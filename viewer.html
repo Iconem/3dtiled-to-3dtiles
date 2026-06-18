@@ -1,0 +1,1596 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>3D Tiles Viewer</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+
+  html, body {
+    height: 100%;
+    width: 100%;
+    overflow: hidden;
+    background: #0a0a0f;
+    color: #e0e0e0;
+    font-family: system-ui, sans-serif;
+  }
+
+  #header {
+    position: absolute;
+    top: 0; left: 0; right: 0;
+    z-index: 20;
+    padding: 10px 14px;
+    background: rgba(10,10,15,0.92);
+    border-bottom: 1px solid #222;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    flex-wrap: wrap;
+    backdrop-filter: blur(6px);
+  }
+
+  #header h1 {
+    font-size: 13px;
+    font-weight: 600;
+    color: #fff;
+    white-space: nowrap;
+    letter-spacing: 0.02em;
+  }
+
+  /* ── Preset buttons ── */
+  .presets {
+    display: flex;
+    gap: 4px;
+    flex-wrap: wrap;
+  }
+
+  .preset {
+    padding: 4px 10px;
+    border-radius: 4px;
+    cursor: pointer;
+    font-size: 11px;
+    border: 1px solid #333;
+    background: #1a1a1a;
+    color: #9ca3af;
+    transition: all 0.15s;
+    white-space: nowrap;
+  }
+  .preset:hover { background: #252525; color: #d1d5db; }
+  .preset.active { background: #1d3461; border-color: #2563eb; color: #93c5fd; }
+
+  /* ── URL bar ── */
+  #url-bar {
+    display: flex;
+    gap: 6px;
+    flex: 1;
+    min-width: 260px;
+  }
+
+  #url-bar input {
+    flex: 1;
+    padding: 5px 10px;
+    background: #111;
+    border: 1px solid #2a2a2a;
+    border-radius: 4px;
+    color: #e0e0e0;
+    font-size: 11px;
+    font-family: monospace;
+  }
+  #url-bar input:focus { outline: none; border-color: #2563eb; }
+
+  #url-bar button {
+    padding: 5px 14px;
+    background: #2563eb;
+    border: none;
+    border-radius: 4px;
+    color: #fff;
+    cursor: pointer;
+    font-size: 12px;
+    white-space: nowrap;
+  }
+  #url-bar button:hover { background: #1d4ed8; }
+
+  /* ── Cesium fills the rest ── */
+  #cesium-container {
+    position: absolute;
+    top: 0; left: 0; right: 0; bottom: 0;
+    width: 100%;
+    height: 100%;
+  }
+
+  /* ── Local frame panel ── */
+  #localframe-panel {
+    position: absolute;
+    top: 52px;
+    left: 12px;
+    z-index: 15;
+    background: rgba(10,10,15,0.88);
+    border: 1px solid #2a2a2a;
+    border-radius: 8px;
+    padding: 12px 14px;
+    font-size: 11px;
+    display: none;
+    min-width: 280px;
+    backdrop-filter: blur(4px);
+  }
+  #localframe-panel h4 {
+    font-size: 11px;
+    color: #7dd3fc;
+    margin-bottom: 8px;
+    font-weight: 600;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+  }
+  .lf-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-bottom: 6px;
+  }
+  .lf-row label { color: #9ca3af; width: 60px; flex-shrink: 0; }
+  .lf-row input {
+    flex: 1;
+    padding: 4px 8px;
+    background: #111;
+    border: 1px solid #2a2a2a;
+    border-radius: 3px;
+    color: #e0e0e0;
+    font-size: 11px;
+    font-family: monospace;
+  }
+  .lf-row input:focus { outline: none; border-color: #2563eb; }
+  #use-current-view {
+    margin-top: 4px;
+    width: 100%;
+    padding: 5px;
+    background: #1a1a1a;
+    border: 1px solid #333;
+    border-radius: 4px;
+    color: #9ca3af;
+    cursor: pointer;
+    font-size: 11px;
+    margin-bottom: 4px;
+  }
+  #use-current-view:hover { background: #252525; color: #d1d5db; }
+  #apply-localframe {
+    margin-top: 0;
+    width: 100%;
+    padding: 5px;
+    background: #1d3461;
+    border: 1px solid #2563eb;
+    border-radius: 4px;
+    color: #93c5fd;
+    cursor: pointer;
+    font-size: 11px;
+  }
+  #apply-localframe:hover { background: #1e40af; }
+  .lf-note { color: #6b7280; font-size: 10px; margin-top: 6px; line-height: 1.5; }
+
+  /* ── Code panel ── */
+  #code-panel {
+    position: absolute;
+    top: 52px;
+    right: 12px;
+    z-index: 15;
+    background: rgba(10,10,15,0.88);
+    border: 1px solid #222;
+    border-radius: 8px;
+    padding: 14px;
+    max-width: 400px;
+    font-size: 11px;
+    line-height: 1.7;
+    display: none;
+    backdrop-filter: blur(4px);
+    max-height: calc(100vh - 80px);
+    overflow-y: auto;
+  }
+  #code-panel h3 { font-size: 11px; color: #7dd3fc; margin-bottom: 8px; text-transform: uppercase; letter-spacing: 0.04em; }
+  #code-panel pre {
+    background: #0d1117;
+    border: 1px solid #1e2a38;
+    border-radius: 4px;
+    padding: 10px;
+    overflow-x: auto;
+    color: #c9d1d9;
+    font-size: 10px;
+    white-space: pre-wrap;
+    word-break: break-all;
+  }
+  #code-panel .note { color: #6b7280; margin-top: 8px; font-size: 10px; line-height: 1.5; }
+
+  /* ── Consolidated sidebar ── */
+  #sidebar {
+    position: absolute;
+    top: 52px;
+    right: 12px;
+    bottom: 16px;
+    z-index: 15;
+    width: 250px;
+    background: rgba(10,10,15,0.9);
+    border: 1px solid #2a2a2a;
+    border-radius: 8px;
+    padding: 10px 12px;
+    overflow-y: auto;
+    backdrop-filter: blur(6px);
+    display: flex;
+    flex-direction: column;
+    gap: 14px;
+    font-size: 11px;
+  }
+  #sidebar::-webkit-scrollbar { width: 8px; }
+  #sidebar::-webkit-scrollbar-thumb { background: #2a2a2a; border-radius: 4px; }
+
+  .sb-section { display: flex; flex-direction: column; gap: 7px; }
+  .sb-section > h4 {
+    font-size: 10px;
+    color: #7dd3fc;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    font-weight: 600;
+    border-bottom: 1px solid #1e2a38;
+    padding-bottom: 4px;
+  }
+  .sb-row { display: flex; align-items: center; gap: 8px; justify-content: space-between; }
+  .sb-row > label { color: #9ca3af; white-space: nowrap; }
+  .sb-row input[type=number], .sb-row input[type=text], .sb-row select {
+    background: #111;
+    border: 1px solid #2a2a2a;
+    border-radius: 3px;
+    color: #e0e0e0;
+    font-size: 11px;
+    font-family: monospace;
+    padding: 3px 6px;
+    min-width: 0;
+  }
+  .sb-row input[type=number] { width: 80px; text-align: right; }
+  .sb-row input:focus, .sb-row select:focus { outline: none; border-color: #2563eb; }
+  .sb-check { display: flex; align-items: center; gap: 7px; cursor: pointer; user-select: none; color: #9ca3af; }
+  .sb-check input[type=checkbox] { accent-color: #2563eb; cursor: pointer; margin: 0; }
+  .sb-check.hidden, .sb-row.hidden { display: none; }
+
+  .sb-btn {
+    width: 100%;
+    padding: 6px;
+    background: #1a1a1a;
+    border: 1px solid #333;
+    border-radius: 4px;
+    color: #9ca3af;
+    cursor: pointer;
+    font-size: 11px;
+    transition: all 0.15s;
+  }
+  .sb-btn:hover { background: #252525; color: #d1d5db; }
+  .sb-btn.primary { background: #1d3461; border-color: #2563eb; color: #93c5fd; }
+  .sb-btn.primary:hover { background: #1e40af; color: #fff; }
+  .sb-btn.active { border-color: #2563eb; color: #93c5fd; }
+
+  /* Segmented renderer toggle */
+  .sb-seg { display: flex; border: 1px solid #333; border-radius: 4px; overflow: hidden; }
+  .sb-seg button {
+    flex: 1;
+    padding: 6px 4px;
+    background: #1a1a1a;
+    border: none;
+    color: #9ca3af;
+    cursor: pointer;
+    font-size: 11px;
+    transition: all 0.15s;
+  }
+  .sb-seg button:hover { background: #252525; }
+  .sb-seg button.active { background: #1d3461; color: #93c5fd; }
+
+  .sb-details { border: none; }
+  .sb-details > summary {
+    cursor: pointer;
+    color: #7dd3fc;
+    font-size: 10px;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    font-weight: 600;
+    list-style: none;
+    padding-bottom: 4px;
+    border-bottom: 1px solid #1e2a38;
+  }
+  .sb-details > summary::-webkit-details-marker { display: none; }
+  .sb-details > summary::after { content: ' ▸'; color: #6b7280; }
+  .sb-details[open] > summary::after { content: ' ▾'; }
+  .sb-details > div { padding-top: 7px; display: flex; flex-direction: column; gap: 6px; }
+  .sb-note { color: #6b7280; font-size: 10px; line-height: 1.5; }
+
+  /* ── Status ── */
+  #status {
+    position: absolute;
+    bottom: 20px;
+    left: 12px;
+    z-index: 15;
+    background: rgba(0,0,0,0.65);
+    padding: 7px 11px;
+    border-radius: 6px;
+    font-size: 10.5px;
+    color: #9ca3af;
+    pointer-events: none;
+    max-width: 360px;
+    line-height: 1.6;
+    white-space: pre-line;
+  }
+
+  /* ── Error overlay ── */
+  #error {
+    display: none;
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%,-50%);
+    z-index: 30;
+    background: #130a0a;
+    border: 1px solid #5c2020;
+    border-radius: 8px;
+    padding: 20px 24px;
+    color: #f87171;
+    font-size: 12px;
+    text-align: center;
+    white-space: pre-line;
+    max-width: 440px;
+  }
+</style>
+
+<script type="importmap">
+{
+  "imports": {
+    "three": "https://esm.sh/three@0.180.0",
+    "three/addons/": "https://esm.sh/three@0.180.0/examples/jsm/",
+    "three/examples/": "https://esm.sh/three@0.180.0/examples/",
+    "3d-tiles-renderer": "https://esm.sh/3d-tiles-renderer@0.4.28?external=three",
+    "3d-tiles-renderer/plugins": "https://esm.sh/3d-tiles-renderer@0.4.28/plugins?external=three",
+    "@sparkjsdev/spark": "https://esm.sh/@sparkjsdev/spark@2.1.0?external=three",
+    "3d-tiles-rendererjs-3dgs-plugin": "https://esm.sh/3d-tiles-rendererjs-3dgs-plugin@0.1.13?external=three,@sparkjsdev/spark,3d-tiles-renderer"
+  }
+}
+</script>
+<script src="https://cesium.com/downloads/cesiumjs/releases/1.142/Build/Cesium/Cesium.js"></script>
+<link href="https://cesium.com/downloads/cesiumjs/releases/1.142/Build/Cesium/Widgets/widgets.css" rel="stylesheet">
+</head>
+<body>
+
+<!-- Fixed header -->
+<div id="header">
+  <h1>3D Tiles</h1>
+
+  <div class="presets" id="preset-bar">
+    <!-- populated by JS -->
+  </div>
+
+  <div id="url-bar">
+    <input id="tileset-url" type="text" placeholder="http://localhost:3000/…/tileset.json" />
+    <button onclick="loadTileset()">Load</button>
+  </div>
+</div>
+
+<!-- Cesium fills the viewport -->
+<div id="cesium-container"></div>
+
+<!-- 3DTilesRendererJS / Three.js canvas (hidden until toggled) -->
+<div id="three-container" style="display:none; position:absolute; top:0; left:0; right:0; bottom:0;"></div>
+
+<!-- ── Consolidated sidebar ── -->
+<div id="sidebar">
+
+  <!-- Renderer -->
+  <div class="sb-section">
+    <h4>Renderer</h4>
+    <div class="sb-seg" title="Switch between CesiumJS and NASA-AMMOS 3DTilesRendererJS">
+      <button id="seg-cesium" class="active" onclick="setRenderer('cesium')">CesiumJS</button>
+      <button id="btn-3dtrjs" onclick="setRenderer('3dtrjs')">3DTRJS</button>
+    </div>
+  </div>
+
+  <!-- Basemap -->
+  <div class="sb-section">
+    <h4>Basemap</h4>
+    <div class="sb-row">
+      <label for="basemap-select">Imagery</label>
+      <select id="basemap-select" onchange="setBasemap(this.value)">
+        <option value="google">Google Hybrid</option>
+        <option value="osm" selected>OpenStreetMap</option>
+        <option value="none">None</option>
+      </select>
+    </div>
+    <label class="sb-check"><input type="checkbox" id="terrain-toggle" onchange="toggleTerrain(this.checked)" /> Terrain (Ion)</label>
+  </div>
+
+  <!-- Tileset / LoD -->
+  <div class="sb-section">
+    <h4>Tileset &amp; LoD</h4>
+    <div class="sb-row" title="Maximum screen-space error (px). Lower = refine sooner = more detail / more tiles. CesiumJS: maximumScreenSpaceError; 3DTRJS: errorTarget.">
+      <label for="max-sse">Max SSE (px)</label>
+      <input type="number" id="max-sse" min="0.05" step="0.25" placeholder="auto" onchange="setMaxSSE(this.value)" />
+    </div>
+    <label class="sb-check" title="Draw tile bounding volumes, colour tiles by octree depth">
+      <input type="checkbox" id="debug-toggle" onchange="toggleDebug(this.checked)" /> Debug tiles (bounds + depth)
+    </label>
+    <div class="sb-row" title="Vertical field of view (degrees) — same camera drives rendering, controls and tile SSE.">
+      <label for="fov-input">FOV (°)</label>
+      <input type="number" id="fov-input" min="10" max="120" step="1" value="60" onchange="setFov(this.value)" />
+    </div>
+    <div class="sb-row hidden" id="controls-toggle-wrap" title="3DTRJS camera controls: Globe (ECEF ellipsoid), Orbit (free orbit around the tileset), or Env (local ground plane)">
+      <label for="controls-mode">Controls</label>
+      <select id="controls-mode" onchange="window.__3dtrjs && window.__3dtrjs.setControlMode(this.value)">
+        <option value="globe">Globe</option>
+        <option value="orbit">Orbit</option>
+        <option value="env">Env</option>
+      </select>
+    </div>
+    <div class="sb-row hidden" id="zoffset-wrap" title="3DTRJS: raise/lower the tileset along its up axis (metres)">
+      <label for="zoffset-input">Z offset (m)</label>
+      <input type="number" id="zoffset-input" value="0" step="1" onchange="window.__3dtrjs && window.__3dtrjs.setZOffset(this.value)" />
+    </div>
+  </div>
+
+  <!-- Navigation -->
+  <div class="sb-section">
+    <h4>Navigation</h4>
+    <label class="sb-check"><input type="checkbox" id="collision-toggle" onchange="toggleCollision(!this.checked)" /> Disable collision</label>
+    <button class="sb-btn" onclick="flyToOrigin()">⊙ Fly to origin</button>
+  </div>
+
+  <!-- Local frame -->
+  <details class="sb-details" open>
+    <summary>Local frame</summary>
+    <div>
+      <div class="sb-row"><label>Lon</label><input id="lf-lon" type="number" step="0.0001" value="-122.4194" /></div>
+      <div class="sb-row"><label>Lat</label><input id="lf-lat" type="number" step="0.0001" value="37.7749" /></div>
+      <div class="sb-row"><label>Alt (m)</label><input id="lf-alt" type="number" step="1" value="0" /></div>
+      <div class="sb-row"><label>Range (m)</label><input id="lf-range" type="number" step="10" value="200" /></div>
+      <button class="sb-btn" id="use-current-view" onclick="useCurrentView()">↖ Use current view</button>
+      <button class="sb-btn" id="fly-to-localframe" onclick="flyToLocalFrame()">↗ Fly to (no transform)</button>
+      <button class="sb-btn primary" id="apply-localframe" onclick="applyLocalFrame()">Apply &amp; fly to</button>
+      <p class="sb-note">For tilesets with no geographic transform — places the origin at the given lon/lat/alt on the globe.</p>
+    </div>
+  </details>
+
+  <!-- Cesium Ion -->
+  <details class="sb-details">
+    <summary>Cesium Ion asset</summary>
+    <div>
+      <div class="sb-row"><label>Asset ID</label><input id="ion-asset-id" type="number" value="4547222" /></div>
+      <textarea id="ion-token" rows="3" placeholder="eyJ… personal access token" style="width:100%;box-sizing:border-box;background:#111;border:1px solid #2a2a2a;color:#e0e0e0;padding:4px 6px;border-radius:3px;font-size:10px;font-family:monospace;resize:vertical;"></textarea>
+      <button class="sb-btn primary" onclick="loadIonAsset()">Load Ion asset</button>
+      <p class="sb-note">Splat demo assets: 3667783, 4547222. Token: cesium.com → Access Tokens.</p>
+    </div>
+  </details>
+
+  <!-- Code snippet -->
+  <details class="sb-details">
+    <summary id="code-title">Snippet</summary>
+    <div>
+      <pre id="code-block" style="background:#0d1117;border:1px solid #1e2a38;border-radius:4px;padding:8px;overflow-x:auto;color:#c9d1d9;font-size:10px;white-space:pre-wrap;word-break:break-all;"></pre>
+      <p class="sb-note" id="code-note"></p>
+    </div>
+  </details>
+
+</div>
+
+<!-- Status / error -->
+<div id="status">Initializing Cesium…</div>
+<div id="error"></div>
+
+<script>
+/* ──────────────────────────────────────────────
+   PRESETS
+   ────────────────────────────────────────────── */
+const PRESETS = [
+  {
+    id: 'coit-rad',
+    label: '✦ Coit (RAD)',
+    type: 'splat',
+    url: 'http://localhost:3000/sample-data/output-rad/coit-3dtiles-from-rad/tileset.json',
+    local: false,
+  },
+  {
+    id: 'tastier-rad',
+    label: '✦ Tastier σ×1',
+    type: 'splat',
+    url: 'http://localhost:3000/sample-data/output-rad/tastier500k-3dtiles-from-rad/tileset.json',
+    local: false,
+  },
+  // Splat-size A/B variants (--scale): test whether the gaussian footprint is too large.
+  {
+    id: 'tastier-s050',
+    label: '✦ Tastier σ×0.5',
+    type: 'splat',
+    url: 'http://localhost:3000/sample-data/output-rad/tastier500k-s050-3dtiles-from-rad/tileset.json',
+    local: false,
+  },
+  {
+    id: 'tastier-s033',
+    label: '✦ Tastier σ×0.33',
+    type: 'splat',
+    url: 'http://localhost:3000/sample-data/output-rad/tastier500k-s033-3dtiles-from-rad/tileset.json',
+    local: false,
+  },
+  {
+    id: 'coit-s050',
+    label: '✦ Coit σ×0.5',
+    type: 'splat',
+    url: 'http://localhost:3000/sample-data/output-rad/coit-s050-3dtiles-from-rad/tileset.json',
+    local: false,
+  },
+  // Reference splat tilesets from the 3DTilesRendererJS-3DGS-Plugin demo data
+  // (PLY → 3D Tiles via 3DGS-PLY-3DTiles-Converter; SPZ v3 + SH3, ECEF-placed).
+  {
+    id: 'wl-splat1',
+    label: '◈ GSplat 1 (WL plugin)',
+    type: 'splat',
+    url: 'https://raw.githubusercontent.com/WilliamLiu-1997/3DTilesRendererJS-3DGS-Plugin/main/data/gaussianSplat1/tileset.json',
+    local: false,
+  },
+  {
+    id: 'wl-splat2',
+    label: '◈ GSplat 2 (WL plugin)',
+    type: 'splat',
+    url: 'https://raw.githubusercontent.com/WilliamLiu-1997/3DTilesRendererJS-3DGS-Plugin/main/data/gaussianSplat2/tileset.json',
+    local: false,
+  },
+  {
+    id: 'autzen-copc',
+    label: '☁ Autzen (COPC)',
+    type: 'pointcloud',
+    url: 'http://localhost:3000/sample-data/output-copc/autzen-3dtiles-from-copc/tileset.json',
+    local: false,
+  },
+  {
+    id: 'eiffel-copc',
+    label: '☁ Eiffel (COPC)',
+    type: 'pointcloud',
+    url: 'http://localhost:3000/sample-data/output-copc/eiffel-3dtiles-from-copc/tileset.json',
+    local: false,
+  },
+  {
+    id: 'texas-copc',
+    label: '☁ Texas (COPC)',
+    type: 'pointcloud',
+    url: 'http://localhost:3000/sample-data/output-copc/texas-3dtiles-from-copc/tileset.json',
+    local: false,
+  },
+  // ── Open data city meshes (3D Tiles 1.0, explicit, REPLACE, b3dm) ──
+  {
+    id: 'strasbourg',
+    label: '🏙 Strasbourg',
+    type: 'mesh',
+    url: 'https://s3.eu-west-2.wasabisys.com/ems-sgct-photomaillage/ODACIT/EMS_PM2022/tileset.json',
+    local: false,
+  },
+  {
+    id: 'clermont',
+    label: '🏙 Clermont (CRAIG)',
+    type: 'mesh',
+    url: 'https://3d.craig.fr/datasets/Clermont/3dtiles/tileset.json',
+    local: false,
+  },
+  {
+    id: 'lille',
+    label: '🏙 Lille Métropole',
+    type: 'mesh',
+    url: 'https://webimaging.lillemetropole.fr/externe/maillage/2016_mel_10cm/3dtiles/tileset.json',
+    local: false,
+  },
+];
+
+const SNIPPETS = {
+  pointcloud: {
+    title: 'Point Cloud — CesiumJS',
+    code: `const tileset = await Cesium.Cesium3DTileset.fromUrl(
+  url
+);
+viewer.scene.primitives.add(tileset);
+viewer.zoomTo(tileset);`,
+    note: 'Serve via HTTP:  npx serve .\nThen open: http://localhost:3000/viewer.html',
+  },
+  splat: {
+    title: 'Gaussian Splat — CesiumJS ≥ 1.115',
+    code: `const tileset = await Cesium.Cesium3DTileset.fromUrl(
+  url,
+  { maximumScreenSpaceError: 2, skipLevelOfDetail: false }
+);
+viewer.scene.primitives.add(tileset);
+viewer.zoomTo(tileset);`,
+    note: 'KHR_gaussian_splatting requires CesiumJS ≥ 1.115.\nServe via:  npx serve .',
+  },
+  mesh: {
+    title: '3D Mesh — CesiumJS',
+    code: `const tileset = await Cesium.Cesium3DTileset.fromUrl(url);
+viewer.scene.primitives.add(tileset);
+viewer.zoomTo(tileset);`,
+    note: 'Explicit tiling, REPLACE refinement, b3dm tiles.\nNote: CORS must be enabled on the tile server.',
+  },
+  local: {
+    title: 'Non-georeferenced — Local Frame',
+    code: `// Place tileset origin at lon/lat/alt
+const origin = Cesium.Cartesian3.fromDegrees(lon, lat, alt);
+const enu = Cesium.Transforms.eastNorthUpToFixedFrame(origin);
+tileset.modelMatrix = enu;`,
+    note: "The model matrix maps the tileset's local ENU frame to ECEF.",
+  },
+};
+
+/* ──────────────────────────────────────────────
+   STATE
+   ────────────────────────────────────────────── */
+let viewer = null;
+let currentTileset = null;
+let currentPresetId = null;
+let currentType = 'pointcloud';
+
+/* ──────────────────────────────────────────────
+   INIT
+   ────────────────────────────────────────────── */
+async function initCesium() {
+  try {
+    Cesium.Ion.defaultAccessToken = ''; // no Ion needed for local tiles
+
+    viewer = new Cesium.Viewer('cesium-container', {
+      animation: false,
+      baseLayerPicker: false,
+      fullscreenButton: false,
+      geocoder: false,
+      homeButton: false,
+      infoBox: false,
+      sceneModePicker: false,
+      selectionIndicator: false,
+      timeline: false,
+      navigationHelpButton: false,
+      creditContainer: document.createElement('div'),
+      // Cesium ≥1.107 removed the `imageryProvider` Viewer option — it is silently
+      // ignored, which left the globe plain blue on load. Use `baseLayer` instead so
+      // the chosen basemap is present from the first frame.
+      baseLayer: new Cesium.ImageryLayer(
+        new Cesium.OpenStreetMapImageryProvider({ url: 'https://tile.openstreetmap.org/' }),
+      ),
+    });
+
+    viewer.scene.backgroundColor = Cesium.Color.fromCssColorString('#0a0a0f');
+    window.viewer = viewer; // expose for debugging / console inspection
+
+    // Double-click: move camera 50% of the way toward the picked point.
+    // Camera keeps its orientation; the picked point becomes the new look-at centre.
+    const handler = new Cesium.ScreenSpaceEventHandler(viewer.scene.canvas);
+    handler.setInputAction(movement => {
+      const picked = viewer.scene.pickPosition(movement.position);
+      if (!Cesium.defined(picked)) return;
+      const cam = viewer.camera;
+      const newPos = Cesium.Cartesian3.lerp(cam.positionWC, picked, 0.5, new Cesium.Cartesian3());
+      cam.flyTo({
+        destination: newPos,
+        orientation: { heading: cam.heading, pitch: cam.pitch, roll: cam.roll },
+        duration: 0.35,
+        easingFunction: Cesium.EasingFunction.QUADRATIC_OUT,
+      });
+    }, Cesium.ScreenSpaceEventType.LEFT_DOUBLE_CLICK);
+
+    setStatus('Cesium ready.\nSelect a preset or enter a tileset.json URL.');
+    buildPresetBar();
+  } catch (e) {
+    showError('Failed to initialize CesiumJS:\n' + e.message);
+  }
+}
+
+/* ──────────────────────────────────────────────
+   PRESET BAR
+   ────────────────────────────────────────────── */
+function buildPresetBar() {
+  const bar = document.getElementById('preset-bar');
+  bar.innerHTML = '';
+  PRESETS.forEach(p => {
+    const btn = document.createElement('button');
+    btn.className = 'preset';
+    btn.textContent = p.label;
+    btn.id = 'preset-' + p.id;
+    btn.onclick = () => selectPreset(p);
+    bar.appendChild(btn);
+  });
+}
+
+function selectPreset(p) {
+  currentPresetId = p.id;
+  currentType = p.type;
+  document.getElementById('tileset-url').value = p.url;
+  document.querySelectorAll('.preset').forEach(b => b.classList.remove('active'));
+  document.getElementById('preset-' + p.id).classList.add('active');
+
+  // Update snippet
+  const snip = SNIPPETS[p.type] || SNIPPETS.pointcloud;
+  document.getElementById('code-title').textContent = snip.title;
+  document.getElementById('code-block').textContent = snip.code;
+  document.getElementById('code-note').textContent = snip.note;
+
+  if (_3dtMode) {
+    // 3DTRJS mode: reload the tileset in Three.js
+    if (window.__3dtrjs) window.__3dtrjs.load(p.url, p.type === 'splat');
+    setStatus('3DTilesRendererJS — ' + p.label);
+  } else {
+    loadTileset();
+  }
+}
+
+/* ──────────────────────────────────────────────
+   LOAD TILESET
+   ────────────────────────────────────────────── */
+async function loadTileset() {
+  if (!viewer) { showError('Cesium still initializing…'); return; }
+
+  const url = document.getElementById('tileset-url').value.trim();
+  if (!url) return;
+
+  // Clear existing
+  if (currentTileset) {
+    viewer.scene.primitives.remove(currentTileset);
+    currentTileset = null;
+  }
+  hideError();
+  setStatus('Loading…\n' + url);
+
+  const isSplat = currentType === 'splat';
+  const isMesh  = currentType === 'mesh';
+  const defaultSSE = isSplat ? 0.5 : (isMesh ? 16 : 4);
+  const sse = sseOverride ?? defaultSSE;
+  const opts = isSplat
+    // cacheBytes caps total loaded tile data so a 50M-splat scene doesn't OOM
+    ? { maximumScreenSpaceError: sse, skipLevelOfDetail: false, cacheBytes: 512 * 1024 * 1024 }
+    : { maximumScreenSpaceError: sse };
+  // Reflect the effective SSE in the sidebar (shows the per-type default when not overridden)
+  const sseInput = document.getElementById('max-sse');
+  if (sseInput && sseOverride == null) sseInput.value = defaultSSE;
+
+  try {
+    const tileset = await Cesium.Cesium3DTileset.fromUrl(url, opts);
+    viewer.scene.primitives.add(tileset);
+    currentTileset = tileset;
+    if (_cesiumDebug) { tileset.debugShowBoundingVolume = true; tileset.debugColorizeTiles = true; }
+
+    // Point cloud shading: EDL approximation + screen-space attenuation
+    if (!isSplat && tileset.pointCloudShading) {
+      tileset.pointCloudShading.attenuation             = true;
+      tileset.pointCloudShading.maximumAttenuation      = 4;
+      tileset.pointCloudShading.eyeDomeLighting         = true;
+      tileset.pointCloudShading.eyeDomeLightingStrength = 1.0;
+      tileset.pointCloudShading.eyeDomeLightingRadius   = 1.0;
+    }
+
+    // If bounding sphere is very close to ECEF origin the tileset has no
+    // geographic position (non-georeferenced local data).  Skip the automatic
+    // zoom and ask the user to place it via the local frame panel.
+    const bs = tileset.boundingSphere;
+    const distFromEcefOrigin = Cesium.Cartesian3.magnitude(bs.center);
+    const isLocalCoords = distFromEcefOrigin < 1e6; // < 1000 km from Earth center
+
+    if (isLocalCoords) {
+      if (isSplat) {
+        // Auto-place splat tilesets immediately — no need for manual Apply & Fly
+        document.getElementById('lf-range').value = Math.max(5, Math.round(bs.radius * 3));
+        applyLocalFrame();
+        setStatus('Splat placed at local frame origin.\nAdjust ⊕ Local Frame if needed.');
+      } else {
+        setStatus('Tileset loaded in local coordinates.\nUse ⊕ Local Frame to place it on the globe.');
+      }
+    } else {
+      try {
+        // Use the actual bounding sphere radius for a sensible camera distance.
+        const range = Math.max(50, bs.radius * 2.5);
+        viewer.camera.flyToBoundingSphere(bs, {
+          offset: new Cesium.HeadingPitchRange(
+            Cesium.Math.toRadians(-30),
+            Cesium.Math.toRadians(-25),
+            range,
+          ),
+          duration: 1.5,
+        });
+      } catch (_) {
+        setStatus('Tileset loaded but zoom failed.\nUse ⊕ Local Frame to place it.');
+      }
+      setStatus('Loaded: ' + url);
+    }
+
+    tileset.allTilesLoaded.addEventListener(() => {
+      const n = tileset.statistics.numberOfTilesWithContentReady;
+      setStatus(`Tiles ready: ${n}  —  ${url}`);
+    });
+
+    // Log tile-load failures to the status panel and console for debugging
+    tileset.tileFailed.addEventListener(e => {
+      console.error('[3DTiles] Tile failed:', e.url, e.message);
+      setStatus(`⚠ Tile failed: ${e.message || e.url}`);
+    });
+    tileset.tileLoad.addEventListener(t => {
+      console.log('[3DTiles] Tile loaded:', t.tile?.content?.url ?? '?',
+        'ready:', tileset.statistics?.numberOfTilesWithContentReady);
+    });
+
+  } catch (e) {
+    showError(
+      'Failed to load tileset:\n' + e.message +
+      '\n\nMake sure the server is running:\n  npx serve .\n' +
+      'Then open: http://localhost:3000/viewer.html\n\n' +
+      'Note: mixed-content (HTTP from HTTPS page) is blocked by browsers.'
+    );
+    setStatus('Load failed.');
+  }
+}
+
+/* ──────────────────────────────────────────────
+   USE CURRENT CAMERA POSITION
+   ────────────────────────────────────────────── */
+function useCurrentView() {
+  if (!viewer) return;
+  const cart = viewer.camera.positionCartographic;
+  document.getElementById('lf-lon').value = Cesium.Math.toDegrees(cart.longitude).toFixed(6);
+  document.getElementById('lf-lat').value = Cesium.Math.toDegrees(cart.latitude).toFixed(6);
+  document.getElementById('lf-alt').value = Math.round(cart.height);
+  // Estimate a sensible range from current camera height
+  document.getElementById('lf-range').value = Math.max(20, Math.round(cart.height * 0.8));
+}
+
+/* ──────────────────────────────────────────────
+   LOCAL REFERENCE FRAME
+   Places a non-georeferenced tileset at a given lon/lat/alt.
+   ────────────────────────────────────────────── */
+function flyToLocalFrame() {
+  if (!viewer) return;
+  const lon   = parseFloat(document.getElementById('lf-lon').value);
+  const lat   = parseFloat(document.getElementById('lf-lat').value);
+  const alt   = parseFloat(document.getElementById('lf-alt').value);
+  const range = parseFloat(document.getElementById('lf-range').value) || 200;
+  const origin = Cesium.Cartesian3.fromDegrees(lon, lat, alt);
+  viewer.camera.flyToBoundingSphere(new Cesium.BoundingSphere(origin, range * 0.5), {
+    offset: new Cesium.HeadingPitchRange(
+      Cesium.Math.toRadians(0),
+      Cesium.Math.toRadians(-25),
+      range,
+    ),
+    duration: 1.2,
+  });
+}
+
+function applyLocalFrame() {
+  if (!currentTileset) {
+    setStatus('Load a tileset first, then apply a local frame.');
+    return;
+  }
+
+  const lon   = parseFloat(document.getElementById('lf-lon').value);
+  const lat   = parseFloat(document.getElementById('lf-lat').value);
+  const alt   = parseFloat(document.getElementById('lf-alt').value);
+  const range = parseFloat(document.getElementById('lf-range').value) || 200;
+
+  // Build East-North-Up frame at origin
+  const origin = Cesium.Cartesian3.fromDegrees(lon, lat, alt);
+  const enu = Cesium.Transforms.eastNorthUpToFixedFrame(origin);
+  currentTileset.modelMatrix = enu;
+
+  // Fly camera to the new location
+  const bs = new Cesium.BoundingSphere(origin, range * 0.5);
+  viewer.camera.flyToBoundingSphere(bs, {
+    offset: new Cesium.HeadingPitchRange(
+      Cesium.Math.toRadians(0),
+      Cesium.Math.toRadians(-25),
+      range,
+    ),
+    duration: 1.2,
+  });
+
+  setStatus(`Local frame applied.\nOrigin: ${lon.toFixed(5)}, ${lat.toFixed(5)}, ${alt}m`);
+}
+
+/* ──────────────────────────────────────────────
+   BASEMAP
+   ────────────────────────────────────────────── */
+function setBasemap(id) {
+  if (!viewer) return;
+  const layers = viewer.imageryLayers;
+  layers.removeAll();
+  if (id === 'google') {
+    layers.addImageryProvider(new Cesium.UrlTemplateImageryProvider({
+      url: 'https://mt1.google.com/vt/lyrs=y&x={x}&y={y}&z={z}',
+      credit: 'Google Hybrid',
+    }));
+  } else if (id === 'osm') {
+    layers.addImageryProvider(new Cesium.OpenStreetMapImageryProvider({
+      url: 'https://tile.openstreetmap.org/',
+    }));
+  }
+  // 'none' leaves layers empty
+
+  // Mirror the basemap onto the 3DTRJS generated-surface globe.
+  if (_3dtMode) window.__3dtrjs?.setBasemap();
+}
+
+/* ──────────────────────────────────────────────
+   TERRAIN TOGGLE
+   ────────────────────────────────────────────── */
+async function toggleTerrain(enabled) {
+  if (!viewer) return;
+  if (enabled) {
+    try {
+      viewer.terrainProvider = await Cesium.createWorldTerrainAsync();
+    } catch(e) {
+      // No Ion token — fall back to ellipsoid silently
+      viewer.terrainProvider = new Cesium.EllipsoidTerrainProvider();
+      document.getElementById('terrain-toggle').checked = false;
+      setStatus('World terrain requires a Cesium Ion token.\nFalling back to ellipsoid.');
+    }
+  } else {
+    viewer.terrainProvider = new Cesium.EllipsoidTerrainProvider();
+  }
+}
+
+async function loadIonAsset() {
+  const assetId = parseInt(document.getElementById('ion-asset-id').value);
+  const token   = document.getElementById('ion-token').value.trim();
+  if (!assetId || !token) { setStatus('Enter an Ion asset ID and access token.'); return; }
+
+  setStatus('Loading Ion asset ' + assetId + '…');
+
+  if (_3dtMode && window.__3dtrjs) {
+    // 3DTRJS path: CesiumIonAuthPlugin handles auth + endpoint resolution
+    window.__3dtrjs.loadIon(assetId, token, true);
+    setStatus('Ion asset ' + assetId + ' → 3DTRJS (CesiumIonAuthPlugin)');
+    return;
+  }
+
+  // CesiumJS path — needs resolved URL + token from endpoint fetch
+  let tileUrl, tileToken;
+  try {
+    const resp = await fetch(`https://api.cesium.com/v1/assets/${assetId}/endpoint`, {
+      headers: { Authorization: 'Bearer ' + token },
+    });
+    if (!resp.ok) throw new Error(`Ion API ${resp.status}: ${await resp.text()}`);
+    const ep = await resp.json();
+    tileUrl   = ep.url;
+    tileToken = ep.accessToken ?? token;
+    console.log('[Ion] endpoint resolved:', tileUrl);
+  } catch (e) {
+    showError('Ion endpoint fetch failed: ' + e.message +
+      '\n\nMake sure you are using a personal access token (cesium.com → Access Tokens), not a short-lived JWT.\n' +
+      'Note: you can only access assets in your own depot or shared with your account.');
+    return;
+  }
+
+  if (!viewer) { setStatus('Cesium not ready.'); return; }
+  if (currentTileset) { viewer.scene.primitives.remove(currentTileset); currentTileset = null; }
+  try {
+    const tileset = await Cesium.Cesium3DTileset.fromUrl(tileUrl, {
+      maximumScreenSpaceError: 0.5,
+      skipLevelOfDetail: false,
+      cacheBytes: 512 * 1024 * 1024,
+    });
+    viewer.scene.primitives.add(tileset);
+    currentTileset = tileset;
+    currentType = 'splat';
+    viewer.zoomTo(tileset);
+    setStatus('Ion asset ' + assetId + ' loaded (CesiumJS).');
+    tileset.tileFailed.addEventListener(e => console.error('[Ion] tile failed:', e.url, e.message));
+  } catch (e) {
+    showError('Ion tileset load failed: ' + e.message);
+  }
+}
+
+function toggleCollision(enabled) {
+  if (!viewer) return;
+  viewer.scene.screenSpaceCameraController.enableCollisionDetection = enabled;
+}
+
+// Debug LoD: bounding volumes + colour-by-depth. Works in both renderers.
+let _cesiumDebug = false;
+function toggleDebug(on) {
+  if (_3dtMode) { window.__3dtrjs?.setDebug(on); return; }
+  _cesiumDebug = on;
+  if (currentTileset) {
+    currentTileset.debugShowBoundingVolume = on;
+    currentTileset.debugColorizeTiles = on;
+  }
+}
+
+// Screen-space error override (px). null = per-type auto default. Lower = more detail.
+// CesiumJS: tileset.maximumScreenSpaceError; 3DTRJS: tiles.errorTarget.
+let sseOverride = null;
+function setMaxSSE(v) {
+  const n = parseFloat(v);
+  sseOverride = (isFinite(n) && n > 0) ? n : null;
+  if (currentTileset) currentTileset.maximumScreenSpaceError = sseOverride ?? currentTileset.maximumScreenSpaceError;
+  window.__3dtrjs?.setErrorTarget(sseOverride);
+}
+
+function flyToOrigin() {
+  if (_3dtMode) { window.__3dtrjs?.frameTileset(); return; } // 3DTRJS: re-frame the tileset
+  if (!viewer) return;
+  viewer.scene.screenSpaceCameraController.enableCollisionDetection = false;
+  document.getElementById('collision-toggle').checked = true;
+  viewer.camera.flyTo({
+    destination: Cesium.Cartesian3.ZERO,
+    orientation: { heading: 0, pitch: -Cesium.Math.PI_OVER_TWO, roll: 0 },
+    duration: 2,
+  });
+}
+
+// Vertical FOV (degrees) for both renderers. CesiumJS frustum.fov is HORIZONTAL
+// when the viewport is wider than tall, so convert from the desired vertical FOV.
+function setFov(deg) {
+  const v = parseFloat(deg);
+  if (!(v > 0) || v >= 120) return;
+  window.__3dtrjs?.setFov(v);
+  if (viewer) {
+    const cam = viewer.camera, fr = cam.frustum;
+    if (fr && 'fov' in fr) {
+      const vrad = Cesium.Math.toRadians(v);
+      const aspect = viewer.scene.canvas.clientWidth / viewer.scene.canvas.clientHeight;
+      // Cesium's `fov` is the larger-axis angle; derive it from vertical FOV + aspect.
+      fr.fov = aspect > 1
+        ? 2 * Math.atan(Math.tan(vrad / 2) * aspect)
+        : vrad;
+    }
+  }
+}
+
+/* ──────────────────────────────────────────────
+   UI HELPERS
+   ────────────────────────────────────────────── */
+function setStatus(msg) {
+  document.getElementById('status').textContent = msg;
+}
+
+function showError(msg) {
+  const el = document.getElementById('error');
+  el.textContent = msg;
+  el.style.display = 'block';
+}
+
+function hideError() {
+  document.getElementById('error').style.display = 'none';
+}
+
+document.getElementById('tileset-url').addEventListener('keydown', e => {
+  if (e.key === 'Enter') loadTileset();
+});
+
+// On manual URL edit, clear active preset highlight
+document.getElementById('tileset-url').addEventListener('input', () => {
+  document.querySelectorAll('.preset').forEach(b => b.classList.remove('active'));
+  currentPresetId = null;
+  currentType = 'pointcloud'; // default
+});
+
+/* ──────────────────────────────────────────────
+   3DTRJS MODE TOGGLE
+   ────────────────────────────────────────────── */
+let _3dtMode = false;
+let _3dtReady = false;
+
+// Sidebar renderer segmented control → toggle only when the target differs.
+function setRenderer(which) {
+  const want3d = which === '3dtrjs';
+  if (want3d !== _3dtMode) toggle3DT();
+}
+
+function toggle3DT() {
+  _3dtMode = !_3dtMode;
+  document.getElementById('btn-3dtrjs').classList.toggle('active', _3dtMode);
+  document.getElementById('seg-cesium').classList.toggle('active', !_3dtMode);
+
+  document.getElementById('controls-toggle-wrap').classList.toggle('hidden', !_3dtMode);
+  document.getElementById('zoffset-wrap').classList.toggle('hidden', !_3dtMode);
+
+  if (_3dtMode) {
+    document.getElementById('cesium-container').style.display = 'none';
+    document.getElementById('three-container').style.display = 'block';
+
+    const url = document.getElementById('tileset-url').value.trim();
+    const isSplat = currentType === 'splat';
+
+    // Module loads asynchronously — poll until ready then init+load
+    const tryStart = (attempts) => {
+      if (!window.__3dtrjs) {
+        if (attempts > 30) {
+          setStatus('3DTRJS: module failed to load — check console for CDN errors.');
+          return;
+        }
+        setTimeout(() => tryStart(attempts + 1), 200);
+        return;
+      }
+      if (!_3dtReady) {
+        window.__3dtrjs.init();
+        _3dtReady = true;
+      }
+      if (url) window.__3dtrjs.load(url, isSplat);
+    };
+    tryStart(0);
+
+    const splatNote = isSplat ? '\nGaussianSplatPlugin — Gaussian splat streaming via SparkJS' : '';
+    setStatus('3DTilesRendererJS — Three.js renderer' + splatNote);
+  } else {
+    document.getElementById('three-container').style.display = 'none';
+    document.getElementById('cesium-container').style.display = 'block';
+    window.__3dtrjs?.pause();
+    setStatus('Cesium mode.');
+  }
+}
+
+initCesium();
+</script>
+
+<!-- ── 3DTilesRendererJS — real ellipsoid globe (GeneratedSurfacePlugin + XYZ overlay) ── -->
+<script type="module">
+import {
+  Scene, PerspectiveCamera, WebGLRenderer, Sphere, Vector2, Vector3, Group, Matrix4, Box3,
+  AmbientLight, DirectionalLight, Raycaster,
+} from 'three';
+import { TilesRenderer, GlobeControls, EnvironmentControls } from '3d-tiles-renderer';
+import {
+  CesiumIonAuthPlugin, ImplicitTilingPlugin, TilesFadePlugin,
+  GeneratedSurfacePlugin, XYZTilesOverlay, ReorientationPlugin, DebugTilesPlugin,
+} from '3d-tiles-renderer/plugins';
+import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+
+// SparkJS + the 3DGS plugin share the importmap's single `three` instance (esm.sh
+// ?external=three), so SparkJS's getShaders() registers THREE.ShaderChunk.splatDefines
+// onto the same ShaderChunk the renderer compiles against — fixing the
+// "#include <splatDefines>" resolution error that the duplicate-three CDN build had.
+let GaussianSplatPlugin = null;
+try {
+  await import('@sparkjsdev/spark');
+  ({ GaussianSplatPlugin } = await import('3d-tiles-rendererjs-3dgs-plugin'));
+  console.log('[3DTRJS] ✓ GaussianSplatPlugin + SparkJS loaded');
+} catch (e) {
+  console.warn('[3DTRJS] GaussianSplatPlugin unavailable:', e.message);
+}
+
+// Default splat error target (lower = higher-resolution splats stream in).
+const SPLAT_ERROR_TARGET = 1;
+let errorTargetOverride = null; // sidebar Max-SSE override; null = per-type default
+
+let renderer, scene, camera, controls, globe, tiles, animId, ecefRoot;
+let controlMode = 'globe';          // 'globe' | 'env' | 'local'
+let tilesIsEcef = true;             // whether the current tileset is georeferenced
+let tilesUp = new Vector3(0, 1, 0); // radial up at the tileset (raw ECEF) for z-offset
+let zOffset = 0;
+let lastLoad = null;                // remember args so a mode switch can re-load
+let debugPlugin = null;             // DebugTilesPlugin on the current tileset
+let debugOn = false;                // show bounding boxes + colour-by-depth
+const DEBUG_COLOR_DEPTH = 4;        // DebugTilesPlugin ColorModes.DEPTH
+let needsFraming = false;           // fly-to once the root bounding sphere is ready
+let framingForceEcef;               // forceEcef arg captured for the deferred framing
+let lastCenter = new Vector3();     // last tileset bounds centre (for mode switches / fly-to)
+let lastRadius = 1;
+
+const raycaster = new Raycaster();
+const ndc = new Vector2();
+
+// ── Basemap (XYZ raster overlay for the generated globe surface) ───────────────
+
+function currentBasemapUrl() {
+  const v = document.getElementById('basemap-select')?.value || 'google';
+  if (v === 'osm')  return 'https://tile.openstreetmap.org/{z}/{x}/{y}.png';
+  if (v === 'none') return null;
+  // Google hybrid (satellite + roads/labels) — lyrs=y
+  return 'https://mt1.google.com/vt/lyrs=y&x={x}&y={y}&z={z}';
+}
+
+// ── Globe: a TilesRenderer whose surface is procedurally generated on the WGS84
+//    ellipsoid, with the XYZ raster draped over it (official mapTiles.js pattern). ──
+
+function buildGlobe() {
+  if (globe) { scene.remove(globe.group); globe.dispose(); globe = null; }
+
+  globe = new TilesRenderer();
+  globe.registerPlugin(new TilesFadePlugin({ maximumFadeOutTiles: 200 }));
+  const url = currentBasemapUrl();
+  globe.registerPlugin(new GeneratedSurfacePlugin({
+    overlay: url ? new XYZTilesOverlay({ url }) : null,
+    shape: 'ellipsoid',
+    applyOverlayTexture: !!url,
+  }));
+  globe.lruCache.minSize = 900;
+  globe.lruCache.maxSize = 1300;
+  globe.parseQueue.maxJobs = 4;
+  globe.setCamera(camera);
+  globe.setResolutionFromRenderer(camera, renderer);
+  // Globe lives under ecefRoot (the shared ECEF→Y-up frame) so that georeferenced
+  // user tilesets, which also live under ecefRoot, are positioned consistently
+  // with the globe surface. (Previously the globe was rotated but tilesets were
+  // not, so they floated over the wrong place / below the surface.)
+  ecefRoot.add(globe.group);
+}
+
+function setBasemap() {
+  if (!globe) return;
+  buildGlobe();
+  if (controls instanceof GlobeControls) controls.setEllipsoid(globe.ellipsoid, globe.group);
+}
+
+// ── Controls ──────────────────────────────────────────────────────────────────
+// Three modes:
+//   globe — GlobeControls over the ECEF ellipsoid (georeferenced tilesets + globe)
+//   env   — EnvironmentControls, local ground-plane navigation (non-georef data)
+//   local — ReorientationPlugin recenters the tileset to the origin (Y-up) and a
+//           plain Three.js OrbitControls orbits it. Useful to inspect a splat
+//           scene free of the ECEF root transform — verifies that the world→local
+//           matrix concatenation is not what blocks finer-detail streaming.
+
+function useGlobeControls(resetCamera = false) {
+  if (controls) controls.dispose();
+  controls = new GlobeControls(scene, camera, renderer.domElement);
+  controls.setEllipsoid(globe.ellipsoid, globe.group);
+  controls.enableDamping = true;
+  controls.minDistance = 1;          // no real zoom-in barrier
+  controls.maxDistance = Infinity;   // no zoom-out barrier
+  controlMode = 'globe';
+  if (resetCamera) {
+    camera.near = 1;
+    camera.far  = 1e9;
+    camera.updateProjectionMatrix();
+    camera.position.set(0, 0, 1.75e7);
+    camera.up.set(0, 1, 0);
+    camera.lookAt(0, 0, 0);
+  }
+  if (globe) globe.group.visible = true;
+}
+
+function useEnvControls(center, radius) {
+  if (controls) controls.dispose();
+  controls = new EnvironmentControls(scene, camera, renderer.domElement);
+  controls.enableDamping = true;
+  controls.minDistance = 1e-5;       // remove zoom-in barrier
+  controls.maxDistance = Infinity;   // remove zoom-out barrier
+  controls.minAltitude = -Infinity;  // allow looking from any tilt (no fight)
+  controls.maxAltitude = Infinity;
+  controlMode = 'env';
+  if (globe) globe.group.visible = false;
+  if (center) {
+    const dist = Math.max(radius * 2.5, 0.01);
+    camera.near = dist * 0.001;
+    camera.far  = dist * 1000;
+    camera.up.set(0, 1, 0);
+    camera.updateProjectionMatrix();
+    camera.position.set(center.x, center.y + dist * 0.4, center.z + dist);
+    camera.lookAt(center.x, center.y, center.z);
+  }
+  controls.update();
+}
+
+// Plain Three.js OrbitControls around the tileset centre — the default for
+// non-georeferenced splats (no controls "fight", full free rotation, no barriers).
+function useOrbitControls(center, radius) {
+  if (controls) controls.dispose();
+  controls = new OrbitControls(camera, renderer.domElement);
+  controls.enableDamping = true;
+  controls.minDistance = 0;            // no barriers
+  controls.maxDistance = Infinity;
+  controls.maxPolarAngle = Math.PI;    // full vertical orbit (no fight)
+  controls.minPolarAngle = 0;
+  controlMode = 'orbit';
+  if (globe) globe.group.visible = false;
+  const c = center || new Vector3();
+  const dist = Math.max(radius * 2.5, 0.1);
+  camera.near = Math.max(dist * 0.0005, 1e-5);
+  camera.far  = dist * 1000;
+  camera.up.set(0, 1, 0);
+  camera.updateProjectionMatrix();
+  camera.position.set(c.x, c.y + radius * 0.6, c.z + dist);
+  controls.target.copy(c);
+  camera.lookAt(c.x, c.y, c.z);
+  controls.update();
+}
+
+// User-facing 3-way selector — globe / orbit / env. All swap the controller live
+// (no reload), reusing the last tileset bounds. Orbit is the splat default.
+function setControlMode(mode) {
+  if (mode === controlMode) return;
+  if (mode === 'globe')      useGlobeControls(false);
+  else if (mode === 'orbit') useOrbitControls(lastCenter, lastRadius);
+  else                       useEnvControls(lastCenter, lastRadius);
+}
+
+// Re-frame the camera on the current tileset (3DTRJS "Fly to origin").
+function frameTileset() { if (tiles) needsFraming = true; }
+
+// ── Init ──────────────────────────────────────────────────────────────────────
+
+async function init() {
+  const container = document.getElementById('three-container');
+  renderer = new WebGLRenderer({ antialias: true });
+  renderer.setPixelRatio(window.devicePixelRatio);
+  renderer.setSize(container.clientWidth || innerWidth, container.clientHeight || innerHeight);
+  container.appendChild(renderer.domElement);
+
+  scene = new Scene();
+  camera = new PerspectiveCamera(
+    60,
+    (container.clientWidth || innerWidth) / (container.clientHeight || innerHeight),
+    1, 1e9,
+  );
+
+  // Shared ECEF→Y-up frame: rotate -90° about X so ECEF Z-up data displays Y-up.
+  // The globe AND georeferenced tilesets both live under this, keeping them aligned.
+  ecefRoot = new Group();
+  ecefRoot.rotation.x = -Math.PI / 2;
+  ecefRoot.updateMatrixWorld(true);
+  scene.add(ecefRoot);
+
+  buildGlobe();
+  useGlobeControls(true);
+
+  scene.add(new AmbientLight(0xffffff, 1.2));
+  const sun = new DirectionalLight(0xffffff, 2.0);
+  sun.position.set(1e8, 5e7, 5e7);
+  scene.add(sun);
+
+  // Double-click: move camera 50% toward the picked point (mirrors Cesium).
+  renderer.domElement.addEventListener('dblclick', onDoubleClick);
+  window.addEventListener('resize', onResize);
+  animate();
+  console.log('[3DTRJS] init() — generated-surface globe + GlobeControls');
+}
+
+function onResize() {
+  const c = document.getElementById('three-container');
+  if (!renderer || c.style.display === 'none') return;
+  camera.aspect = c.clientWidth / c.clientHeight;
+  camera.updateProjectionMatrix();
+  renderer.setSize(c.clientWidth, c.clientHeight);
+}
+
+function onDoubleClick(e) {
+  const rect = renderer.domElement.getBoundingClientRect();
+  ndc.x =  ((e.clientX - rect.left) / rect.width)  * 2 - 1;
+  ndc.y = -((e.clientY - rect.top)  / rect.height) * 2 + 1;
+  raycaster.setFromCamera(ndc, camera);
+  raycaster.far = camera.far;
+  const targets = [];
+  if (tiles) targets.push(tiles.group);
+  if (globe && globe.group.visible) targets.push(globe.group);
+  const hits = raycaster.intersectObjects(targets, true);
+  if (!hits.length) return;
+  const p = hits[0].point;
+  // Move camera halfway to the picked point. For OrbitControls also recenter the
+  // orbit target so subsequent dragging pivots around the new focus.
+  camera.position.lerp(p, 0.5);
+  if (controls && controls.target) controls.target.copy(p);
+  controls?.update();
+}
+
+// ── Tileset loading ───────────────────────────────────────────────────────────
+
+function _makeTiles(url, isSplat, fetchOptions) {
+  const t = new TilesRenderer(url);
+  t.errorTarget = errorTargetOverride ?? (isSplat ? SPLAT_ERROR_TARGET : 6);
+  t.downloadQueue.maxJobs = 10;
+  t.parseQueue.maxJobs = 6;
+  if (fetchOptions) t.fetchOptions = fetchOptions;
+  t.registerPlugin(new ImplicitTilingPlugin());
+  if (isSplat && GaussianSplatPlugin)
+    t.registerPlugin(new GaussianSplatPlugin({ renderer, scene, minRaycastOpacity: 0.1 }));
+  // Debug visualisation: OBB helpers + colour-by-octree-depth. Registered always
+  // (cheap when off); the checkbox flips displayBoxBounds + colorMode live.
+  debugPlugin = new DebugTilesPlugin({
+    displayBoxBounds: debugOn,
+    colorMode: debugOn ? DEBUG_COLOR_DEPTH : 0,
+  });
+  t.registerPlugin(debugPlugin);
+  t.setCamera(camera);
+  t.setResolutionFromRenderer(camera, renderer);
+  // Parent under ecefRoot in globe mode; under the scene directly for orbit/env.
+  // (_tryFraming reparents once the bounds reveal whether the tileset is ECEF.)
+  (controlMode === 'globe' ? ecefRoot : scene).add(t.group);
+  t.addEventListener('load-error', ev => console.error('[3DTRJS] Tile error:', ev?.url ?? ev));
+  return t;
+}
+
+function _applyZOffset() {
+  if (!tiles) return;
+  // In globe mode tiles.group is a child of ecefRoot, so offset along the raw
+  // ECEF radial up (ecefRoot rotates it into world space). Otherwise offset +Y.
+  if (controlMode === 'globe' && tilesIsEcef) tiles.group.position.copy(tilesUp).multiplyScalar(zOffset);
+  else                                        tiles.group.position.set(0, zOffset, 0);
+  tiles.group.updateMatrixWorld();
+}
+
+function setZOffset(v) {
+  zOffset = Number(v) || 0;
+  _applyZOffset();
+}
+
+function setDebug(on) {
+  debugOn = !!on;
+  if (debugPlugin) {
+    debugPlugin.displayBoxBounds = debugOn;
+    debugPlugin.colorMode = debugOn ? DEBUG_COLOR_DEPTH : 0;
+  }
+}
+
+function setErrorTarget(v) {
+  const n = Number(v);
+  errorTargetOverride = (n && n > 0) ? n : null;
+  if (tiles) tiles.errorTarget = errorTargetOverride ?? tiles.errorTarget;
+}
+
+function _detachTiles() {
+  needsFraming = false;
+  debugPlugin = null;
+  if (!tiles) return;
+  tiles.group.parent?.remove(tiles.group);
+  tiles.dispose();
+  tiles = null;
+}
+
+function _onTilesetLoaded(forceEcef) {
+  // The root bounding volume (esp. a "region") may not be resolvable to a sphere
+  // at the instant the tileset JSON loads. Defer framing to the render loop,
+  // which retries until getBoundingSphere succeeds.
+  framingForceEcef = forceEcef;
+  needsFraming = true;
+}
+
+function _tryFraming() {
+  const sphere = new Sphere();
+  if (!tiles || !tiles.getBoundingSphere(sphere)) return;
+  needsFraming = false;
+  const forceEcef = framingForceEcef;
+  const { center, radius } = sphere;
+  console.log('[3DTRJS] Bounds: center', center.toArray().map(v => v.toFixed(2)), 'radius', radius.toFixed(2));
+  lastCenter.copy(center);
+  lastRadius = radius;
+
+  tilesIsEcef = forceEcef ?? (center.length() > 1e5);
+  if (tilesIsEcef) {
+    _reparentTiles(ecefRoot);  // georeferenced → shared ECEF→Y-up frame (aligns with globe)
+    tilesUp = center.clone().normalize();
+    _applyZOffset();
+    if (globe) globe.group.visible = true;
+    useGlobeControls(false);
+    // Camera fly-to: the tileset content is raw ECEF but rendered under ecefRoot,
+    // so transform the target/up into world space through the root matrix.
+    const worldCenter = center.clone().applyMatrix4(ecefRoot.matrixWorld);
+    const worldUp     = tilesUp.clone().transformDirection(ecefRoot.matrixWorld);
+    lastCenter.copy(worldCenter);
+    const dist = Math.max(radius * 3, 500);
+    camera.near = dist * 0.0005;
+    camera.far  = dist * 1000;
+    camera.updateProjectionMatrix();
+    camera.position.copy(worldCenter).addScaledVector(worldUp, dist);
+    camera.up.copy(worldUp);
+    camera.lookAt(worldCenter);
+    controls.update();
+  } else {
+    _reparentTiles(scene);     // local/non-georef content in its own frame (no ECEF rotation)
+    tilesUp.set(0, 1, 0);
+    _applyZOffset();
+    // Default non-georeferenced splats to free OrbitControls (no env "fight").
+    useOrbitControls(center, radius);
+  }
+  syncControlSelect();
+}
+
+// Move the tileset group between the ECEF frame (globe) and the world/scene
+// (local/env), since its correct frame is only known after the bounds load.
+function _reparentTiles(parent) {
+  if (tiles && tiles.group.parent !== parent) {
+    tiles.group.parent?.remove(tiles.group);
+    parent.add(tiles.group);
+  }
+}
+
+function load(url, isSplat, fetchOptions) {
+  if (!animId) animate();
+  _detachTiles();
+  lastLoad = { url, isSplat, fetchOptions };
+  zOffset = 0;
+  const zEl = document.getElementById('zoffset-input');
+  if (zEl) zEl.value = 0;
+  tiles = _makeTiles(url, isSplat, fetchOptions);
+  // 0.4.28 still emits the (now-deprecated) "load-tile-set"; newer builds emit
+  // "load-tileset". Listen for both so the fly-to fires regardless of version.
+  const onLoaded = () => _onTilesetLoaded();
+  tiles.addEventListener('load-tileset', onLoaded);
+  tiles.addEventListener('load-tile-set', onLoaded);
+  console.log('[3DTRJS] Loading:', url, isSplat ? '(splat)' : '(tileset)', 'mode:', controlMode);
+}
+
+function loadIon(assetId, token, isSplat) {
+  if (!animId) animate();
+  _detachTiles();
+  lastLoad = { ion: { assetId, token, isSplat } };
+  zOffset = 0;
+  const ionUrl = `https://api.cesium.com/v1/assets/${assetId}/endpoint`;
+  tiles = _makeTiles(ionUrl, isSplat, null);
+  tiles.registerPlugin(new CesiumIonAuthPlugin({ apiToken: token, assetId: String(assetId) }));
+  const onLoaded = () => _onTilesetLoaded(controlMode !== 'local');
+  tiles.addEventListener('load-tileset', onLoaded);
+  tiles.addEventListener('load-tile-set', onLoaded);
+  console.log('[3DTRJS] Loading Ion asset', assetId, 'mode:', controlMode);
+}
+
+function syncControlSelect() {
+  const sel = document.getElementById('controls-mode');
+  if (sel) sel.value = controlMode;
+}
+
+// Vertical FOV (degrees). The SAME camera drives rendering, controls and tile
+// SSE/error projection, so intrinsics stay consistent with what's on screen.
+function setFov(deg) {
+  const d = Number(deg);
+  if (!camera || !(d > 0) || d >= 180) return;
+  camera.fov = d;
+  camera.updateProjectionMatrix();
+}
+
+// ── Render loop ───────────────────────────────────────────────────────────────
+
+function pause() {
+  if (animId) { cancelAnimationFrame(animId); animId = null; }
+}
+
+let _frames = 0;
+function animate() {
+  animId = requestAnimationFrame(animate);
+  _frames++;
+  if (needsFraming) _tryFraming();
+  controls?.update();
+  camera.updateMatrixWorld();
+  if (globe && globe.group.visible) {
+    globe.setCamera(camera);
+    globe.setResolutionFromRenderer(camera, renderer);
+    globe.update();
+  }
+  if (tiles) {
+    tiles.setCamera(camera);
+    tiles.setResolutionFromRenderer(camera, renderer);
+    tiles.update();
+  }
+  renderer.render(scene, camera);
+}
+
+function _debug() {
+  const s = new Sphere();
+  const ok = tiles?.getBoundingSphere(s);
+  const wc = ok ? s.center.clone().applyMatrix4(tiles.group.matrixWorld) : null;
+  const root = tiles?.root;
+  return {
+    mode: controlMode,
+    camDistFromEarthCentre: camera ? +camera.position.length().toFixed(0) : null,
+    tilesParentIsEcefRoot: tiles ? tiles.group.parent === ecefRoot : null,
+    tilesWorldCentreDistFromOrigin: wc ? +wc.length().toFixed(0) : null,
+    hasRoot: !!root,
+    rootBVKeys: root?.boundingVolume ? Object.keys(root.boundingVolume) : null,
+    groupChildren: tiles?.group?.children?.length ?? null,
+    needsFraming,
+    frames: _frames,
+    radius: ok ? +s.radius.toFixed(2) : null,
+    bsCentre: ok ? s.center.toArray().map(v=>+v.toFixed(1)) : null,
+    camPos: camera ? camera.position.toArray().map(v=>+v.toFixed(1)) : null,
+    sceneChildren: scene ? scene.children.map(o=>o.type||o.constructor?.name).slice(0,12) : null,
+    splatMeshBox: (() => {
+      if (!scene) return null;
+      let m = null; scene.traverse(o => { if (!m && o.isMesh && o.geometry) m = o; });
+      if (!m) return null;
+      const b = new Box3().setFromObject(m);
+      const c = b.getCenter(new Vector3()), sz = b.getSize(new Vector3());
+      return { center: c.toArray().map(v=>+v.toFixed(2)), halfSize: sz.multiplyScalar(0.5).toArray().map(v=>+v.toFixed(2)) };
+    })(),
+  };
+}
+
+// Manually step the update+render pipeline (debug aid for headless environments
+// where requestAnimationFrame is throttled and the loop won't drive tile loading).
+function _pump() {
+  if (needsFraming) _tryFraming();
+  controls?.update();
+  camera.updateMatrixWorld();
+  if (globe && globe.group.visible) { globe.setCamera(camera); globe.setResolutionFromRenderer(camera, renderer); globe.update(); }
+  if (tiles) { tiles.setCamera(camera); tiles.setResolutionFromRenderer(camera, renderer); tiles.update(); }
+  renderer.render(scene, camera);
+}
+
+window.__3dtrjs = { init, load, loadIon, pause, setControlMode, setZOffset, setBasemap, setDebug, setErrorTarget, setFov, frameTileset, _debug, _pump };
+console.log('[3DTRJS] module ready — GaussianSplatPlugin:', GaussianSplatPlugin ? 'loaded' : 'unavailable');
+</script>
+</body>
+</html>
