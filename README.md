@@ -107,11 +107,16 @@ cd rad-to-3dtiles
 npm install
 # Always inspect first:
 node scripts/dump-rad-header.js coit.rad
-# Convert:
+# Convert (defaults: --scale=1, --ge-scale=1, --ge-layer=1):
 node src/index.js coit.rad ./out-rad
-# Convert with package output (optional):
-node src/index.js coit.rad ./out-rad --3tz     # output .3tz archive
-node src/index.js coit.rad ./out-rad --3dtiles  # output .3dtiles package
+# Noise filtering (OPT-IN, default OFF — SparkJS renders the RAD with no filtering, so we don't either):
+#   --opacity-filter=0.05   drop faint splats (final opacity < N)
+#   --max-scale-mult=30     drop giant "floating noise" splats (maxScale > per-chunk median×N)
+node src/index.js coit.rad ./out-rad --opacity-filter=0.05 --max-scale-mult=30  # only for data with known noise
+# Tune splat size and LoD (rarely needed — raw values match the reference):
+node src/index.js coit.rad ./out-rad --scale=2         # σ×2 (larger splats)
+node src/index.js coit.rad ./out-rad --ge-scale=2      # GE×2 (refine at greater distance)
+node src/index.js coit.rad ./out-rad --ge-layer=2      # widen depth range
 ```
 
 **Output:**
@@ -125,6 +130,53 @@ out-rad/
 > [`@cesium/3d-tiles-tools`](https://github.com/CesiumGS/3d-tiles-tools) installed.
 > `npm install @cesium/3d-tiles-tools` in the `rad-to-3dtiles` directory, then pass the flag.
 > Plan to eventually promote this to a first-class dependency.
+
+---
+
+### sog-to-3dtiles
+
+Converts a PlayCanvas **[Streamed SOG](docs-references/streamed-sog.md)** dataset (`lod-meta.json`
++ per-chunk unbundled [SOG](docs-references/sog.md) dirs) to 3D Tiles 1.1 with the same
+`KHR_gaussian_splatting` + `_compression_spz_2` GLB tiles as the RAD path.
+
+```sh
+cd sog-to-3dtiles
+npm install                                  # pulls @playcanvas/splat-transform
+node src/index.js path/to/scene/ ./out-sog   # dir containing lod-meta.json, or the json itself
+```
+
+**How it works:** the streamed-SOG binary spatial tree maps almost 1:1 onto a 3D Tiles HLOD
+tree — interior nodes become empty grouping tiles, and each leaf becomes a `REPLACE` chain of
+tiles from coarsest LOD level down to level 0 (finest). Bounds are emitted in the Z-up tileset
+frame (`RX+90°`), matching the RAD path.
+
+**The per-chunk pipeline (intermediate format):**
+1. [`@playcanvas/splat-transform`](https://github.com/playcanvas/splat-transform)'s `readSog`
+   decodes each SOG chunk's WebP textures (CPU `webp.wasm` — **no GPU**) into a **`DataTable`** —
+   that's the intermediate per-chunk format. Columns: `x,y,z`, `rot_0..3` (quaternion, **w-first**),
+   `scale_0..2` (**log**), `f_dc_0..2` (SH DC), `opacity` (**logit**).
+2. For each leaf's `lods[level]` run, we slice `[offset, offset+count)` of that DataTable, convert
+   conventions (`exp` scale, `sigmoid` opacity, `0.5 + SH_C0·f_dc` → color, quaternion reorder
+   w-first → xyzw), and re-encode to an **SPZ-v2 GLB** with our own encoder (the same one
+   `rad-to-3dtiles` uses).
+
+That this path renders cleanly is itself proof the **SPZ-v2/GLB encoder and tree builder are
+correct** — so when the RAD path looked wrong, the bug had to be in the *RAD decode*, not the
+shared encoder. (It was: see [RAD column layouts](#rad-column-byte-layouts-the-spiky-render-bug).)
+
+**Output:**
+```
+out-sog/
+  tileset.json           HLOD tree mirroring the SOG spatial tree
+  tiles/node_<n>.glb      one per LOD run; tiles/env.glb if the scene has an environment
+```
+
+> **Status:** validated end-to-end on PlayCanvas's `example_skatepark_02` & `example_roman_parish_02`
+> (see Sample Data below). Decoded tiles contain real splats — varied positions, valid scales,
+> unit quaternions, proper opacity — confirming the WebP CPU decode + decode conventions
+> (quaternion `rot_0=w`, log scales, logit opacity, SH0→color). geometricError halves cleanly
+> root→leaf (e.g. skatepark `17.8 → 8.9 → … → 0.0`). Bundled `.sog` environments are skipped
+> (best-effort) since the spec's chunks are unbundled.
 
 ---
 
@@ -147,6 +199,23 @@ curl -L https://wlt-ai-cdn.art/tastier_rad_500/0524c1a1-abf2-4969-ae40-9981ee836
 > a **streaming manifest** (88 KB JSON header only; chunk data fetched on demand via HTTP range
 > requests). The converter detects streaming manifests and exits with a clear error — download
 > the full monolithic file to convert. Run `node scripts/dump-rad-header.js <file.rad>` to inspect.
+
+### Streamed SOG (PlayCanvas LOD)
+
+PlayCanvas example datasets (download the whole tree with `sog-to-3dtiles/scripts/fetch-sog.mjs`):
+
+```sh
+cd sog-to-3dtiles
+# Skatepark — 20 chunks, 4 LOD levels (~160 files)
+node scripts/fetch-sog.mjs https://code.playcanvas.com/examples_data/example_skatepark_02/ ../sample-data/input/sog/skatepark
+# Roman Parish — 131 chunks, 7 LOD levels (~790 files)
+node scripts/fetch-sog.mjs https://code.playcanvas.com/examples_data/example_roman_parish_02/ ../sample-data/input/sog/roman-parish
+# then convert:
+node src/index.js ../sample-data/input/sog/skatepark ../sample-data/output-sog/skatepark-3dtiles-from-sog
+```
+
+Both are wired into the viewer preset bar (**⬢ Skatepark / Roman Parish (SOG)**) and the inspector
+(`cd tools-inspector && npm run inspect:skatepark` / `inspect:roman-parish`).
 
 ### COPC (LiDAR Point Cloud)
 
@@ -259,18 +328,34 @@ coarser nodes that contain unique points.
 How `rad-to-3dtiles` builds a tile hierarchy that selects levels correctly in both
 CesiumJS and 3DTilesRendererJS:
 
-- **Geometric error = uniform per depth, anchored to a rendering-error proxy.** Each tile
-  records a feature size = `mean over splats of max(scaleₓ,scaleᵧ,scale_z) × 3` (≈ SparkJS
-  BhattLod `featureSize`), then the builder collapses these to **one error per LoD level**
-  (mean featureSize at each depth, forced strictly decreasing). This mirrors the
+- **Geometric error = uniform per depth, anchored to a rendering-error proxy — then scaled to
+  match renderer expectations.** Each tile records a feature size =
+  `mean over splats of max(scaleₓ,scaleᵧ,scale_z) × 3` (≈ SparkJS BhattLod `featureSize`),
+  then the builder collapses these to **one error per LoD level** (mean featureSize at each depth,
+  forced strictly decreasing). This mirrors the
   [3DGS-PLY-3DTiles-Converter](https://github.com/WilliamLiu-1997/3DGS-PLY-3DTiles-Converter)
   model where all siblings at a level share one error so they **refine together**. Per-*node*
-  errors (the earlier approach) vary within a level — e.g. Tastier L2 spanned 0.024–0.059 — so
-  sibling tiles popped in/out at different camera distances: the uneven tile selection. Uniform
-  per-depth fixes that. Using box half-extent as the error — the naïve choice — instead makes
-  coarse nodes claim huge error and breaks SSE-based LoD entirely. A per-edge safety clamp
-  handles RAD's rare DAG edges (a node emitted under a same-depth parent); it fires on ~3 Tastier
-  edges, 0 for Coit.
+  errors vary within a level and make siblings pop in/out at different distances. Uniform per-depth
+  fixes that.
+
+  Two optional modifiers (both **default 1**, mirroring the
+  [3DTiles-Inspector](https://github.com/WilliamLiu-1997/3DTiles-Inspector) sliders and the
+  reference converter's `errorTargetLayerMultiplier`) can tune this:
+
+  1. **Layer multiplier** (`--ge-layer`, default `1`): stretches the per-depth range —
+     `GE(d) = leafGE + (GE(d) − leafGE) × geLayer`. `1` = natural halving, which is what the
+     reference uses and what makes sibling levels refine together.
+  2. **Global GE scale** (`--ge-scale`, default `1`): multiplies all GE values by a constant.
+
+  **These default to 1** because the raw featureSize GE is already the right magnitude: Coit's root
+  GE is ≈ 1.1, matching the [3DGS-PLY-3DTiles-Converter](https://github.com/WilliamLiu-1997/3DGS-PLY-3DTiles-Converter)
+  reference's ≈ 2.07 for a comparable scene (verified by fetching its `tiling/geometric-error.js` and
+  a rendered reference tileset). An earlier attempt set these to `16`/`8` — that over-inflated GE so
+  every tile's SSE always exceeded the threshold, forcing **full-detail-everywhere refinement
+  regardless of camera distance** (high-res tiles loading away from the camera focus, the whole scene
+  rendering as dense spikes). That was a mis-calibration compensating for the half-opacity `lodOpacity`
+  bug; with opacity fixed, raw GE is correct. If a scene under-refines, nudge `--ge-scale=2` (the
+  reference sits ~2× our magnitude); values like `16` are far too high.
 - **Bounding volumes are emitted in the Z-up tileset frame.** Bounds are computed from the glTF
   (Y-up) splat positions, but a 3D Tiles tile's `boundingVolume` lives in the tileset frame, which
   is Z-up — both CesiumJS and 3DTilesRendererJS rotate glTF content by `RX(+90°)` → `(x,y,z) →
@@ -284,10 +369,28 @@ CesiumJS and 3DTilesRendererJS:
   node's box to enclose all descendant boxes (`parent ⊇ children`), which both renderers require
   for correct frustum culling and screen-space-error refinement. (Before this fix, 56% of Coit
   parent→child pairs were non-nested, with children up to 14× larger than their parent.)
+- **Root node RX(180°) transform corrects the inverted-up artifact.** After the glTF→tileset
+  `RX(+90°)` that both renderers apply to GLB content, RAD splats appeared upside-down. A
+  `root.transform = diag(1,−1,−1,1)` (column-major RX 180°) is written into the root tile only —
+  children inherit it automatically per the 3D Tiles spec, so no intermediate or leaf nodes carry
+  a transform. This is the correct place: intermediate/leaf transforms would fight the inherited
+  value on each child's rendered position.
 - **Native RAD coordinates, no global-centroid subtraction.** Splats keep their raw RAD frame —
   subtracting a float offset before int24 quantisation buys nothing (RAD scenes already sit near
   the origin) and only adds a lossy step. RAD has no per-node transforms, so all tiles share one
-  frame; a single root transform could geolocate the tileset later if a dataset needed it.
+  frame; the single root transform above is sufficient to orient the content correctly.
+- **`lodOpacity` must be applied — the cause of the "thin/spiky" artifact.** RAD stores its
+  quantisation ranges and flags under `meta.splatEncoding` (per-chunk, mirrored from the root
+  header), **not** `meta.encoding`. Reading the wrong key silently fell back to defaults, missing
+  `lodOpacity: true`. SparkJS's `unpackSplat` does `opacity = stored/255; if (lodOpacity) opacity ×= 2`
+  — i.e. RAD LoD files store **half** the real opacity. Without the ×2 every splat rendered at half
+  opacity, so the large coarse splats could not blend and the sharp needle splats (scale anisotropy
+  reaches 100–1000× on merged LoD representatives — legitimately needle-shaped) showed through as
+  spikes. Sourcing `lnScaleMin/Max`/`lodOpacity` from `splatEncoding` fixes it (and is robust for RAD
+  files whose ranges differ from the `−12…9` default). Note: the SPZ encoding itself was verified
+  **byte-identical** to SparkJS's `SpzWriter` (positions int24/4096, alpha ×255, rgb via `SH_C0/0.15`,
+  scales `(ln s + 10)×16`, v2 first-three rotations) — the bug was purely the missed opacity doubling
+  in the RAD decode, not the SPZ storage.
 
 Toggle **🪲 Debug tiles** in `viewer.html` to draw the tile bounding volumes coloured by octree
 depth — CesiumJS via `debugShowBoundingVolume`/`debugColorizeTiles`, 3DTRJS via `DebugTilesPlugin`
@@ -331,6 +434,8 @@ They work in `viewer.html` via the built-in city mesh presets.
 | `KHR_gaussian_splatting.md` | KHR_gaussian_splatting glTF extension spec (RC) |
 | `KHR_gaussian_splatting_compression_spz_2.md` | SPZ compression extension spec (Draft) |
 | `spz-format.md` | SPZ v2/v3 binary format — per-field encoding, pack/unpack formulas (source: github.com/nianticlabs/spz) |
+| `sog.md` | SOG (Spatially Ordered Gaussians) chunk format — WebP textures + dequant (positions/quats/scales/SH); consumed by `sog-to-3dtiles` (source: developer.playcanvas.com) |
+| `streamed-sog.md` | PlayCanvas Streamed SOG LOD format — `lod-meta.json` spatial tree + chunk references; the input to `sog-to-3dtiles` (source: developer.playcanvas.com) |
 
 #### Upstream specs & reference implementations
 
@@ -347,16 +452,29 @@ They work in `viewer.html` via the built-in city mesh presets.
 - [@sparkjsdev/spark](https://github.com/sparkjsdev/spark) — SparkJS; writes SPZ v3 by default but version-dispatches on read (handles v2 and v3).
 - [javagl/JSplat](https://github.com/javagl/JSplat) — Java reference for writing splat glTFs that CesiumJS reads (`GltfSpzSplatWriter`); a useful cross-check when updating an SPZ writer.
 
+**PlayCanvas SOG / Streamed SOG (used by `sog-to-3dtiles`)**
+- [playcanvas/splat-transform](https://github.com/playcanvas/splat-transform) — SplatTransform: PlayCanvas's splat conversion library/CLI. `sog-to-3dtiles` uses its `readSog` (CPU `webp.wasm` decode) to turn each SOG chunk into a `DataTable`. Authors Streamed SOG datasets too.
+- [SOG format spec](https://developer.playcanvas.com/user-manual/gaussian-splatting/formats/sog/) — local notes: [`docs-references/sog.md`](docs-references/sog.md).
+- [Streamed SOG (LOD) spec](https://developer.playcanvas.com/user-manual/gaussian-splatting/formats/streamed-sog/) — local notes: [`docs-references/streamed-sog.md`](docs-references/streamed-sog.md).
+
 **3DTilesRendererJS Gaussian-splat ecosystem (WilliamLiu-1997)** — closest reference implementations to this repo's RAD path; studied to improve tiling:
 - [3DTilesRendererJS-3DGS-Plugin](https://github.com/WilliamLiu-1997/3DTilesRendererJS-3DGS-Plugin) — the `3d-tiles-rendererjs-3dgs-plugin` this viewer uses to render splats in 3DTRJS (parses `KHR_gaussian_splatting` + `_spz_2`, renders via SparkJS, one shared Spark renderer per scene/renderer, camera-relative rebasing, `sparkRendererOptions`, WebXR-aware). Its `data/gaussianSplat1` & `gaussianSplat2` are wired into this viewer's preset bar (**◈ GSplat 1/2**). Note its rendering tip: keep the globe in the **opaque** pass so it doesn't object-sort against transparent splats at the horizon.
 - [3DGS-PLY-3DTiles-Converter](https://github.com/WilliamLiu-1997/3DGS-PLY-3DTiles-Converter) — PLY→3D Tiles converter (kd-tree tiling, AABB bounds, SPZ v3 + quantized SH). Its [`src/tiling/geometric-error.js`](https://github.com/WilliamLiu-1997/3DGS-PLY-3DTiles-Converter/blob/main/src/tiling/geometric-error.js) is the model our **uniform-per-depth geometric error** mirrors: `GE(depth) = leafReference × (1/samplingRate)^(maxDepth−depth)`, anchored to a deepest-leaf "sparsity + extent" estimate, all siblings at a level sharing one error. Each tileset also emits a `build_summary.json` exposing the full GE-by-depth and sampling schedule — handy for cross-checking. ([Issue #24](https://github.com/WilliamLiu-1997/3DGS-PLY-3DTiles-Converter/issues/24): auto-depth can overload the root node on >8M-splat scenes — a tree-balancing concern worth noting for very large RAD inputs.)
-- [3DTiles-Inspector](https://github.com/WilliamLiu-1997/3DTiles-Inspector) — standalone web inspector for 3D Tiles / Gaussian-splat tilesets (root-transform edit, geometric-error & layer-multiplier scaling `1/16x–16x`, splat crop regions, `build_summary.json` round-trip). A good complement to this repo's `viewer.html` 🪲 Debug-tiles overlay. Run it on any of our generated tilesets — it starts a localhost server and opens your browser:
+- [3DTiles-Inspector](https://github.com/WilliamLiu-1997/3DTiles-Inspector) — standalone web inspector for 3D Tiles / Gaussian-splat tilesets (root-transform edit, geometric-error & layer-multiplier scaling `1/16x–16x`, splat crop regions, `build_summary.json` round-trip). A good complement to this repo's `viewer.html` 🪲 Debug-tiles overlay.
+
+  **The inspector is pre-installed** in `tools-inspector/` — run via npm scripts (no global install needed):
   ```bash
-  npx 3dtiles-inspector sample-data/output-rad/coit-3dtiles-from-rad/tileset.json      # RAD splats
-  npx 3dtiles-inspector sample-data/output-rad/coit-s050-3dtiles-from-rad/tileset.json # σ×0.5 variant
-  npx 3dtiles-inspector sample-data/output-copc/autzen-3dtiles-from-copc/tileset.json  # COPC point cloud
+  cd tools-inspector
+  npm run inspect:tastier    # tastier500k RAD tileset
+  npm run inspect:coit       # coit RAD tileset (large, 778 tiles)
+  npm run inspect:coit-s050  # coit σ×0.5 scale variant
   ```
-  Its `Geometric Error` / `Layer Multiplier` sliders are the runtime analogue of this converter's uniform-per-depth error model — handy for confirming LoD behaviour without re-tiling.
+  Or run directly from the repo root with `npx`:
+  ```bash
+  npx --prefix tools-inspector 3dtiles-inspector sample-data/output-rad/tastier500k-3dtiles-from-rad
+  npx --prefix tools-inspector 3dtiles-inspector sample-data/output-rad/coit-3dtiles-from-rad
+  ```
+  Each command starts a localhost HTTP server and opens the inspector in your default browser. Its `Geometric Error` / `Layer Multiplier` sliders are the runtime analogue of this converter's uniform-per-depth error model — handy for confirming LoD behaviour without re-tiling.
 
 ---
 

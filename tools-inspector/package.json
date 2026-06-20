@@ -1,1 +1,14 @@
-{"name":"inspector-host","private":true,"dependencies":{"3dtiles-inspector":"^0.2.13"}}
+{
+  "name": "inspector-host",
+  "private": true,
+  "scripts": {
+    "inspect":              "3dtiles-inspector",
+    "inspect:tastier":      "3dtiles-inspector ../sample-data/output-rad/tastier500k-3dtiles-from-rad",
+    "inspect:coit":         "3dtiles-inspector ../sample-data/output-rad/coit-3dtiles-from-rad",
+    "inspect:skatepark":    "3dtiles-inspector ../sample-data/output-sog/skatepark-3dtiles-from-sog",
+    "inspect:roman-parish": "3dtiles-inspector ../sample-data/output-sog/roman-parish-3dtiles-from-sog"
+  },
+  "dependencies": {
+    "3dtiles-inspector": "^0.2.13"
+  }
+}

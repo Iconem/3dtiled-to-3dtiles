@@ -391,8 +391,8 @@
     <div class="sb-row">
       <label for="basemap-select">Imagery</label>
       <select id="basemap-select" onchange="setBasemap(this.value)">
-        <option value="google">Google Hybrid</option>
-        <option value="osm" selected>OpenStreetMap</option>
+        <option value="google" selected>Google Hybrid</option>
+        <option value="osm">OpenStreetMap</option>
         <option value="none">None</option>
       </select>
     </div>
@@ -489,31 +489,24 @@ const PRESETS = [
   },
   {
     id: 'tastier-rad',
-    label: '✦ Tastier σ×1',
+    label: '✦ Tastier (RAD)',
     type: 'splat',
     url: 'http://localhost:3000/sample-data/output-rad/tastier500k-3dtiles-from-rad/tileset.json',
     local: false,
   },
-  // Splat-size A/B variants (--scale): test whether the gaussian footprint is too large.
+  // PlayCanvas Streamed SOG → 3D Tiles (via sog-to-3dtiles).
   {
-    id: 'tastier-s050',
-    label: '✦ Tastier σ×0.5',
+    id: 'skatepark-sog',
+    label: '⬢ Skatepark (SOG)',
     type: 'splat',
-    url: 'http://localhost:3000/sample-data/output-rad/tastier500k-s050-3dtiles-from-rad/tileset.json',
+    url: 'http://localhost:3000/sample-data/output-sog/skatepark-3dtiles-from-sog/tileset.json',
     local: false,
   },
   {
-    id: 'tastier-s033',
-    label: '✦ Tastier σ×0.33',
+    id: 'roman-parish-sog',
+    label: '⬢ Roman Parish (SOG)',
     type: 'splat',
-    url: 'http://localhost:3000/sample-data/output-rad/tastier500k-s033-3dtiles-from-rad/tileset.json',
-    local: false,
-  },
-  {
-    id: 'coit-s050',
-    label: '✦ Coit σ×0.5',
-    type: 'splat',
-    url: 'http://localhost:3000/sample-data/output-rad/coit-s050-3dtiles-from-rad/tileset.json',
+    url: 'http://localhost:3000/sample-data/output-sog/roman-parish-3dtiles-from-sog/tileset.json',
     local: false,
   },
   // Reference splat tilesets from the 3DTilesRendererJS-3DGS-Plugin demo data
@@ -1135,12 +1128,35 @@ import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 // onto the same ShaderChunk the renderer compiles against — fixing the
 // "#include <splatDefines>" resolution error that the duplicate-three CDN build had.
 let GaussianSplatPlugin = null;
+let getSparkRendererForScene = null;
 try {
   await import('@sparkjsdev/spark');
-  ({ GaussianSplatPlugin } = await import('3d-tiles-rendererjs-3dgs-plugin'));
+  ({ GaussianSplatPlugin, getSparkRendererForScene } = await import('3d-tiles-rendererjs-3dgs-plugin'));
   console.log('[3DTRJS] ✓ GaussianSplatPlugin + SparkJS loaded');
 } catch (e) {
   console.warn('[3DTRJS] GaussianSplatPlugin unavailable:', e.message);
+}
+
+// SparkRenderer-level LoD settings that the plugin's `sparkRendererOptions` allowlist
+// does NOT expose (maxStdDev/blurAmount ARE in the allowlist and set on the plugin;
+// these two are not). SparkJS's own viewer sets them — lodInflate inflates coarse LoD
+// splats so opacity ≤ 1 (better blending of merged splats), lodSplatScale scales the
+// active-splat budget. We reach the shared SparkRenderer via getSparkRendererForScene
+// and set them directly. Until the plugin supports passing these through, this is the
+// only lever (feature request filed: see docs-references/plugin-feature-request.md).
+let SPARK_LOD_INFLATE = true;
+let SPARK_LOD_SPLAT_SCALE = 1.0;
+let _sparkLodApplied = false;
+function applySparkLodSettings() {
+  if (_sparkLodApplied || !getSparkRendererForScene) return;
+  let spark = null;
+  try { spark = getSparkRendererForScene(scene); } catch { /* not ready */ }
+  if (!spark) return;
+  if ('lodInflate'    in spark) spark.lodInflate    = SPARK_LOD_INFLATE;
+  if ('lodSplatScale' in spark) spark.lodSplatScale = SPARK_LOD_SPLAT_SCALE;
+  spark.lodDirty = true;
+  _sparkLodApplied = true;
+  console.log(`[3DTRJS] SparkRenderer LoD set — lodInflate=${SPARK_LOD_INFLATE}, lodSplatScale=${SPARK_LOD_SPLAT_SCALE}`);
 }
 
 // Default splat error target (lower = higher-resolution splats stream in).
@@ -1360,6 +1376,7 @@ function onDoubleClick(e) {
 // ── Tileset loading ───────────────────────────────────────────────────────────
 
 function _makeTiles(url, isSplat, fetchOptions) {
+  _sparkLodApplied = false;   // re-apply SparkRenderer LoD settings for the new tileset
   const t = new TilesRenderer(url);
   t.errorTarget = errorTargetOverride ?? (isSplat ? SPLAT_ERROR_TARGET : 6);
   t.downloadQueue.maxJobs = 10;
@@ -1367,7 +1384,20 @@ function _makeTiles(url, isSplat, fetchOptions) {
   if (fetchOptions) t.fetchOptions = fetchOptions;
   t.registerPlugin(new ImplicitTilingPlugin());
   if (isSplat && GaussianSplatPlugin)
-    t.registerPlugin(new GaussianSplatPlugin({ renderer, scene, minRaycastOpacity: 0.1 }));
+    t.registerPlugin(new GaussianSplatPlugin({
+      renderer, scene, minRaycastOpacity: 0.1,
+      // Match SparkJS's own viewer render settings (from its spark-2.0 explore.html)
+      // so our tiles look like the native RAD render — the right place to control
+      // appearance, instead of filtering/discarding splats at conversion time.
+      //   maxStdDev sqrt(8): gaussian render cutoff (desktop default)
+      //   blurAmount 0.3 / preBlurAmount 0.0: SparkJS antialiasing (aa=true path)
+      sparkRendererOptions: {
+        maxStdDev: Math.sqrt(8),
+        blurAmount: 0.3,
+        preBlurAmount: 0.0,
+        focalAdjustment: 2,
+      },
+    }));
   // Debug visualisation: OBB helpers + colour-by-octree-depth. Registered always
   // (cheap when off); the checkbox flips displayBoxBounds + colorMode live.
   debugPlugin = new DebugTilesPlugin({
@@ -1544,8 +1574,26 @@ function animate() {
     tiles.setCamera(camera);
     tiles.setResolutionFromRenderer(camera, renderer);
     tiles.update();
+    if (debugOn) _dimDebugBoxes();
+    applySparkLodSettings();   // applies once the shared SparkRenderer exists
   }
   renderer.render(scene, camera);
+}
+
+// DebugTilesPlugin draws bounding boxes as opaque LineSegments (Box3Helper), which
+// hide the splats behind them. Dim them to ~1/10 opacity so the underlying splat
+// quality is visible through the boxes. Splat content is Mesh, never LineSegments,
+// so this only touches the debug helpers. Runs each frame (tiles stream in/out).
+const DEBUG_BOX_OPACITY = 0.1;
+function _dimDebugBoxes() {
+  tiles.group.traverse(o => {
+    if (o.isLineSegments && o.material && o.material.opacity !== DEBUG_BOX_OPACITY) {
+      o.material.transparent = true;
+      o.material.opacity = DEBUG_BOX_OPACITY;
+      o.material.depthWrite = false;
+      o.material.needsUpdate = true;
+    }
+  });
 }
 
 function _debug() {

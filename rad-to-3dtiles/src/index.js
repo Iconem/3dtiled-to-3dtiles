@@ -26,8 +26,53 @@ const SCALE_MULT = (() => {
   const v = f ? parseFloat(f.slice('--scale='.length)) : 1;
   return (isFinite(v) && v > 0) ? v : 1;
 })();
+
+// Geometric-error global scale (mirrors 3DTiles-Inspector "Geometric Error" slider).
+// Default 1 — the raw featureSize-based per-depth error is already the right
+// magnitude (coit root ≈ 1.1, matching the 3DGS-PLY-3DTiles-Converter reference's
+// ≈ 2.07 for a comparable scene). An earlier default of 16 over-inflated GE so every
+// tile's SSE always exceeded the threshold → full-detail-everywhere refinement
+// regardless of camera distance (the "high-res tiles not at focus" + spiky artifact).
+// That hack was compensating for the (now-fixed) half-opacity lodOpacity bug.
+// Override: --ge-scale=N
+const GE_SCALE = (() => {
+  const f = argv.find(a => a.startsWith('--ge-scale='));
+  const v = f ? parseFloat(f.slice('--ge-scale='.length)) : 1;
+  return (isFinite(v) && v > 0) ? v : 1;
+})();
+
+// Layer multiplier (mirrors 3DTiles-Inspector "Layer Multiplier" slider, and the
+// reference converter's `errorTargetLayerMultiplier`). Stretches the per-depth GE
+// range: GE(d) = leafGE + (GE(d) − leafGE) × layerMult. Default 1 — matches the
+// reference, where sibling levels refine together with naturally-halving error.
+// Override: --ge-layer=N
+const GE_LAYER = (() => {
+  const f = argv.find(a => a.startsWith('--ge-layer='));
+  const v = f ? parseFloat(f.slice('--ge-layer='.length)) : 1;
+  return (isFinite(v) && v > 0) ? v : 1;
+})();
+
+// Opacity filter — OPT-IN, default OFF (0). SparkJS renders the RAD with NO splat
+// filtering, so by default we don't either: discarding splats changes the data and
+// throws away legitimate content. Enable only if you specifically want to drop faint
+// splats, e.g. --opacity-filter=0.05 (matches the reference PLY converter's default).
+const OPACITY_MIN = (() => {
+  const f = argv.find(a => a.startsWith('--opacity-filter='));
+  const v = f ? parseFloat(f.slice('--opacity-filter='.length)) : 0;
+  return (isFinite(v) && v >= 0) ? v : 0;
+})();
+
+// Scale-outlier filter — OPT-IN, default OFF (0). Drops splats whose max-axis scale
+// exceeds per-chunk median(maxScale) × this. Only enable for data with known giant
+// "floating noise" splats, e.g. --max-scale-mult=30. Off by default to match SparkJS.
+const SCALE_OUTLIER_MULT = (() => {
+  const f = argv.find(a => a.startsWith('--max-scale-mult='));
+  const v = f ? parseFloat(f.slice('--max-scale-mult='.length)) : 0;
+  return (isFinite(v) && v >= 0) ? v : 0;
+})();
+
 if (!radPath || !outDir) {
-  console.error('Usage: node src/index.js <input.rad> <outDir> [--scale=1.0]');
+  console.error('Usage: node src/index.js <input.rad> <outDir> [--scale=N] [--ge-scale=N] [--ge-layer=N] [--opacity-filter=N] [--max-scale-mult=N]');
   process.exit(1);
 }
 
@@ -80,13 +125,16 @@ function halfToFloat(h) {
 }
 
 /**
- * Decode f16 column: 2-plane byte-transposed float16.
- * [low bytes 0..N-1][high bytes N..2N-1]
+ * Decode f16 column: INTERLEAVED little-endian float16 — splat i's two bytes are
+ * consecutive: [lo0,hi0, lo1,hi1, …]. (Verified empirically: reading this planar
+ * produced ~2.5% inf/NaN and values up to ±65504; interleaved gives clean [0,1.6].)
+ * RAD's "plain" encodings (f16/oct88r8/ln_0r8) are interleaved; only the
+ * explicitly-named f32_lebytes is byte-transposed and r8_delta is per-channel planar.
  */
 function decodeF16(raw, count) {
   const result = new Float32Array(count);
   for (let i = 0; i < count; i++)
-    result[i] = halfToFloat(raw[i] | (raw[count + i] << 8));
+    result[i] = halfToFloat(raw[i*2] | (raw[i*2 + 1] << 8));
   return result;
 }
 
@@ -110,7 +158,10 @@ function decodeRgbDelta(raw, count) {
 }
 
 /**
- * Decode ln_0r8 scales column: channel-planar uint8 log-encoded.
+ * Decode ln_0r8 scales column: channel-PLANAR uint8 log-encoded — [all sx][all sy][all sz].
+ * Authoritative per SparkJS `encode_ln_0r8` (rust/spark-lib/src/rad.rs): outer loop over
+ * dimension, inner over splats → planar output. (NB: only `f16` and `oct88r8` are
+ * interleaved; `ln_0r8`/`r8_delta` are planar, `f32_lebytes` is byte+dim transposed.)
  * 0 → near-zero, 1..255 → exp(lnMin + (v-1)/254 * (lnMax-lnMin))
  * Returns Float32Array scales interleaved [sx0,sy0,sz0, ...].
  */
@@ -128,13 +179,15 @@ function decodeScales(raw, count, lnMin, lnMax) {
 
 /**
  * Decode oct88r8 orientation column → quaternion xyzw.
- * Channel-planar: [all u][all v][all angle]
- * Matches SparkJS decodeQuatOctXy88R8.
+ * INTERLEAVED: splat i's three bytes are consecutive [u,v,angle per splat].
+ * Authoritative per SparkJS `encode_quat_oct88r8` (rust/spark-lib/src/rad.rs): it loops
+ * per-splat pushing 3 bytes each → interleaved. Reading it planar produced garbage
+ * rotations (the "spiky" RAD render). Per-splat math matches `decodeQuatOctXy88R8`.
  */
 function decodeOrientationToQuat(raw, count) {
   const result = new Float32Array(count * 4);
   for (let i = 0; i < count; i++) {
-    const quantU = raw[i], quantV = raw[count + i], angleInt = raw[2 * count + i];
+    const quantU = raw[i*3], quantV = raw[i*3 + 1], angleInt = raw[i*3 + 2];
     let fx = (quantU / 255 - 0.5) * 2;
     let fy = (quantV / 255 - 0.5) * 2;
     const fz = 1 - (Math.abs(fx) + Math.abs(fy));
@@ -384,7 +437,17 @@ async function writeChunkGlb(buf, chunk, payloadBase, outputPath) {
   const { meta, count, props } = parseRadcChunk(buf, chunk, payloadBase,
     ['center', 'alpha', 'rgb', 'scales', 'orientation']);
 
-  const enc    = meta.encoding ?? {};
+  // RAD stores its quantisation ranges + flags under `splatEncoding` (per-chunk,
+  // mirrored from the root header) — NOT `encoding`. Reading `meta.encoding`
+  // (which never exists) silently fell back to defaults, which crucially MISSED
+  // `lodOpacity: true`. SparkJS's unpackSplat (verified) does
+  // `opacity = stored/255; if (lodOpacity) opacity *= 2` — i.e. RAD stores HALF
+  // the real opacity in LoD files. Missing the ×2 rendered every splat at half
+  // opacity, so the large coarse splats could not blend and the sharp needle
+  // splats showed through as spikes (the "thin/spiky" artifact). lnScaleMin/Max
+  // happen to match the fallback here, but sourcing them correctly is also robust
+  // for RAD files with different ranges.
+  const enc    = meta.splatEncoding ?? {};
   const lnMin  = enc.lnScaleMin  ?? LN_SCALE_MIN;
   const lnMax  = enc.lnScaleMax  ?? LN_SCALE_MAX;
   const lodOp  = enc.lodOpacity  ?? false;
@@ -404,9 +467,55 @@ async function writeChunkGlb(buf, chunk, payloadBase, outputPath) {
     alphas.fill(1);
   }
 
-  const rgb       = props.has('rgb')         ? decodeRgbDelta(props.get('rgb'), count)               : null;
-  const scales    = props.has('scales')      ? decodeScales(props.get('scales'), count, lnMin, lnMax) : null;
-  const rotations = props.has('orientation') ? decodeOrientationToQuat(props.get('orientation'), count) : null;
+  let rgb       = props.has('rgb')         ? decodeRgbDelta(props.get('rgb'), count)               : null;
+  let scales    = props.has('scales')      ? decodeScales(props.get('scales'), count, lnMin, lnMax) : null;
+  let rotations = props.has('orientation') ? decodeOrientationToQuat(props.get('orientation'), count) : null;
+
+  // ── Noise / outlier filtering ──────────────────────────────────────────────
+  // SparkJS's native renderer hides faint and giant "floating noise" splats via
+  // view-dependent LoD; our baked HLOD renders whatever a tile contains, so they
+  // show up as haze (low opacity) and bright spikes (giant anisotropic scale) and
+  // inflate the bounding volume. Filter them here, matching the reference converter.
+  let posArr = positions, alphaArr = alphas, count2 = count;
+  {
+    // Per-chunk scale-outlier threshold = median(maxScale) × SCALE_OUTLIER_MULT.
+    let scaleCap = Infinity;
+    if (scales && SCALE_OUTLIER_MULT > 0 && count > 0) {
+      const maxS = new Float64Array(count);
+      for (let i = 0; i < count; i++) maxS[i] = Math.max(scales[i*3], scales[i*3+1], scales[i*3+2]);
+      const sorted = Float64Array.from(maxS).sort();
+      const median = sorted[sorted.length >> 1] || 0;
+      if (median > 0) scaleCap = median * SCALE_OUTLIER_MULT;
+    }
+    const keep = new Uint8Array(count);
+    let kept = 0;
+    for (let i = 0; i < count; i++) {
+      if (OPACITY_MIN > 0 && alphas[i] < OPACITY_MIN) continue;
+      if (scales && isFinite(scaleCap)) {
+        const ms = Math.max(scales[i*3], scales[i*3+1], scales[i*3+2]);
+        if (ms > scaleCap) continue;
+      }
+      keep[i] = 1; kept++;
+    }
+    // Only compact if anything was dropped (and never drop a whole tile to empty).
+    if (kept < count && kept > 0) {
+      const np = new Float32Array(kept*3), na = new Float32Array(kept);
+      const nr = rgb ? new Float32Array(kept*3) : null;
+      const ns = scales ? new Float32Array(kept*3) : null;
+      const nq = rotations ? new Float32Array(kept*4) : null;
+      let j = 0;
+      for (let i = 0; i < count; i++) {
+        if (!keep[i]) continue;
+        np[j*3]=positions[i*3]; np[j*3+1]=positions[i*3+1]; np[j*3+2]=positions[i*3+2];
+        na[j]=alphas[i];
+        if (nr){nr[j*3]=rgb[i*3];nr[j*3+1]=rgb[i*3+1];nr[j*3+2]=rgb[i*3+2];}
+        if (ns){ns[j*3]=scales[i*3];ns[j*3+1]=scales[i*3+1];ns[j*3+2]=scales[i*3+2];}
+        if (nq){nq[j*4]=rotations[i*4];nq[j*4+1]=rotations[i*4+1];nq[j*4+2]=rotations[i*4+2];nq[j*4+3]=rotations[i*4+3];}
+        j++;
+      }
+      posArr = np; alphaArr = na; rgb = nr; scales = ns; rotations = nq; count2 = kept;
+    }
+  }
 
   // Optional uniform splat-size multiplier (CLI --scale). Applied before encoding
   // so both the SPZ scale bytes and the featureSize-based geometricError track it.
@@ -419,20 +528,22 @@ async function writeChunkGlb(buf, chunk, payloadBase, outputPath) {
   // mean splat extent shrinks with depth — a natural, monotonic geometric error
   // that needs no artificial clamp. Use ~3σ (max axis) as the visible feature size.
   let featureSize = 0.1;
-  if (scales && count > 0) {
+  if (scales && count2 > 0) {
     let sum = 0;
-    for (let i = 0; i < count; i++)
+    for (let i = 0; i < count2; i++)
       sum += Math.max(scales[i*3], scales[i*3+1], scales[i*3+2]);
-    featureSize = (sum / count) * 3.0;
+    featureSize = (sum / count2) * 3.0;
   }
 
-  const bounds = computeBounds(positions, count);
-  const spzBuf = buildSpzBuffer(positions, alphas, rgb, scales, rotations, count);
-  const glb    = buildSpzGlb(spzBuf, count, bounds);
+  // Bounds computed on the FILTERED set — dropping the giant noise splats shrinks
+  // the bounding volume to the real geometry (no more inflated 15000m boxes).
+  const bounds = computeBounds(posArr, count2);
+  const spzBuf = buildSpzBuffer(posArr, alphaArr, rgb, scales, rotations, count2);
+  const glb    = buildSpzGlb(spzBuf, count2, bounds);
   await ensureDir(path.dirname(outputPath));
   await fs.writeFile(outputPath, glb);
 
-  return { bounds, featureSize };
+  return { bounds, featureSize, count, kept: count2 };
 }
 
 // ── Main ──────────────────────────────────────────────────────────────────────
@@ -456,6 +567,13 @@ async function convert() {
   const comment = JSON.parse(header.comment || '{}');
   console.log(`  BhattLod base: ${JSON.stringify(comment.method ?? 'unknown')}`);
 
+  // Rough time estimate from past runs (~RAD_SEC_PER_M_SPLATS s per 1M splats:
+  // dominated by per-chunk decode + SPZ gzip; coit 50M ≈ 4 min). Just a ballpark.
+  const t0 = Date.now();
+  const RAD_SEC_PER_M_SPLATS = 5;
+  const estSec = (header.count / 1e6) * RAD_SEC_PER_M_SPLATS;
+  console.log(`  Est. processing time: ~${estSec < 60 ? Math.ceil(estSec)+'s' : Math.ceil(estSec/60)+' min'} (rough, ${RAD_SEC_PER_M_SPLATS}s/M splats)`);
+
   console.log('Building node topology...');
   const nodes = buildNodeTable(header.chunks, radBuf, payloadBase, header.chunkSize ?? 65536);
 
@@ -476,7 +594,7 @@ async function convert() {
   }
   console.log(`\r  ${done}/${nodes.length} tiles`);
 
-  const tileset = buildTileset(nodes, { tileUriTemplate: 'tiles/node_{index}.glb' });
+  const tileset = buildTileset(nodes, { tileUriTemplate: 'tiles/node_{index}.glb', geScale: GE_SCALE, geLayer: GE_LAYER });
   // Declare GLB extensions so Cesium knows to enable them
   tileset.extensions     = {
     '3DTILES_content_gltf': {
@@ -489,8 +607,10 @@ async function convert() {
   await fs.writeFile(path.join(outDir, 'tileset.json'), JSON.stringify(tileset, null, 2));
 
   const treeDepth = nodes.reduce((m, n) => Math.max(m, n.depth ?? 0), 0);
+  const elapsed = (Date.now() - t0) / 1000;
   console.log(`\nDone → ${outDir}/tileset.json`);
   console.log(`  REPLACE tileset, ${treeDepth + 1} levels, KHR_gaussian_splatting_compression_spz_2`);
+  console.log(`  Actual time: ${elapsed < 60 ? elapsed.toFixed(1)+'s' : (elapsed/60).toFixed(1)+' min'} (${(elapsed/(header.count/1e6)).toFixed(1)}s/M splats)`);
 
   process.exit(0); // force-exit: gzip/fs may hold async handles open
 }

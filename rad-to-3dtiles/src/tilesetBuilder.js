@@ -31,7 +31,14 @@ const GEOMETRIC_ERROR_ROOT_DEFAULT = 1000;
 export function buildTileset(nodes, opts = {}) {
   const {
     tileUriTemplate    = 'tiles/node_{index}.glb',
-    rootGeometricError = null
+    rootGeometricError = null,
+    // geScale: global multiplier applied to every tile GE. Default 1 — raw
+    //   featureSize GE is already the right magnitude (matches the reference
+    //   3DGS-PLY-3DTiles-Converter). >1 over-refines (full detail everywhere).
+    geScale = 1,
+    // geLayer: layer-multiplier (reference `errorTargetLayerMultiplier`). Default 1.
+    //   GE(d) = leafGE + (GE(d) − leafGE) × geLayer. 1 = natural halving per level.
+    geLayer = 1,
   } = opts;
 
   if (!nodes.length) throw new Error('No nodes');
@@ -51,6 +58,10 @@ export function buildTileset(nodes, opts = {}) {
   // featureSize at that depth (real splat size, like their leaf "sparsity + extent"
   // reference) and force it strictly decreasing with depth.
   const geByDepth = computeErrorByDepth(nodes);
+  // Bake in the inspector's "Layer Multiplier" then "Geometric Error" scale.
+  // Layer: GE(d) = leafGE + (GE(d) − leafGE) × geLayer  — stretches the depth range.
+  // Scale: multiply every GE by geScale — raises the baseline to pixel-SSE units.
+  applyGeModifiers(geByDepth, geScale, geLayer);
   const rootError = rootGeometricError
     ?? geByDepth.get(0)
     ?? geoError(root, null)
@@ -108,6 +119,19 @@ export function buildTileset(nodes, opts = {}) {
   const geSummary = [...geByDepth.entries()].map(([d, g]) => `${d}:${g.toFixed(3)}`).join(' ');
   console.log(`  [tileset] geometricError by depth → ${geSummary}`);
 
+  // Root-node RX(180°) transform: flips the content upright in the tileset frame.
+  // Applied only to the root — children inherit it automatically per the 3D Tiles spec.
+  // Column-major 4×4 (glTF convention): RX(180°) = diag(1, −1, −1, 1).
+  // This corrects the "up points down" artifact seen when loading RAD tilesets in
+  // CesiumJS and 3DTilesRendererJS (the splat Y-up content comes out inverted after
+  // the glTF→tileset-frame RX(+90°) the renderers apply).
+  root3dt.transform = [
+    1,  0,  0,  0,
+    0, -1,  0,  0,
+    0,  0, -1,  0,
+    0,  0,  0,  1
+  ];
+
   return {
     asset: { version: '1.1' },
     geometricError: rootError,
@@ -139,6 +163,22 @@ function computeErrorByDepth(nodes) {
     prev = g;
   }
   return byDepth;
+}
+
+/**
+ * Bake the inspector's Layer Multiplier and Geometric Error scale into geByDepth.
+ * Layer stretch: GE(d) = leafGE + (GE(d) − leafGE) × layerMult
+ * Global scale:  GE(d) *= geScale
+ * Applied in-place so the root error and all child errors stay consistent.
+ */
+function applyGeModifiers(geByDepth, geScale, geLayer) {
+  if (geScale === 1 && geLayer === 1) return;
+  const maxDepth = Math.max(...geByDepth.keys());
+  const leafGE   = geByDepth.get(maxDepth) ?? 0;
+  for (const [d, g] of geByDepth) {
+    const stretched = leafGE + (g - leafGE) * geLayer;
+    geByDepth.set(d, stretched * geScale);
+  }
 }
 
 /** Axis-aligned min/max corners of a 3D-Tiles `box` array (axis-aligned only). */
