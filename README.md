@@ -1,9 +1,103 @@
-# 3D Tiles Converters
+# 3dtiled-to-3dtiles
 
-Two Node.js CLI tools converting geospatial formats to OGC 3D Tiles 1.1,
-plus a self-contained CesiumJS viewer (`viewer.html`).
+Node.js CLI tools that convert **tiled / LoD splat & point-cloud formats** → OGC **3D Tiles 1.1**
+(Gaussian splats via `KHR_gaussian_splatting` + `KHR_gaussian_splatting_compression_spz_2` GLB
+tiles), plus a self-contained CesiumJS + 3DTilesRendererJS viewer (`viewer.html`).
 
-See `docs-references/` for full reference documentation on all formats.
+The unifying idea: every source format is some *spatial tree of pre-tiled, LoD'd splats* (or points)
+— so each converter just maps that tree onto a 3D Tiles HLOD tree and re-encodes node content to
+SPZ-v2 GLB (one shared encoder, `spzGlb.js`). The decode differs per format; the output is uniform.
+
+## Format comparison
+
+| Format | Status | Hierarchy / subdivision | Node (leaf) content | Refine | Intermediate nodes | Metadata location | HTTP range | Spec |
+|--------|:------:|-------------------------|---------------------|:------:|--------------------|-------------------|:----------:|------|
+| **RAD** (SparkJS) | 🟢 | LoD merge tree, variable fanout (BhattLod ~1.75 / TinyLod ~1.5) | RADC chunk: per-splat columns — `f16`/`oct88r8` **interleaved**, `ln_0r8`/`r8_delta` **planar**, `f32_lebytes` byte-transposed | REPLACE | downsampled **merged** splats | root `RAD0` JSON + per-chunk `RADC` JSON | ✅ chunked `.radc` | [sparkjs.dev](https://sparkjs.dev/docs/lod-getting-started/) |
+| **SOG (streamed)** (PlayCanvas) | 🟢 | **binary** spatial tree (AABB split) | unbundled SOG chunk: WebP textures → `DataTable` (pos/quat-w-first/log-scale/SH-DC/logit-opacity) | REPLACE | empty grouping nodes | `lod-meta.json` + per-chunk `meta.json` | ✅ per-file | [playcanvas](https://developer.playcanvas.com/user-manual/gaussian-splatting/formats/streamed-sog/) |
+| **LCC** (XGRIDS) | 🟢 | **grid of Units** (cellX×Y) × per-cell LODs | `Data.bin` fixed **32 B/splat**: pos `f32×3`, color `rgba8`, rot `10-10-10-2`, scale `u16×3` (+SH `Shcoef.bin` 64 B) | REPLACE | per-cell coarse LODs | `meta.lcc` JSON + `Index.bin` | ✅ `Index.bin` offsets into `Data.bin` | [developer.xgrids.com](https://developer.xgrids.com/#/document?titleId=en-1720509291851) |
+| **COPC** (LiDAR) | 🟢 | **octree** (EPT-style) | LAZ-compressed LAS points | ADD | octree nodes (accumulate) | COPC VLR + hierarchy pages | ✅ designed for range reads | [copc.io](https://copc.io) |
+| **Nexus** (CNR-ISTI) | 🟠 doc | multiresolution patch DAG / batched mesh | per-patch mesh (not splats) | — | — | header + patch index | ✅ | [github](https://github.com/cnr-isti-vclab/nexus) · [paper](https://vcg.isti.cnr.it/Publications/2016/PD16/FastDec_Ponchio.pdf) |
+| **I3S** (Esri) | 🟠 doc | node tree, bounding-sphere LoD (SLPK) | nodes/geometry/textures (mesh/point) | REPLACE | node pages | `3dSceneLayer.json` + node docs | ✅ | [github](https://github.com/esri/i3s-spec) |
+| **3D Tiles** (output) | 🟢 out | explicit or implicit; box/region/sphere volumes | glTF/GLB w/ `KHR_gaussian_splatting`+`_spz_2` | REPLACE/ADD | optional content | `tileset.json` (+ `.3tz`) | ✅ | [OGC](https://www.ogc.org/standard/3dtiles/) |
+
+🟢 = operational converter · 🟠 doc = spec referenced in `docs-references/`, converter not built (lower-priority / niche).
+See `docs-references/` for the full per-format reference notes.
+
+```mermaid
+flowchart LR
+  subgraph IN["Source spatial trees (LoD pre-tiled)"]
+    RAD["RAD · LoD merge tree<br/>(SparkJS build-lod)"]
+    SOG["Streamed SOG · binary tree<br/>(PlayCanvas)"]
+    LCC["LCC · Unit grid × LODs<br/>(XGRIDS)"]
+    COPC["COPC · octree<br/>(LiDAR)"]
+  end
+  RAD -->|"decode columns"| DEC
+  SOG -->|"readSog → DataTable"| DEC
+  LCC -->|"32 B/splat decode"| DEC
+  COPC -->|"LAZ decode"| DEC
+  DEC["per-node splat arrays<br/>pos · color · opacity · rot(xyzw) · scale"] --> ENC["spzGlb.js<br/>SPZ-v2 + GLB<br/>(KHR_gaussian_splatting + _spz_2)"]
+  ENC --> TS["3D Tiles HLOD tree<br/>interior = grouping · leaf chain = REPLACE LODs"]
+  TS --> V["viewer.html<br/>CesiumJS + 3DTilesRendererJS/SparkJS"]
+```
+
+### Per-format structure
+
+<details><summary><b>RAD</b> (SparkJS) — LoD merge tree, REPLACE</summary>
+
+```mermaid
+flowchart TD
+  R["RAD0 header (JSON)<br/>chunks[], chunkSize, splatEncoding"] --> C0["RADC chunk 0 (coarsest LoD)<br/>merged representative splats"]
+  C0 --> C1["RADC chunk … (finer)"]
+  C1 --> CN["RADC chunk N (finest)"]
+  subgraph COL["each RADC chunk = per-splat columns"]
+    P["center f32_lebytes (byte-transposed)"]
+    A["alpha f16 (interleaved)"]
+    G["rgb r8_delta (planar)"]
+    S["scales ln_0r8 (planar)"]
+    O["orientation oct88r8 (interleaved)"]
+    H["sh1 s8 (planar)"]
+  end
+  CN -.contains.-> COL
+```
+</details>
+
+<details><summary><b>Streamed SOG</b> (PlayCanvas) — binary spatial tree, REPLACE</summary>
+
+```mermaid
+flowchart TD
+  M["lod-meta.json<br/>tree, filenames[], lodLevels"] --> N0["interior node (AABB)"]
+  N0 --> N1["interior node"]
+  N0 --> N2["interior node"]
+  N1 --> L1["leaf: lods{0..L}<br/>each = {file, offset, count}"]
+  N2 --> L2["leaf: lods{0..L}"]
+  L1 -.run in.-> CH["chunk = unbundled SOG<br/>(WebP textures + meta.json)<br/>→ readSog → DataTable"]
+```
+</details>
+
+<details><summary><b>LCC</b> (XGRIDS) — Unit grid × LODs, REPLACE</summary>
+
+```mermaid
+flowchart TD
+  MT["meta.lcc (JSON) + Index.bin<br/>Units = cellX×Y grid"] --> U["Unit (cell x,y)"]
+  U --> D0["LOD0 run (finest)"]
+  U --> D1["LOD1 run"]
+  U --> D2["LOD… (coarsest)"]
+  D0 -.->|"Index → Data.bin offset"| REC["32 B/splat: pos f32×3 · color rgba8 (a=opacity)<br/>· rot u32 10-10-10-2 · scale u16×3 (geometric)"]
+  U -.optional.-> SH["Shcoef.bin (Quality, 64 B/splat)"]
+```
+</details>
+
+<details><summary><b>COPC</b> (LiDAR) — octree, ADD</summary>
+
+```mermaid
+flowchart TD
+  HD["LAS header + COPC VLR<br/>+ hierarchy pages"] --> RT["root octree node (depth 0)"]
+  RT --> O1["octant (depth 1)"]
+  RT --> O2["octant (depth 1)"]
+  O1 --> O11["octant (depth 2) …"]
+  O1 -.->|"each node = key (D-X-Y-Z)"| PTS["LAZ-compressed LAS points<br/>(ADD: nodes accumulate detail)"]
+```
+</details>
 
 ---
 
@@ -177,6 +271,34 @@ out-sog/
 > (quaternion `rot_0=w`, log scales, logit opacity, SH0→color). geometricError halves cleanly
 > root→leaf (e.g. skatepark `17.8 → 8.9 → … → 0.0`). Bundled `.sog` environments are skipped
 > (best-effort) since the spec's chunks are unbundled.
+
+---
+
+### lcc-to-3dtiles
+
+Converts an XGRIDS **[LCC](docs-references/lcc-format.md)** dataset (`meta.lcc` + `Index.bin` +
+`Data.bin` [+ `Shcoef.bin`]) to 3D Tiles with the same `KHR_gaussian_splatting` + `_spz_2` GLB tiles.
+
+```sh
+cd lcc-to-3dtiles
+node src/index.js path/to/lcc-dir ./out-lcc     # dir containing meta.lcc (name can vary)
+```
+
+**How it works:** LCC organises splats as a **grid of Units** (one per partition cell, x/y packed in
+the index) × `totalLevel` LODs (LOD0 = finest). Each Unit → a `REPLACE` chain of tiles
+coarsest→finest under a single root. `Data.bin` is **uncompressed, fixed 32 B/splat** (the meta
+`"encoding": "COMPRESS"` refers to field quantization, not stream compression — verified
+`LODSize / PointsCount == 32`). The 32-byte layout was reverse-engineered + validated against the
+`Guan_Temple` sample: `pos f32×3 · color rgba8 (a = opacity) · rot uint32 (10-10-10-2 smallest-three) ·
+scale uint16×3 (linear lerp) · 6 B pad`. Rotation decode follows the whitepaper `QLut`.
+
+**Validated:** `Guan_Temple` → 154 tiles, **11,424,293 splats (= `meta.totalSplats` exactly)**,
+0 bad quaternions. **SH (`Shcoef.bin`, Quality files) not yet emitted** (DC only, like the other
+converters). LCC is XGRIDS' format — attribution required per its White Paper (see the doc).
+
+> **License note:** the LCC White Paper requires displaying "Data Organization Format originated
+> from XGRIDS" and publishing derivatives under terms no less open. This converter reads the format;
+> downstream products must carry that attribution.
 
 ---
 
@@ -436,6 +558,9 @@ They work in `viewer.html` via the built-in city mesh presets.
 | `spz-format.md` | SPZ v2/v3 binary format — per-field encoding, pack/unpack formulas (source: github.com/nianticlabs/spz) |
 | `sog.md` | SOG (Spatially Ordered Gaussians) chunk format — WebP textures + dequant (positions/quats/scales/SH); consumed by `sog-to-3dtiles` (source: developer.playcanvas.com) |
 | `streamed-sog.md` | PlayCanvas Streamed SOG LOD format — `lod-meta.json` spatial tree + chunk references; the input to `sog-to-3dtiles` (source: developer.playcanvas.com) |
+| `lcc-format.md` | XGRIDS LCC (Lixel CyberColor) — `meta.lcc`/`Index.bin`/`Data.bin` (32 B/splat, 10-10-10-2 rot, packed-11 SH); input to `lcc-to-3dtiles` (source: github.com/xgrids/LCCWhitepaper). Attribution required. |
+| `nexus-format.md` | 🟠 CNR-ISTI Nexus multiresolution mesh (DAG of patches) — **doc-referenced, no converter** (mesh, not splats; niche). Refs: github.com/cnr-isti-vclab/nexus, FastDec paper |
+| `i3s-spec.md` | 🟠 Esri I3S (Indexed 3D Scene Layer / SLPK) — **doc-referenced, no converter** (would be `i3s-to-3dtiles`). Ref: github.com/esri/i3s-spec |
 
 #### Upstream specs & reference implementations
 

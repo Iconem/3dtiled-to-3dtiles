@@ -27,6 +27,15 @@ const SCALE_MULT = (() => {
   return (isFinite(v) && v > 0) ? v : 1;
 })();
 
+// Final opacity multiplier (A/B-test whether the lodOpacity ×2 is right). Applied on
+// top of the decoded alpha (which already ×2 when lodOpacity), then clamped to [0,1].
+// --alpha-scale=0.5 → net ×1 (undo the doubling), =1 → current, =2 → net ×4.
+const ALPHA_SCALE = (() => {
+  const f = argv.find(a => a.startsWith('--alpha-scale='));
+  const v = f ? parseFloat(f.slice('--alpha-scale='.length)) : 1;
+  return (isFinite(v) && v > 0) ? v : 1;
+})();
+
 // Geometric-error global scale (mirrors 3DTiles-Inspector "Geometric Error" slider).
 // Default 1 — the raw featureSize-based per-depth error is already the right
 // magnitude (coit root ≈ 1.1, matching the 3DGS-PLY-3DTiles-Converter reference's
@@ -462,7 +471,7 @@ async function writeChunkGlb(buf, chunk, payloadBase, outputPath) {
   if (props.has('alpha')) {
     const raw = decodeF16(props.get('alpha'), count);
     for (let i = 0; i < count; i++)
-      alphas[i] = Math.max(0, Math.min(1, lodOp ? raw[i] * 2 : raw[i]));
+      alphas[i] = Math.max(0, Math.min(1, (lodOp ? raw[i] * 2 : raw[i]) * ALPHA_SCALE));
   } else {
     alphas.fill(1);
   }

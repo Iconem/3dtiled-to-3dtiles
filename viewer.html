@@ -494,6 +494,66 @@ const PRESETS = [
     url: 'http://localhost:3000/sample-data/output-rad/tastier500k-3dtiles-from-rad/tileset.json',
     local: false,
   },
+  // Coit opacity A/B variants (--alpha-scale): α×0.5 undoes the lodOpacity doubling,
+  // α×1 is current, α×2 doubles it. Load each to judge which opacity looks right.
+  {
+    id: 'coit-a05',
+    label: '✦ Coit α×0.5',
+    type: 'splat',
+    url: 'http://localhost:3000/sample-data/output-rad/coit-a05-3dtiles-from-rad/tileset.json',
+    local: false,
+  },
+  {
+    id: 'coit-a1',
+    label: '✦ Coit α×1',
+    type: 'splat',
+    url: 'http://localhost:3000/sample-data/output-rad/coit-a1-3dtiles-from-rad/tileset.json',
+    local: false,
+  },
+  {
+    id: 'coit-a2',
+    label: '✦ Coit α×2',
+    type: 'splat',
+    url: 'http://localhost:3000/sample-data/output-rad/coit-a2-3dtiles-from-rad/tileset.json',
+    local: false,
+  },
+  // Same-scene comparison: Elevator.ply via two pipelines (our RAD path vs William's PLY converter).
+  {
+    id: 'elevator-ours',
+    label: '⊿ Elevator (ours: PLY→RAD)',
+    type: 'splat',
+    url: 'http://localhost:3000/sample-data/output-rad/Elevator-3dtiles-from-rad/tileset.json',
+    local: false,
+  },
+  {
+    id: 'elevator-william',
+    label: '⊿ Elevator (William: PLY)',
+    type: 'splat',
+    url: 'http://localhost:3000/sample-data/output-ply-william/Elevator-3dtiles-from-ply/tileset.json',
+    local: false,
+  },
+  {
+    id: 'svirnas-ours',
+    label: '⊿ SvirnasAlyt (ours: PLY→RAD)',
+    type: 'splat',
+    url: 'http://localhost:3000/sample-data/output-rad/SvirnasAlyt-3dtiles-from-rad/tileset.json',
+    local: false,
+  },
+  {
+    id: 'svirnas-william',
+    label: '⊿ SvirnasAlyt (William: PLY)',
+    type: 'splat',
+    url: 'http://localhost:3000/sample-data/output-ply-william/SvirnasAlyt-3dtiles-from-ply/tileset.json',
+    local: false,
+  },
+  // XGRIDS LCC → 3D Tiles (via lcc-to-3dtiles).
+  {
+    id: 'lcc-guantemple',
+    label: '◆ Guan Temple (LCC)',
+    type: 'splat',
+    url: 'http://localhost:3000/sample-data/output-lcc/Guan_Temple-3dtiles-from-lcc/tileset.json',
+    local: false,
+  },
   // PlayCanvas Streamed SOG → 3D Tiles (via sog-to-3dtiles).
   {
     id: 'skatepark-sog',

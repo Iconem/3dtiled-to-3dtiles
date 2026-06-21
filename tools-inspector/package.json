@@ -6,7 +6,8 @@
     "inspect:tastier":      "3dtiles-inspector ../sample-data/output-rad/tastier500k-3dtiles-from-rad",
     "inspect:coit":         "3dtiles-inspector ../sample-data/output-rad/coit-3dtiles-from-rad",
     "inspect:skatepark":    "3dtiles-inspector ../sample-data/output-sog/skatepark-3dtiles-from-sog",
-    "inspect:roman-parish": "3dtiles-inspector ../sample-data/output-sog/roman-parish-3dtiles-from-sog"
+    "inspect:roman-parish": "3dtiles-inspector ../sample-data/output-sog/roman-parish-3dtiles-from-sog",
+    "inspect:guantemple":   "3dtiles-inspector ../sample-data/output-lcc/Guan_Temple-3dtiles-from-lcc"
   },
   "dependencies": {
     "3dtiles-inspector": "^0.2.13"
