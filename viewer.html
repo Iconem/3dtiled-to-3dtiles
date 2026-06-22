@@ -102,7 +102,7 @@
   /* ── Local frame panel ── */
   #localframe-panel {
     position: absolute;
-    top: 52px;
+    top: var(--header-h, 52px);
     left: 12px;
     z-index: 15;
     background: rgba(10,10,15,0.88);
@@ -170,7 +170,7 @@
   /* ── Code panel ── */
   #code-panel {
     position: absolute;
-    top: 52px;
+    top: var(--header-h, 52px);
     right: 12px;
     z-index: 15;
     background: rgba(10,10,15,0.88);
@@ -202,7 +202,7 @@
   /* ── Consolidated sidebar ── */
   #sidebar {
     position: absolute;
-    top: 52px;
+    top: var(--header-h, 52px);
     right: 12px;
     bottom: 16px;
     z-index: 15;
@@ -366,6 +366,25 @@
     <button onclick="loadTileset()">Load</button>
   </div>
 </div>
+
+<!-- Keep panels (sidebar / code / localframe) below the header, whose height grows as
+     preset pills wrap to multiple rows. Mirror the live header height into --header-h. -->
+<script>
+(function () {
+  const header = document.getElementById('header');
+  const sync = () =>
+    document.documentElement.style.setProperty('--header-h', header.offsetHeight + 'px');
+  sync();
+  // ResizeObserver covers most reflows; also re-sync on the events that change header
+  // height — preset pills are injected into #preset-bar after this runs, and font/layout
+  // settles a frame later — so the panels always clear the (multi-row) header.
+  new ResizeObserver(sync).observe(header);
+  new MutationObserver(sync).observe(document.getElementById('preset-bar'), { childList: true, subtree: true });
+  window.addEventListener('resize', sync);
+  window.addEventListener('load', sync);
+  requestAnimationFrame(sync);
+})();
+</script>
 
 <!-- Cesium fills the viewport -->
 <div id="cesium-container"></div>

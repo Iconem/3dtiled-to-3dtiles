@@ -1,0 +1,7 @@
+{
+  "name": "i3s-to-3dtiles",
+  "version": "0.0.1-draft",
+  "type": "module",
+  "description": "DRAFT (untested) — Esri I3S Scene Layer (SLPK/service) → OGC 3D Tiles 1.1. Explicit nodepage tiling, uncompressed DefaultGeometrySchema meshes + point clouds only.",
+  "bin": { "i3s-to-3dtiles": "src/index.js" }
+}

@@ -1,25 +1,55 @@
 # I3S — Esri Indexed 3D Scene Layer
 
-> Status: 🟠 **doc-referenced only — no converter built** (would be `i3s-to-3dtiles`).
-> Ref: https://github.com/esri/i3s-spec (OGC Community Standard).
+> Status: 🟡 **draft converter `i3s-to-3dtiles/` — UNTESTED** (no SLPK sample in this repo to validate).
+> Ref: https://github.com/esri/i3s-spec (OGC Community Standard), docs/1.8.
 
 ## Gist
-I3S is Esri's streaming format for large 3D scene layers (integrated mesh, 3D objects, point clouds,
-point scene layers, and building scene layers). Distributed as a **REST service** or a single-file
-**SLPK** (Scene Layer Package, a zip). It is the most direct "other tiled 3D" analogue to OGC 3D Tiles
-— both are OGC standards solving the same streaming-LoD problem with different document layouts.
+I3S is Esri's streaming format for large 3D scene layers. Distributed as a **REST service** or a
+single-file **SLPK** (Scene Layer Package — a plain zip; resources inside are often gzip'd). It is
+the closest "other tiled 3D" analogue to OGC 3D Tiles — both are OGC standards solving the same
+streaming-LoD problem with different document layouts.
 
-- **Hierarchy:** a node tree with **bounding-sphere** LoD; nodes reference geometry/texture/attribute
-  resources. Newer I3S uses node **pages** (`nodepages`) for compact index access.
-- **Top metadata:** `3dSceneLayer.json` (layer type, store, spatial reference, default geometry schema).
-- **Node docs:** per-node JSON (`3dNodeIndexDocument` / nodepage entries) → `geometries/`, `textures/`,
-  `attributes/`, `shared/` resources. Geometry often Draco-compressed.
-- **Refine:** REPLACE-style (a node's children supersede it), distance/SSE driven by `lodSelection`.
-- **HTTP:** designed for range/REST access; SLPK is a zip with an internal index.
+## Layer types (what I3S can carry)
+- **IntegratedMesh** — photogrammetry / reality mesh (one watertight textured mesh, tiled).
+- **3DObject** — discrete textured meshes with attributes (buildings, features).
+- **PointCloud** (PCSL) — lidar; its own per-node binary encoding (not `DefaultGeometrySchema`).
+- **Point** — places **symbol/model instances** (billboards or 3D models) at point features.
+- **Building** (BSL) — a **composite** of sublayers (the "mix of types" case).
 
-## Why no converter (yet)
-Most I3S in the wild is **integrated mesh / point cloud**, not Gaussian splats — so an `i3s-to-3dtiles`
-would primarily be a *mesh/point* tileset converter (b3dm/pnts/glTF), overlapping with mature tools
-(e.g. Esri's own I3S↔3D Tiles interoperability work). Out of scope for this splat-focused repo; kept
-as a reference. If built, the I3S node tree → 3D Tiles tree mapping is fairly direct (both are
-bounding-volume LoD trees).
+So: meshes ✓, point clouds ✓, instances ✓ (Point layers), and mixed ✓ (Building SL = multiple
+sublayers). A *single* scene layer is one type; heterogeneity comes from BSL or multiple layers.
+
+## Tiling & hierarchy — **always explicit**
+- A **node tree**: internal nodes reference children by array index. I3S has **no implicit/template
+  tiling** (nothing like 3D Tiles `3DTILES_implicit_tiling` subtrees) — it is always an explicit tree.
+- Modern I3S (≥1.7) uses **node pages** (`nodepages/<id>.json`, `nodesPerPage` entries each) for
+  compact, range-friendly index access. Older layers used per-node `3dNodeIndexDocument`.
+- **Refine:** REPLACE-style — a node's children supersede it; selection driven by `lodThreshold`.
+- **HTTP:** REST + range-friendly by design; SLPK packs the same layout into a zip.
+
+## Key on-disk structures (1.8)
+- **`3dSceneLayer.json`** — `layerType`, `store` (version, `index.nodesPerPage`,
+  `defaultGeometrySchema`), `spatialReference` (`wkid`/`latestWkid`, optional `vcsWkid`),
+  `geometryDefinitions` (where Draco shows up, under `geometryBuffers[].compressedAttributes`).
+- **nodePage entry**: `{ index, children:[idx…], obb, mesh?, lodThreshold }`.
+  - **`obb`** = `{ center:[x,y,z], halfSize:[3], quaternion:[x,y,z,w] }`. center is in the layer CRS
+    (global ⇒ WGS84 lon°,lat°,h); the quaternion orients an ECEF-aligned box.
+  - **`mesh`** = `{ geometry:{definition, resource, vertexCount, featureCount}, material:{…}, attribute:{…} }`.
+- **`DefaultGeometrySchema`** (uncompressed): `topology: PerAttributeArray` → **sequential** arrays,
+  NOT interleaved. Header `vertexCount u32, featureCount u32`, then in `ordering`:
+  `position f32[3·V] · normal f32[3·V] · uv0 f32[2·V] · color u8[4·V]`, then per-feature
+  `id u64[F] · faceRange u32[2·F]`. `geometryType: triangles`.
+
+## → 3D Tiles mapping (what the draft does)
+- node tree → tileset tree (children→children, **REPLACE**); `lodThreshold`/OBB diagonal → geometricError.
+- **OBB → 3D Tiles `box`**: geodetic `center` → ECEF; rotate unit axes by `quaternion`, scale by
+  `halfSize`. (Verified on synthetic input: ECEF(0,0,0)=(6378137,0,0); axes scale correctly.)
+- mesh `DefaultGeometrySchema` → glTF **TRIANGLES** (POSITION[/NORMAL/COLOR_0]); PointCloud → **POINTS**.
+- vertices placed via a tile `transform` translating to the OBB-centre ECEF.
+
+## Why still a draft (unvalidated / out of scope)
+No SLPK sample to test against, and these are gated out with warnings: **Draco** geometry, **textures/
+materials**, **per-feature attributes** (→ would need `EXT_mesh_features`/3D Tiles metadata), **legacy
+`3dNodeIndexDocument`** index, **Point/Building** layer types, and **non-WGS84 / vertical-CRS** nuance.
+The exact resource path layout, the vertex-origin convention, and projected-CRS OBB handling all need
+confirmation against real data. Full-fidelity I3S overlaps mature tooling (loaders.gl, Cesium ion).

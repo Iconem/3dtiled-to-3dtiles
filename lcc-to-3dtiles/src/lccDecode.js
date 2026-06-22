@@ -3,15 +3,25 @@
  *
  * Decoders for the XGRIDS LCC (Lixel CyberColor) format. See docs-references/lcc-format.md.
  *
- * Data.bin per-splat = 32 bytes, UNCOMPRESSED (the meta "encoding: COMPRESS" refers to the
- * quantized field encoding, not stream compression — verified: LODSize / PointsCount == 32).
- * Layout (reverse-engineered + validated against the Guan_Temple sample, v3.0):
- *   0–11  position  3× float32 (used directly)
- *   12–14 color RGB 3× uint8  → /255  (display color)
- *   15    opacity   uint8     → /255  (this is the colour's alpha channel)
- *   16–19 rotation  uint32    → 10-10-10-2 "smallest-three" (whitepaper DecodeRotation)
- *   20–25 scale     3× uint16 → lerp(scaleMin[k], scaleMax[k], v/65535)  (LINEAR scene units)
- *   26–31 padding   zeros
+ * Data.bin per-splat = 32 bytes (two RGBA32UI texels in the SDK's `splatData`), UNCOMPRESSED.
+ * Layout is AUTHORITATIVE — extracted from the official xgrids/LCC-Web-SDK v0.6.1 vertex shader
+ * (`sdk/lcc-web-sdk.js`, the non-`LCC_COMPRESSED` `decodeCov(uint r,g,b)` + main unpack):
+ *
+ *   pixel0 (bytes 0–15):  position = uintBitsToFloat(pixel0.xyz);  color = pixel0.w
+ *     0–11  position  3× float32                       (used directly)
+ *     12    R  · 13 G · 14 B · 15 A(opacity)  uint8/255 (decodeColor: (color>>0,8,16,24)&255)
+ *   pixel1 (bytes 16–31): decodeCov(pixel1.r=u32@16, pixel1.g=u32@20, pixel1.b=u32@24)
+ *     scale = mix(scaleMin, scaleMax, value·(1/65535))  — value = uvec3(r, r>>16, g)&0xFFFF, so:
+ *     16–17 scale.x  uint16   ┐
+ *     18–19 scale.y  uint16   ├ LINEAR interpolation (GLSL `mix`), NOT geometric/log
+ *     20–21 scale.z  uint16   ┘
+ *     rotateEnc = ((b&0xFFFF)<<16) | ((g>>16)&0xFFFF)  ==  uint32 LE @ byte 22:
+ *     22–25 rotation uint32   → 10-10-10-2 "smallest-three" (calculateCov / QUAT_TAB)
+ *     26–27 semantic id (decodeSemantic: (b>>16)&0xFFFF);  28–31 padding
+ *
+ * NOTE: an earlier reverse-engineered guess (rotation@16, scale@20–25 geometric) was WRONG on
+ * both offset and interpolation — it put scale where the rotation is. The SDK shader above is
+ * the ground truth: scale@16–21 LINEAR, rotation@22–25.
  */
 
 export const LCC_STRIDE = 32;
@@ -21,7 +31,7 @@ const QLUT = [3,0,1,2, 0,3,1,2, 0,1,3,2, 0,1,2,3];
 const SQRT2 = Math.SQRT2;
 const RSQRT2 = Math.SQRT1_2;
 
-/** uint32 → quaternion xyzw (matches the whitepaper DecodeRotation / QLut). */
+/** uint32 → quaternion xyzw (matches the SDK calculateCov / QUAT_TAB decode). */
 export function decodeRotation(enc) {
   const px = (enc & 1023) / 1023;
   const py = ((enc >>> 10) & 1023) / 1023;
@@ -42,16 +52,16 @@ export function decodeRotation(enc) {
  * @param {Buffer} buf   the whole Data.bin
  * @param {number} byteOffset  start of this run (from Index.bin LODOffset)
  * @param {number} count        splats in this run (LOD PointsCount)
- * @param {number[]} scaleMin   meta attributes.scale.min (3)
- * @param {number[]} scaleMax   meta attributes.scale.max (3)
+ * @param {number[]} scaleMin   meta attributes.scale.min (3)  → compressedScaleMin uniform
+ * @param {number[]} scaleMax   meta attributes.scale.max (3)  → compressedScaleMax uniform
  *
- * SCALE decode: uint16/65535 interpolated **geometrically** (log-space) between min and max:
- *   scale = min · (max/min)^t   (= exp(lerp(ln min, ln max, t)))
- * Scales span ~5 orders of magnitude (0.0001..8 m), so the quantization is logarithmic — linear
- * lerp gives a 3.3 m median (absurd for a building); geometric gives ~0.026 m (correct).
- * (Newer/compressed v5 LCC vector-quantizes scale into a codebook LUT inside shcoef.bin
- * [`scaleEnc>>14 & 0x1FFFF` → texelFetch], per the LCC-Web-SDK shader; this v3.0 sample's
- * shcoef.bin is pure per-splat SH (64 B/splat, no LUT), so geometric interpolation is used.)
+ * SCALE decode: uint16 (at bytes 16/18/20) LINEARLY interpolated between min and max, exactly as
+ * the SDK shader does: `scale = mix(compressedScaleMin, compressedScaleMax, value/65535)`. The
+ * result is the linear per-axis std-dev in scene units (what buildSpzBuffer expects; it applies
+ * ln itself). Validated on Guan_Temple: p50 ≈ 3 cm for a 325 m-diagonal temple. (The COMPRESSED
+ * variant — meta `encoding: COMPRESS` with a populated shcoef.bin scale LUT — instead does
+ * `scaleK=(scaleEnc>>14)&0x1FFFF` → texelFetch(lutScaleTexture); not used by these v3.0 samples,
+ * whose shcoef.bin is pure per-splat SH.)
  */
 export function decodeSplats(buf, byteOffset, count, scaleMin, scaleMax) {
   const positions = new Float32Array(count * 3);
@@ -59,11 +69,7 @@ export function decodeSplats(buf, byteOffset, count, scaleMin, scaleMax) {
   const rgb       = new Float32Array(count * 3);
   const scales    = new Float32Array(count * 3);
   const rotations = new Float32Array(count * 4);
-  // Precompute log endpoints for geometric interpolation (guard non-positive → linear).
-  const lg = (mn, mx) => (mn > 0 && mx > 0) ? [Math.log(mn), Math.log(mx) - Math.log(mn), true] : [mn, mx - mn, false];
-  const [lx0, lxd, lxg] = lg(scaleMin[0], scaleMax[0]);
-  const [ly0, lyd, lyg] = lg(scaleMin[1], scaleMax[1]);
-  const [lz0, lzd, lzg] = lg(scaleMin[2], scaleMax[2]);
+  const dx = scaleMax[0] - scaleMin[0], dy = scaleMax[1] - scaleMin[1], dz = scaleMax[2] - scaleMin[2];
 
   for (let i = 0; i < count; i++) {
     const o = byteOffset + i * LCC_STRIDE;
@@ -76,16 +82,15 @@ export function decodeSplats(buf, byteOffset, count, scaleMin, scaleMax) {
     rgb[i*3+2] = buf[o + 14] / 255;
     alphas[i]  = buf[o + 15] / 255;
 
-    const q = decodeRotation(buf.readUInt32LE(o + 16));
+    // scale = mix(min, max, u/65535) — bytes 16/18/20, LINEAR (SDK decodeCov).
+    scales[i*3]   = scaleMin[0] + dx * (buf.readUInt16LE(o + 16) / 65535);
+    scales[i*3+1] = scaleMin[1] + dy * (buf.readUInt16LE(o + 18) / 65535);
+    scales[i*3+2] = scaleMin[2] + dz * (buf.readUInt16LE(o + 20) / 65535);
+
+    // rotation = uint32 LE @ byte 22  (== SDK's ((b&0xFFFF)<<16)|((g>>16)&0xFFFF)).
+    const q = decodeRotation(buf.readUInt32LE(o + 22));
     rotations[i*4]   = q[0]; rotations[i*4+1] = q[1];
     rotations[i*4+2] = q[2]; rotations[i*4+3] = q[3];
-
-    const u0 = buf.readUInt16LE(o + 20) / 65535;
-    const u1 = buf.readUInt16LE(o + 22) / 65535;
-    const u2 = buf.readUInt16LE(o + 24) / 65535;
-    scales[i*3]   = lxg ? Math.exp(lx0 + lxd * u0) : lx0 + lxd * u0;
-    scales[i*3+1] = lyg ? Math.exp(ly0 + lyd * u1) : ly0 + lyd * u1;
-    scales[i*3+2] = lzg ? Math.exp(lz0 + lzd * u2) : lz0 + lzd * u2;
   }
   return { positions, alphas, rgb, scales, rotations };
 }

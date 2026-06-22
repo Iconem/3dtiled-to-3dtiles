@@ -16,11 +16,12 @@ SPZ-v2 GLB (one shared encoder, `spzGlb.js`). The decode differs per format; the
 | **SOG (streamed)** (PlayCanvas) | 🟢 | **binary** spatial tree (AABB split) | unbundled SOG chunk: WebP textures → `DataTable` (pos/quat-w-first/log-scale/SH-DC/logit-opacity) | REPLACE | empty grouping nodes | `lod-meta.json` + per-chunk `meta.json` | ✅ per-file | [playcanvas](https://developer.playcanvas.com/user-manual/gaussian-splatting/formats/streamed-sog/) |
 | **LCC** (XGRIDS) | 🟢 | **grid of Units** (cellX×Y) × per-cell LODs | `Data.bin` fixed **32 B/splat**: pos `f32×3`, color `rgba8`, rot `10-10-10-2`, scale `u16×3` (+SH `Shcoef.bin` 64 B) | REPLACE | per-cell coarse LODs | `meta.lcc` JSON + `Index.bin` | ✅ `Index.bin` offsets into `Data.bin` | [developer.xgrids.com](https://developer.xgrids.com/#/document?titleId=en-1720509291851) |
 | **COPC** (LiDAR) | 🟢 | **octree** (EPT-style) | LAZ-compressed LAS points | ADD | octree nodes (accumulate) | COPC VLR + hierarchy pages | ✅ designed for range reads | [copc.io](https://copc.io) |
+| **Potree** (point cloud) | 🟡 | **octree** (named `r`/`r0`..`r7`) | points: position int32×3·scale+offset + rgb (2.0 `octree.bin` / 1.x per-node `.bin`) | ADD | octree nodes (accumulate) | 2.0 `metadata.json`+`hierarchy.bin` (22 B/node) · 1.x `cloud.js`+`.hrc` | ✅ (2.0 single octree.bin; 1.x per-node files) | [Potree](https://github.com/potree/PotreeConverter) |
 | **Nexus** (CNR-ISTI) | 🟠 doc | multiresolution patch DAG / batched mesh | per-patch mesh (not splats) | — | — | header + patch index | ✅ | [github](https://github.com/cnr-isti-vclab/nexus) · [paper](https://vcg.isti.cnr.it/Publications/2016/PD16/FastDec_Ponchio.pdf) |
-| **I3S** (Esri) | 🟠 doc | node tree, bounding-sphere LoD (SLPK) | nodes/geometry/textures (mesh/point) | REPLACE | node pages | `3dSceneLayer.json` + node docs | ✅ | [github](https://github.com/esri/i3s-spec) |
+| **I3S** (Esri) | 🟡 draft | node tree (**always explicit** — no implicit/template scheme), OBB/MBS LoD (SLPK or REST) | nodes/geometry/textures; `DefaultGeometrySchema` = **PerAttributeArray** (pos `f32×3` · normal `f32×3` · uv0 `f32×2` · color `u8×4`, sequential) or Draco | REPLACE | node pages (`nodepages/*.json`) | `3dSceneLayer.json` + node pages | ✅ REST/range | [github](https://github.com/esri/i3s-spec) |
 | **3D Tiles** (output) | 🟢 out | explicit or implicit; box/region/sphere volumes | glTF/GLB w/ `KHR_gaussian_splatting`+`_spz_2` | REPLACE/ADD | optional content | `tileset.json` (+ `.3tz`) | ✅ | [OGC](https://www.ogc.org/standard/3dtiles/) |
 
-🟢 = operational converter · 🟠 doc = spec referenced in `docs-references/`, converter not built (lower-priority / niche).
+🟢 = operational converter · 🟡 draft = scaffold built, **untested** (no sample to validate) · 🟠 doc = spec referenced in `docs-references/`, converter not built (lower-priority / niche).
 See `docs-references/` for the full per-format reference notes.
 
 ```mermaid
@@ -288,17 +289,82 @@ node src/index.js path/to/lcc-dir ./out-lcc     # dir containing meta.lcc (name 
 the index) × `totalLevel` LODs (LOD0 = finest). Each Unit → a `REPLACE` chain of tiles
 coarsest→finest under a single root. `Data.bin` is **uncompressed, fixed 32 B/splat** (the meta
 `"encoding": "COMPRESS"` refers to field quantization, not stream compression — verified
-`LODSize / PointsCount == 32`). The 32-byte layout was reverse-engineered + validated against the
-`Guan_Temple` sample: `pos f32×3 · color rgba8 (a = opacity) · rot uint32 (10-10-10-2 smallest-three) ·
-scale uint16×3 (linear lerp) · 6 B pad`. Rotation decode follows the whitepaper `QLut`.
+`LODSize / PointsCount == 32`). The 32-byte layout is taken **directly from the official
+[xgrids/LCC-Web-SDK](https://github.com/xgrids/LCC-Web-SDK) vertex shader** (the non-`LCC_COMPRESSED`
+`decodeCov` path), not guessed: `0–11 pos f32×3 · 12–15 color rgba8 (a = opacity) ·
+16–21 scale uint16×3 · 22–25 rot uint32 (10-10-10-2 smallest-three) · 26–27 semantic · 28–31 pad`.
+**Scale = linear `mix(scale.min, scale.max, u/65535)`** (the SDK's `compressedScaleMin/Max` uniforms =
+meta `attributes.scale.min/max`); rotation decode = the SDK's `QUAT_TAB`.
 
 **Validated:** `Guan_Temple` → 154 tiles, **11,424,293 splats (= `meta.totalSplats` exactly)**,
-0 bad quaternions. **SH (`Shcoef.bin`, Quality files) not yet emitted** (DC only, like the other
-converters). LCC is XGRIDS' format — attribution required per its White Paper (see the doc).
+0 bad quaternions, scale p50 ≈ 3 cm (sane for a 325 m-diagonal temple). **SH (`Shcoef.bin`, Quality
+files) not yet emitted** (DC only, like the other converters). LCC is XGRIDS' format — attribution
+required per its White Paper (see the doc).
 
 > **License note:** the LCC White Paper requires displaying "Data Organization Format originated
 > from XGRIDS" and publishing derivatives under terms no less open. This converter reads the format;
 > downstream products must carry that attribution.
+
+---
+
+### i3s-to-3dtiles  🟡 **DRAFT — untested**
+
+Converts the **supported subset** of Esri **[I3S](docs-references/i3s-spec.md)** (Indexed 3D Scene
+Layer) → 3D Tiles 1.1. ⚠️ **No I3S sample exists in this repo, so this converter is unvalidated** —
+the parsing/tree/OBB/geometry logic is spec-grounded (and unit-checked against synthetic buffers),
+but offsets, CRS/ECEF placement, and resource paths must be verified against real data.
+
+```sh
+unzip your-layer.slpk -d your-layer/        # an SLPK is a plain zip
+cd i3s-to-3dtiles
+node src/index.js ../your-layer ./out-i3s
+```
+
+**Scope (deliberately gated — warns/skips everything else):**
+
+| Supported ✓ | Not supported ✗ (detected → warn/skip/exit) |
+|---|---|
+| Explicit `nodepages/*.json` trees | Legacy per-node `3dNodeIndexDocument` index (pre-1.7) |
+| `IntegratedMesh` / `3DObject` → glTF **TRIANGLES** | **Draco**-compressed geometry (no decoder) |
+| `PointCloud` → glTF **POINTS** | `Point` (symbol/instance) & `Building` (composite) layers |
+| Uncompressed `DefaultGeometrySchema` (PerAttributeArray) | Textures / PBR materials (dropped — geometry only) |
+| OBB → 3D Tiles `box`; node tree → REPLACE tileset | Per-feature attributes (dropped); non-WGS84 vertical CRS |
+
+**Investigation notes** (answering "is it complex? meshes/points/instances/mix? implicit?"):
+I3S **does** cover meshes (`IntegratedMesh`, `3DObject`), point clouds (`PointCloud`), and
+symbol/model **instances** (`Point` layers); a **Building Scene Layer** is the "mix" — a composite of
+sublayers. Tiling is **always explicit** (a node tree addressed via paged indices); I3S has **no
+implicit/template scheme** like 3D Tiles subtrees, so the user's "explicit tiling only" constraint is
+automatic. The node-tree → tileset mapping is **direct** (OBB↔box, children↔children, REPLACE). The
+genuinely hard parts — and why this stays a draft — are **Draco** geometry, **textures/materials**,
+**per-feature attributes** (→ `EXT_mesh_features`/metadata), and the **CRS/ECEF vertex placement**
+nuances. A mesh-or-points-only, uncompressed, explicit-tree converter (this draft) is **moderate**;
+full-fidelity I3S is **high** effort and overlaps mature tools (loaders.gl, Cesium ion).
+
+---
+
+### potree-to-3dtiles
+
+Converts a **Potree** octree point cloud → 3D Tiles (glTF **POINTS** tiles). Auto-detects
+**2.0** (`metadata.json` + `hierarchy.bin` + `octree.bin`) and **1.x** (`cloud.js` + `.hrc` +
+per-node `.bin`).
+
+```sh
+cd potree-to-3dtiles && npm install
+node src/index.js path/to/potree-dir ./out-potree
+```
+
+**How it works:** the Potree octree (`r`, `r0`..`r7`, …) maps 1:1 to a 3D Tiles tree with
+**`refine: ADD`** (children add denser detail in sub-octants, like COPC); `geometricError` = point
+spacing per depth (`rootSpacing / 2^depth`). 2.0 decode is authoritative (`hierarchy.bin` 22 B/node:
+`type u8, childMask u8, numPoints u32, byteOffset u64, byteSize u64`; positions `int32×3·scale+offset`;
+DEFAULT + BROTLI via Node's `zlib`). Points are emitted relative to the dataset centre (float32-safe).
+
+> **Status:** 🟡 **2.0 decode validated on a synthetic dataset** (positions + RGB round-trip exactly,
+> incl. the Y-up `RX(−90°)` convention); **1.x is best-effort** (POCLoader path/`.hrc` conventions).
+> Both **untested on a real dataset** (none in repo) — and output is **not geo-referenced** (sits at
+> the local origin; add a root transform / ENU placement downstream). Validate before production.
+> Reference: [yeyan00/potree23dtiles](https://github.com/yeyan00/potree23dtiles) (2.0 decode cross-check).
 
 ---
 
@@ -377,6 +443,43 @@ curl -L "https://data.geopf.fr/telechargement/download/LiDARHD-NUALID/NUALHD_1-0
 | `proj4` | copc-to-3dtiles |
 | `@sparkjsdev/spark` | rad-to-3dtiles |
 | `@cesium/3d-tiles-tools` (optional) | both — `.3tz`/`.3dtiles` packaging via `--3tz`/`--3dtiles` flag |
+
+---
+
+## Performance & parallelism
+
+Tile **conversion is currently single-threaded and sequential** — each converter walks its node
+list in a `for … await` loop, doing decode → SPZ/GLB encode (gzip) → `fs.writeFile` one tile at a
+time on the main thread. The tree walk is cheap; the cost is per-tile encoding (gzip, WebP decode
+for SOG, point packing). That work is **embarrassingly parallel and independent per tile**, so the
+clear next optimization is a **`worker_threads` pool** (or `Promise.all` with bounded concurrency)
+fanning tiles across cores — near-linear speedup on multi-core, since tiles don't depend on each
+other. Memory is already bounded per-chunk (esp. SOG/LCC: decode one chunk → write its tiles →
+release). Not yet done; tracked as the headline perf TODO.
+
+---
+
+## Related tilers (prior art / reference implementations)
+
+Tools that tile point clouds, meshes, or splats to 3D Tiles / streaming formats — studied for
+format handling, tree/geometric-error strategy, and parallelism:
+
+**Point clouds**
+- [yeyan00/potree23dtiles](https://github.com/yeyan00/potree23dtiles) — Potree → 3D Tiles (the
+  closest analogue to our planned `potree-to-3dtiles`).
+- [py3dtiles](https://gitlab.com/py3dtiles/py3dtiles) — Python LAS/XYZ → 3D Tiles `pnts` tiler.
+- [igd-geo/schwarzwald](https://github.com/igd-geo/schwarzwald) — high-throughput point-cloud tiler (3D Tiles).
+- [Potree / PotreeConverter](https://github.com/potree/PotreeConverter) — the octree format + converter we read.
+- [gocesiumtiler](https://github.com/mfbonfigli/gocesiumtiler) — Go LAS → Cesium 3D Tiles point tiler.
+
+**Meshes / CAD / GIS**
+- [mago3d/mago-3d-tiler](https://github.com/Gaia3D/mago-3d-tiler) — Java OBJ/IFC/GIS → 3D Tiles.
+- [obj2tiles](https://github.com/OpenDroneMap/Obj2Tiles) — OBJ → 3D Tiles (b3dm) with LoD.
+
+**Gaussian splats**
+- [@sparkjsdev/spark `build-lod`](https://sparkjs.dev/docs/lod-getting-started/) — PLY/SPZ → RAD LoD (we consume `.rad`).
+- [WilliamLiu-1997/3DGS-PLY-3DTiles-Converter](https://github.com/WilliamLiu-1997/3DGS-PLY-3DTiles-Converter) — PLY → SPZ-GLB 3D Tiles (our cross-validation reference).
+- [playcanvas/splat-transform](https://github.com/playcanvas/splat-transform) — SOG/PLY/SPZ conversion (we use `readSog`).
 
 ---
 
@@ -560,7 +663,7 @@ They work in `viewer.html` via the built-in city mesh presets.
 | `streamed-sog.md` | PlayCanvas Streamed SOG LOD format — `lod-meta.json` spatial tree + chunk references; the input to `sog-to-3dtiles` (source: developer.playcanvas.com) |
 | `lcc-format.md` | XGRIDS LCC (Lixel CyberColor) — `meta.lcc`/`Index.bin`/`Data.bin` (32 B/splat, 10-10-10-2 rot, packed-11 SH); input to `lcc-to-3dtiles` (source: github.com/xgrids/LCCWhitepaper). Attribution required. |
 | `nexus-format.md` | 🟠 CNR-ISTI Nexus multiresolution mesh (DAG of patches) — **doc-referenced, no converter** (mesh, not splats; niche). Refs: github.com/cnr-isti-vclab/nexus, FastDec paper |
-| `i3s-spec.md` | 🟠 Esri I3S (Indexed 3D Scene Layer / SLPK) — **doc-referenced, no converter** (would be `i3s-to-3dtiles`). Ref: github.com/esri/i3s-spec |
+| `i3s-spec.md` | 🟡 Esri I3S (Indexed 3D Scene Layer / SLPK) — **draft converter `i3s-to-3dtiles/` (UNTESTED)**: explicit nodepages + uncompressed `DefaultGeometrySchema` mesh / point cloud only. Ref: github.com/esri/i3s-spec |
 
 #### Upstream specs & reference implementations
 
