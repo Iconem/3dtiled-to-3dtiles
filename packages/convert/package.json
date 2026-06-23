@@ -1,0 +1,8 @@
+{
+  "name": "3dtiles-convert",
+  "version": "0.1.0",
+  "type": "module",
+  "bin": { "3dtiled": "cli.js" },
+  "main": "index.js",
+  "dependencies": { "3dtiles-convert-core": "workspace:*" }
+}

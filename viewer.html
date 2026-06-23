@@ -335,21 +335,16 @@
   }
 </style>
 
-<script type="importmap">
-{
-  "imports": {
-    "three": "https://esm.sh/three@0.180.0",
-    "three/addons/": "https://esm.sh/three@0.180.0/examples/jsm/",
-    "three/examples/": "https://esm.sh/three@0.180.0/examples/",
-    "3d-tiles-renderer": "https://esm.sh/3d-tiles-renderer@0.4.28?external=three",
-    "3d-tiles-renderer/plugins": "https://esm.sh/3d-tiles-renderer@0.4.28/plugins?external=three",
-    "@sparkjsdev/spark": "https://esm.sh/@sparkjsdev/spark@2.1.0?external=three",
-    "3d-tiles-rendererjs-3dgs-plugin": "https://esm.sh/3d-tiles-rendererjs-3dgs-plugin@0.1.13?external=three,@sparkjsdev/spark,3d-tiles-renderer"
-  }
-}
+<!-- Offline/self-contained via Vite (npm run dev). All deps resolve from node_modules — no CDN.
+     `three`, `3d-tiles-renderer`, `@sparkjsdev/spark`, the 3DGS plugin are bare ESM imports Vite
+     resolves; Cesium is imported here and exposed as the `Cesium` global the non-module scripts use.
+     `vite-plugin-cesium` injects CESIUM_BASE_URL + copies Cesium's Workers/Assets/Widgets. -->
+<script type="module">
+  import * as Cesium from 'cesium';
+  import 'cesium/Build/Cesium/Widgets/widgets.css';
+  window.Cesium = Cesium;
+  window.dispatchEvent(new Event('cesium-ready'));
 </script>
-<script src="https://cesium.com/downloads/cesiumjs/releases/1.142/Build/Cesium/Cesium.js"></script>
-<link href="https://cesium.com/downloads/cesiumjs/releases/1.142/Build/Cesium/Widgets/widgets.css" rel="stylesheet">
 </head>
 <body>
 
@@ -503,14 +498,14 @@ const PRESETS = [
     id: 'coit-rad',
     label: '✦ Coit (RAD)',
     type: 'splat',
-    url: 'http://localhost:3000/sample-data/output-rad/coit-3dtiles-from-rad/tileset.json',
+    url: 'http://localhost:3000/sample-data/output/rad/coit-3dtiles-from-rad/tileset.json',
     local: false,
   },
   {
     id: 'tastier-rad',
     label: '✦ Tastier (RAD)',
     type: 'splat',
-    url: 'http://localhost:3000/sample-data/output-rad/tastier500k-3dtiles-from-rad/tileset.json',
+    url: 'http://localhost:3000/sample-data/output/rad/tastier500k-3dtiles-from-rad/tileset.json',
     local: false,
   },
   // Coit opacity A/B variants (--alpha-scale): α×0.5 undoes the lodOpacity doubling,
@@ -519,21 +514,21 @@ const PRESETS = [
     id: 'coit-a05',
     label: '✦ Coit α×0.5',
     type: 'splat',
-    url: 'http://localhost:3000/sample-data/output-rad/coit-a05-3dtiles-from-rad/tileset.json',
+    url: 'http://localhost:3000/sample-data/output/rad/coit-a05-3dtiles-from-rad/tileset.json',
     local: false,
   },
   {
     id: 'coit-a1',
     label: '✦ Coit α×1',
     type: 'splat',
-    url: 'http://localhost:3000/sample-data/output-rad/coit-a1-3dtiles-from-rad/tileset.json',
+    url: 'http://localhost:3000/sample-data/output/rad/coit-a1-3dtiles-from-rad/tileset.json',
     local: false,
   },
   {
     id: 'coit-a2',
     label: '✦ Coit α×2',
     type: 'splat',
-    url: 'http://localhost:3000/sample-data/output-rad/coit-a2-3dtiles-from-rad/tileset.json',
+    url: 'http://localhost:3000/sample-data/output/rad/coit-a2-3dtiles-from-rad/tileset.json',
     local: false,
   },
   // Same-scene comparison: Elevator.ply via two pipelines (our RAD path vs William's PLY converter).
@@ -541,28 +536,28 @@ const PRESETS = [
     id: 'elevator-ours',
     label: '⊿ Elevator (ours: PLY→RAD)',
     type: 'splat',
-    url: 'http://localhost:3000/sample-data/output-rad/Elevator-3dtiles-from-rad/tileset.json',
+    url: 'http://localhost:3000/sample-data/output/rad/Elevator-3dtiles-from-rad/tileset.json',
     local: false,
   },
   {
     id: 'elevator-william',
     label: '⊿ Elevator (William: PLY)',
     type: 'splat',
-    url: 'http://localhost:3000/sample-data/output-ply-william/Elevator-3dtiles-from-ply/tileset.json',
+    url: 'http://localhost:3000/sample-data/output/ply-william/Elevator-3dtiles-from-ply/tileset.json',
     local: false,
   },
   {
     id: 'svirnas-ours',
     label: '⊿ SvirnasAlyt (ours: PLY→RAD)',
     type: 'splat',
-    url: 'http://localhost:3000/sample-data/output-rad/SvirnasAlyt-3dtiles-from-rad/tileset.json',
+    url: 'http://localhost:3000/sample-data/output/rad/SvirnasAlyt-3dtiles-from-rad/tileset.json',
     local: false,
   },
   {
     id: 'svirnas-william',
     label: '⊿ SvirnasAlyt (William: PLY)',
     type: 'splat',
-    url: 'http://localhost:3000/sample-data/output-ply-william/SvirnasAlyt-3dtiles-from-ply/tileset.json',
+    url: 'http://localhost:3000/sample-data/output/ply-william/SvirnasAlyt-3dtiles-from-ply/tileset.json',
     local: false,
   },
   // XGRIDS LCC → 3D Tiles (via lcc-to-3dtiles).
@@ -570,7 +565,7 @@ const PRESETS = [
     id: 'lcc-guantemple',
     label: '◆ Guan Temple (LCC)',
     type: 'splat',
-    url: 'http://localhost:3000/sample-data/output-lcc/Guan_Temple-3dtiles-from-lcc/tileset.json',
+    url: 'http://localhost:3000/sample-data/output/lcc/Guan_Temple-3dtiles-from-lcc/tileset.json',
     local: false,
   },
   // PlayCanvas Streamed SOG → 3D Tiles (via sog-to-3dtiles).
@@ -578,14 +573,14 @@ const PRESETS = [
     id: 'skatepark-sog',
     label: '⬢ Skatepark (SOG)',
     type: 'splat',
-    url: 'http://localhost:3000/sample-data/output-sog/skatepark-3dtiles-from-sog/tileset.json',
+    url: 'http://localhost:3000/sample-data/output/sog/skatepark-3dtiles-from-sog/tileset.json',
     local: false,
   },
   {
     id: 'roman-parish-sog',
     label: '⬢ Roman Parish (SOG)',
     type: 'splat',
-    url: 'http://localhost:3000/sample-data/output-sog/roman-parish-3dtiles-from-sog/tileset.json',
+    url: 'http://localhost:3000/sample-data/output/sog/roman-parish-3dtiles-from-sog/tileset.json',
     local: false,
   },
   // Reference splat tilesets from the 3DTilesRendererJS-3DGS-Plugin demo data
@@ -608,23 +603,65 @@ const PRESETS = [
     id: 'autzen-copc',
     label: '☁ Autzen (COPC)',
     type: 'pointcloud',
-    url: 'http://localhost:3000/sample-data/output-copc/autzen-3dtiles-from-copc/tileset.json',
+    url: 'http://localhost:3000/sample-data/output/copc/autzen-3dtiles-from-copc/tileset.json',
     local: false,
   },
   {
     id: 'eiffel-copc',
     label: '☁ Eiffel (COPC)',
     type: 'pointcloud',
-    url: 'http://localhost:3000/sample-data/output-copc/eiffel-3dtiles-from-copc/tileset.json',
+    url: 'http://localhost:3000/sample-data/output/copc/eiffel-3dtiles-from-copc/tileset.json',
     local: false,
   },
   {
     id: 'texas-copc',
     label: '☁ Texas (COPC)',
     type: 'pointcloud',
-    url: 'http://localhost:3000/sample-data/output-copc/texas-3dtiles-from-copc/tileset.json',
+    url: 'http://localhost:3000/sample-data/output/copc/texas-3dtiles-from-copc/tileset.json',
     local: false,
   },
+  {
+    id: 'copc-live',
+    label: '🛰 COPC→3DT (live middleware)',
+    type: 'pointcloud',
+    url: 'http://localhost:3001/copc/tileset.json?url=' + encodeURIComponent('http://localhost:3000/sample-data/input/COPC/autzen.copc.laz'),
+    local: false,
+  },
+  {
+    id: 'lion-potree2',
+    label: '🌲 Lion (Potree 2.0)',
+    type: 'pointcloud',
+    url: 'http://localhost:3000/sample-data/output/potree/lion_p2/tileset.json',
+    local: false,
+  },
+  {
+    id: 'lion-takanawa-potree1',
+    label: '🌲 Lion Takanawa (Potree 1.x)',
+    type: 'pointcloud',
+    url: 'http://localhost:3000/sample-data/output/potree/lion_takanawa/tileset.json',
+    local: false,
+  },
+  {
+    id: 'lion-takanawa-laz',
+    label: '🌲 Lion Takanawa (Potree LAZ)',
+    type: 'pointcloud',
+    url: 'http://localhost:3000/sample-data/output/potree/lion_takanawa_laz/tileset.json',
+    local: false,
+  },
+  {
+    id: 'i3s-nyc',
+    label: '🧱 NYC Buildings (I3S draft)',
+    type: 'mesh',
+    url: 'http://localhost:3000/sample-data/output/i3s/Buildings_NewYork_v18/tileset.json',
+    local: false,
+  },
+  // ── Meta-converter outputs (3dtiled auto-detect → dispatch; written to output-meta-converter/) ──
+  { id: 'meta-rad',    label: '🔀 RAD (meta)',    type: 'splat',      url: 'http://localhost:3000/sample-data/output-meta-converter/rad-tastier500k/tileset.json', local: false },
+  { id: 'meta-sog',    label: '🔀 SOG (meta)',    type: 'splat',      url: 'http://localhost:3000/sample-data/output-meta-converter/sog-skatepark/tileset.json',   local: false },
+  { id: 'meta-lcc',    label: '🔀 LCC (meta)',    type: 'splat',      url: 'http://localhost:3000/sample-data/output-meta-converter/lcc-Guan_Temple/tileset.json',  local: false },
+  { id: 'meta-copc',   label: '🔀 COPC (meta)',   type: 'pointcloud', url: 'http://localhost:3000/sample-data/output-meta-converter/copc-autzen/tileset.json',     local: false },
+  { id: 'meta-potree', label: '🔀 Potree (meta)', type: 'pointcloud', url: 'http://localhost:3000/sample-data/output-meta-converter/potree-lion_p2/tileset.json',  local: false },
+  { id: 'meta-i3s',    label: '🔀 I3S (meta)',    type: 'mesh',       url: 'http://localhost:3000/sample-data/output-meta-converter/i3s-NYC/tileset.json',          local: false },
   // ── Open data city meshes (3D Tiles 1.0, explicit, REPLACE, b3dm) ──
   {
     id: 'strasbourg',
@@ -1186,7 +1223,10 @@ function toggle3DT() {
   }
 }
 
-initCesium();
+// Cesium is imported by a `<script type="module">` (deferred), so it may not be on `window`
+// yet when this synchronous script finishes. Run initCesium once the import has resolved.
+if (window.Cesium) initCesium();
+else window.addEventListener('cesium-ready', () => initCesium(), { once: true });
 </script>
 
 <!-- ── 3DTilesRendererJS — real ellipsoid globe (GeneratedSurfacePlugin + XYZ overlay) ── -->

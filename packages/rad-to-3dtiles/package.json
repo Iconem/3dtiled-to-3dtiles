@@ -1,0 +1,20 @@
+{
+  "name": "rad-to-3dtiles",
+  "version": "0.1.0",
+  "description": "Convert SparkJS .RAD Gaussian Splat LoD files to OGC 3D Tiles 1.1",
+  "type": "module",
+  "bin": {
+    "rad-to-3dtiles": "./src/index.js"
+  },
+  "scripts": {
+    "start": "node src/index.js"
+  },
+  "dependencies": {
+    "@gltf-transform/core": "^4.0.0",
+    "@sparkjsdev/spark": "^2.1.0"
+  },
+  "optionalDependencies": {
+    "@cesium/3d-tiles-tools": "^1.0.0"
+  },
+  "main": "src/index.js"
+}

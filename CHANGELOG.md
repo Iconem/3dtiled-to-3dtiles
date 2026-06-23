@@ -5,6 +5,136 @@ Format loosely follows [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+### Added — 2026-06-22g (live COPC→3D Tiles middleware; I3S geometricError; Potree CRS)
+- **`tile-server` — live COPC → 3D Tiles middleware** (`packages/tile-server`, the "TiTiler for 3D"):
+  `GET /copc/tileset.json?url=<COPC>` builds a 3D Tiles tree from the COPC hierarchy (HTTP-range), and
+  `GET /copc/tile/<D-X-Y-Z>.glb?url=<COPC>` range-reads one octree node and returns a POINTS GLB on the fly
+  (`core.buildPointsGlb`). One ENU→ECEF root transform from the COPC WKT CRS (proj4). `npm run serve:tiles`
+  (:3001, CORS open). Verified: CesiumJS renders Autzen geo-referenced over Oregon, streamed live — the
+  viewer only sees 3D Tiles. Added viewer pill **🛰 COPC→3DT (live middleware)**.
+- **I3S geometricError** now = half the tile's bounding-box diagonal (shrinks with depth: 33 km root → 0
+  leaves), so the renderer refines by camera distance instead of loading every tile always.
+- **Potree CRS recovery**: readers surface `cloud.js.projection` (1.x) / `metadata` CRS (2.0) as `crs`
+  for downstream geo-referencing.
+- **`potree-to-copc` assessed, deferred**: read side ready (octree + points + CRS), but COPC needs LAZ and
+  there's no pure-JS LAZ encoder (`laz-perf` WASM is decode-only). Path documented (Rust `copc-rs`/`laz-rs`
+  → WASM, or PDAL `writers.copc` / copc-lib).
+
+### Fixed — 2026-06-22f (I3S ENU frame — upright on the globe)
+- **I3S buildings now sit flat & upright on the globe** (were tilted ~40° / looked like a plane
+  perpendicular to the ground, with weirdly-rotated boxes). Root cause: geometry stored in **ECEF axes**,
+  which are tilted vs the local horizon at NYC. Fix: a single **local ENU frame** — geometry in
+  East/North/Up **metres**, with the root `transform` = ENU→ECEF (`[East,North,Up,origin]`). glTF POSITION
+  is pre-swizzled to `(E,U,−N)` so the renderer's Y-up→Z-up RX(+90°) yields tileset `(E,N,U)`; boxes are
+  AABBs in that ENU frame. Verified: root box ENU half-extents = 23.5 km × 23.1 km × **0.3 km** (a flat
+  city slab, not a vertical plane); buildings follow the Manhattan street grid (Central Park visible),
+  ground-aligned boxes. This is the "custom local CRS via tile transform" approach (vs converting every
+  vertex to absolute ECEF).
+
+### Fixed — 2026-06-22e (Potree 1.x scatter, I3S boxes/orientation)
+- **Potree 1.x no longer scatters into duplicate clusters.** Two coupled bugs: (1) `POSITION_CARTESIAN` is
+  **node-relative** — `raw·scale + THIS NODE's box.min` (the spec's "boundingBox.min" is the node's subdivided
+  box; the global cloud min piles every node at the corner); (2) the octant→sub-box convention was wrong —
+  Potree's `createChildAABB` is **bit0→Z, bit1→Y, bit2→X**, not bit0→X (an X/Z swap that put deep nodes in the
+  wrong octant). Fixed both (potree1.js + potree2.js childBox). Verified: child→root NN 0.03 m, 60/60 nodes'
+  geometry inside their box, lion_takanawa renders as one coherent statue with geometry filling the debug boxes.
+  Added `docs-references/potree-format.md` (1.x `.hrc`/`.bin` + 2.0 binary octree, with the decode rules + source links).
+- **I3S bounding boxes now contain the geometry (no weird rotation).** The I3S OBB quaternion is in a local
+  frame that doesn't match our per-vertex-geodetic placement, so OBB-derived boxes were rotated wrong and
+  didn't enclose the mesh. Now each tile's box is the **axis-aligned AABB of its actual decoded geometry**,
+  unioned with children (parent ⊇ children). Verified: 40/40 sampled content tiles contain their geometry;
+  NYC buildings render tangent to the globe over Manhattan and refine on zoom.
+
+### Fixed — 2026-06-22d (I3S transform compounding)
+- **I3S tiles no longer scatter / vanish on zoom.** The converter set a per-tile `transform` translating
+  to each node's ECEF centre (~6.4M m), but 3D Tiles **composes transforms down the tree**, so child
+  translations compounded (root + child + grandchild ≈ N×6.4M) and flung deep tiles off the planet.
+  Fix: one shared ECEF origin (root OBB centre) — all tile geometry **and** bounding boxes are stored
+  relative to it, and only the **root** carries a `transform`. Verified on NYC: buildings concentrate
+  over Manhattan and refine on zoom (627 tiles vs the old 36 + scatter). (Potree 1.x re-verified correct
+  via debug-box overlay — boxes wrap the point cloud; earlier "wrong" look was pre-fix / sparse ADD LoD.)
+
+### Added — 2026-06-22c (in-process meta dispatch, offline Vite viewer)
+- **Meta-converter now dispatches IN-PROCESS** — every converter exports a uniform
+  `convert(input, outDir, opts)` plus a `fileURLToPath`-guarded CLI shim. The registry `import()`s the
+  module (verified: **0 child processes spawned**); it falls back to `spawn` only when `opts.extraArgs`
+  (format-specific CLI flags) are passed. rad's argv-consts became a settable `OPTS` object + `parseArgvOpts`.
+- **Viewer is now offline / self-contained via Vite** — added `cesium`, `three`, `3d-tiles-renderer`,
+  `@sparkjsdev/spark`, `3d-tiles-rendererjs-3dgs-plugin` as deps + `vite` / `vite-plugin-cesium`.
+  Removed the importmap + CDN `<script>`s; Cesium is imported as ESM and exposed as the `window.Cesium`
+  global the non-module scripts use (init deferred via a `cesium-ready` event). `npm run dev` →
+  `http://localhost:3000/viewer.html`. **Verified 0 CDN requests** (Cesium, 3DTRJS globe, and Gaussian-splat
+  streaming all from node_modules); `three` de-duplicated via `resolve.dedupe`. The dev server also serves
+  `sample-data/` so the presets resolve same-origin. **pnpm supported**: `pnpm-workspace.yaml` +
+  `.npmrc` (`node-linker=hoisted`, so `import('rad-to-3dtiles')` resolves), `convert`'s core dep uses the
+  `workspace:*` protocol, and a root `index.html` redirects `/` → `/viewer.html`. `pnpm install && pnpm run dev` verified.
+
+### Fixed / Added — 2026-06-22b (decode bug fixes, RAD spatial GE, packages/ migration)
+- **RAD geometricError is now SPATIAL by default** — `geBasis: 'spatial'` = `2 × bboxDiagonal/∛(splatCount)`
+  (mean representative-splat spacing). Elevator root GE 1.22 → **4.15** (≈ William's 4.66), fixing the
+  under-refinement that showed as coarse/"missing" tiles at distance. Legacy basis via `--ge-basis=featuresize`.
+- **Potree 2.0 BROTLI decode FIXED** — was rendering as a flat line. The decompressed buffer is
+  **attribute-planar** (not interleaved) and position/rgb are **Morton-encoded** (16 B / 8 B per point);
+  ported Potree's `dealign24b` + planar plane offsets. lion_p2 now decodes to a correct 3D lion with colour.
+- **Potree 1.x parent/child offset FIXED** — points are quantised relative to **each node's bbox min**,
+  not the root's (root min shifted deep nodes → misaligned clusters). Verified points now nest in their node box.
+- **Potree 1.4 inline-hierarchy + tiled LAZ implemented** (was fast-fail). Reads the inline `hierarchy`
+  array + flat `data/<name>.{bin,laz}`; LAZ nodes decoded with laz-perf (via `copc`). `lion_takanawa_laz`
+  → 200 tiled-LAZ tiles, `vol_total` → 42. (This is the *tiled* LAZ path; plain untiled LAS/LAZ stays in copc.)
+- **I3S mesh placement FIXED** — geographic-layer vertices are `(Δlon°, Δlat°, Δheight_m)` relative to the
+  OBB centre; converted per-vertex to ECEF (stored centre-relative for float32 precision). NYC buildings now
+  land at ≈ −74°, 40.7°. `detectFormat` also now recognises extracted SLPK dirs (`3dSceneLayer.json.gz`/`nodepages/`).
+- **All six converters moved under `packages/<fmt>-to-3dtiles/`** (workspace members); core imports repointed
+  (`../../core`), meta-converter registry paths updated. Meta dispatch retested on all formats. (In-process
+  `convert()` export remains the next step; dispatch is still child-process.)
+- **Viewer/inspector**: added Potree LAZ pill + `inspect:lion-laz`; regenerated all changed outputs (rad GE,
+  potree decode, i3s placement) incl. the `output-meta-converter/` set.
+- **README**: format table notes tiled-LAZ; `.3tz`/upgrades now point to CesiumGS **3d-tiles-tools**;
+  added **loaders.gl I3S test-data** to open-data samples; Missing-features section trimmed to what's still open.
+
+### Added / Changed — 2026-06-22 (parallelism rollout, I3S + Potree on real data, LAS/LAZ, output reorg)
+- **Parallelism rolled out to all five operational converters.** `rad`, `sog`, `copc`, `potree` joined
+  `lcc` on the shared `core` async-gzip + `parallelMap` tier (bounded concurrency = cores−1). Verified
+  equivalent output: **rad byte-identical**, **copc byte-identical** (autzen 23.0→16.9 s), **potree
+  byte-identical** (lion 6.2→5.0 s), **sog content-identical** (same 2054 tiles / 10,995,501 splats;
+  tiles renumbered in task-order, deterministic across runs). `sog/spzGlb.js` deleted (now imports core).
+- **I3S converter validated on real SLPKs.** `Buildings_NewYork_v18` (3DObject mesh, v1.8) →
+  **5882 glTF TRIANGLES tiles**. Fixed the load-bearing encoding detector (was gating the whole layer as
+  Draco when buffer 0 is uncompressed). `SMALL_AUTZEN_LAS_All` (PointCloud, **LEPCC**) → fast-fail (no
+  decoder). CRS/ENU placement remains the known caveat. Status 🟡 draft → mesh works.
+- **Potree validated on real datasets** (iTowns `lion` 2.0 BROTLI = 3,954,696 pts exact; `lion_takanawa`
+  1.7 = 167 tiles). **Potree 1.4 inline-hierarchy** and **1.x LAZ** now **fast-fail** with stale-format
+  messages (exit 1, no output) instead of writing an invalid `root:null` tileset.
+- **Plain (non-COPC) LAS/LAZ** support added to `copc-to-3dtiles` (`plainLas.js`): detect via missing COPC
+  VLR → flat tiling (≤2 M pts/tile, no native LoD), LAZ via `laz-perf`. Single-tile LAS tested; multi-tile
+  + non-COPC LAZ end-to-end UNTESTED (no sample).
+- **Meta-converter retested on every format** via the `3dtiled` CLI → `sample-data/output-meta-converter/`
+  (auto-detect + dispatch): rad 11 · sog 2054 · lcc 154 · copc 278 · potree 1624 · **i3s 5882** tiles.
+  Fixed `detectFormat` to recognize **extracted SLPK dirs** (`3dSceneLayer.json.gz` / `nodepages/`).
+  **Note:** the meta-CLI requires `npm install` first (workspace symlink) — without it the bare
+  `3dtiles-convert-core` import fails with `ERR_MODULE_NOT_FOUND`.
+- **Output dirs reorganized** `sample-data/output-<fmt>/` → **`sample-data/output/<fmt>/`**; viewer presets
+  (15), inspector scripts, and README paths repointed. **Viewer pills added**: Potree ×2, I3S (NYC), and a
+  **meta-converter group** (🔀 ×6) pointing at `output-meta-converter/`; matching `inspect:*` scripts.
+- **README**: format-comparison table **split** into Output / point-cloud&mesh / Gaussian-splat; added a
+  **Parallelism (per-converter)** table and a **Missing features & unsupported code-paths** section.
+- **Naming**: kept the `<fmt>-to-3dtiles` convention and the **`3dtiled`** CLI name; purged `@3dtiled/*`
+  from docs/source (shared packages are unscoped `3dtiles-convert-core` / `3dtiles-convert`).
+
+### Added — monorepo, shared core, meta-converter, parallelism (see ARCHITECTURE.md)
+- **npm workspaces** root (`packages/*`). **`3dtiles-convert-core`** holds the shared machinery: the
+  canonical SPZ-v2 + GLB splat encoder (now **async gzip** for parallelism), POINTS GLB writer,
+  `parallelMap` (bounded concurrency) + `WorkerPool` (worker_threads), and `detectFormat`.
+- **`3dtiles-convert`** — the **meta-converter**: `convert(input, outDir, opts)` JS API + `3dtiled`
+  CLI that auto-detects the format and dispatches. Detection covers rad/sog/lcc/copc/potree/i3s.
+  Dispatches to the standalone converters today (non-breaking); migrates to in-process `convert()`
+  as each converter moves into `packages/`.
+- **Parallelism** wired into `lcc-to-3dtiles` as the first adopter: two-phase (build tree + collect
+  tasks → `parallelMap` decode/encode/gzip/write); uses `3dtiles-convert-core`. Validated identical output
+  (11,424,293 splats), ~20% faster on Guan_Temple (more on gzip-heavy formats like SOG).
+- **README**: format-comparison table + a **Runtime (Node / browser-capable)** table per converter
+  (decoders mostly portable / WASM; Node-only gates are I/O + gzip/brotli + workers).
+
 ### Added — converters
 - **sog-to-3dtiles** — PlayCanvas Streamed SOG → 3D Tiles. Walks the binary spatial tree
   (interior = grouping, leaf = REPLACE LOD chain); decodes each chunk via

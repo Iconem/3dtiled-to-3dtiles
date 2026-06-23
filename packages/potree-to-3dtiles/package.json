@@ -1,0 +1,14 @@
+{
+  "name": "potree-to-3dtiles",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "bin": {
+    "potree-to-3dtiles": "src/index.js"
+  },
+  "dependencies": {
+    "@gltf-transform/core": "^4.0.0",
+    "copc": "^0.0.8"
+  },
+  "main": "src/index.js"
+}

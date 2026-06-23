@@ -1,0 +1,24 @@
+{
+  "name": "3dtiled-to-3dtiles",
+  "version": "0.1.0",
+  "private": true,
+  "workspaces": ["packages/*"],
+  "scripts": {
+    "convert": "node packages/convert/cli.js",
+    "dev": "vite",
+    "build": "vite build",
+    "serve": "vite preview --port 3000",
+    "serve:tiles": "node packages/tile-server/server.js"
+  },
+  "dependencies": {
+    "cesium": "1.142.0",
+    "three": "0.180.0",
+    "3d-tiles-renderer": "0.4.28",
+    "@sparkjsdev/spark": "2.1.0",
+    "3d-tiles-rendererjs-3dgs-plugin": "0.1.13"
+  },
+  "devDependencies": {
+    "vite": "^6.0.0",
+    "vite-plugin-cesium": "^1.2.23"
+  }
+}

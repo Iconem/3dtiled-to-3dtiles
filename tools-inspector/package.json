@@ -3,11 +3,20 @@
   "private": true,
   "scripts": {
     "inspect":              "3dtiles-inspector",
-    "inspect:tastier":      "3dtiles-inspector ../sample-data/output-rad/tastier500k-3dtiles-from-rad",
-    "inspect:coit":         "3dtiles-inspector ../sample-data/output-rad/coit-3dtiles-from-rad",
-    "inspect:skatepark":    "3dtiles-inspector ../sample-data/output-sog/skatepark-3dtiles-from-sog",
-    "inspect:roman-parish": "3dtiles-inspector ../sample-data/output-sog/roman-parish-3dtiles-from-sog",
-    "inspect:guantemple":   "3dtiles-inspector ../sample-data/output-lcc/Guan_Temple-3dtiles-from-lcc"
+    "inspect:tastier":      "3dtiles-inspector ../sample-data/output/rad/tastier500k-3dtiles-from-rad",
+    "inspect:coit":         "3dtiles-inspector ../sample-data/output/rad/coit-3dtiles-from-rad",
+    "inspect:skatepark":    "3dtiles-inspector ../sample-data/output/sog/skatepark-3dtiles-from-sog",
+    "inspect:roman-parish": "3dtiles-inspector ../sample-data/output/sog/roman-parish-3dtiles-from-sog",
+    "inspect:guantemple":   "3dtiles-inspector ../sample-data/output/lcc/Guan_Temple-3dtiles-from-lcc",
+    "inspect:lion-p2":      "3dtiles-inspector ../sample-data/output/potree/lion_p2",
+    "inspect:lion-laz":     "3dtiles-inspector ../sample-data/output/potree/lion_takanawa_laz",
+    "inspect:nyc-i3s":      "3dtiles-inspector ../sample-data/output/i3s/Buildings_NewYork_v18",
+    "inspect:meta-rad":     "3dtiles-inspector ../sample-data/output-meta-converter/rad-tastier500k",
+    "inspect:meta-sog":     "3dtiles-inspector ../sample-data/output-meta-converter/sog-skatepark",
+    "inspect:meta-lcc":     "3dtiles-inspector ../sample-data/output-meta-converter/lcc-Guan_Temple",
+    "inspect:meta-copc":    "3dtiles-inspector ../sample-data/output-meta-converter/copc-autzen",
+    "inspect:meta-potree":  "3dtiles-inspector ../sample-data/output-meta-converter/potree-lion_p2",
+    "inspect:meta-i3s":     "3dtiles-inspector ../sample-data/output-meta-converter/i3s-NYC"
   },
   "dependencies": {
     "3dtiles-inspector": "^0.2.13"

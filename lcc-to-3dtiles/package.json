@@ -1,7 +1,0 @@
-{
-  "name": "lcc-to-3dtiles",
-  "version": "0.1.0",
-  "private": true,
-  "type": "module",
-  "bin": { "lcc-to-3dtiles": "src/index.js" }
-}

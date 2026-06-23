@@ -1,0 +1,13 @@
+{
+  "name": "sog-to-3dtiles",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "bin": {
+    "sog-to-3dtiles": "src/index.js"
+  },
+  "dependencies": {
+    "@playcanvas/splat-transform": "^2.6.0"
+  },
+  "main": "src/index.js"
+}

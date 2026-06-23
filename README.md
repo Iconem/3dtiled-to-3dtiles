@@ -10,19 +10,78 @@ SPZ-v2 GLB (one shared encoder, `spzGlb.js`). The decode differs per format; the
 
 ## Format comparison
 
+🟢 = operational · 🟡 draft = scaffold built, partially/un-validated · 🟠 doc = spec referenced in
+`docs-references/`, converter not built (lower-priority / niche). See `docs-references/` for full notes.
+
+### Output — 3D Tiles
+
+| Format | Status | Hierarchy / subdivision | Node (leaf) content | Refine | Intermediate nodes | Metadata location | HTTP range | Spec |
+|--------|:------:|-------------------------|---------------------|:------:|--------------------|-------------------|:----------:|------|
+| **3D Tiles** (output) | 🟢 out | explicit or implicit; box/region/sphere volumes | glTF/GLB w/ `KHR_gaussian_splatting`+`_spz_2` (splats) or POINTS/TRIANGLES | REPLACE/ADD | optional content | `tileset.json` (+ `.3tz`) | ✅ | [OGC](https://www.ogc.org/standard/3dtiles/) |
+
+### Tiled point-cloud & mesh sources → 3D Tiles
+
+| Format | Status | Hierarchy / subdivision | Node (leaf) content | Refine | Intermediate nodes | Metadata location | HTTP range | Spec |
+|--------|:------:|-------------------------|---------------------|:------:|--------------------|-------------------|:----------:|------|
+| **COPC** (LiDAR) | 🟢 | **octree** (EPT-style) | LAZ-compressed LAS points | ADD | octree nodes (accumulate) | COPC VLR + hierarchy pages | ✅ designed for range reads | [copc.io](https://copc.io) |
+| **Potree** (point cloud) | 🟢 | **octree** (named `r`/`r0`..`r7`) | points: position int32×3·scale+offset + rgb (2.0 `octree.bin` / 1.x per-node `.bin`) | ADD | octree nodes (accumulate) | 2.0 `metadata.json`+`hierarchy.bin` (22 B/node) · 1.x `cloud.js`+`.hrc` | ✅ (2.0 single octree.bin; 1.x per-node files) | [Potree](https://github.com/potree/PotreeConverter) |
+| **LAS / LAZ** (plain) | 🟡 | none (flat / chunked — no native LoD) | LAS points (LAZ via `laz-perf`) | ADD | — | LAS header + VLRs | ⚠️ whole-file (not cloud-optimized) | [ASPRS LAS](https://www.ogc.org/standard/las/) |
+| **I3S** (Esri) | 🟡 draft | node tree (**always explicit** — no implicit/template scheme), OBB/MBS LoD (SLPK or REST) | nodes/geometry/textures; `DefaultGeometrySchema` = **PerAttributeArray** (pos `f32×3` · normal `f32×3` · uv0 `f32×2` · color `u8×4`, sequential) or Draco | REPLACE | node pages (`nodepages/*.json`) | `3dSceneLayer.json` + node pages | ✅ REST/range | [github](https://github.com/esri/i3s-spec) |
+| **Nexus** (CNR-ISTI) | 🟠 doc | multiresolution patch DAG / batched mesh | per-patch mesh (not splats) | — | — | header + patch index | ✅ | [github](https://github.com/cnr-isti-vclab/nexus) · [paper](https://vcg.isti.cnr.it/Publications/2016/PD16/FastDec_Ponchio.pdf) |
+
+### Tiled Gaussian-splat sources → 3D Tiles
+
 | Format | Status | Hierarchy / subdivision | Node (leaf) content | Refine | Intermediate nodes | Metadata location | HTTP range | Spec |
 |--------|:------:|-------------------------|---------------------|:------:|--------------------|-------------------|:----------:|------|
 | **RAD** (SparkJS) | 🟢 | LoD merge tree, variable fanout (BhattLod ~1.75 / TinyLod ~1.5) | RADC chunk: per-splat columns — `f16`/`oct88r8` **interleaved**, `ln_0r8`/`r8_delta` **planar**, `f32_lebytes` byte-transposed | REPLACE | downsampled **merged** splats | root `RAD0` JSON + per-chunk `RADC` JSON | ✅ chunked `.radc` | [sparkjs.dev](https://sparkjs.dev/docs/lod-getting-started/) |
 | **SOG (streamed)** (PlayCanvas) | 🟢 | **binary** spatial tree (AABB split) | unbundled SOG chunk: WebP textures → `DataTable` (pos/quat-w-first/log-scale/SH-DC/logit-opacity) | REPLACE | empty grouping nodes | `lod-meta.json` + per-chunk `meta.json` | ✅ per-file | [playcanvas](https://developer.playcanvas.com/user-manual/gaussian-splatting/formats/streamed-sog/) |
-| **LCC** (XGRIDS) | 🟢 | **grid of Units** (cellX×Y) × per-cell LODs | `Data.bin` fixed **32 B/splat**: pos `f32×3`, color `rgba8`, rot `10-10-10-2`, scale `u16×3` (+SH `Shcoef.bin` 64 B) | REPLACE | per-cell coarse LODs | `meta.lcc` JSON + `Index.bin` | ✅ `Index.bin` offsets into `Data.bin` | [developer.xgrids.com](https://developer.xgrids.com/#/document?titleId=en-1720509291851) |
-| **COPC** (LiDAR) | 🟢 | **octree** (EPT-style) | LAZ-compressed LAS points | ADD | octree nodes (accumulate) | COPC VLR + hierarchy pages | ✅ designed for range reads | [copc.io](https://copc.io) |
-| **Potree** (point cloud) | 🟡 | **octree** (named `r`/`r0`..`r7`) | points: position int32×3·scale+offset + rgb (2.0 `octree.bin` / 1.x per-node `.bin`) | ADD | octree nodes (accumulate) | 2.0 `metadata.json`+`hierarchy.bin` (22 B/node) · 1.x `cloud.js`+`.hrc` | ✅ (2.0 single octree.bin; 1.x per-node files) | [Potree](https://github.com/potree/PotreeConverter) |
-| **Nexus** (CNR-ISTI) | 🟠 doc | multiresolution patch DAG / batched mesh | per-patch mesh (not splats) | — | — | header + patch index | ✅ | [github](https://github.com/cnr-isti-vclab/nexus) · [paper](https://vcg.isti.cnr.it/Publications/2016/PD16/FastDec_Ponchio.pdf) |
-| **I3S** (Esri) | 🟡 draft | node tree (**always explicit** — no implicit/template scheme), OBB/MBS LoD (SLPK or REST) | nodes/geometry/textures; `DefaultGeometrySchema` = **PerAttributeArray** (pos `f32×3` · normal `f32×3` · uv0 `f32×2` · color `u8×4`, sequential) or Draco | REPLACE | node pages (`nodepages/*.json`) | `3dSceneLayer.json` + node pages | ✅ REST/range | [github](https://github.com/esri/i3s-spec) |
-| **3D Tiles** (output) | 🟢 out | explicit or implicit; box/region/sphere volumes | glTF/GLB w/ `KHR_gaussian_splatting`+`_spz_2` | REPLACE/ADD | optional content | `tileset.json` (+ `.3tz`) | ✅ | [OGC](https://www.ogc.org/standard/3dtiles/) |
+| **LCC** (XGRIDS) | 🟢 | **grid of Units** (cellX×Y) × per-cell LODs | `Data.bin` fixed **32 B/splat**: pos `f32×3`, color `rgba8`, scale `u16×3`, rot `10-10-10-2` (+SH `Shcoef.bin` 64 B) | REPLACE | per-cell coarse LODs | `meta.lcc` JSON + `Index.bin` | ✅ `Index.bin` offsets into `Data.bin` | [developer.xgrids.com](https://developer.xgrids.com/#/document?titleId=en-1720509291851) |
 
-🟢 = operational converter · 🟡 draft = scaffold built, **untested** (no sample to validate) · 🟠 doc = spec referenced in `docs-references/`, converter not built (lower-priority / niche).
-See `docs-references/` for the full per-format reference notes.
+### Parallelism (per converter)
+
+Per-tile work — decode → SPZ/GLB encode → gzip → write — is **independent per tile**, so it is
+embarrassingly parallel. The shared `core` (`packages/core`) provides the two tiers: **async gzip**
+(`zlib.gzip` on the libuv threadpool) + `parallelMap` (bounded-concurrency = cores−1, no workers), and
+a `WorkerPool` (`worker_threads`) for decode-heavy formats. **All five operational converters now use
+tier 1** (`parallelMap` + async gzip/`buildPointsGlb`), each verified to produce output equivalent to
+its prior serial version. The `WorkerPool` tier (true multicore decode) is not yet wired — it's the
+remaining headroom for the WASM/CPU-bound decoders.
+
+| Converter | Decode cost (per tile) | Parallel **today**? | Main-thread-bound part | Worker-extractable? |
+|-----------|------------------------|:-------------------:|------------------------|---------------------|
+| **rad** | pure-JS column unpack (interleaved/planar) — CPU-bound | ✅ `parallelMap` + async gzip (byte-identical) | JS decode | ✅ decode per chunk → `WorkerPool` (true multicore) |
+| **sog** | **WebP WASM** decode per chunk | ✅ `parallelMap` + async gzip (content-identical) | WebP decode | ✅ **biggest win** (thousands of tiles); WASM runs in workers as-is |
+| **lcc** | pure-JS `DataView` unpack — fast | ✅ `parallelMap` + async gzip | one ~3 M-splat tile is a serial tail | ✅ worker decode would split that giant tile |
+| **copc** | **LAZ WASM** (`laz-perf`) decode — CPU-bound | ✅ `parallelMap` (byte-identical; ~27% faster) | LAZ decode | ✅ per-node decode → worker pool |
+| **potree** | pure-JS slice (+ **brotli** for 2.0) — many small nodes | ✅ `parallelMap` (byte-identical) | per-node decode + brotli | ✅ many small nodes → ideal worker-pool fan-out |
+| **i3s** (draft) | pure-JS geometry decode | ❌ (draft; serial) | — | ✅ later |
+
+Measured (cores−1 lanes): copc autzen 23.0→16.9 s, potree lion 6.2→5.0 s — modest now (gzip/decode
+still on the main thread via the libuv pool); the `WorkerPool` tier is where multicore decode lands.
+
+**Short answer to "can main-thread work move to workers?"** Yes — for *every* converter. The pure-JS
+decoders (rad, lcc, potree) gain the most (they're single-core-bound today → true multicore via
+`WorkerPool`); the WASM decoders (sog, copc) are already fast per-op but still serialized on the main
+thread, so a worker pool parallelizes them across cores. `core.WorkerPool` is the shared mechanism;
+each converter just needs its tile loop ported (lcc is the worked example).
+
+### Runtime (Node today / browser-capable?)
+
+All converters run on **Node today** (`fs` for I/O, Node `zlib` for SPZ gzip). The *decoders* are
+mostly portable; the Node-only parts are I/O + compression + workers, which `core` abstracts.
+
+| Converter | Decoder portability | Node-only gate(s) → browser path |
+|-----------|---------------------|----------------------------------|
+| **rad** | pure JS (Buffer math) | `fs` → fetch/File; SPZ `zlib.gzip` → `CompressionStream('gzip')`. Browser-capable. |
+| **sog** | **WASM** (`webp.wasm` via splat-transform — a web SDK) | `fs`/`MemoryReadFileSystem` → its `UrlReadFileSystem` already works in-browser. Browser-capable. |
+| **lcc** | pure JS (DataView) | `fs` → fetch. Browser-capable. |
+| **copc** | **WASM** (`laz-perf`) | `fs` → fetch; `proj4` is browser-ok. Browser-capable. |
+| **potree** | pure JS | `fs` → fetch; **2.0 BROTLI needs a WASM brotli** (no standard browser API — DEFAULT encoding is fine). Mostly browser-capable. |
+| **i3s** | JS + zip | `fs`/zip → fetch + a browser zip lib. Browser-capable (draft). |
+| **output GLB** | `@gltf-transform/core` | works in Node and browser. |
+
+Common gates: **gzip** (SPZ) → browser `CompressionStream`; **brotli** (Potree 2.0) → needs WASM;
+**parallelism** `worker_threads` → Web Workers (same task shape); WebP/LAZ decoders are *already* WASM.
 
 ```mermaid
 flowchart LR
@@ -102,18 +161,88 @@ flowchart TD
 
 ---
 
-## Converters
+## Monorepo & usage
 
-### Testing
+npm-workspaces monorepo. Each input format is an **independent converter** with its own deps
+(install just the one you need); a shared **core** holds the common machinery; a **meta-converter**
+detects any input and dispatches.
 
-Self-contained CesiumJS 1.116 viewer. Open via HTTP (not `file://`).
-
-```sh
-npx serve ./out-copc   # then open viewer.html, set URL: http://localhost:3000/tileset.json
-npx serve ./out-rad    # same
+```
+packages/
+  core/      3dtiles-convert-core   — shared: SPZ-v2 GLB + POINTS GLB encoders (async gzip),
+                                      parallelMap + WorkerPool, format detection
+  convert/   3dtiles-convert        — meta-converter; exposes the `3dtiled` CLI + a JS/TS API
+  rad-to-3dtiles/  sog-to-3dtiles/  lcc-to-3dtiles/  copc-to-3dtiles/  potree-to-3dtiles/  i3s-to-3dtiles/
+                                    — the per-format converters (each its own package + deps)
 ```
 
-Two tabs: point cloud (classification colors) and Gaussian splat (CesiumJS + three.js code).
+All packages live under `packages/` (npm-workspaces members). Run `npm install` once at the repo root
+to link the `3dtiles-convert-core` workspace symlink and each converter's deps.
+
+*Naming:* per-format converters keep the descriptive **`<fmt>-to-3dtiles`** convention (not scoped
+`@scope/<fmt>`); the two shared packages are the unscoped `3dtiles-convert-core` / `3dtiles-convert`.
+
+### Meta-converter — convert anything
+
+```sh
+npm install                                  # wire up the workspaces
+# CLI (auto-detects format):
+npm run convert -- <input> <outDir> [--format rad|sog|lcc|copc|potree|i3s] \
+                                    [--scale N] [--ge-scale N] [--ge-layer N] [-- <extra converter args>]
+# or directly:
+node packages/convert/cli.js sample-data/input/RAD/coit.rad sample-data/output/rad/coit-3dtiles-from-rad
+```
+
+```js
+// JS/TS API — same detection + dispatch
+import { convert, detectFormat, supportedFormats } from '3dtiles-convert';
+await convert('path/to/input', 'out/dir', { geScale: 2, onLog: s => process.stdout.write(s) });
+```
+
+> Today the meta-converter dispatches to each `<fmt>-to-3dtiles/src/index.js` as a child process
+> (non-breaking during migration); as converters move into `packages/<fmt>` and export the uniform
+> `convert()`, the registry flips that entry to an in-process module import — the public API is
+> unchanged. See [ARCHITECTURE.md](ARCHITECTURE.md).
+
+### Individual converter (à la carte)
+
+Each converter also runs standalone (only its own deps):
+
+```sh
+node packages/rad-to-3dtiles/src/index.js    <coit.rad>            sample-data/output/rad/<name>-3dtiles-from-rad
+node packages/sog-to-3dtiles/src/index.js    <scene-dir>           sample-data/output/sog/<name>-3dtiles-from-sog
+node packages/lcc-to-3dtiles/src/index.js    <lcc-dir>             sample-data/output/lcc/<name>-3dtiles-from-lcc
+node packages/copc-to-3dtiles/src/index.js   <input.copc.laz>      sample-data/output/copc/<name>-3dtiles-from-copc
+node packages/potree-to-3dtiles/src/index.js <potree-dir>          sample-data/output/potree/<name>
+node packages/i3s-to-3dtiles/src/index.js    <extracted-slpk-dir>  sample-data/output/i3s/<name>   # draft
+```
+
+> Output convention: regenerate into **`sample-data/output/<fmt>/…`** (the viewer presets and
+> `tools-inspector` scripts point there).
+
+---
+
+## Converters
+
+### Viewer (`viewer.html`) — offline, self-contained via Vite
+
+All viewer deps (Cesium, three, 3d-tiles-renderer, @sparkjsdev/spark, the 3DGS plugin) are **npm
+dependencies bundled by Vite — no CDN, works fully offline**:
+
+```sh
+pnpm install         # (or npm install) — installs cesium/three/3d-tiles-renderer/spark/vite
+pnpm run dev         # vite dev server → http://localhost:3000/ (redirects to viewer.html; serves sample-data/)
+# pnpm run build     # static offline bundle in dist/
+```
+
+pnpm uses `pnpm-workspace.yaml` + `.npmrc` (`node-linker=hoisted`, so the meta-converter's
+`import('rad-to-3dtiles')` resolves like npm's flat layout); npm uses the `workspaces` field. Either works.
+
+`vite-plugin-cesium` copies Cesium's Workers/Assets/Widgets and sets `CESIUM_BASE_URL`; `three` is
+de-duplicated (`resolve.dedupe`) so SparkJS + the 3DGS plugin share one instance (replacing the old
+esm.sh `?external=three` trick). Verified: **0 CDN requests** — Cesium, the 3DTRJS globe, and Gaussian
+splat streaming all load from `node_modules`. The dev server serves `sample-data/output/**` too, so the
+built-in presets (which point at `http://localhost:3000/sample-data/...`) resolve against the same origin.
 
 Additional online viewers:
 - **COPC**: [viewer.copc.io](https://viewer.copc.io), [lidar-viewer.gishub.org](https://lidar-viewer.gishub.org)
@@ -140,8 +269,8 @@ tiles.registerPlugin(new GaussianSplatPlugin({
 scene.add(tiles.group);
 ```
 
-> The viewer loads the plugin from esm.sh at runtime (shared `three@0.180` via `?external=three`)
-> — no local install needed for the viewer.
+> The viewer bundles this plugin (and SparkJS) as local npm deps via Vite — shared `three@0.180`
+> through `resolve.dedupe`, no CDN. `npm run dev` serves it offline.
 
 `viewer.html` consolidates all controls into a right **sidebar** (Renderer · Basemap · Tileset &
 LoD · Navigation · Local frame · Ion · Snippet), including a **Max SSE (px)** input that drives
@@ -159,7 +288,7 @@ this viewer, see [3DTiles-Inspector](https://github.com/WilliamLiu-1997/3DTiles-
 Converts COPC `.copc.laz` LiDAR files to 3D Tiles 1.1 with implicit octree tiling.
 
 ```sh
-cd copc-to-3dtiles
+cd packages/copc-to-3dtiles
 npm install
 node src/index.js input.copc.laz ./out-copc
 ```
@@ -198,7 +327,7 @@ native-CRS outputs.
 Converts SparkJS `.RAD` Gaussian Splat LoD files to 3D Tiles 1.1 with `KHR_gaussian_splatting` GLB tiles.
 
 ```sh
-cd rad-to-3dtiles
+cd packages/rad-to-3dtiles
 npm install
 # Always inspect first:
 node scripts/dump-rad-header.js coit.rad
@@ -235,7 +364,7 @@ Converts a PlayCanvas **[Streamed SOG](docs-references/streamed-sog.md)** datase
 `KHR_gaussian_splatting` + `_compression_spz_2` GLB tiles as the RAD path.
 
 ```sh
-cd sog-to-3dtiles
+cd packages/sog-to-3dtiles
 npm install                                  # pulls @playcanvas/splat-transform
 node src/index.js path/to/scene/ ./out-sog   # dir containing lod-meta.json, or the json itself
 ```
@@ -281,7 +410,7 @@ Converts an XGRIDS **[LCC](docs-references/lcc-format.md)** dataset (`meta.lcc` 
 `Data.bin` [+ `Shcoef.bin`]) to 3D Tiles with the same `KHR_gaussian_splatting` + `_spz_2` GLB tiles.
 
 ```sh
-cd lcc-to-3dtiles
+cd packages/lcc-to-3dtiles
 node src/index.js path/to/lcc-dir ./out-lcc     # dir containing meta.lcc (name can vary)
 ```
 
@@ -307,16 +436,18 @@ required per its White Paper (see the doc).
 
 ---
 
-### i3s-to-3dtiles  🟡 **DRAFT — untested**
+### i3s-to-3dtiles  🟡 **DRAFT — mesh validated on real data**
 
 Converts the **supported subset** of Esri **[I3S](docs-references/i3s-spec.md)** (Indexed 3D Scene
-Layer) → 3D Tiles 1.1. ⚠️ **No I3S sample exists in this repo, so this converter is unvalidated** —
-the parsing/tree/OBB/geometry logic is spec-grounded (and unit-checked against synthetic buffers),
-but offsets, CRS/ECEF placement, and resource paths must be verified against real data.
+Layer) → 3D Tiles 1.1. Validated on `Buildings_NewYork_v18.slpk` → **5882 glTF TRIANGLES tiles** that
+place correctly in NYC: I3S geographic-layer vertices are `(Δlon°, Δlat°, Δheight_m)` relative to the
+node OBB centre, converted per-vertex to ECEF (stored relative to the centre for float32 precision,
+tile `transform` translates back). Still a draft: **projected/vertical CRS** placement is not handled,
+normals stay in the source frame, and Draco/LEPCC/textures/attributes are gated out.
 
 ```sh
 unzip your-layer.slpk -d your-layer/        # an SLPK is a plain zip
-cd i3s-to-3dtiles
+cd packages/i3s-to-3dtiles
 node src/index.js ../your-layer ./out-i3s
 ```
 
@@ -350,7 +481,7 @@ Converts a **Potree** octree point cloud → 3D Tiles (glTF **POINTS** tiles). A
 per-node `.bin`).
 
 ```sh
-cd potree-to-3dtiles && npm install
+cd packages/potree-to-3dtiles && npm install
 node src/index.js path/to/potree-dir ./out-potree
 ```
 
@@ -360,11 +491,20 @@ spacing per depth (`rootSpacing / 2^depth`). 2.0 decode is authoritative (`hiera
 `type u8, childMask u8, numPoints u32, byteOffset u64, byteSize u64`; positions `int32×3·scale+offset`;
 DEFAULT + BROTLI via Node's `zlib`). Points are emitted relative to the dataset centre (float32-safe).
 
-> **Status:** 🟡 **2.0 decode validated on a synthetic dataset** (positions + RGB round-trip exactly,
-> incl. the Y-up `RX(−90°)` convention); **1.x is best-effort** (POCLoader path/`.hrc` conventions).
-> Both **untested on a real dataset** (none in repo) — and output is **not geo-referenced** (sits at
-> the local origin; add a root transform / ENU placement downstream). Validate before production.
-> Reference: [yeyan00/potree23dtiles](https://github.com/yeyan00/potree23dtiles) (2.0 decode cross-check).
+**Validated on real datasets** (2026-06-22):
+
+| Sample | Potree | Result |
+|--------|--------|--------|
+| iTowns `lion` | 2.0 (**BROTLI**) | ✅ 1624 tiles / **3,954,696 pts = `metadata.points` exactly** (Morton-decoded position+rgb) |
+| `lion_takanawa` | 1.x **v1.7** (`.hrc` + chunked `data/r/…`) | ✅ 167 tiles / 272,768 pts (per-node origin) |
+| `vol_total` | 1.x **v1.4** (inline `hierarchy`, flat `data/<name>.bin`) | ✅ 42 tiles |
+| `lion_takanawa_laz` | 1.x **v1.4 + LAZ** (`pointAttributes:"LAZ"`, flat `data/<name>.laz`) | ✅ 200 tiles — **tiled LAZ** octree (one .laz per node, laz-perf) |
+
+> **Status:** 🟢 **operational for Potree 2.0 (DEFAULT + BROTLI) and 1.x (v1.7 `.hrc` + v1.4 inline),
+> with `.bin` and tiled-`.laz` nodes.** 2.0 BROTLI positions/rgb are Morton-decoded; 1.x points are
+> quantised per-node-origin; LAZ nodes are decoded with laz-perf (via `copc`). Output is **not
+> geo-referenced** (local origin; add a root transform downstream). Samples in
+> `sample-data/input/POTREE/`. Reference: [yeyan00/potree23dtiles](https://github.com/yeyan00/potree23dtiles) + Potree `DecoderWorker_brotli.js`.
 
 ---
 
@@ -393,13 +533,13 @@ curl -L https://wlt-ai-cdn.art/tastier_rad_500/0524c1a1-abf2-4969-ae40-9981ee836
 PlayCanvas example datasets (download the whole tree with `sog-to-3dtiles/scripts/fetch-sog.mjs`):
 
 ```sh
-cd sog-to-3dtiles
+cd packages/sog-to-3dtiles
 # Skatepark — 20 chunks, 4 LOD levels (~160 files)
 node scripts/fetch-sog.mjs https://code.playcanvas.com/examples_data/example_skatepark_02/ ../sample-data/input/sog/skatepark
 # Roman Parish — 131 chunks, 7 LOD levels (~790 files)
 node scripts/fetch-sog.mjs https://code.playcanvas.com/examples_data/example_roman_parish_02/ ../sample-data/input/sog/roman-parish
 # then convert:
-node src/index.js ../sample-data/input/sog/skatepark ../sample-data/output-sog/skatepark-3dtiles-from-sog
+node src/index.js ../sample-data/input/sog/skatepark ../sample-data/output/sog/skatepark-3dtiles-from-sog
 ```
 
 Both are wired into the viewer preset bar (**⬢ Skatepark / Roman Parish (SOG)**) and the inspector
@@ -465,21 +605,24 @@ Tools that tile point clouds, meshes, or splats to 3D Tiles / streaming formats 
 format handling, tree/geometric-error strategy, and parallelism:
 
 **Point clouds**
-- [yeyan00/potree23dtiles](https://github.com/yeyan00/potree23dtiles) — Potree → 3D Tiles (the
-  closest analogue to our planned `potree-to-3dtiles`).
-- [py3dtiles](https://gitlab.com/py3dtiles/py3dtiles) — Python LAS/XYZ → 3D Tiles `pnts` tiler.
-- [igd-geo/schwarzwald](https://github.com/igd-geo/schwarzwald) — high-throughput point-cloud tiler (3D Tiles).
+- [PDAL](https://pdal.io/en/latest/) for building COPC
 - [Potree / PotreeConverter](https://github.com/potree/PotreeConverter) — the octree format + converter we read.
 - [gocesiumtiler](https://github.com/mfbonfigli/gocesiumtiler) — Go LAS → Cesium 3D Tiles point tiler.
+- [py3dtiles](https://gitlab.com/py3dtiles/py3dtiles) — Python LAS/XYZ → 3D Tiles `pnts` tiler.
+- [yeyan00/potree23dtiles](https://github.com/yeyan00/potree23dtiles) — Potree → 3D Tiles (the
+  closest analogue to our `potree-to-3dtiles`; cross-checked our 2.0 decode against it).
+- [igd-geo/schwarzwald](https://github.com/igd-geo/schwarzwald) — high-throughput point-cloud tiler (3D Tiles).
 
 **Meshes / CAD / GIS**
-- [mago3d/mago-3d-tiler](https://github.com/Gaia3D/mago-3d-tiler) — Java OBJ/IFC/GIS → 3D Tiles.
+- [Gaia3D/mago-3d-tiler](https://github.com/Gaia3D/mago-3d-tiler) — Java OBJ/IFC/GIS → 3D Tiles.
+- [fanvanzh/3dtiles](https://github.com/fanvanzh/3dtiles)
+- [kitware vtk 3d-tiles-generation](https://www.kitware.com/3d-tiles-generation-using-vtk/)
 - [obj2tiles](https://github.com/OpenDroneMap/Obj2Tiles) — OBJ → 3D Tiles (b3dm) with LoD.
 
 **Gaussian splats**
 - [@sparkjsdev/spark `build-lod`](https://sparkjs.dev/docs/lod-getting-started/) — PLY/SPZ → RAD LoD (we consume `.rad`).
-- [WilliamLiu-1997/3DGS-PLY-3DTiles-Converter](https://github.com/WilliamLiu-1997/3DGS-PLY-3DTiles-Converter) — PLY → SPZ-GLB 3D Tiles (our cross-validation reference).
 - [playcanvas/splat-transform](https://github.com/playcanvas/splat-transform) — SOG/PLY/SPZ conversion (we use `readSog`).
+- [WilliamLiu-1997/3DGS-PLY-3DTiles-Converter](https://github.com/WilliamLiu-1997/3DGS-PLY-3DTiles-Converter) — PLY → SPZ-GLB 3D Tiles (our cross-validation reference).
 
 ---
 
@@ -647,6 +790,12 @@ https://webimaging.lillemetropole.fr/externe/maillage/2016_mel_10cm/3dtiles/tile
 All three city mesh tilesets use RGF93/Lambert-93 or WGS84 coordinates and are served with CORS.
 They work in `viewer.html` via the built-in city mesh presets.
 
+**Esri I3S samples (for `i3s-to-3dtiles`)** — [loaders.gl I3S test data](https://github.com/visgl/loaders.gl/tree/master/modules/i3s/test/data)
+has both `.slpk` packages and **raw REST/file-server layouts** (`3dSceneLayer.json` + `nodepages/` + `nodes/`
+trees on disk — the converter reads those directly, no unzip). Mix of `3DObject`/`IntegratedMesh` (mesh),
+`PointCloud`, and Draco-compressed layers (Draco/LEPCC are gated out). Local samples live in
+`sample-data/input/I3S-SLPK/` (NYC buildings mesh ✓, Autzen point cloud → LEPCC, gated).
+
 ### References
 
 #### Local notes (in `docs-references/`)
@@ -662,6 +811,7 @@ They work in `viewer.html` via the built-in city mesh presets.
 | `sog.md` | SOG (Spatially Ordered Gaussians) chunk format — WebP textures + dequant (positions/quats/scales/SH); consumed by `sog-to-3dtiles` (source: developer.playcanvas.com) |
 | `streamed-sog.md` | PlayCanvas Streamed SOG LOD format — `lod-meta.json` spatial tree + chunk references; the input to `sog-to-3dtiles` (source: developer.playcanvas.com) |
 | `lcc-format.md` | XGRIDS LCC (Lixel CyberColor) — `meta.lcc`/`Index.bin`/`Data.bin` (32 B/splat, 10-10-10-2 rot, packed-11 SH); input to `lcc-to-3dtiles` (source: github.com/xgrids/LCCWhitepaper). Attribution required. |
+| `potree-format.md` | Potree 1.x (`cloud.js` + `.hrc`/`.bin`/`.laz`) and 2.0 (binary octree) — input to `potree-to-3dtiles`. Key: 1.x decode is `POSITION·scale + the NODE's box.min` (node-relative), with the `createChildAABB` octant convention bit0→Z/bit1→Y/bit2→X. cloud.js can carry a proj4 CRS. Sources: potree repo `docs/` (pinned commits). |
 | `nexus-format.md` | 🟠 CNR-ISTI Nexus multiresolution mesh (DAG of patches) — **doc-referenced, no converter** (mesh, not splats; niche). Refs: github.com/cnr-isti-vclab/nexus, FastDec paper |
 | `i3s-spec.md` | 🟡 Esri I3S (Indexed 3D Scene Layer / SLPK) — **draft converter `i3s-to-3dtiles/` (UNTESTED)**: explicit nodepages + uncompressed `DefaultGeometrySchema` mesh / point cloud only. Ref: github.com/esri/i3s-spec |
 
@@ -699,8 +849,8 @@ They work in `viewer.html` via the built-in city mesh presets.
   ```
   Or run directly from the repo root with `npx`:
   ```bash
-  npx --prefix tools-inspector 3dtiles-inspector sample-data/output-rad/tastier500k-3dtiles-from-rad
-  npx --prefix tools-inspector 3dtiles-inspector sample-data/output-rad/coit-3dtiles-from-rad
+  npx --prefix tools-inspector 3dtiles-inspector sample-data/output/rad/tastier500k-3dtiles-from-rad
+  npx --prefix tools-inspector 3dtiles-inspector sample-data/output/rad/coit-3dtiles-from-rad
   ```
   Each command starts a localhost HTTP server and opens the inspector in your default browser. Its `Geometric Error` / `Layer Multiplier` sliders are the runtime analogue of this converter's uniform-per-depth error model — handy for confirming LoD behaviour without re-tiling.
 
@@ -830,6 +980,47 @@ world→local matrix concatenation is not what limits fine-detail streaming.
 
 ---
 
+## Missing features & unsupported code-paths
+
+A consolidated, honest list of what is **not** handled (and where it would go). Items marked
+**fast-fail** error out with a clear message rather than producing bad output.
+
+### Format decode coverage
+- **Spherical harmonics (SH)** — every splat converter emits **DC only**. Sources carry more: RAD `sh1`,
+  LCC `Shcoef.bin` (64 B/splat, packed-11, degree-3), SOG higher SH bands. View-dependent color is dropped.
+- **Plain LAS/LAZ** (copc converter, *untiled*) — **flat tiling only** (no native LoD); single-tile path
+  tested, **multi-tile chunking + a genuine non-COPC `.laz` end-to-end are UNTESTED**; whole-file LAZ decode
+  holds the full buffer in RAM (~filesize); only LAS **1.2 / 1.4** headers (the `copc` lib's limit). (For a
+  *tiled* LAZ point cloud, use a Potree LAZ octree — supported, see below.)
+- **I3S** (draft): **Draco-only** geometry (gated), **LEPCC/PCSL** point clouds (gated — Autzen sample hits
+  this), textures/materials (dropped — geometry only), per-feature attributes (dropped), legacy per-node
+  `3dNodeIndexDocument` index (unsupported), **Point** (instance) & **Building** (composite) layers
+  (unsupported), **projected/vertical CRS** (only WGS84-geographic vertex placement is implemented), and
+  per-vertex **normals are left in the source frame** (not re-oriented to ECEF — affects lit shading only).
+- **Nexus** — no converter (doc-referenced only; mesh, niche).
+- *(Resolved this round: Potree 2.0 BROTLI Morton decode, Potree 1.x per-node origin, Potree 1.4
+  inline-hierarchy + tiled LAZ, RAD spatial geometricError, I3S geographic vertex placement.)*
+
+### Parallelism & performance
+- **`WorkerPool` (worker_threads) tier not wired** — all converters use only the async-gzip + `parallelMap`
+  tier (main-thread decode on the libuv pool). True multicore decode (the WASM/CPU-bound decoders) is unused headroom.
+- **RAD `geometricError` undershoots** — featureSize-based GE is ~4× lower than a spatial (tile-diagonal)
+  basis (Elevator: ours 1.22 vs William's 4.66), so renderers under-refine → coarse/"missing" tiles at
+  distance. Workaround `--ge-scale ~4`; no spatial-GE option yet.
+
+### Architecture & runtime
+- **Browser runtime not built** — `fs` / `zlib` / `worker_threads` are Node-only; core's planned `fs-io`
+  abstraction + `CompressionStream`/WASM-brotli paths don't exist yet (decoders are mostly portable; see Runtime table).
+- **Converters not yet moved under `packages/<fmt>/`** — they remain top-level `*-to-3dtiles/` dirs; the
+  meta-converter dispatches via **child process**, not an in-process module import (migration pending).
+- **Meta-converter needs `npm install` first** (to link the `3dtiles-convert-core` workspace symlink); without
+  it the bare import fails with `ERR_MODULE_NOT_FOUND`.
+- **Output not geo-referenced** for Potree & plain-LAS/COPC-without-CRS (local origin; needs a root ENU transform).
+- **`.3tz` packaging / tileset upgrades** are not built in. Use Cesium's
+  [3d-tiles-tools](https://github.com/CesiumGS/3d-tiles-tools) (CLI + JS API) — `npx 3d-tiles-tools createTileset`,
+  `… combine`, `… upgrade` (1.0→1.1), and `… convert tileset.json output.3tz` — which handle `.3tz` zip
+  packaging and tileset upgrades cleanly. (One COPC `.zip` exists in `sample-data/` as an ad-hoc example.)
+
 ## TODO
 
 ### copc-to-3dtiles
@@ -842,18 +1033,44 @@ world→local matrix concatenation is not what limits fine-detail streaming.
 
 ---
 
-## Vision: towards a TiTiler for 3D
+## Vision: towards a TiTiler for 3D — **now live for COPC**
 
-This project seeds what could become a **TiTiler equivalent for 3D formats**: middleware that reads
-cloud-native, internally tiled 3D formats (COPC, RAD, SPZ, Potree, EPT, i3s…) and streams
-OGC 3D Tiles 1.1 on demand — transcribing the source hierarchy verbatim into implicit/explicit
-tiling, converting raw tile geometry to glTF/GLB with appropriate extensions
-(KHR_gaussian_splatting, EXT_mesh_features, CESIUM_primitive_outline…), serving with HTTP Range
-requests so no data is re-encoded or re-sorted.
+A **TiTiler equivalent for 3D formats**: middleware that reads cloud-native, internally tiled 3D
+formats and streams OGC 3D Tiles 1.1 **on demand** — transcribing the source octree/hierarchy into a
+3D Tiles tree and converting raw node geometry to glTF/GLB, served over HTTP Range so nothing is
+re-encoded or re-sorted. Like TiTiler for COG: zero re-tiling, zero copy.
 
-Like TiTiler for Cloud Optimized GeoTIFF: zero re-tiling, zero copy, internally-tiled-to-internally-tiled.
+### `tile-server` — live COPC → 3D Tiles (implemented ✅)
 
-Formats in scope: COPC (LiDAR), RAD/SPZ (3DGS), EPT/Entwine (LiDAR), Potree (LiDAR), 3DTILES (passthrough).
+`packages/tile-server` is a working middleware (the TiTiler `/cog/tiles/...` analogue):
+
+```sh
+npm run serve:tiles      # → http://localhost:3001  (CORS open)
+# then, in viewer.html, the pill "🛰 COPC→3DT (live middleware)" loads:
+#   http://localhost:3001/copc/tileset.json?url=<any COPC url>
+```
+
+- `GET /copc/tileset.json?url=<COPC>` — range-reads the COPC header + hierarchy, returns a 3D Tiles 1.1
+  tileset (explicit tree, `ADD` refine, one ENU→ECEF root transform from the COPC WKT CRS via proj4).
+- `GET /copc/tile/<D-X-Y-Z>.glb?url=<COPC>` — range-reads **just that octree node**, decodes its points,
+  returns a POINTS GLB on the fly (`core.buildPointsGlb`).
+
+The COPC octree maps ~1:1 onto the 3D Tiles tree, so no re-tiling. Verified end-to-end: a browser
+viewer (CesiumJS) renders Autzen geo-referenced over Oregon, streamed live from a COPC URL — the
+viewer never sees the COPC, only 3D Tiles. Works with any 3D-Tiles client (CesiumJS, 3DTilesRendererJS,
+cesium-for-unreal). Other formats (RAD/SPZ, Potree, EPT) can be added behind the same endpoint shape.
+
+Formats in scope: **COPC (live ✅)**, RAD/SPZ (3DGS), EPT/Entwine (LiDAR), Potree (LiDAR), 3DTILES (passthrough).
+
+### `potree-to-copc` (assessed — blocked on a JS LAZ encoder)
+
+Potree and COPC are both octrees, so the hierarchy/metadata is a near 1:1 map and the read side is
+ready (the readers extract points + the octree + the `cloud.js`/metadata **CRS**). The blocker is the
+**write**: COPC mandates LAZ, and there is **no pure-JS LAZ encoder** (`laz-perf`'s WASM build is
+decode-only; `copc.js` is read-only). Realistic paths: compile a Rust crate
+([copc-rs](https://github.com/pka/copc-rs) / [copc-converter](https://github.com/360-geo/copc-converter)
+with `laz-rs`) to **WASM**, or shell out to [PDAL `writers.copc`](https://pdal.io/en/stable/stages/writers.copc.html)
+/ [copc-lib](https://github.com/RockRobotic/copc-lib). Deferred until a JS/WASM LAZ writer is wired.
 
 ---
 
