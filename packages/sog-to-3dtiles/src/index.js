@@ -23,7 +23,7 @@ import { decodeChunk, extractRange } from './sogChunk.js';
 // Shared, parallel-friendly encoder from core (async gzip on the libuv threadpool) +
 // bounded-concurrency map — same import lcc uses. (Replaced the former local synchronous
 // ./spzGlb.js, which was byte-identical and is now deleted.)
-import { buildSpzBuffer, buildSpzGlb, computeBounds, parallelMap, defaultConcurrency } from '../../core/index.js';
+import { buildSplatTileGlb, computeBounds, parallelMap, defaultConcurrency } from '../../core/index.js';
 
 // Geometric error: anchored to the ROOT bound diagonal and halved at every step down
 // the tree (interior level AND each LOD-chain step), matching the reference
@@ -127,8 +127,7 @@ export async function convert(input, outDir, opts = {}) {
     await parallelMap(tasks, async ({ uri, run }) => {
       const { positions, alphas, rgb, scales, rotations } = extractRange(table, run.offset, run.count);
       const bounds = computeBounds(positions, run.count);
-      const spz = await buildSpzBuffer(positions, alphas, rgb, scales, rotations, run.count);
-      const glb = buildSpzGlb(spz, run.count, bounds);
+      const glb = await buildSplatTileGlb({ positions, alphas, rgb, scales, rotations }, run.count, bounds, opts.centroidsOnly);
       await fs.writeFile(path.join(outDir, uri), glb);
       tilesWritten++;
     }, { concurrency });
@@ -146,7 +145,7 @@ export async function convert(input, outDir, opts = {}) {
       const n = table.numRows;
       const { positions, alphas, rgb, scales, rotations } = extractRange(table, 0, n);
       const bounds = computeBounds(positions, n);
-      const glb = buildSpzGlb(await buildSpzBuffer(positions, alphas, rgb, scales, rotations, n), n, bounds);
+      const glb = await buildSplatTileGlb({ positions, alphas, rgb, scales, rotations }, n, bounds, opts.centroidsOnly);
       const uri = `tiles/env.glb`;
       await fs.writeFile(path.join(outDir, uri), glb);
       const envBox = [bounds.cx, -bounds.cz, bounds.cy, bounds.hx,0,0, 0,bounds.hz,0, 0,0,bounds.hy];
@@ -166,15 +165,18 @@ export async function convert(input, outDir, opts = {}) {
     asset: { version: '1.1' },
     geometricError: root.tile.geometricError,
     root: root.tile,
-    extensionsUsed: ['3DTILES_content_gltf'],
-    extensions: { '3DTILES_content_gltf': {
-      extensionsUsed:     ['KHR_gaussian_splatting', 'KHR_gaussian_splatting_compression_spz_2'],
-      extensionsRequired: ['KHR_gaussian_splatting', 'KHR_gaussian_splatting_compression_spz_2'],
-    }},
+    // centroids mode emits plain glTF POINTS tiles → no splat-extension advertisement.
+    ...(opts.centroidsOnly ? {} : {
+      extensionsUsed: ['3DTILES_content_gltf'],
+      extensions: { '3DTILES_content_gltf': {
+        extensionsUsed:     ['KHR_gaussian_splatting', 'KHR_gaussian_splatting_compression_spz_2'],
+        extensionsRequired: ['KHR_gaussian_splatting', 'KHR_gaussian_splatting_compression_spz_2'],
+      }},
+    }),
   };
   await fs.writeFile(path.join(outDir, 'tileset.json'), JSON.stringify(tileset, null, 2));
   const elapsed = (Date.now() - t0) / 1000;
-  console.log(`\nDone → ${outDir}/tileset.json  (${tilesWritten} GLB tiles, KHR_gaussian_splatting_compression_spz_2)`);
+  console.log(`\nDone → ${outDir}/tileset.json  (${tilesWritten} ${opts.centroidsOnly ? 'POINTS centroid' : 'SPZ splat'} tiles)`);
   console.log(`  Actual time: ${elapsed < 60 ? elapsed.toFixed(1)+'s' : (elapsed/60).toFixed(1)+' min'}`);
   return { format: 'sog', outDir, tiles: tilesWritten };
 }

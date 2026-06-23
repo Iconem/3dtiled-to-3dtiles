@@ -12,6 +12,7 @@
  */
 import zlib from 'zlib';
 import { promisify } from 'util';
+import { buildPointsGlb } from './points-glb.js';
 
 const gzip = promisify(zlib.gzip);
 
@@ -51,6 +52,34 @@ export function computeBounds(positions, count) {
   for (let i=0;i<count;i++){const x=positions[i*3],y=positions[i*3+1],z=positions[i*3+2];if(!isFinite(x))continue;if(x<a)a=x;if(x>d)d=x;if(y<b)b=y;if(y>e)e=y;if(z<c)c=z;if(z>f)f=z;}
   if(!isFinite(a)||!isFinite(d)) return {minX:0,minY:0,minZ:0,maxX:0,maxY:0,maxZ:0,cx:0,cy:0,cz:0,hx:0.001,hy:0.001,hz:0.001};
   return {minX:a,minY:b,minZ:c,maxX:d,maxY:e,maxZ:f,cx:(a+d)/2,cy:(b+e)/2,cz:(c+f)/2,hx:Math.max((d-a)/2,0.001),hy:Math.max((e-b)/2,0.001),hz:Math.max((f-c)/2,0.001)};
+}
+
+/**
+ * Emit one splat tile's GLB — either the KHR_gaussian_splatting SPZ-v2 GLB (default) or, when
+ * `centroidsOnly` is set, a plain glTF **POINTS** GLB of the splat centroids (POSITION + COLOR_0,
+ * dropping scale/rotation/opacity-as-gaussian). Positions are stored verbatim (no swizzle) so the
+ * centroid tile occupies the exact same frame as the SPZ tile — the converter's existing box
+ * transform applies unchanged. Lets point-cloud-only 3D Tiles renderers display splat scenes.
+ *
+ * @param {{positions:Float32Array, alphas:?Float32Array, rgb:?Float32Array, scales:?Float32Array, rotations:?Float32Array}} arrays
+ * @param {number} count
+ * @param {object} bounds  result of computeBounds(positions, count)
+ * @param {boolean} [centroidsOnly=false]
+ * @returns {Promise<Uint8Array|Buffer>} GLB bytes
+ */
+export async function buildSplatTileGlb(arrays, count, bounds, centroidsOnly = false) {
+  const { positions, alphas, rgb, scales, rotations } = arrays;
+  if (centroidsOnly) {
+    const colors = new Float32Array(count * 4);
+    for (let i = 0; i < count; i++) {
+      colors[i*4]   = rgb ? rgb[i*3]   : 1;
+      colors[i*4+1] = rgb ? rgb[i*3+1] : 1;
+      colors[i*4+2] = rgb ? rgb[i*3+2] : 1;
+      colors[i*4+3] = alphas ? alphas[i] : 1;
+    }
+    return buildPointsGlb(positions, colors, count, { swizzle: false });
+  }
+  return buildSpzGlb(await buildSpzBuffer(positions, alphas, rgb, scales, rotations, count), count, bounds);
 }
 
 /** Assemble a KHR_gaussian_splatting_compression_spz_2 GLB from a gzipped SPZ payload. */

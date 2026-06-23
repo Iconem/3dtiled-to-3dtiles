@@ -30,6 +30,7 @@ function optsToFlags(fmt, opts = {}) {
   if (opts.scale != null)   f.push(`--scale=${opts.scale}`);
   if (opts.geScale != null) f.push(`--ge-scale=${opts.geScale}`);
   if (opts.geLayer != null) f.push(`--ge-layer=${opts.geLayer}`);
+  if (opts.centroidsOnly)   f.push('--centroids-only');
   if (Array.isArray(opts.extraArgs)) f.push(...opts.extraArgs);
   return f;
 }
@@ -38,7 +39,7 @@ function optsToFlags(fmt, opts = {}) {
  * Convert any supported input to 3D Tiles.
  * @param {string} input   path to the source (file or dataset dir)
  * @param {string} outDir  output directory (tileset.json + tiles/)
- * @param {object} [opts]  { format?, scale?, geScale?, geLayer?, extraArgs?, onLog? }
+ * @param {object} [opts]  { format?, scale?, geScale?, geLayer?, centroidsOnly?, extraArgs?, onLog? }
  * @returns {Promise<{format:string, outDir:string}>}
  */
 export async function convert(input, outDir, opts = {}) {

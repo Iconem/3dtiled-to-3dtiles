@@ -18,7 +18,7 @@ import { buildTileset } from './tilesetBuilder.js';
 // Shared, parallel-friendly encoder from core (async gzip on the libuv threadpool) +
 // bounded-concurrency map — same import lcc uses. Replaces rad's inline synchronous
 // SPZ-v2/GLB encoder (verified byte-identical to the prior gzipSync output).
-import { buildSpzBuffer, buildSpzGlb, computeBounds, parallelMap, defaultConcurrency } from '../../core/index.js';
+import { buildSplatTileGlb, computeBounds, parallelMap, defaultConcurrency } from '../../core/index.js';
 
 // Conversion options (settable per-call by `convert()`; the CLI shim builds them from argv).
 //  scaleMult        --scale=N           uniform σ multiplier (A/B splat size)
@@ -28,7 +28,7 @@ import { buildSpzBuffer, buildSpzGlb, computeBounds, parallelMap, defaultConcurr
 //  geBasis          --ge-basis=…        'spatial' (default; bboxDiag/∛count) | 'featuresize' (legacy)
 //  opacityMin       --opacity-filter=N  OPT-IN: drop splats with alpha < N (default 0 = off, matches SparkJS)
 //  scaleOutlierMult --max-scale-mult=N  OPT-IN: drop splats with maxScale > median×N (default 0 = off)
-const OPTS = { scaleMult: 1, alphaScale: 1, geScale: 1, geLayer: 1, geBasis: 'spatial', opacityMin: 0, scaleOutlierMult: 0 };
+const OPTS = { scaleMult: 1, alphaScale: 1, geScale: 1, geLayer: 1, geBasis: 'spatial', opacityMin: 0, scaleOutlierMult: 0, centroidsOnly: false };
 
 /** Parse `--flag=value` argv into an opts object (for the CLI shim). */
 function parseArgvOpts(argv) {
@@ -42,6 +42,7 @@ function parseArgvOpts(argv) {
     geBasis:          (gb && gb.slice('--ge-basis='.length).toLowerCase() === 'featuresize') ? 'featuresize' : 'spatial',
     opacityMin:       num('opacity-filter', 0, true),
     scaleOutlierMult: num('max-scale-mult', 0, true),
+    centroidsOnly:    argv.includes('--centroids-only'),
   };
 }
 
@@ -274,8 +275,7 @@ async function writeChunkGlb(buf, chunk, payloadBase, outputPath) {
   // Bounds computed on the FILTERED set — dropping the giant noise splats shrinks
   // the bounding volume to the real geometry (no more inflated 15000m boxes).
   const bounds = computeBounds(posArr, count2);
-  const spzBuf = await buildSpzBuffer(posArr, alphaArr, rgb, scales, rotations, count2);
-  const glb    = buildSpzGlb(spzBuf, count2, bounds);
+  const glb    = await buildSplatTileGlb({ positions: posArr, alphas: alphaArr, rgb, scales, rotations }, count2, bounds, OPTS.centroidsOnly);
   await ensureDir(path.dirname(outputPath));
   await fs.writeFile(outputPath, glb);
 
@@ -337,21 +337,24 @@ export async function convert(radPath, outDir, opts = {}) {
   console.log(`\r  ${nodes.length}/${nodes.length} tiles`);
 
   const tileset = buildTileset(nodes, { tileUriTemplate: 'tiles/node_{index}.glb', geScale: OPTS.geScale, geLayer: OPTS.geLayer, geBasis: OPTS.geBasis });
-  // Declare GLB extensions so Cesium knows to enable them
-  tileset.extensions     = {
-    '3DTILES_content_gltf': {
-      extensionsUsed:     ['KHR_gaussian_splatting', 'KHR_gaussian_splatting_compression_spz_2'],
-      extensionsRequired: ['KHR_gaussian_splatting', 'KHR_gaussian_splatting_compression_spz_2'],
-    }
-  };
-  tileset.extensionsUsed = ['3DTILES_content_gltf'];
+  // Declare GLB extensions so Cesium knows to enable them — but only in splat mode.
+  // centroids mode emits plain glTF POINTS tiles, which need no extension advertisement.
+  if (!OPTS.centroidsOnly) {
+    tileset.extensions     = {
+      '3DTILES_content_gltf': {
+        extensionsUsed:     ['KHR_gaussian_splatting', 'KHR_gaussian_splatting_compression_spz_2'],
+        extensionsRequired: ['KHR_gaussian_splatting', 'KHR_gaussian_splatting_compression_spz_2'],
+      }
+    };
+    tileset.extensionsUsed = ['3DTILES_content_gltf'];
+  }
 
   await fs.writeFile(path.join(outDir, 'tileset.json'), JSON.stringify(tileset, null, 2));
 
   const treeDepth = nodes.reduce((m, n) => Math.max(m, n.depth ?? 0), 0);
   const elapsed = (Date.now() - t0) / 1000;
   console.log(`\nDone → ${outDir}/tileset.json`);
-  console.log(`  REPLACE tileset, ${treeDepth + 1} levels, KHR_gaussian_splatting_compression_spz_2`);
+  console.log(`  REPLACE tileset, ${treeDepth + 1} levels, ${OPTS.centroidsOnly ? 'glTF POINTS centroids' : 'KHR_gaussian_splatting_compression_spz_2'}`);
   console.log(`  Actual time: ${elapsed < 60 ? elapsed.toFixed(1)+'s' : (elapsed/60).toFixed(1)+' min'} (${(elapsed/(header.count/1e6)).toFixed(1)}s/M splats)`);
   return { format: 'rad', outDir, tiles: nodes.length, levels: treeDepth + 1 };
 }

@@ -472,6 +472,13 @@ genuinely hard parts — and why this stays a draft — are **Draco** geometry, 
 nuances. A mesh-or-points-only, uncompressed, explicit-tree converter (this draft) is **moderate**;
 full-fidelity I3S is **high** effort and overlaps mature tools (loaders.gl, Cesium ion).
 
+> **Reference — bidirectional I3S ⇄ 3D Tiles converter:** loaders.gl's
+> **[`@loaders.gl/tile-converter`](https://github.com/visgl/loaders.gl/tree/master/modules/tile-converter)**
+> ([docs](https://loaders.gl/docs/modules/tile-converter/cli-reference/tile-converter)) converts
+> **3D Tiles → I3S and I3S → 3D Tiles** (Draco, textures, attributes, gzip), and is the mature
+> baseline this draft is measured against. Use it for full-fidelity I3S; `i3s-to-3dtiles` here stays a
+> minimal, dependency-light subset (uncompressed, explicit tree, mesh/points only).
+
 ---
 
 ### potree-to-3dtiles
@@ -1065,10 +1072,31 @@ Formats in scope: **COPC (live ✅)**, RAD/SPZ (3DGS), EPT/Entwine (LiDAR), Potr
 ### `/convert` — live **any-format** → 3D Tiles (implemented ✅)
 
 The same server also exposes a generic endpoint that works for **every format the meta-converter
-supports** (potree, sog/streamed-SOG, rad, lcc, copc, i3s). Where `/copc` is *per-tile* (range-reads
-one octree node per request), `/convert` is *per-dataset*: on the **first** request it runs the
-in-process `convert()` once (cached on disk under the OS temp dir), then serves the static 3D Tiles
-output. Not range-streamed, but genuinely on-demand for any format.
+supports** (potree, sog/streamed-SOG, rad, lcc, copc, i3s).
+
+#### The intent (online, range-streamed — word for word)
+
+> Could it not be fully online, fetching only the required portions of the underlying format
+> hierarchy to build the 3dtiles json hierarchy, and then when glb tiles are requested, fetch (via
+> range requests) the corresponding {copc, stream-sog, lcc, potree, etc} contiguous memory block
+> just to build the requested tile?
+
+This is exactly what **`/copc` already does** for one format: it range-reads only the COPC header +
+hierarchy to emit the tileset JSON, and on each `tile/<key>.glb` request range-reads **just that
+octree node's** contiguous point block to build the tile. Nothing is fully downloaded; nothing is
+pre-converted. The end state is the same model generalised to every internally-tiled format
+(streamed-SOG chunk runs, LCC unit LOD runs, Potree octree-node byte ranges, …): a per-format
+"range adapter" mapping a requested 3D-Tiles key → the source byte range to fetch and transcode.
+
+#### The current implementation (offline conversion, cached, served live)
+
+`/convert` is a pragmatic stand-in that gets **every** format renderable today, before each
+per-format range adapter exists. Where `/copc` is *per-tile*, `/convert` is *per-dataset*: on the
+**first** request it resolves the source to a local dataset (downloading remote inputs), runs the
+in-process `convert()` **once** (output cached on disk under the OS temp dir, keyed by
+`sha1(format|src)`), then serves the static 3D Tiles output. So it converts the **whole** hierarchy
+and **all** tile content up front, then streams from that cache — not range-streamed, but genuinely
+on-demand and format-agnostic. Subsequent requests (and restarts) hit the warm cache instantly.
 
 ```sh
 npm run serve:tiles
@@ -1080,14 +1108,47 @@ npm run serve:tiles
   formats are mirrored with the sibling files each converter reads — Potree 2.0 (`metadata.json` +
   `hierarchy.bin` + `octree.bin`), LCC (`meta.lcc` + `index.bin`/`data.bin`), SOG (`lod-meta.json` +
   every chunk `meta.json` + its WebP textures). Single-file formats (COPC/RAD/SLPK) download the one file.
-- `&format=` is optional — format is auto-detected from the path/extension (pass it for remote
-  directory formats where the index filename isn't decisive, or to override).
+- `&format=` is optional — auto-detected from the path/extension (pass it for remote directory
+  formats where the index filename isn't decisive, or to override).
+- `&centroids=1` (point clouds get this for free) renders **splat** datasets (RAD/SOG/LCC) as a
+  POINTS tileset of splat **centroids** — so renderers without `KHR_gaussian_splatting` support can
+  still display the scene. See [`--centroids-only`](#centroids-only-splats-as-point-clouds) below.
 - The served **root** tileset has its relative `uri`s rewritten to absolute `/convert/<key>/…` so
   content resolves regardless of how the viewer bases the query-string URL; nested sub-tilesets are
   served at their real paths so their own relative URIs already resolve.
 - For big COPC, prefer `/copc` (true range streaming) over `/convert` (downloads the whole `.laz`).
 
+**Remote source notes / limits:**
+- Mirroring is server-side, so **no browser CORS** applies — but the source must serve **HTTP range
+  206** for `/copc`, and **must not redirect in a way that drops the `Range` header** (e.g. some IGN
+  LiDAR HD URLs 302 to an OVH bucket → range lost). `/convert` downloads in full so it tolerates that.
+- **I3S** remote = `.slpk` **file** only; live **REST** SceneServer services (gzipped node-page tree)
+  aren't mirrored yet — extract the `.slpk` / mirror the service locally and pass the directory.
+- Use a **raw** file URL, not a hosting page — GitHub `…/blob/…#L2` returns HTML; use the
+  `raw.githubusercontent.com` URL (or `?raw=1`).
+- Don't mix protocols in a browser: an `https://` viewer page can't fetch an `http://localhost`
+  tileset (mixed-content block). Serve the viewer over the same scheme as the tile-server.
+
 viewer.html ships pills for each: **🛰 Potree / RAD / SOG / LCC / COPC →3DT (live)**.
+
+#### Centroids-only: splats as point clouds
+
+Gaussian-splat formats (**RAD / SOG / LCC**) normally emit `KHR_gaussian_splatting` GLB tiles, which
+many 3D-Tiles clients can't render. `--centroids-only` (CLI) / `?centroids=1` (middleware) instead
+emits a plain glTF **POINTS** tileset of the splat **centroids** — POSITION + COLOR_0 only, dropping
+scale / rotation / gaussian opacity — placed in the exact same frame as the splat tiles. So any
+point-cloud-capable renderer (CesiumJS, 3DTilesRendererJS, cesium-for-unreal, …) can display a
+tiled-splat scene as points.
+
+```sh
+# offline conversion
+3dtiled scene.rad out/ --centroids-only           # POINTS tileset instead of splats
+# live middleware
+GET /convert/tileset.json?url=<SRC>&centroids=1    # cached separately from the splat variant
+```
+
+Point-cloud inputs (COPC/Potree) are already POINTS, so the flag is a no-op for them. The output is a
+standard POINTS tileset with **no** `KHR_gaussian_splatting` extension advertised.
 
 ### `potree-to-copc` (assessed — blocked on a JS LAZ encoder)
 

@@ -6,8 +6,11 @@
  * serves the static 3D Tiles output. Not range-streamed, but genuinely on-demand for ANY format —
  * potree, sog (streamed-SOG), rad, lcc, copc, i3s.
  *
- *   GET /convert/tileset.json?url=<SRC>[&format=<fmt>]   → tileset (root content URIs rewritten absolute)
- *   GET /convert/<key>/<path>                            → static tile / subtree / sub-tileset file
+ *   GET /convert/tileset.json?url=<SRC>[&format=<fmt>][&centroids=1]  → tileset (URIs rewritten absolute)
+ *   GET /convert/<key>/<path>                                        → static tile / subtree / sub-tileset
+ *
+ * &centroids=1 makes splat formats (rad/sog/lcc) emit a POINTS tileset of splat centroids, so
+ * renderers without KHR_gaussian_splatting can still display the scene.
  *
  * SRC may be a remote URL (we download the source + the sibling files each converter reads) OR a local
  * path — file or dataset dir. Local paths make every format testable instantly against on-disk data,
@@ -25,7 +28,7 @@ const CACHE = path.join(os.tmpdir(), '3dtiles-live-cache');
 const CORS = { 'Access-Control-Allow-Origin': '*', 'Access-Control-Allow-Headers': '*' };
 const isRemote = s => /^https?:\/\//i.test(s);
 const exists = async p => !!(await fs.stat(p).catch(() => null));
-const keyFor = (src, fmt) => crypto.createHash('sha1').update(`${fmt || ''}|${src}`).digest('hex').slice(0, 16);
+const keyFor = (src, fmt, centroids) => crypto.createHash('sha1').update(`${fmt || ''}|${centroids ? 'c|' : ''}${src}`).digest('hex').slice(0, 16);
 
 const MIME = {
   '.json': 'application/json', '.glb': 'model/gltf-binary', '.bin': 'application/octet-stream',
@@ -99,7 +102,7 @@ async function mirrorRemote(src, fmt, dir) {
 
 // ── conversion, cached per key. The in-flight promise dedupes concurrent first hits. ──
 const jobs = new Map();
-function ensureConverted(src, fmt, key) {
+function ensureConverted(src, fmt, key, centroidsOnly) {
   if (jobs.has(key)) return jobs.get(key);
   const job = (async () => {
     const outDir = path.join(CACHE, key);
@@ -107,8 +110,8 @@ function ensureConverted(src, fmt, key) {
     let input = isRemote(src) ? await mirrorRemote(src, fmt, path.join(CACHE, key + '.src'))
               : src.startsWith('file://') ? fileURLToPath(src) : src;
     await fs.mkdir(outDir, { recursive: true });
-    console.log(`[convert-live] ${fmt} ${src} → ${outDir}`);
-    await convert(input, outDir, { format: fmt });
+    console.log(`[convert-live] ${fmt}${centroidsOnly ? ' (centroids)' : ''} ${src} → ${outDir}`);
+    await convert(input, outDir, { format: fmt, centroidsOnly });
     return outDir;
   })();
   jobs.set(key, job);
@@ -140,8 +143,9 @@ export async function handleConvert(req, res, u) {
     const name = src.split('?')[0].split('/').pop() || 'input';
     const fmt = await resolveFormat(src, u.searchParams.get('format'), name);
     if (!fmt) { res.writeHead(400, CORS); res.end(`could not detect format for "${name}" — pass &format=`); return true; }
-    const key = keyFor(src, fmt);
-    const outDir = await ensureConverted(src, fmt, key);
+    const centroids = ['1', 'true', 'yes'].includes((u.searchParams.get('centroids') || '').toLowerCase());
+    const key = keyFor(src, fmt, centroids);
+    const outDir = await ensureConverted(src, fmt, key, centroids);
     const tileset = JSON.parse(await fs.readFile(path.join(outDir, 'tileset.json'), 'utf8'));
     rewriteUris(tileset.root, `/convert/${key}/`);
     res.writeHead(200, { 'Content-Type': 'application/json', ...CORS });

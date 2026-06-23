@@ -22,7 +22,7 @@ import { fileURLToPath } from 'node:url';
 import { decodeSplats } from './lccDecode.js';
 // Shared, parallel-friendly encoder from 3dtiles-convert-core (async gzip) + bounded-concurrency map.
 // (Relative path during the monorepo migration; becomes `3dtiles-convert-core` once lcc moves to packages/.)
-import { buildSpzBuffer, buildSpzGlb, computeBounds, parallelMap, defaultConcurrency } from '../../core/index.js';
+import { buildSplatTileGlb, computeBounds, parallelMap, defaultConcurrency } from '../../core/index.js';
 
 const ROOT_GE_FACTOR = 0.05;   // root GE = sceneDiagonal × this (matches sog/reference magnitude)
 const DEPTH_RATIO    = 0.5;    // GE halves per LOD step down
@@ -103,8 +103,8 @@ export async function convert(input, outDir, opts = {}) {
   await parallelMap(tasks, async ({ tile, off, pts }) => {
     const { positions, alphas, rgb, scales, rotations } = decodeSplats(dataBuf, off, pts, scaleAttr.min, scaleAttr.max);
     const bounds = computeBounds(positions, pts);
-    const spz = await buildSpzBuffer(positions, alphas, rgb, scales, rotations, pts);
-    await fs.writeFile(path.join(outDir, tile.content.uri), buildSpzGlb(spz, pts, bounds));
+    const glb = await buildSplatTileGlb({ positions, alphas, rgb, scales, rotations }, pts, bounds, opts.centroidsOnly);
+    await fs.writeFile(path.join(outDir, tile.content.uri), glb);
     tile.boundingVolume.box = boundToZUpBox(bounds);
   }, { concurrency, onProgress: (d, t) => { tilesWritten = d; if (d % 20 === 0 || d === t) process.stdout.write(`\r  ${d}/${t} tiles (×${concurrency})`); } });
   process.stdout.write('\n');
@@ -121,15 +121,18 @@ export async function convert(input, outDir, opts = {}) {
     asset: { version: '1.1' },
     geometricError: ROOT_GE * 2,
     root: { boundingVolume: { box: rootBox }, geometricError: ROOT_GE * 2, refine: 'REPLACE', children: unitTiles },
-    extensionsUsed: ['3DTILES_content_gltf'],
-    extensions: { '3DTILES_content_gltf': {
-      extensionsUsed:     ['KHR_gaussian_splatting', 'KHR_gaussian_splatting_compression_spz_2'],
-      extensionsRequired: ['KHR_gaussian_splatting', 'KHR_gaussian_splatting_compression_spz_2'],
-    }},
+    // centroids mode emits plain glTF POINTS tiles → no splat-extension advertisement.
+    ...(opts.centroidsOnly ? {} : {
+      extensionsUsed: ['3DTILES_content_gltf'],
+      extensions: { '3DTILES_content_gltf': {
+        extensionsUsed:     ['KHR_gaussian_splatting', 'KHR_gaussian_splatting_compression_spz_2'],
+        extensionsRequired: ['KHR_gaussian_splatting', 'KHR_gaussian_splatting_compression_spz_2'],
+      }},
+    }),
   };
   await fs.writeFile(path.join(outDir, 'tileset.json'), JSON.stringify(tileset, null, 2));
   const elapsed = (Date.now() - t0) / 1000;
-  console.log(`Done → ${outDir}/tileset.json  (${tilesWritten} GLB tiles, ${numUnits} units)`);
+  console.log(`Done → ${outDir}/tileset.json  (${tilesWritten} ${opts.centroidsOnly ? 'POINTS centroid' : 'SPZ splat'} tiles, ${numUnits} units)`);
   console.log(`  Actual time: ${elapsed < 60 ? elapsed.toFixed(1)+'s' : (elapsed/60).toFixed(1)+' min'}`);
   return { format: 'lcc', outDir, tiles: tilesWritten };
 }
