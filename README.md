@@ -1062,6 +1062,33 @@ cesium-for-unreal). Other formats (RAD/SPZ, Potree, EPT) can be added behind the
 
 Formats in scope: **COPC (live ✅)**, RAD/SPZ (3DGS), EPT/Entwine (LiDAR), Potree (LiDAR), 3DTILES (passthrough).
 
+### `/convert` — live **any-format** → 3D Tiles (implemented ✅)
+
+The same server also exposes a generic endpoint that works for **every format the meta-converter
+supports** (potree, sog/streamed-SOG, rad, lcc, copc, i3s). Where `/copc` is *per-tile* (range-reads
+one octree node per request), `/convert` is *per-dataset*: on the **first** request it runs the
+in-process `convert()` once (cached on disk under the OS temp dir), then serves the static 3D Tiles
+output. Not range-streamed, but genuinely on-demand for any format.
+
+```sh
+npm run serve:tiles
+#   GET /convert/tileset.json?url=<SRC>[&format=<fmt>]   → tileset (content URIs rewritten absolute)
+#   GET /convert/<key>/<path>                            → static tile / subtree / sub-tileset file
+```
+
+- `<SRC>` may be a **remote URL** *or* a **local path** (file or dataset dir). Remote directory
+  formats are mirrored with the sibling files each converter reads — Potree 2.0 (`metadata.json` +
+  `hierarchy.bin` + `octree.bin`), LCC (`meta.lcc` + `index.bin`/`data.bin`), SOG (`lod-meta.json` +
+  every chunk `meta.json` + its WebP textures). Single-file formats (COPC/RAD/SLPK) download the one file.
+- `&format=` is optional — format is auto-detected from the path/extension (pass it for remote
+  directory formats where the index filename isn't decisive, or to override).
+- The served **root** tileset has its relative `uri`s rewritten to absolute `/convert/<key>/…` so
+  content resolves regardless of how the viewer bases the query-string URL; nested sub-tilesets are
+  served at their real paths so their own relative URIs already resolve.
+- For big COPC, prefer `/copc` (true range streaming) over `/convert` (downloads the whole `.laz`).
+
+viewer.html ships pills for each: **🛰 Potree / RAD / SOG / LCC / COPC →3DT (live)**.
+
 ### `potree-to-copc` (assessed — blocked on a JS LAZ encoder)
 
 Potree and COPC are both octrees, so the hierarchy/metadata is a near 1:1 map and the read side is

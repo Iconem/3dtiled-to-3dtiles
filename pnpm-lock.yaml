@@ -36,6 +36,24 @@ importers:
       3dtiles-convert-core:
         specifier: workspace:*
         version: link:../core
+      copc-to-3dtiles:
+        specifier: workspace:*
+        version: link:../copc-to-3dtiles
+      i3s-to-3dtiles:
+        specifier: workspace:*
+        version: link:../i3s-to-3dtiles
+      lcc-to-3dtiles:
+        specifier: workspace:*
+        version: link:../lcc-to-3dtiles
+      potree-to-3dtiles:
+        specifier: workspace:*
+        version: link:../potree-to-3dtiles
+      rad-to-3dtiles:
+        specifier: workspace:*
+        version: link:../rad-to-3dtiles
+      sog-to-3dtiles:
+        specifier: workspace:*
+        version: link:../sog-to-3dtiles
 
   packages/copc-to-3dtiles:
     dependencies:

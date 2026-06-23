@@ -627,6 +627,21 @@ const PRESETS = [
     url: 'http://localhost:3001/copc/tileset.json?url=' + encodeURIComponent('http://localhost:3000/sample-data/input/COPC/autzen.copc.laz'),
     local: false,
   },
+  // ── Generic <fmt>→3D Tiles live middleware (/convert): converts on first request (cached), then
+  //    serves the static output. `url` may be a remote URL OR a local path the server can read. ──
+  ...(() => {
+    const SD = 'C:/Users/jonathan/Downloads/3dtiles-converters/sample-data/input';
+    const live = (id, label, type, src, format) =>
+      ({ id, label, type, local: false,
+         url: `http://localhost:3001/convert/tileset.json?url=${encodeURIComponent(src)}` + (format ? `&format=${format}` : '') });
+    return [
+      live('conv-potree', '🛰 Potree→3DT (live)', 'pointcloud', `${SD}/POTREE/lion_p2`,      'potree'),
+      live('conv-rad',    '🛰 RAD→3DT (live)',    'splat',      `${SD}/RAD/coit.rad`,         'rad'),
+      live('conv-sog',    '🛰 SOG→3DT (live)',    'splat',      `${SD}/SOG/skatepark`,        'sog'),
+      live('conv-lcc',    '🛰 LCC→3DT (live)',    'splat',      `${SD}/LCC/Guan_Temple`,      'lcc'),
+      live('conv-copc',   '🛰 COPC→3DT (live, convert)', 'pointcloud', `${SD}/COPC/autzen.copc.laz`, 'copc'),
+    ];
+  })(),
   {
     id: 'lion-potree2',
     label: '🌲 Lion (Potree 2.0)',
