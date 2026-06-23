@@ -34,10 +34,17 @@ function childBox(box, oct) {
   return { min: mn, max: mx };
 }
 
-export async function loadPotree1(dir) {
-  const cloud = JSON.parse(await fs.readFile(path.join(dir, 'cloud.js'), 'utf8'));
+/**
+ * @param {string} dir  dataset dir (used only by the default fs reader)
+ * @param {object} [opts] opts.read(relPath) → Promise<Buffer>; relPath is forward-slash relative to
+ *   the dataset root (e.g. "cloud.js", "data/r/00000/r00000.bin"). Default reads from local fs.
+ *   The live tile-server passes a fetch-based reader so the SAME 1.x logic serves over HTTP.
+ */
+export async function loadPotree1(dir, opts = {}) {
+  const read = opts.read || (rel => fs.readFile(path.join(dir, ...rel.split('/'))).then(Buffer.from));
+  const cloud = JSON.parse((await read('cloud.js')).toString('utf8'));
 
-  const octreeDir = path.join(dir, cloud.octreeDir || 'data');
+  const octreeDir = cloud.octreeDir || 'data';            // forward-slash relative; reader resolves it
   const stepSize  = cloud.hierarchyStepSize ?? 5;
   const bb  = cloud.boundingBox;
   const min = [bb.lx ?? bb.min[0], bb.ly ?? bb.min[1], bb.lz ?? bb.min[2]];
@@ -61,20 +68,17 @@ export async function loadPotree1(dir) {
   const posA = attrs.find(a => /POSITION/i.test(a.name));
   const colA = attrs.find(a => /RGBA|RGB|COLOR/i.test(a.name));
 
-  // Node file path: flat for inline (1.4); chunked dirs for .hrc (1.7).
-  const nodeFile = (name) => {
-    if (inline) return path.join(octreeDir, `${name}.${ext}`);
+  // Node file path: flat for inline (1.4); chunked dirs for .hrc (1.7). Forward-slash relative.
+  const chunkDirs = (name) => {                            // ["r","00000",…] up to the node's chunk depth
     const idx = name.substring(1), parts = Math.floor(idx.length / stepSize);
-    let p = 'r';
-    for (let i = 0; i < parts; i++) p = path.join(p, idx.substr(i * stepSize, stepSize));
-    return path.join(octreeDir, p, `${name}.${ext}`);
+    const segs = ['r'];
+    for (let i = 0; i < parts; i++) segs.push(idx.substr(i * stepSize, stepSize));
+    return segs;
   };
-  const hrcPath = (name) => {                              // dir holding <name>.hrc (.hrc layout only)
-    const idx = name.substring(1), parts = Math.floor(idx.length / stepSize);
-    let p = 'r';
-    for (let i = 0; i < parts; i++) p = path.join(p, idx.substr(i * stepSize, stepSize));
-    return path.join(octreeDir, p);
-  };
+  const nodeFile = (name) => inline
+    ? `${octreeDir}/${name}.${ext}`
+    : [octreeDir, ...chunkDirs(name), `${name}.${ext}`].join('/');
+  const hrcRel = (name) => [octreeDir, ...chunkDirs(name)].join('/');   // dir holding <name>.hrc
 
   const nodes = new Map();
 
@@ -90,7 +94,7 @@ export async function loadPotree1(dir) {
     // Walk the `.hrc` chunks (5 B/node: childMask u8 + numPoints u32), recursing at chunk edges.
     async function loadHrc(name, box) {
       let buf;
-      try { buf = Buffer.from(await fs.readFile(path.join(hrcPath(name), name + '.hrc'))); } catch { return; }
+      try { buf = await read(`${hrcRel(name)}/${name}.hrc`); } catch { return; }
       const queue = [{ name, box }]; let rec = 0; const boundary = [];
       while (queue.length && rec * 5 < buf.length) {
         const { name: nm, box: bx } = queue.shift();
@@ -113,7 +117,7 @@ export async function loadPotree1(dir) {
 
   // ── Node decoders ──────────────────────────────────────────────────────────
   async function readLazNode(node) {
-    let bytes; try { bytes = await fs.readFile(nodeFile(node.name)); } catch { return null; }
+    let bytes; try { bytes = await read(nodeFile(node.name)); } catch { return null; }
     const header = Las.Header.parse(bytes);
     const records = await Las.PointData.decompressFile(bytes);   // laz-perf WASM
     const view = Las.View.create(records, header);
@@ -135,7 +139,7 @@ export async function loadPotree1(dir) {
   }
 
   async function readBinNode(node) {
-    let buf; try { buf = Buffer.from(await fs.readFile(nodeFile(node.name))); } catch { return null; }
+    let buf; try { buf = await read(nodeFile(node.name)); } catch { return null; }
     const n = Math.floor(buf.length / pointSize);
     const positions = new Float32Array(n * 3);
     const colors = colA ? new Float32Array(n * 4) : null;

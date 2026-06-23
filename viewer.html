@@ -643,11 +643,17 @@ const PRESETS = [
       // centroids=1 → splats served as a POINTS tileset (centroids) for point-cloud-only renderers
       live('conv-rad-c',  '🔵 RAD centroids (live)', 'pointcloud', `${SD}/RAD/coit.rad`,    'rad', '&centroids=1'),
       live('conv-sog-c',  '🔵 SOG centroids (live)', 'pointcloud', `${SD}/SOG/skatepark`,   'sog', '&centroids=1'),
-      // ── TRUE streaming (range-read per tile, nothing pre-converted) — like /copc, for Potree 2.0 ──
-      { id: 'stream-potree-local', label: '⚡ Potree→3DT (stream, local)', type: 'pointcloud', local: false,
-        url: 'http://localhost:3001/potree/tileset.json?url=' + encodeURIComponent('http://localhost:3000/sample-data/input/POTREE/lion_p2/metadata.json') },
-      { id: 'stream-potree-org', label: '⚡ Potree→3DT (stream, potree.org)', type: 'pointcloud', local: false,
-        url: 'http://localhost:3001/potree/tileset.json?url=' + encodeURIComponent('https://potree.org/pointclouds/lion/metadata.json') },
+      // ── TRUE streaming (range-read per tile, nothing pre-converted) via the unified /stream dispatcher ──
+      { id: 'stream-potree-local', label: '⚡ Potree (stream, local)', type: 'pointcloud', local: false,
+        url: 'http://localhost:3001/stream/tileset.json?url=' + encodeURIComponent('http://localhost:3000/sample-data/input/POTREE/lion_p2/metadata.json') },
+      { id: 'stream-potree-org', label: '⚡ Potree (stream, potree.org)', type: 'pointcloud', local: false,
+        url: 'http://localhost:3001/stream/tileset.json?url=' + encodeURIComponent('https://potree.org/pointclouds/lion/metadata.json') },
+      { id: 'stream-copc', label: '⚡ COPC (stream, AWS)', type: 'pointcloud', local: false,
+        url: 'http://localhost:3001/stream/tileset.json?url=' + encodeURIComponent('https://s3.amazonaws.com/hobu-lidar/autzen-classified.copc.laz') },
+      { id: 'stream-potree1', label: '⚡ Potree 1.x (stream, local)', type: 'pointcloud', local: false,
+        url: 'http://localhost:3001/stream/tileset.json?format=potree&url=' + encodeURIComponent('http://localhost:3000/sample-data/input/POTREE/lion_takanawa/cloud.js') },
+      { id: 'stream-sog', label: '⚡ SOG (stream, local)', type: 'splat', local: false,
+        url: 'http://localhost:3001/stream/tileset.json?format=sog&url=' + encodeURIComponent('http://localhost:3000/sample-data/input/SOG/skatepark/lod-meta.json') },
     ];
   })(),
   {
@@ -901,14 +907,12 @@ async function loadTileset() {
     const isLocalCoords = distFromEcefOrigin < 1e6; // < 1000 km from Earth center
 
     if (isLocalCoords) {
-      if (isSplat) {
-        // Auto-place splat tilesets immediately — no need for manual Apply & Fly
-        document.getElementById('lf-range').value = Math.max(5, Math.round(bs.radius * 3));
-        applyLocalFrame();
-        setStatus('Splat placed at local frame origin.\nAdjust ⊕ Local Frame if needed.');
-      } else {
-        setStatus('Tileset loaded in local coordinates.\nUse ⊕ Local Frame to place it on the globe.');
-      }
+      // Auto-place ANY non-geo-referenced tileset (splats AND local point clouds — e.g. centroid
+      // tilesets, non-georef Potree) at the local frame origin, then fly to it. Previously only
+      // splats auto-placed, so local point clouds loaded but never zoomed (looked broken in Cesium).
+      document.getElementById('lf-range').value = Math.max(5, Math.round(bs.radius * 3));
+      applyLocalFrame();
+      setStatus((isSplat ? 'Splat' : 'Local tileset') + ' placed at local frame origin.\nAdjust ⊕ Local Frame if needed.');
     } else {
       try {
         // Use the actual bounding sphere radius for a sensible camera distance.

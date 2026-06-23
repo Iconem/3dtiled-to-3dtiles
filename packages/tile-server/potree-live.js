@@ -1,20 +1,21 @@
 /**
- * potree-live.js — live **Potree 2.0 → OGC 3D Tiles** middleware (true online range-streaming).
+ * potree-live.js — live **Potree → OGC 3D Tiles** middleware (true online, build-on-the-fly).
  *
  * The same model as `/copc`, generalised to Potree's octree: NOTHING is pre-converted or fully
- * downloaded. We fetch `metadata.json` (tiny) + `hierarchy.bin` once to emit the 3D Tiles tree, then
- * each tile request HTTP-**range**-reads just that node's contiguous block from `octree.bin`, decodes
- * it, and returns a glTF POINTS GLB. The Potree octree maps ~1:1 onto the 3D Tiles tree.
+ * downloaded. The hierarchy is fetched to emit the 3D Tiles tree, then each tile request fetches just
+ * that node's data, decodes it, and returns a glTF POINTS GLB. Handles BOTH:
+ *   • Potree 2.0 (metadata.json + hierarchy.bin + octree.bin) — one HTTP **range** read of octree.bin
+ *     per tile (true range-streaming).
+ *   • Potree 1.x (cloud.js + .hrc + per-node .bin/.laz) — one whole-file fetch per node (the nodes
+ *     ARE the files), via the shared loadPotree1 reader with an injected fetch source.
  *
- *   GET /potree/tileset.json?url=<metadata.json URL>          → 3D Tiles 1.1 tileset (explicit, ADD)
- *   GET /potree/tile/<name>.glb?url=<metadata.json URL>       → that node's points as a POINTS GLB
- *
- * `url` points at the dataset's metadata.json; hierarchy.bin / octree.bin are resolved as siblings.
- * (Potree 1.x — cloud.js + per-node files — isn't range-served here; use `/convert?format=potree`.)
+ *   GET /potree/tileset.json?url=<metadata.json | cloud.js URL>
+ *   GET /potree/tile/<name>.glb?url=<…>                       → that node's points as a POINTS GLB
  */
 import proj4 from 'proj4';
 import { buildPointsGlb } from '../core/index.js';
 import { preparePotree2Schema, parsePotree2Hierarchy, decodePotree2Node } from '../potree-to-3dtiles/src/potree2.js';
+import { loadPotree1 } from '../potree-to-3dtiles/src/potree1.js';
 
 const CORS = { 'Access-Control-Allow-Origin': '*', 'Access-Control-Allow-Headers': '*' };
 const DEG = Math.PI / 180, A = 6378137.0, E2 = 0.00669437999014;
@@ -42,31 +43,41 @@ async function rangeGet(url, begin, length) {
   return Buffer.from(await r.arrayBuffer());
 }
 
-// Per-URL context (metadata + hierarchy + georef), cached. Hierarchy is fetched whole (small vs
-// octree.bin) to emit the explicit tree — exactly like /copc loads the full COPC hierarchy.
-const ctxCache = new Map();
-async function getCtx(metaUrl) {
-  if (ctxCache.has(metaUrl)) return ctxCache.get(metaUrl);
-  const base = metaUrl.slice(0, metaUrl.lastIndexOf('/') + 1);
-  const meta = JSON.parse((await fetchFull(metaUrl)).toString('utf8'));
-  if ((meta.version || '').toString()[0] !== '2') console.warn(`[potree-live] ${metaUrl}: metadata.version=${meta.version} — expected 2.x`);
-  const schema = preparePotree2Schema(meta);
-  const hierBuf = await fetchFull(base + 'hierarchy.bin');
-  const { nodes, rootBox } = parsePotree2Hierarchy(meta, hierBuf);
+const georef = (origin, crs) => {
+  if (!crs) return null;
+  try { const [lon, lat, h] = proj4(crs, 'WGS84').forward(origin); const e = llhToEcef(lon, lat, h ?? origin[2]); return enuMatrix(lon, lat, e[0], e[1], e[2]); }
+  catch (e) { console.warn('[potree-live] georef failed:', e.message); return null; }
+};
+const finishCtx = (nodes, rootBox, crs, spacingMeta, readTile) => {
   const origin = [0,1,2].map(k => (rootBox.min[k] + rootBox.max[k]) / 2);
-
-  let transform = null;
-  const crs = meta.projection || meta.crs || meta.wkt || null;
-  try {
-    if (crs) { const [lon, lat, h] = proj4(crs, 'WGS84').forward(origin); const e = llhToEcef(lon, lat, h ?? origin[2]); transform = enuMatrix(lon, lat, e[0], e[1], e[2]); }
-    else console.warn(`[potree-live] no CRS in ${metaUrl} — local-origin (not geo-referenced)`);
-  } catch (e) { console.warn('[potree-live] georef failed:', e.message); }
-
   const rootDiag = Math.hypot(rootBox.max[0]-rootBox.min[0], rootBox.max[1]-rootBox.min[1], rootBox.max[2]-rootBox.min[2]);
-  const spacing = meta.spacing || rootDiag / 128;
-  const ctx = { meta, schema, nodes, origin, transform, rootDiag, spacing, octreeUrl: base + 'octree.bin' };
-  ctxCache.set(metaUrl, ctx);
-  console.log(`[potree-live] ${metaUrl} → ${nodes.size} nodes, georef=${!!transform}`);
+  return { nodes, origin, transform: georef(origin, crs), rootDiag, spacing: spacingMeta || rootDiag / 128, readTile };
+};
+
+// Per-URL context (hierarchy + georef + a readTile(name) closure), cached. 2.0 → range reads of
+// octree.bin; 1.x → whole-file fetch per node through loadPotree1's injectable reader.
+const ctxCache = new Map();
+async function getCtx(url) {
+  if (ctxCache.has(url)) return ctxCache.get(url);
+  const base = url.slice(0, url.lastIndexOf('/') + 1);
+  let ctx;
+
+  if (/cloud\.js(\?|$)/i.test(url)) {                       // ── Potree 1.x ──
+    const src = await loadPotree1('', { read: rel => fetchFull(base + rel) });
+    const readTile = name => src.readNode(src.nodes.get(name));
+    ctx = finishCtx(src.nodes, src.rootBox, src.crs, src.spacing, readTile);
+    console.log(`[potree-live] (1.x) ${url} → ${src.nodes.size} nodes, georef=${!!ctx.transform}`);
+  } else {                                                  // ── Potree 2.0 ──
+    const meta = JSON.parse((await fetchFull(url)).toString('utf8'));
+    if ((meta.version || '').toString()[0] !== '2') console.warn(`[potree-live] ${url}: metadata.version=${meta.version} — expected 2.x`);
+    const schema = preparePotree2Schema(meta);
+    const { nodes, rootBox } = parsePotree2Hierarchy(meta, await fetchFull(base + 'hierarchy.bin'));
+    const octreeUrl = base + 'octree.bin';
+    const readTile = async name => { const n = nodes.get(name); if (!n || !n.byteSize) return null; return decodePotree2Node(meta, schema, n, await rangeGet(octreeUrl, n.byteOffset, n.byteSize)); };
+    ctx = finishCtx(nodes, rootBox, meta.projection || meta.crs || meta.wkt || null, meta.spacing, readTile);
+    console.log(`[potree-live] (2.0) ${url} → ${nodes.size} nodes, georef=${!!ctx.transform}`);
+  }
+  ctxCache.set(url, ctx);
   return ctx;
 }
 
@@ -85,7 +96,7 @@ function buildTileset(ctx, urlParam) {
       geometricError: spacing / (2 ** node.depth),
       refine: 'ADD',
     };
-    if (node.numPoints > 0 && node.byteSize > 0) tile.content = { uri: `tile/${name}.glb?url=${enc}` };
+    if (node.numPoints > 0) tile.content = { uri: `tile/${name}.glb?url=${enc}` };
     const kids = [];
     for (let c2 = 0; c2 < 8; c2++) { const ck = name + c2; if (nodes.has(ck)) kids.push(tileFor(ck)); }
     if (kids.length) tile.children = kids;
@@ -98,14 +109,20 @@ function buildTileset(ctx, urlParam) {
 
 async function serveTileGlb(ctx, name) {
   const node = ctx.nodes.get(name);
-  if (!node || !node.numPoints || !node.byteSize) return null;
-  const raw = await rangeGet(ctx.octreeUrl, node.byteOffset, node.byteSize);
-  const { positions, colors, count } = decodePotree2Node(ctx.meta, ctx.schema, node, raw);
+  if (!node || !node.numPoints) return null;
+  const data = await ctx.readTile(name);                    // 2.0: range read+decode; 1.x: per-node fetch+decode
+  if (!data || !data.count) return null;
+  const { positions, colors, count } = data;
   const [ox, oy, oz] = ctx.origin;                          // world → tile-local (float32-safe)
   const pos = new Float32Array(count * 3);
   for (let i = 0; i < count; i++) { pos[i*3]=positions[i*3]-ox; pos[i*3+1]=positions[i*3+1]-oy; pos[i*3+2]=positions[i*3+2]-oz; }
   return Buffer.from(await buildPointsGlb(pos, colors, count));   // core applies the (E,U,−N) Y-up swizzle
 }
+
+// Pure builders the /stream dispatcher reuses.
+export const potreeTileRe = /^[r0-7]+$/;
+export async function potreeTileset(url) { return buildTileset(await getCtx(url), url); }
+export async function potreeTile(url, name) { return serveTileGlb(await getCtx(url), name); }
 
 /** Try to handle a /potree/* request. Returns true iff it owned the response. */
 export async function handlePotree(req, res, u) {

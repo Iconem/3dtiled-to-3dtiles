@@ -1,161 +1,48 @@
 #!/usr/bin/env node
 /**
- * tile-server — a "TiTiler for 3D": a live COPC → OGC 3D Tiles middleware.
+ * tile-server — a "TiTiler for 3D": live <format> → OGC 3D Tiles middleware. CORS open.
  *
- * Like TiTiler's `/cog/tiles/{z}/{x}/{y}` for rasters, this serves a 3D Tiles tileset *on the fly*
- * from a remote COPC URL — no pre-conversion. A viewer (CesiumJS / 3DTilesRendererJS / cesium-for-unreal)
- * points at the tileset endpoint; each tile request is fulfilled by HTTP-range-reading just that COPC
- * octree node and encoding a glTF POINTS GLB. The COPC octree maps ~1:1 onto the 3D Tiles tree.
+ * Two complementary modes (see README "Vision: towards a TiTiler for 3D"):
  *
- *   GET /copc/tileset.json?url=<COPC_URL>          → 3D Tiles 1.1 tileset (explicit tree, ADD refine)
- *   GET /copc/tile/<D-X-Y-Z>.glb?url=<COPC_URL>     → that node's points as a POINTS GLB
+ *   TRUE online range-streaming (nothing pre-converted — range-read the hierarchy, then one byte
+ *   range per tile). Per-format range adapters, unified under /stream:
+ *     GET /stream/tileset.json?url=<SRC>[&format=<fmt>]   (copc, potree today; lcc/rad next)
+ *     GET /copc/...   GET /potree/...                     (the adapters directly)
  *
- * Run:  PORT=3001 node packages/tile-server/server.js     (CORS open so any localhost viewer can fetch)
+ *   PREPROCESS + cache (convert the WHOLE dataset once on first hit, then serve static) — works for
+ *   EVERY format the meta-converter supports:
+ *     GET /convert/tileset.json?url=<SRC>[&format=<fmt>][&centroids=1]
+ *
+ * Run:  PORT=3001 node packages/tile-server/server.js   (npm run serve:tiles | serve:live)
  */
 import http from 'node:http';
-import { Copc, Getter } from 'copc';
-import proj4 from 'proj4';
-import { buildPointsGlb } from '../core/index.js';
-import { keyToCoords } from '../copc-to-3dtiles/src/subtreeBuilder.js';
-import { handleConvert } from './convert-live.js';
+import { handleCopc } from './copc-live.js';
 import { handlePotree } from './potree-live.js';
+import { handleSog } from './sog-live.js';
+import { handleStream } from './stream-live.js';
+import { handleConvert } from './convert-live.js';
 
 const PORT = Number(process.env.PORT) || 3001;
-const DEG = Math.PI / 180, A = 6378137.0, E2 = 0.00669437999014;
-
-const llhToEcef = (lon, lat, h) => {
-  const sLat = Math.sin(lat*DEG), cLat = Math.cos(lat*DEG), sLon = Math.sin(lon*DEG), cLon = Math.cos(lon*DEG);
-  const N = A / Math.sqrt(1 - E2*sLat*sLat);
-  return [(N+h)*cLat*cLon, (N+h)*cLat*sLon, (N*(1-E2)+h)*sLat];
-};
-// Column-major ENU→ECEF (columns East, North, Up, origin).
-const enuMatrix = (lon, lat, cx, cy, cz) => {
-  const sl = Math.sin(lon*DEG), cl = Math.cos(lon*DEG), sp = Math.sin(lat*DEG), cp = Math.cos(lat*DEG);
-  return [-sl,cl,0,0, -sp*cl,-sp*sl,cp,0, cp*cl,cp*sl,sp,0, cx,cy,cz,1];
-};
-
-// Read the LASF_Projection/2112 WKT VLR via a range read (copc exposes offset+length, not bytes).
-async function readWkt(getter, copc) {
-  const vlr = (copc.vlrs ?? []).find(v => v.userId === 'LASF_Projection' && v.recordId === 2112);
-  if (!vlr || !vlr.contentOffset || !vlr.contentLength) return null;
-  const buf = await getter(vlr.contentOffset, vlr.contentOffset + vlr.contentLength);
-  let raw = Buffer.from(buf).toString('utf8').replace(/\0/g, '').trim();
-  if (raw.startsWith('COMPD_CS[')) {                       // strip vertical CRS; proj4 wants the 2D part
-    const inner = raw.slice(raw.indexOf(',') + 1).trim();
-    let depth = 0, end = 0;
-    for (let i = 0; i < inner.length; i++) { if (inner[i]==='[') depth++; else if (inner[i]===']' && --depth===0) { end = i+1; break; } }
-    if (end > 0) raw = inner.slice(0, end);
-  }
-  return raw || null;
-}
-
-// Per-URL context (COPC header + full node hierarchy + georef), cached.
-const ctxCache = new Map();
-async function getCtx(url) {
-  if (ctxCache.has(url)) return ctxCache.get(url);
-  const getter = Getter.http(url);
-  const copc = await Copc.create(getter);
-  const nodeMap = new Map();
-  const loadPage = async (ref) => {
-    const { nodes, pages } = await Copc.loadHierarchyPage(getter, ref);   // (getter|filename, page)
-    for (const k of Object.keys(nodes)) nodeMap.set(k, nodes[k]);
-    for (const k of Object.keys(pages)) if (pages[k]) await loadPage(pages[k]);
-  };
-  await loadPage(copc.info.rootHierarchyPage);
-  const cube = copc.info.cube;
-  const origin = [(cube[0]+cube[3])/2, (cube[1]+cube[4])/2, (cube[2]+cube[5])/2];
-  let transform = null;
-  try {
-    const wkt = await readWkt(getter, copc);
-    if (wkt) { const [lon, lat, h] = proj4(wkt, 'WGS84').forward(origin); const e = llhToEcef(lon, lat, h ?? origin[2]); transform = enuMatrix(lon, lat, e[0], e[1], e[2]); }
-    else console.warn(`[tile-server] no WKT CRS in ${url} — local-origin (not geo-referenced)`);
-  } catch (e) { console.warn('[tile-server] georef failed:', e.message); }
-  const rootDiag = Math.hypot(cube[3]-cube[0], cube[4]-cube[1], cube[5]-cube[2]);
-  const ctx = { getter, copc, nodeMap, origin, transform, rootDiag, cube };
-  ctxCache.set(url, ctx);
-  console.log(`[tile-server] ${url} → ${nodeMap.size} nodes, georef=${!!transform}`);
-  return ctx;
-}
-
-const subCube = (cube, level, x, y, z) => {
-  const n = 2**level, dx = (cube[3]-cube[0])/n, dy = (cube[4]-cube[1])/n, dz = (cube[5]-cube[2])/n;
-  return [cube[0]+x*dx, cube[1]+y*dy, cube[2]+z*dz, cube[0]+(x+1)*dx, cube[1]+(y+1)*dy, cube[2]+(z+1)*dz];
-};
-
-// Explicit 3D Tiles tree from the COPC hierarchy. Boxes = octree sub-cube relative to the origin
-// (≈ ENU since the COPC's projected CRS is ~axis-aligned to ENU near the origin); content per node.
-function buildTileset(ctx, urlParam) {
-  const { nodeMap, origin, transform, rootDiag, cube } = ctx;
-  const enc = encodeURIComponent(urlParam);
-  const tileFor = (key) => {
-    const { level, x, y, z } = keyToCoords(key);
-    const sc = subCube(cube, level, x, y, z);
-    const c = [(sc[0]+sc[3])/2-origin[0], (sc[1]+sc[4])/2-origin[1], (sc[2]+sc[5])/2-origin[2]];
-    const h = [Math.max((sc[3]-sc[0])/2,0.01), Math.max((sc[4]-sc[1])/2,0.01), Math.max((sc[5]-sc[2])/2,0.01)];
-    const node = nodeMap.get(key);
-    const tile = { boundingVolume: { box: [c[0],c[1],c[2], h[0],0,0, 0,h[1],0, 0,0,h[2]] }, geometricError: rootDiag / (2**level), refine: 'ADD' };
-    if (node && node.pointCount > 0) tile.content = { uri: `tile/${key}.glb?url=${enc}` };
-    const kids = [];
-    for (let i = 0; i < 8; i++) {
-      const ck = `${level+1}-${2*x+(i&1)}-${2*y+((i>>1)&1)}-${2*z+((i>>2)&1)}`;
-      if (nodeMap.has(ck)) kids.push(tileFor(ck));
-    }
-    if (kids.length) tile.children = kids;
-    return tile;
-  };
-  const root = tileFor('0-0-0-0');
-  if (transform) root.transform = transform;
-  return { asset: { version: '1.1' }, geometricError: rootDiag, root,
-           extensionsUsed: ['3DTILES_content_gltf'] };
-}
-
-async function serveTileGlb(ctx, key) {
-  const node = ctx.nodeMap.get(key);
-  if (!node || !node.pointCount) return null;
-  const view = await Copc.loadPointDataView(ctx.getter, ctx.copc, node);
-  const n = view.pointCount, [ox, oy, oz] = ctx.origin;
-  const gx = view.getter('X'), gy = view.getter('Y'), gz = view.getter('Z');
-  const pos = new Float32Array(n * 3);
-  for (let i = 0; i < n; i++) { pos[i*3] = gx(i)-ox; pos[i*3+1] = gy(i)-oy; pos[i*3+2] = gz(i)-oz; }
-  const d = view.dimensions; let colors = null;
-  if (d.Red && d.Green && d.Blue) {
-    const gr = view.getter('Red'), gg = view.getter('Green'), gb = view.getter('Blue'), s = d.Red.size === 2 ? 1/65535 : 1/255;
-    colors = new Float32Array(n * 4);
-    for (let i = 0; i < n; i++) { colors[i*4]=gr(i)*s; colors[i*4+1]=gg(i)*s; colors[i*4+2]=gb(i)*s; colors[i*4+3]=1; }
-  }
-  return Buffer.from(await buildPointsGlb(pos, colors, n));   // core applies the (E,U,−N) Y-up swizzle
-}
-
 const CORS = { 'Access-Control-Allow-Origin': '*', 'Access-Control-Allow-Headers': '*' };
 
 http.createServer(async (req, res) => {
   try {
     if (req.method === 'OPTIONS') { res.writeHead(204, CORS); return res.end(); }
     const u = new URL(req.url, `http://localhost:${PORT}`);
-    if (await handlePotree(req, res, u)) return;             // Potree 2.0 → 3D Tiles live (range-streamed)
-    if (await handleConvert(req, res, u)) return;            // generic <fmt>→3D Tiles live (any format)
-    const copcUrl = u.searchParams.get('url');
-    if (!copcUrl) { res.writeHead(400, CORS); return res.end('missing ?url=<COPC url>'); }
-    const ctx = await getCtx(copcUrl);
-
-    if (u.pathname === '/copc/tileset.json') {
-      res.writeHead(200, { 'Content-Type': 'application/json', ...CORS });
-      return res.end(JSON.stringify(buildTileset(ctx, copcUrl)));
-    }
-    const m = u.pathname.match(/^\/copc\/tile\/(\d+-\d+-\d+-\d+)\.glb$/);
-    if (m) {
-      const glb = await serveTileGlb(ctx, m[1]);
-      if (!glb) { res.writeHead(404, CORS); return res.end('no such node'); }
-      res.writeHead(200, { 'Content-Type': 'model/gltf-binary', ...CORS });
-      return res.end(glb);
-    }
-    res.writeHead(404, CORS); res.end('not found');
+    if (await handleStream(req, res, u)) return;     // unified true-streaming dispatcher
+    if (await handleCopc(req, res, u)) return;       // COPC → 3D Tiles live (range-streamed)
+    if (await handlePotree(req, res, u)) return;     // Potree 2.0 → 3D Tiles live (range-streamed)
+    if (await handleSog(req, res, u)) return;        // streamed-SOG → 3D Tiles live (chunk-on-demand)
+    if (await handleConvert(req, res, u)) return;    // any <fmt> → 3D Tiles live (preprocess + cache)
+    res.writeHead(404, CORS); res.end('not found — try /stream, /copc, /potree, or /convert');
   } catch (e) {
     console.error('[tile-server]', e.stack || e.message);
     res.writeHead(500, CORS); res.end(String(e.message || e));
   }
 }).listen(PORT, () => {
-  console.log(`tile-server (COPC→3D Tiles live) on http://localhost:${PORT}/copc/tileset.json?url=<COPC_URL>`);
-  console.log(`            (Potree→3D Tiles live, streamed) on http://localhost:${PORT}/potree/tileset.json?url=<metadata.json URL>`);
-  console.log(`            (any <fmt>→3D Tiles live, cached) on http://localhost:${PORT}/convert/tileset.json?url=<SRC>[&format=<fmt>]`);
+  console.log(`tile-server on http://localhost:${PORT}`);
+  console.log(`  stream   (true range-streaming) /stream/tileset.json?url=<SRC>[&format=copc|potree]`);
+  console.log(`  copc     /copc/tileset.json?url=<COPC_URL>`);
+  console.log(`  potree   /potree/tileset.json?url=<metadata.json URL>`);
+  console.log(`  convert  (preprocess+cache, any fmt) /convert/tileset.json?url=<SRC>[&format=<fmt>][&centroids=1]`);
 });

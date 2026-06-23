@@ -1047,6 +1047,24 @@ formats and streams OGC 3D Tiles 1.1 **on demand** — transcribing the source o
 3D Tiles tree and converting raw node geometry to glTF/GLB, served over HTTP Range so nothing is
 re-encoded or re-sorted. Like TiTiler for COG: zero re-tiling, zero copy.
 
+### Two modes (`packages/tile-server`, one HTTP server, CORS open)
+
+| Mode | Endpoint | What it does | Formats |
+|---|---|---|---|
+| **Stream** (true online) | **`/stream`** (+ `/copc`, `/potree`) | Range-read the hierarchy → tileset; **one byte range per tile** → GLB. Nothing pre-converted or fully downloaded. | per-format range adapters: **copc, potree** (lcc/rad next) |
+| **Preprocess** (cached) | **`/convert`** | Convert the **whole** dataset once on first hit (cached on disk), then serve static. | **every** format the meta-converter supports |
+
+```sh
+npm run serve:tiles            # alias: npm run serve:live  → http://localhost:3001
+#   GET /stream/tileset.json?url=<SRC>[&format=copc|potree]    ← unified streaming dispatcher
+#   GET /convert/tileset.json?url=<SRC>[&format=<fmt>][&centroids=1]   ← preprocess+cache, any format
+```
+
+`/stream` is the single front-door the user envisioned: it detects the format and delegates to that
+format's range adapter (the range logic is necessarily format-specific — a COPC LAZ chunk vs a Potree
+octree-node byte range — but the entry point is one URL). For a format without an adapter yet it
+returns **501** pointing you at `/convert`. `/copc` and `/potree` remain as the direct adapters.
+
 ### `tile-server` — live COPC → 3D Tiles (implemented ✅)
 
 `packages/tile-server` is a working middleware (the TiTiler `/cog/tiles/...` analogue):
@@ -1092,16 +1110,26 @@ viewer.html pills: **⚡ Potree→3DT (stream, local)** and **⚡ Potree→3DT (
 
 #### Streaming roadmap — per-format range adapters
 
-| Format | Range-streamable? | Status |
-|---|---|---|
-| **COPC** | ✅ octree node = LAZ chunk byte range | **live `/copc`** |
-| **Potree 2.0** | ✅ node = `octree.bin` byte range (hierarchy.bin gives offsets) | **live `/potree`** |
-| **LCC** | ✅ unit LOD = `data.bin` byte range (index.bin gives offset/size) | next — clean, like COPC |
-| **RAD** | ✅ node = chunk byte range in the monolithic `.rad` | next — clean |
-| **streamed-SOG** | 🟡 tile = `[offset,count)` run, but WebP must be fetched+decoded **whole per chunk** | semi-stream (per-chunk, not per-tile) |
-| **I3S (REST)** | 🟡 nodepages + per-node geometry are REST/range-friendly, but it's a multi-resource tree | larger effort |
+A format can be **streamed** only if it persists **per-tile spatial bounds** (so the tileset tree is
+emitted without decoding any geometry). That's the dividing line:
 
-Everything not yet on a range adapter is still fully renderable today via `/convert` (below).
+| Format | Persists tile bounds? | Status |
+|---|---|---|
+| **COPC** | ✅ octree cube → derived boxes; node = LAZ chunk byte range | **live `/copc` + `/stream`** ✅ |
+| **Potree 2.0** | ✅ octree boxes; node = `octree.bin` byte range | **live `/potree` + `/stream`** ✅ |
+| **Potree 1.x** | ✅ octree boxes (.hrc / inline); node = one `.bin`/`.laz` file fetch | **live `/potree` + `/stream`** ✅ |
+| **streamed-SOG** | ✅ `lod-meta.json` tree carries per-node bounds + leaf `[file,offset,count]` runs | **live `/sog` + `/stream`** ✅ (fetch+decode the chunk WebP per leaf) |
+| **LCC** | 🟡 grid is persisted (`cellLengthX/Y` + per-unit index) → X/Y boxes derivable, Z from scene bounds | feasible — next (needs the unit-id→cell mapping); `/convert` serves it now |
+| **RAD** | ❌ chunk bounds NOT persisted, and **chunks aren't spatial tiles** (a chunk mixes LoD-tree levels — confirmed by the Spark team, see RAD notes) | **not streamed** — use `/convert` |
+| **I3S (REST)** | 🟡 REST node-page tree; multi-resource | larger effort — `/convert` for `.slpk` |
+
+Why RAD is excluded: building a 3D-Tiles tree needs spatial tile bounds, but RAD persists neither
+tile bounds nor a spatial tile partition — its "chunks" are 64K-splat **streaming** groups ordered by
+featureSize, spanning multiple LoD-tree levels. So there's nothing to range into as a "tile" without a
+decode pass. `/convert` (preprocess+cache) already serves RAD live; see
+[`docs-references/rad-format-notes.md`](docs-references/rad-format-notes.md) for the full rationale.
+
+Everything not on a range adapter is still fully renderable today via `/convert` (below).
 
 ### `/convert` — live **any-format** → 3D Tiles (implemented ✅)
 
