@@ -1069,6 +1069,40 @@ cesium-for-unreal). Other formats (RAD/SPZ, Potree, EPT) can be added behind the
 
 Formats in scope: **COPC (live ✅)**, RAD/SPZ (3DGS), EPT/Entwine (LiDAR), Potree (LiDAR), 3DTILES (passthrough).
 
+### `/potree` — live **Potree 2.0** → 3D Tiles (true range-streaming ✅)
+
+The second format with a real **range adapter** (the COPC model generalised). Nothing is pre-converted
+or fully downloaded: `metadata.json` (tiny) + `hierarchy.bin` are fetched once to emit the tileset
+tree; each tile request HTTP-**range**-reads just that node's contiguous block from `octree.bin`,
+decodes it (DEFAULT or BROTLI), and returns a glTF POINTS GLB. Potree's octree → 3D Tiles tree ~1:1.
+
+```sh
+#   GET /potree/tileset.json?url=<metadata.json URL>     → 3D Tiles 1.1 tileset (explicit, ADD refine)
+#   GET /potree/tile/<name>.glb?url=<metadata.json URL>  → that node's points (one octree.bin range read)
+```
+
+- `url` points at the dataset's `metadata.json`; `hierarchy.bin` / `octree.bin` resolve as siblings.
+- The source host must serve **HTTP 206** range responses (potree.org, S3, most static hosts do).
+- Geo-referenced if `metadata.json` carries a CRS (`projection`/`crs`/WKT, via proj4); else local origin.
+- Potree **1.x** (cloud.js + per-node files) isn't range-served — use `/convert?format=potree`.
+- Verified end-to-end against **potree.org** (remote, internet) and local data. The decode is the same
+  authoritative code the offline `potree-to-3dtiles` converter uses (shared `potree2.js`).
+
+viewer.html pills: **⚡ Potree→3DT (stream, local)** and **⚡ Potree→3DT (stream, potree.org)**.
+
+#### Streaming roadmap — per-format range adapters
+
+| Format | Range-streamable? | Status |
+|---|---|---|
+| **COPC** | ✅ octree node = LAZ chunk byte range | **live `/copc`** |
+| **Potree 2.0** | ✅ node = `octree.bin` byte range (hierarchy.bin gives offsets) | **live `/potree`** |
+| **LCC** | ✅ unit LOD = `data.bin` byte range (index.bin gives offset/size) | next — clean, like COPC |
+| **RAD** | ✅ node = chunk byte range in the monolithic `.rad` | next — clean |
+| **streamed-SOG** | 🟡 tile = `[offset,count)` run, but WebP must be fetched+decoded **whole per chunk** | semi-stream (per-chunk, not per-tile) |
+| **I3S (REST)** | 🟡 nodepages + per-node geometry are REST/range-friendly, but it's a multi-resource tree | larger effort |
+
+Everything not yet on a range adapter is still fully renderable today via `/convert` (below).
+
 ### `/convert` — live **any-format** → 3D Tiles (implemented ✅)
 
 The same server also exposes a generic endpoint that works for **every format the meta-converter
@@ -1091,7 +1125,8 @@ pre-converted. The end state is the same model generalised to every internally-t
 #### The current implementation (offline conversion, cached, served live)
 
 `/convert` is a pragmatic stand-in that gets **every** format renderable today, before each
-per-format range adapter exists. Where `/copc` is *per-tile*, `/convert` is *per-dataset*: on the
+per-format range adapter exists (so far `/copc` and `/potree` do; LCC/RAD are next — see the roadmap
+above). Where `/copc` and `/potree` are *per-tile*, `/convert` is *per-dataset*: on the
 **first** request it resolves the source to a local dataset (downloading remote inputs), runs the
 in-process `convert()` **once** (output cached on disk under the OS temp dir, keyed by
 `sha1(format|src)`), then serves the static 3D Tiles output. So it converts the **whole** hierarchy
@@ -1119,9 +1154,14 @@ npm run serve:tiles
 - For big COPC, prefer `/copc` (true range streaming) over `/convert` (downloads the whole `.laz`).
 
 **Remote source notes / limits:**
+- The **same remote support is shared by the CLI and JS API** (`packages/convert/fetch-source.js`):
+  `3dtiled https://host/scene/metadata.json out/` and `convert('https://…', out)` download the source
+  (+ the sibling files the format needs) to a temp dir, then convert. Local path or remote URL works
+  identically across CLI, JS API, and the `/convert` middleware.
 - Mirroring is server-side, so **no browser CORS** applies — but the source must serve **HTTP range
-  206** for `/copc`, and **must not redirect in a way that drops the `Range` header** (e.g. some IGN
-  LiDAR HD URLs 302 to an OVH bucket → range lost). `/convert` downloads in full so it tolerates that.
+  206** for `/copc` and `/potree`, and **must not redirect in a way that drops the `Range` header**
+  (e.g. some IGN LiDAR HD URLs 302 to an OVH bucket → range lost). `/convert` downloads in full so it
+  tolerates that.
 - **I3S** remote = `.slpk` **file** only; live **REST** SceneServer services (gzipped node-page tree)
   aren't mirrored yet — extract the `.slpk` / mirror the service locally and pass the directory.
 - Use a **raw** file URL, not a hosting page — GitHub `…/blob/…#L2` returns HTML; use the

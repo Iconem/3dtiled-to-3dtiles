@@ -9,7 +9,8 @@
     "dev:web": "vite",
     "build": "vite build",
     "serve": "vite preview --port 3000",
-    "serve:tiles": "node packages/tile-server/server.js"
+    "serve:tiles": "node packages/tile-server/server.js",
+    "serve:live": "node packages/tile-server/server.js"
   },
   "dependencies": {
     "cesium": "1.142.0",

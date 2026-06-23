@@ -9,6 +9,23 @@ import path from 'path';
 const exists = async p => !!(await fs.stat(p).catch(() => null));
 const isDir  = async p => { const s = await fs.stat(p).catch(() => null); return s?.isDirectory(); };
 
+/**
+ * Detect format from a basename/URL alone (extension or index filename) — no filesystem access.
+ * Used for remote inputs, where directory formats can't be recognised by stat-ing sibling files.
+ * Returns a format id or null.
+ */
+export function detectFormatByName(name) {
+  const l = name.toLowerCase().split('?')[0].split('#')[0];
+  if (l.endsWith('.rad')) return 'rad';
+  if (l.endsWith('.copc.laz') || l.endsWith('.copc') || l.endsWith('.laz') || l.endsWith('.las')) return 'copc';
+  if (l.endsWith('.slpk')) return 'i3s';
+  if (l.endsWith('metadata.json') || l.endsWith('cloud.js')) return 'potree';
+  if (l.endsWith('lod-meta.json')) return 'sog';
+  if (l.endsWith('.lcc')) return 'lcc';
+  if (l.endsWith('3dscenelayer.json') || l.endsWith('3dscenelayer.json.gz')) return 'i3s';
+  return null;
+}
+
 export async function detectFormat(input) {
   const lower = input.toLowerCase();
 

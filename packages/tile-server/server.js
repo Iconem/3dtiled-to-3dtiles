@@ -18,6 +18,7 @@ import proj4 from 'proj4';
 import { buildPointsGlb } from '../core/index.js';
 import { keyToCoords } from '../copc-to-3dtiles/src/subtreeBuilder.js';
 import { handleConvert } from './convert-live.js';
+import { handlePotree } from './potree-live.js';
 
 const PORT = Number(process.env.PORT) || 3001;
 const DEG = Math.PI / 180, A = 6378137.0, E2 = 0.00669437999014;
@@ -131,6 +132,7 @@ http.createServer(async (req, res) => {
   try {
     if (req.method === 'OPTIONS') { res.writeHead(204, CORS); return res.end(); }
     const u = new URL(req.url, `http://localhost:${PORT}`);
+    if (await handlePotree(req, res, u)) return;             // Potree 2.0 → 3D Tiles live (range-streamed)
     if (await handleConvert(req, res, u)) return;            // generic <fmt>→3D Tiles live (any format)
     const copcUrl = u.searchParams.get('url');
     if (!copcUrl) { res.writeHead(400, CORS); return res.end('missing ?url=<COPC url>'); }
@@ -154,5 +156,6 @@ http.createServer(async (req, res) => {
   }
 }).listen(PORT, () => {
   console.log(`tile-server (COPC→3D Tiles live) on http://localhost:${PORT}/copc/tileset.json?url=<COPC_URL>`);
-  console.log(`            (any <fmt>→3D Tiles live) on http://localhost:${PORT}/convert/tileset.json?url=<SRC>[&format=<fmt>]`);
+  console.log(`            (Potree→3D Tiles live, streamed) on http://localhost:${PORT}/potree/tileset.json?url=<metadata.json URL>`);
+  console.log(`            (any <fmt>→3D Tiles live, cached) on http://localhost:${PORT}/convert/tileset.json?url=<SRC>[&format=<fmt>]`);
 });

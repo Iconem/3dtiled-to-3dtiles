@@ -23,10 +23,11 @@ import path from 'node:path';
 import crypto from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 import { convert, detectFormat } from '../convert/index.js';
+import { isRemote, mirrorRemote } from '../convert/fetch-source.js';
+import { detectFormatByName } from '../core/index.js';
 
 const CACHE = path.join(os.tmpdir(), '3dtiles-live-cache');
 const CORS = { 'Access-Control-Allow-Origin': '*', 'Access-Control-Allow-Headers': '*' };
-const isRemote = s => /^https?:\/\//i.test(s);
 const exists = async p => !!(await fs.stat(p).catch(() => null));
 const keyFor = (src, fmt, centroids) => crypto.createHash('sha1').update(`${fmt || ''}|${centroids ? 'c|' : ''}${src}`).digest('hex').slice(0, 16);
 
@@ -35,72 +36,16 @@ const MIME = {
   '.subtree': 'application/octet-stream', '.b3dm': 'application/octet-stream', '.pnts': 'application/octet-stream',
 };
 
-// Map a (remote-or-local) basename to a format when the extension / index filename is decisive.
-// Used for remote URLs, where detectFormat() can't stat sibling files to recognise directory formats.
-function detectByName(name) {
-  const l = name.toLowerCase();
-  if (l.endsWith('.rad')) return 'rad';
-  if (l.endsWith('.copc.laz') || l.endsWith('.copc') || l.endsWith('.laz') || l.endsWith('.las')) return 'copc';
-  if (l.endsWith('.slpk')) return 'i3s';
-  if (l === 'metadata.json' || l === 'cloud.js') return 'potree';
-  if (l.endsWith('lod-meta.json')) return 'sog';
-  if (l.endsWith('.lcc')) return 'lcc';
-  return null;
-}
-
+// Resolve the format: explicit &format wins; else detect (stat for local dirs, basename for remote).
 async function resolveFormat(src, explicit, name) {
   if (explicit) return explicit;
   if (!isRemote(src)) { const f = await detectFormat(src.startsWith('file://') ? fileURLToPath(src) : src).catch(() => null); if (f) return f; }
-  return detectByName(name);
+  return detectFormatByName(name);
 }
 
-// ── remote mirroring: fetch the source + the sibling files each converter reads ──
-async function fetchTo(url, dest) {
-  const r = await fetch(url);
-  if (!r.ok) throw new Error(`fetch ${url} → ${r.status}`);
-  await fs.mkdir(path.dirname(dest), { recursive: true });
-  await fs.writeFile(dest, Buffer.from(await r.arrayBuffer()));
-}
-const tryFetch = (url, dest) => fetchTo(url, dest).catch(() => {});
-
-// Download a remote dataset into `dir`, returning the local input path to hand to convert().
-async function mirrorRemote(src, fmt, dir) {
-  const clean = src.split('?')[0];
-  const base = clean.slice(0, clean.lastIndexOf('/') + 1);
-  const name = clean.slice(clean.lastIndexOf('/') + 1) || 'input';
-  const get = (rel) => fetchTo(base + rel, path.join(dir, rel));
-
-  if (fmt === 'potree') {                                   // Potree 2.0 (3 files). 1.x (cloud.js + node tree) isn't mirrored.
-    await get('metadata.json'); await get('hierarchy.bin'); await get('octree.bin');
-    return dir;
-  }
-  if (fmt === 'lcc') {                                      // meta.lcc (+ index.bin, data.bin, optional shcoef.bin)
-    await get(name);
-    for (const f of ['index.bin', 'data.bin', 'shcoef.bin']) await tryFetch(base + f, path.join(dir, f));
-    return dir;
-  }
-  if (fmt === 'sog') {                                      // lod-meta.json + per-chunk meta.json + the files each chunk references
-    const r = await fetch(base + name); if (!r.ok) throw new Error(`fetch ${base + name} → ${r.status}`);
-    const lod = JSON.parse(Buffer.from(await r.arrayBuffer()).toString('utf8'));
-    await fs.mkdir(dir, { recursive: true });
-    await fs.writeFile(path.join(dir, 'lod-meta.json'), JSON.stringify(lod));
-    if (lod.environment) await tryFetch(base + lod.environment, path.join(dir, lod.environment));
-    for (const cm of lod.filenames || []) {
-      await get(cm);                                        // chunk meta.json (e.g. "1_0/meta.json")
-      const cj = JSON.parse(await fs.readFile(path.join(dir, cm), 'utf8'));
-      const cdir = path.posix.dirname(cm);
-      for (const k of Object.keys(cj)) {                    // each column's WebP textures, siblings of the chunk meta
-        const files = cj[k]?.files;
-        if (Array.isArray(files)) for (const fn of files) await get(path.posix.join(cdir, fn));
-      }
-    }
-    return path.join(dir, 'lod-meta.json');
-  }
-  await get(name);                                          // single-file formats: copc / rad / i3s-slpk
-  return path.join(dir, name);
-}
-
-// ── conversion, cached per key. The in-flight promise dedupes concurrent first hits. ──
+// ── conversion, cached per key. The in-flight promise dedupes concurrent first hits.
+// Remote sources are mirrored (source + sibling files each converter needs) via the shared
+// fetch-source module, which the CLI / JS API use too. ──
 const jobs = new Map();
 function ensureConverted(src, fmt, key, centroidsOnly) {
   if (jobs.has(key)) return jobs.get(key);

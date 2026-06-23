@@ -10,7 +10,8 @@
 import { spawn } from 'child_process';
 import path from 'path';
 import { fileURLToPath } from 'url';
-import { detectFormat } from '3dtiles-convert-core';
+import { detectFormat, detectFormatByName } from '3dtiles-convert-core';
+import { isRemote, resolveSource } from './fetch-source.js';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..');
 
@@ -43,10 +44,18 @@ function optsToFlags(fmt, opts = {}) {
  * @returns {Promise<{format:string, outDir:string}>}
  */
 export async function convert(input, outDir, opts = {}) {
-  const format = opts.format || await detectFormat(input);
+  // Resolve format first — remote URLs can't stat sibling files, so detect by basename for those.
+  const format = opts.format
+    || (isRemote(input) ? detectFormatByName(input) : await detectFormat(input));
   if (!format) throw new Error(`Could not detect input format for "${input}". Pass { format } explicitly.`);
   const entry = REGISTRY[format];
   if (!entry) throw new Error(`No converter registered for format "${format}".`);
+
+  // Remote input → download (with the sibling files the format needs) to a temp dir, then convert locally.
+  if (isRemote(input)) {
+    const { input: localInput } = await resolveSource(input, format);
+    input = localInput;
+  }
 
   // In-process dispatch (preferred). Fall back to child-process only when the caller passed
   // format-specific CLI flags (extraArgs) that the in-process options object doesn't model.

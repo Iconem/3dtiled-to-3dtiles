@@ -13,6 +13,8 @@
  * · I3S (.slpk / 3dSceneLayer.json).
  */
 import { convert, detectFormat, supportedFormats } from './index.js';
+import { detectFormatByName } from '3dtiles-convert-core';
+import { isRemote } from './fetch-source.js';
 
 const rawArgv = process.argv.slice(2);
 const sepIdx = rawArgv.indexOf('--');
@@ -39,7 +41,7 @@ if (!input || !outDir) {
 }
 
 (async () => {
-  const format = flag('format') || await detectFormat(input);
+  const format = flag('format') || (isRemote(input) ? detectFormatByName(input) : await detectFormat(input));
   console.log(`[3dtiled] input: ${input}`);
   console.log(`[3dtiled] detected format: ${format ?? '(none — pass --format)'}`);
   if (!format) process.exit(2);

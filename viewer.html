@@ -643,6 +643,11 @@ const PRESETS = [
       // centroids=1 → splats served as a POINTS tileset (centroids) for point-cloud-only renderers
       live('conv-rad-c',  '🔵 RAD centroids (live)', 'pointcloud', `${SD}/RAD/coit.rad`,    'rad', '&centroids=1'),
       live('conv-sog-c',  '🔵 SOG centroids (live)', 'pointcloud', `${SD}/SOG/skatepark`,   'sog', '&centroids=1'),
+      // ── TRUE streaming (range-read per tile, nothing pre-converted) — like /copc, for Potree 2.0 ──
+      { id: 'stream-potree-local', label: '⚡ Potree→3DT (stream, local)', type: 'pointcloud', local: false,
+        url: 'http://localhost:3001/potree/tileset.json?url=' + encodeURIComponent('http://localhost:3000/sample-data/input/POTREE/lion_p2/metadata.json') },
+      { id: 'stream-potree-org', label: '⚡ Potree→3DT (stream, potree.org)', type: 'pointcloud', local: false,
+        url: 'http://localhost:3001/potree/tileset.json?url=' + encodeURIComponent('https://potree.org/pointclouds/lion/metadata.json') },
     ];
   })(),
   {
@@ -673,6 +678,10 @@ const PRESETS = [
     url: 'http://localhost:3000/sample-data/output/i3s/Buildings_NewYork_v18/tileset.json',
     local: false,
   },
+  // ── Offline centroid-only splats (3dtiled --centroids-only → POINTS tileset of splat centroids) ──
+  { id: 'cent-rad', label: '🔵 RAD centroids',  type: 'pointcloud', url: 'http://localhost:3000/sample-data/output/centroids/rad-tastier500k/tileset.json', local: false },
+  { id: 'cent-lcc', label: '🔵 LCC centroids',  type: 'pointcloud', url: 'http://localhost:3000/sample-data/output/centroids/lcc-Guan_Temple/tileset.json', local: false },
+  { id: 'cent-sog', label: '🔵 SOG centroids',  type: 'pointcloud', url: 'http://localhost:3000/sample-data/output/centroids/sog-skatepark/tileset.json',  local: false },
   // ── Meta-converter outputs (3dtiled auto-detect → dispatch; written to output-meta-converter/) ──
   { id: 'meta-rad',    label: '🔀 RAD (meta)',    type: 'splat',      url: 'http://localhost:3000/sample-data/output-meta-converter/rad-tastier500k/tileset.json', local: false },
   { id: 'meta-sog',    label: '🔀 SOG (meta)',    type: 'splat',      url: 'http://localhost:3000/sample-data/output-meta-converter/sog-skatepark/tileset.json',   local: false },

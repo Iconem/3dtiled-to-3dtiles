@@ -13,6 +13,9 @@ export default defineConfig({
     port: 3000,
     // Serve the whole repo (viewer.html + sample-data/output/** that the presets reference).
     fs: { allow: ['.'] },
+    // …but DON'T file-watch sample-data: it holds ~100k+ tile files. Watching them makes the dev
+    // server crawl on startup and every HMR. They're still served on demand — only watching is off.
+    watch: { ignored: ['**/sample-data/**'] },
   },
   resolve: {
     // `import … from 'three/addons/…'` → three's bundled examples/jsm.
