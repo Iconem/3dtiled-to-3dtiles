@@ -11,8 +11,9 @@
  */
 import { Copc, Getter } from 'copc';
 import proj4 from 'proj4';
-import { buildPointsGlb } from '../core/index.js';
-import { keyToCoords } from '../copc-to-3dtiles/src/subtreeBuilder.js';
+import { buildPointsGlb, keyToCoords, buildSubtreeBuffer } from '../core/index.js';
+
+const SUBTREE_LEVELS = 3;
 
 const CORS = { 'Access-Control-Allow-Origin': '*', 'Access-Control-Allow-Headers': '*' };
 const DEG = Math.PI / 180, A = 6378137.0, E2 = 0.00669437999014;
@@ -82,7 +83,7 @@ const subCube = (cube, level, x, y, z) => {
 };
 
 // Explicit 3D Tiles tree from the COPC hierarchy. Boxes = octree sub-cube relative to the origin.
-function buildTileset(ctx, urlParam) {
+function buildTilesetExplicit(ctx, urlParam) {
   const { nodeMap, origin, transform, rootDiag, cube } = ctx;
   const enc = encodeURIComponent(urlParam);
   const tileFor = (key) => {
@@ -106,6 +107,22 @@ function buildTileset(ctx, urlParam) {
   return { asset: { version: '1.1' }, geometricError: rootDiag, root, extensionsUsed: ['3DTILES_content_gltf'] };
 }
 
+// Implicit octree: one root with implicitTiling + content/subtree templates (subtrees built on the fly).
+function buildTilesetImplicit(ctx, urlParam) {
+  const { origin, transform, rootDiag, cube } = ctx;
+  const enc = encodeURIComponent(urlParam);
+  let maxLevel = 0;
+  for (const key of ctx.nodeMap.keys()) { const l = keyToCoords(key).level; if (l > maxLevel) maxLevel = l; }
+  const root = {
+    boundingVolume: { box: [0,0,0, (cube[3]-cube[0])/2,0,0, 0,(cube[4]-cube[1])/2,0, 0,0,(cube[5]-cube[2])/2] },
+    refine: 'ADD', geometricError: rootDiag,
+    implicitTiling: { subdivisionScheme: 'OCTREE', availableLevels: maxLevel + 1, subtreeLevels: SUBTREE_LEVELS, subtrees: { uri: `subtrees/{level}-{x}-{y}-{z}.subtree?url=${enc}` } },
+    content: { uri: `tile/{level}-{x}-{y}-{z}.glb?url=${enc}` },
+  };
+  if (transform) root.transform = transform;
+  return { asset: { version: '1.1' }, geometricError: rootDiag, root, extensionsUsed: ['3DTILES_content_gltf'] };
+}
+
 async function serveTileGlb(ctx, key) {
   const node = ctx.nodeMap.get(key);
   if (!node || !node.pointCount) return null;
@@ -123,10 +140,15 @@ async function serveTileGlb(ctx, key) {
   return Buffer.from(await buildPointsGlb(pos, colors, n));   // core applies the (E,U,−N) Y-up swizzle
 }
 
-// Pure builders the /stream dispatcher reuses.
+// Pure builders the /stream dispatcher reuses. Tiles/subtrees are keyed "level-x-y-z" (explicit and
+// implicit both use that token, so one tile route serves both modes).
 export const copcTileRe = /^[0-9]+-[0-9]+-[0-9]+-[0-9]+$/;
-export async function copcTileset(url) { return buildTileset(await getCtx(url), url); }
+export async function copcTileset(url, opts = {}) {
+  const ctx = await getCtx(url);
+  return opts.tiling === 'explicit' ? buildTilesetExplicit(ctx, url) : buildTilesetImplicit(ctx, url);
+}
 export async function copcTile(url, key) { return serveTileGlb(await getCtx(url), key); }
+export async function copcSubtree(url, key) { return buildSubtreeBuffer(key, (await getCtx(url)).nodeMap, SUBTREE_LEVELS); }
 
 /** Try to handle a /copc/* request. Returns true iff it owned the response. */
 export async function handleCopc(req, res, u) {
@@ -136,7 +158,7 @@ export async function handleCopc(req, res, u) {
 
   if (u.pathname === '/copc/tileset.json') {
     res.writeHead(200, { 'Content-Type': 'application/json', ...CORS });
-    res.end(JSON.stringify(await copcTileset(url)));
+    res.end(JSON.stringify(await copcTileset(url, { tiling: u.searchParams.get('tiling') })));
     return true;
   }
   const m = u.pathname.match(/^\/copc\/tile\/(\d+-\d+-\d+-\d+)\.glb$/);
@@ -145,6 +167,12 @@ export async function handleCopc(req, res, u) {
     if (!glb) { res.writeHead(404, CORS); res.end('no such node'); return true; }
     res.writeHead(200, { 'Content-Type': 'model/gltf-binary', ...CORS });
     res.end(glb);
+    return true;
+  }
+  const s = u.pathname.match(/^\/copc\/subtrees\/(\d+-\d+-\d+-\d+)\.subtree$/);
+  if (s) {
+    res.writeHead(200, { 'Content-Type': 'application/octet-stream', ...CORS });
+    res.end(await copcSubtree(url, s[1]));
     return true;
   }
   res.writeHead(404, CORS); res.end('not found');

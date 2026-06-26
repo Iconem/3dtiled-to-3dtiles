@@ -37,6 +37,23 @@ SPZ-v2 GLB (one shared encoder, `spzGlb.js`). The decode differs per format; the
 | **SOG (streamed)** (PlayCanvas) | 🟢 | **binary** spatial tree (AABB split) | unbundled SOG chunk: WebP textures → `DataTable` (pos/quat-w-first/log-scale/SH-DC/logit-opacity) | REPLACE | empty grouping nodes | `lod-meta.json` + per-chunk `meta.json` | ✅ per-file | [playcanvas](https://developer.playcanvas.com/user-manual/gaussian-splatting/formats/streamed-sog/) |
 | **LCC** (XGRIDS) | 🟢 | **grid of Units** (cellX×Y) × per-cell LODs | `Data.bin` fixed **32 B/splat**: pos `f32×3`, color `rgba8`, scale `u16×3`, rot `10-10-10-2` (+SH `Shcoef.bin` 64 B) | REPLACE | per-cell coarse LODs | `meta.lcc` JSON + `Index.bin` | ✅ `Index.bin` offsets into `Data.bin` | [developer.xgrids.com](https://developer.xgrids.com/#/document?titleId=en-1720509291851) |
 
+### Format specifications (canonical sources + local mirrors)
+
+Each source format's authoritative spec, with a distilled local copy under [`docs-references/`](docs-references/):
+
+| Format | Canonical spec(s) | Local mirror |
+|--------|-------------------|--------------|
+| **COPC** | [copc.io](https://copc.io) · [spec repo](https://github.com/copcio/copcio.github.io) | — |
+| **Potree** | [PotreeConverter](https://github.com/potree/PotreeConverter) · [2.0 format (potree-converter)](https://github.com/potree/potree/blob/develop/docs/) · ref impl [potree23dtiles](https://github.com/yeyan00/potree23dtiles) | [`potree-format.md`](docs-references/potree-format.md) |
+| **streamed-SOG** | [PlayCanvas streamed-SOG](https://developer.playcanvas.com/user-manual/gaussian-splatting/formats/streamed-sog/) · [SOG](https://developer.playcanvas.com/user-manual/gaussian-splatting/formats/sog/) · [splat-transform](https://github.com/playcanvas/splat-transform) | [`streamed-sog.md`](docs-references/streamed-sog.md) · [`sog.md`](docs-references/sog.md) |
+| **LCC** (XGRIDS) | [developer.xgrids.com](https://developer.xgrids.com/#/document?titleId=en-1720509291851) · [LCC whitepaper](https://github.com/xgrids/LCCWhitepaper) · [LCC-Web-SDK](https://github.com/xgrids/LCC-Web-SDK) | [`lcc-format.md`](docs-references/lcc-format.md) |
+| **RAD** (SparkJS) | **spec:** [LoD getting started](https://sparkjs.dev/docs/lod-getting-started/) · **blog:** [Spark 2.0 — spatially partitioned LoD](https://www.worldlabs.ai/blog/spark-2.0) · [ext-splats](https://sparkjs.dev/docs/ext-splats/) | [`rad-format-notes.md`](docs-references/rad-format-notes.md) · [`spark-2.0-blog-post.md`](docs-references/spark-2.0-blog-post.md) |
+| **I3S** (Esri) | [esri/i3s-spec](https://github.com/esri/i3s-spec) (OGC Community Standard) | [`i3s-spec.md`](docs-references/i3s-spec.md) |
+| **SPZ / glTF splat exts** | [SPZ](https://github.com/nianticlabs/spz) · [KHR_gaussian_splatting](https://github.com/CesiumGS/glTF/tree/proposal-KHR_gaussian_splatting) | [`spz-format.md`](docs-references/spz-format.md) · [`KHR_gaussian_splatting.md`](docs-references/KHR_gaussian_splatting.md) |
+
+(Several spec sites block automated fetching — the `docs-references/` mirrors are hand-distilled from
+the canonical sources above and kept in sync as the converters evolve.)
+
 ### Parallelism (per converter)
 
 Per-tile work — decode → SPZ/GLB encode → gzip → write — is **independent per tile**, so it is
@@ -425,6 +442,13 @@ coarsest→finest under a single root. `Data.bin` is **uncompressed, fixed 32 B/
 **Scale = linear `mix(scale.min, scale.max, u/65535)`** (the SDK's `compressedScaleMin/Max` uniforms =
 meta `attributes.scale.min/max`); rotation decode = the SDK's `QUAT_TAB`.
 
+> ⚠️ **LCC partitions in X/Y only (a 2-D grid, not an octree).** `Index.bin` packs each Unit's cell as
+> `x(low16)/y(high16)` with `cellLengthX/Y`; there is **no Z partition** — each Unit spans the full
+> scene height, refined by LOD detail rather than by vertical tiling. For a **tall scan** (e.g. an
+> XGRIDS L2 sweep of a tower) the live/stream tile boxes therefore use the cell's X/Y extent + the full
+> scene Z, so vertical frustum culling is coarse (everything in a column shares one Z span). Not a bug —
+> it's how LCC organizes data; tighter per-Unit Z would require decoding the splats.
+
 **Validated:** `Guan_Temple` → 154 tiles, **11,424,293 splats (= `meta.totalSplats` exactly)**,
 0 bad quaternions, scale p50 ≈ 3 cm (sane for a 325 m-diagonal temple). **SH (`Shcoef.bin`, Quality
 files) not yet emitted** (DC only, like the other converters). LCC is XGRIDS' format — attribution
@@ -478,6 +502,20 @@ full-fidelity I3S is **high** effort and overlaps mature tools (loaders.gl, Cesi
 > **3D Tiles → I3S and I3S → 3D Tiles** (Draco, textures, attributes, gzip), and is the mature
 > baseline this draft is measured against. Use it for full-fidelity I3S; `i3s-to-3dtiles` here stays a
 > minimal, dependency-light subset (uncompressed, explicit tree, mesh/points only).
+
+> **Reference — 3D Tiles ⇄ 3D Tiles tooling:** CesiumGS's
+> **[`3d-tiles-tools`](https://github.com/CesiumGS/3d-tiles-tools)** is the canonical toolbox for
+> tileset-level operations, several of which overlap our "3D Tiles → 3D Tiles" plans:
+> - **`upgrade`** — legacy → 3D Tiles 1.0/1.1 (`asset.version`, `url`→`uri`, `refine` upper-case, glTF
+>   1.0→2.0, and with `--targetVersion 1.1` converts PNTS/B3DM/I3DM/CMPT content to glTF; drops
+>   `3DTILES_content_gltf`).
+> - **`merge` / `mergeJson`** — combine tilesets as external tilesets (mergeJson writes only the
+>   referencing JSON, using relative paths to the inputs).
+> - **`b3dmToGlb` / `i3dmToGlb` / `cmptToGlb` / `convertB3dmToGlb` / `convertPntsToGlb` /
+>   `convertI3dmToGlb` / `splitCmpt`** — extract or convert legacy tile content to glTF.
+>
+> Our [`3D Tiles → 3D Tiles`](#3d-tiles--3d-tiles-transcodes) transcodes are the live/streaming-flavored
+> counterparts (implicit→explicit, legacy upgrade); use `3d-tiles-tools` for full offline pipelines.
 
 ---
 
@@ -1220,6 +1258,31 @@ GET /convert/tileset.json?url=<SRC>&centroids=1    # cached separately from the 
 
 Point-cloud inputs (COPC/Potree) are already POINTS, so the flag is a no-op for them. The output is a
 standard POINTS tileset with **no** `KHR_gaussian_splatting` extension advertised.
+
+### 3D Tiles → 3D Tiles transcodes
+
+The input is *already* 3D Tiles — these are tileset-level transforms (the live/streaming-flavored
+counterparts to [`3d-tiles-tools`](https://github.com/CesiumGS/3d-tiles-tools), referenced above).
+
+**Planned / in progress:**
+- **Implicit → explicit** — read a tileset with `implicitTiling` (OCTREE/QUADTREE) + `.subtree` files,
+  walk the availability bitstreams, and emit an **explicit** nested tree (derived boxes via the same
+  `octreeSubCube`/`cubeToBox` core helpers we use for the octree converters). For viewers/tools that
+  don't implement implicit tiling. (We already generate implicit *and* explicit on the write side, so
+  this is the read side of the same machinery.)
+- **Legacy upgrade → 3D Tiles 1.1** — the JSON-level upgrades (`asset.version` → 1.1, `url` → `uri`,
+  `refine` → upper-case, drop `3DTILES_content_gltf`) plus **`b3dm` → `glb`** content extraction (a
+  b3dm is a header + feature/batch tables + an embedded GLB — strip to the GLB). `pnts`/`i3dm`/`cmpt`
+  → glTF and full PBR material conversion are deferred to `3d-tiles-tools` (`upgrade --targetVersion 1.1`).
+
+**Doable but low value (noted, not planned):**
+- **Point-budget / downsample proxy** — serve fewer/decimated tiles to weak clients. Marginal: a
+  capable renderer (CesiumJS / 3DTilesRendererJS) already loads only what its SSE budget needs.
+- **Mesh → points** — emit only vertices of a mesh tileset. Niche (loses the surface; render-time can
+  approximate), listed for completeness.
+
+For full offline pipelines (merge, `mergeJson`, `upgrade`, `b3dmToGlb`/`pnts`/`i3dm`/`cmpt` → glTF),
+use **[`3d-tiles-tools`](https://github.com/CesiumGS/3d-tiles-tools)** — the canonical CesiumGS toolbox.
 
 ### `potree-to-copc` (assessed — blocked on a JS LAZ encoder)
 

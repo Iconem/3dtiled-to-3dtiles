@@ -40,9 +40,27 @@ function childBox(box, oct) {
  *   the dataset root (e.g. "cloud.js", "data/r/00000/r00000.bin"). Default reads from local fs.
  *   The live tile-server passes a fetch-based reader so the SAME 1.x logic serves over HTTP.
  */
+// Parse cloud.js leniently: it's pure JSON on disk, but when served over HTTP by a dev server that
+// transforms .js (e.g. Vite appends an HMR/module footer), there's trailing non-JSON. Extract the
+// first balanced {…} object and parse that.
+function parseCloudJs(text) {
+  try { return JSON.parse(text); } catch { /* fall through to brace extraction */ }
+  const s = text.indexOf('{');
+  if (s < 0) throw new Error('cloud.js: no JSON object found');
+  let depth = 0, inStr = false, esc = false;
+  for (let i = s; i < text.length; i++) {
+    const c = text[i];
+    if (inStr) { if (esc) esc = false; else if (c === '\\') esc = true; else if (c === '"') inStr = false; }
+    else if (c === '"') inStr = true;
+    else if (c === '{') depth++;
+    else if (c === '}' && --depth === 0) return JSON.parse(text.slice(s, i + 1));
+  }
+  throw new Error('cloud.js: unbalanced JSON');
+}
+
 export async function loadPotree1(dir, opts = {}) {
   const read = opts.read || (rel => fs.readFile(path.join(dir, ...rel.split('/'))).then(Buffer.from));
-  const cloud = JSON.parse((await read('cloud.js')).toString('utf8'));
+  const cloud = parseCloudJs((await read('cloud.js')).toString('utf8'));
 
   const octreeDir = cloud.octreeDir || 'data';            // forward-slash relative; reader resolves it
   const stepSize  = cloud.hierarchyStepSize ?? 5;

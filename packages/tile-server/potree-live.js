@@ -13,9 +13,18 @@
  *   GET /potree/tile/<name>.glb?url=<…>                       → that node's points as a POINTS GLB
  */
 import proj4 from 'proj4';
-import { buildPointsGlb } from '../core/index.js';
+import { buildPointsGlb, coordsToKey, buildSubtreeBuffer } from '../core/index.js';
 import { preparePotree2Schema, parsePotree2Hierarchy, decodePotree2Node } from '../potree-to-3dtiles/src/potree2.js';
 import { loadPotree1 } from '../potree-to-3dtiles/src/potree1.js';
+
+const SUBTREE_LEVELS = 3;
+// Spatial octree (level,x,y,z) of a node from its box vs root box (exact ints — robust to Potree's
+// octant-bit convention). Same derivation the offline converter uses for implicit tiling.
+function coordsOfBox(box, rootBox, depth) {
+  const cells = 2 ** depth;
+  const idx = k => { const span = (rootBox.max[k] - rootBox.min[k]) / cells; return span > 0 ? Math.min(cells - 1, Math.max(0, Math.round((box.min[k] - rootBox.min[k]) / span))) : 0; };
+  return { level: depth, x: idx(0), y: idx(1), z: idx(2) };
+}
 
 const CORS = { 'Access-Control-Allow-Origin': '*', 'Access-Control-Allow-Headers': '*' };
 const DEG = Math.PI / 180, A = 6378137.0, E2 = 0.00669437999014;
@@ -51,7 +60,17 @@ const georef = (origin, crs) => {
 const finishCtx = (nodes, rootBox, crs, spacingMeta, readTile) => {
   const origin = [0,1,2].map(k => (rootBox.min[k] + rootBox.max[k]) / 2);
   const rootDiag = Math.hypot(rootBox.max[0]-rootBox.min[0], rootBox.max[1]-rootBox.min[1], rootBox.max[2]-rootBox.min[2]);
-  return { nodes, origin, transform: georef(origin, crs), rootDiag, spacing: spacingMeta || rootDiag / 128, readTile };
+  // Spatial coord index for implicit tiling: coordKey "level-x-y-z" → node name; availability set.
+  const byCoord = new Map(), avail = new Set();
+  let maxLevel = 0;
+  for (const [name, node] of nodes) {
+    if (!(node.numPoints > 0)) continue;
+    const { level, x, y, z } = coordsOfBox(node.box, rootBox, node.depth);
+    const key = coordsToKey(level, x, y, z);
+    byCoord.set(key, name); avail.add(key);
+    if (level > maxLevel) maxLevel = level;
+  }
+  return { nodes, rootBox, origin, transform: georef(origin, crs), rootDiag, spacing: spacingMeta || rootDiag / 128, readTile, byCoord, avail, maxLevel };
 };
 
 // Per-URL context (hierarchy + georef + a readTile(name) closure), cached. 2.0 → range reads of
@@ -83,7 +102,7 @@ async function getCtx(url) {
 
 // Explicit 3D Tiles tree from the Potree octree. Box = node AABB relative to the dataset origin
 // (≈ ENU near the origin); geometric error = point spacing at that depth; ADD refine (children densify).
-function buildTileset(ctx, urlParam) {
+function buildTilesetExplicit(ctx, urlParam) {
   const { nodes, origin, transform, rootDiag, spacing } = ctx;
   const enc = encodeURIComponent(urlParam);
   const tileFor = (name) => {
@@ -107,6 +126,23 @@ function buildTileset(ctx, urlParam) {
   return { asset: { version: '1.1' }, geometricError: rootDiag, root, extensionsUsed: ['3DTILES_content_gltf'] };
 }
 
+// Implicit octree: root box = full extent (centred at origin → 0); content/subtree templates use the
+// "level-x-y-z" coord token; subtrees are built on the fly from the availability set.
+function buildTilesetImplicit(ctx, urlParam) {
+  const { rootBox, origin, transform, rootDiag, spacing, maxLevel } = ctx;
+  const enc = encodeURIComponent(urlParam);
+  const h = [0,1,2].map(k => Math.max((rootBox.max[k] - rootBox.min[k]) / 2, 0.01));
+  const c = [0,1,2].map(k => (rootBox.min[k] + rootBox.max[k]) / 2 - origin[k]);   // = 0
+  const root = {
+    boundingVolume: { box: [c[0],c[1],c[2], h[0],0,0, 0,h[1],0, 0,0,h[2]] },
+    refine: 'ADD', geometricError: spacing,
+    implicitTiling: { subdivisionScheme: 'OCTREE', availableLevels: maxLevel + 1, subtreeLevels: SUBTREE_LEVELS, subtrees: { uri: `subtrees/{level}-{x}-{y}-{z}.subtree?url=${enc}` } },
+    content: { uri: `tile/{level}-{x}-{y}-{z}.glb?url=${enc}` },
+  };
+  if (transform) root.transform = transform;
+  return { asset: { version: '1.1' }, geometricError: rootDiag, root, extensionsUsed: ['3DTILES_content_gltf'] };
+}
+
 async function serveTileGlb(ctx, name) {
   const node = ctx.nodes.get(name);
   if (!node || !node.numPoints) return null;
@@ -119,10 +155,19 @@ async function serveTileGlb(ctx, name) {
   return Buffer.from(await buildPointsGlb(pos, colors, count));   // core applies the (E,U,−N) Y-up swizzle
 }
 
-// Pure builders the /stream dispatcher reuses.
-export const potreeTileRe = /^[r0-7]+$/;
-export async function potreeTileset(url) { return buildTileset(await getCtx(url), url); }
-export async function potreeTile(url, name) { return serveTileGlb(await getCtx(url), name); }
+// Pure builders the /stream dispatcher reuses. Tile token is a Potree name (explicit, "r012") OR a
+// "level-x-y-z" coord (implicit) — potreeTile resolves either.
+export const potreeTileRe = /^([r0-7]+|\d+-\d+-\d+-\d+)$/;
+export async function potreeTileset(url, opts = {}) {
+  const ctx = await getCtx(url);
+  return opts.tiling === 'explicit' ? buildTilesetExplicit(ctx, url) : buildTilesetImplicit(ctx, url);
+}
+export async function potreeTile(url, token) {
+  const ctx = await getCtx(url);
+  const name = /^[r0-7]+$/.test(token) ? token : ctx.byCoord.get(token);   // name or coord key
+  return name ? serveTileGlb(ctx, name) : null;
+}
+export async function potreeSubtree(url, key) { return buildSubtreeBuffer(key, (await getCtx(url)).avail, SUBTREE_LEVELS); }
 
 /** Try to handle a /potree/* request. Returns true iff it owned the response. */
 export async function handlePotree(req, res, u) {
@@ -133,15 +178,21 @@ export async function handlePotree(req, res, u) {
 
   if (u.pathname === '/potree/tileset.json') {
     res.writeHead(200, { 'Content-Type': 'application/json', ...CORS });
-    res.end(JSON.stringify(buildTileset(ctx, url)));
+    res.end(JSON.stringify(await potreeTileset(url, { tiling: u.searchParams.get('tiling') })));
     return true;
   }
-  const m = u.pathname.match(/^\/potree\/tile\/([r0-7]+)\.glb$/);
+  const m = u.pathname.match(/^\/potree\/tile\/([r0-7]+|\d+-\d+-\d+-\d+)\.glb$/);
   if (m) {
-    const glb = await serveTileGlb(ctx, m[1]);
+    const glb = await potreeTile(url, m[1]);
     if (!glb) { res.writeHead(404, CORS); res.end('no such node'); return true; }
     res.writeHead(200, { 'Content-Type': 'model/gltf-binary', ...CORS });
     res.end(glb);
+    return true;
+  }
+  const s = u.pathname.match(/^\/potree\/subtrees\/(\d+-\d+-\d+-\d+)\.subtree$/);
+  if (s) {
+    res.writeHead(200, { 'Content-Type': 'application/octet-stream', ...CORS });
+    res.end(await potreeSubtree(url, s[1]));
     return true;
   }
   res.writeHead(404, CORS); res.end('not found');

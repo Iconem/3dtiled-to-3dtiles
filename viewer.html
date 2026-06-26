@@ -58,6 +58,16 @@
   }
   .preset:hover { background: #252525; color: #d1d5db; }
   .preset.active { background: #1d3461; border-color: #2563eb; color: #93c5fd; }
+  .preset:disabled { opacity: 0.35; cursor: not-allowed; }
+  .preset:disabled:hover { background: #1a1a1a; color: #9ca3af; }
+  /* Mode selector + octree tiling toggle: visually distinct from the asset pills. */
+  .preset.mode   { background: #14241a; border-color: #2f4f3a; color: #86efac; }
+  .preset.mode.active   { background: #16633a; border-color: #22c55e; color: #dcfce7; }
+  .preset.tiling { background: #221a2e; border-color: #46355f; color: #c4b5fd; }
+  .preset.tiling.active { background: #4c2f78; border-color: #8b5cf6; color: #ede9fe; }
+  .preset.fmt    { background: #2a2113; border-color: #5c4a26; color: #fcd34d; }
+  .preset.fmt.active    { background: #7c5e16; border-color: #eab308; color: #fef9c3; }
+  .preset-sep { display: inline-block; width: 1px; align-self: stretch; background: #333; margin: 0 4px; }
 
   /* ── URL bar ── */
   #url-bar {
@@ -493,202 +503,74 @@
 /* ──────────────────────────────────────────────
    PRESETS
    ────────────────────────────────────────────── */
-const PRESETS = [
-  {
-    id: 'coit-rad',
-    label: '✦ Coit (RAD)',
-    type: 'splat',
-    url: 'http://localhost:3000/sample-data/output/rad/coit-3dtiles-from-rad/tileset.json',
-    local: false,
-  },
-  {
-    id: 'tastier-rad',
-    label: '✦ Tastier (RAD)',
-    type: 'splat',
-    url: 'http://localhost:3000/sample-data/output/rad/tastier500k-3dtiles-from-rad/tileset.json',
-    local: false,
-  },
-  // Same-scene comparison: Elevator.ply via two pipelines (our RAD path vs William's PLY converter).
-  {
-    id: 'elevator-ours',
-    label: '⊿ Elevator (ours: PLY→RAD)',
-    type: 'splat',
-    url: 'http://localhost:3000/sample-data/output/rad/Elevator-3dtiles-from-rad/tileset.json',
-    local: false,
-  },
-  {
-    id: 'elevator-william',
-    label: '⊿ Elevator (William: PLY)',
-    type: 'splat',
-    url: 'http://localhost:3000/sample-data/output/ply-william/Elevator-3dtiles-from-ply/tileset.json',
-    local: false,
-  },
-  {
-    id: 'svirnas-ours',
-    label: '⊿ SvirnasAlyt (ours: PLY→RAD)',
-    type: 'splat',
-    url: 'http://localhost:3000/sample-data/output/rad/SvirnasAlyt-3dtiles-from-rad/tileset.json',
-    local: false,
-  },
-  {
-    id: 'svirnas-william',
-    label: '⊿ SvirnasAlyt (William: PLY)',
-    type: 'splat',
-    url: 'http://localhost:3000/sample-data/output/ply-william/SvirnasAlyt-3dtiles-from-ply/tileset.json',
-    local: false,
-  },
-  // XGRIDS LCC → 3D Tiles (via lcc-to-3dtiles).
-  {
-    id: 'lcc-guantemple',
-    label: '◆ Guan Temple (LCC)',
-    type: 'splat',
-    url: 'http://localhost:3000/sample-data/output/lcc/Guan_Temple-3dtiles-from-lcc/tileset.json',
-    local: false,
-  },
-  // PlayCanvas Streamed SOG → 3D Tiles (via sog-to-3dtiles).
-  {
-    id: 'skatepark-sog',
-    label: '⬢ Skatepark (SOG)',
-    type: 'splat',
-    url: 'http://localhost:3000/sample-data/output/sog/skatepark-3dtiles-from-sog/tileset.json',
-    local: false,
-  },
-  {
-    id: 'roman-parish-sog',
-    label: '⬢ Roman Parish (SOG)',
-    type: 'splat',
-    url: 'http://localhost:3000/sample-data/output/sog/roman-parish-3dtiles-from-sog/tileset.json',
-    local: false,
-  },
-  // Reference splat tilesets from the 3DTilesRendererJS-3DGS-Plugin demo data
-  // (PLY → 3D Tiles via 3DGS-PLY-3DTiles-Converter; SPZ v3 + SH3, ECEF-placed).
-  {
-    id: 'wl-splat1',
-    label: '◈ GSplat 1 (WL plugin)',
-    type: 'splat',
-    url: 'https://raw.githubusercontent.com/WilliamLiu-1997/3DTilesRendererJS-3DGS-Plugin/main/data/gaussianSplat1/tileset.json',
-    local: false,
-  },
-  {
-    id: 'wl-splat2',
-    label: '◈ GSplat 2 (WL plugin)',
-    type: 'splat',
-    url: 'https://raw.githubusercontent.com/WilliamLiu-1997/3DTilesRendererJS-3DGS-Plugin/main/data/gaussianSplat2/tileset.json',
-    local: false,
-  },
-  {
-    id: 'autzen-copc',
-    label: '☁ Autzen (COPC)',
-    type: 'pointcloud',
-    url: 'http://localhost:3000/sample-data/output/copc/autzen-3dtiles-from-copc/tileset.json',
-    local: false,
-  },
-  {
-    id: 'eiffel-copc',
-    label: '☁ Eiffel (COPC)',
-    type: 'pointcloud',
-    url: 'http://localhost:3000/sample-data/output/copc/eiffel-3dtiles-from-copc/tileset.json',
-    local: false,
-  },
-  {
-    id: 'texas-copc',
-    label: '☁ Texas (COPC)',
-    type: 'pointcloud',
-    url: 'http://localhost:3000/sample-data/output/copc/texas-3dtiles-from-copc/tileset.json',
-    local: false,
-  },
-  {
-    id: 'copc-live',
-    label: '🛰 COPC→3DT (live middleware)',
-    type: 'pointcloud',
-    url: 'http://localhost:3001/copc/tileset.json?url=' + encodeURIComponent('http://localhost:3000/sample-data/input/COPC/autzen.copc.laz'),
-    local: false,
-  },
-  // ── Generic <fmt>→3D Tiles live middleware (/convert): converts on first request (cached), then
-  //    serves the static output. `url` may be a remote URL OR a local path the server can read. ──
-  ...(() => {
-    // Sample data is served by Vite at :3000 (the dataset folder moved into the repo). The middleware
-    // fetches these over HTTP (no local-filesystem dependency), so `url` is an http URL to the INDEX
-    // file of each dataset (metadata.json / lod-meta.json / meta.lcc / the .laz/.rad file).
-    const SD = 'http://localhost:3000/sample-data/input';
-    const live = (id, label, type, src, format, extra = '') =>
-      ({ id, label, type, local: false,
-         url: `http://localhost:3001/convert/tileset.json?url=${encodeURIComponent(src)}` + (format ? `&format=${format}` : '') + extra });
-    return [
-      live('conv-potree', '🛰 Potree→3DT (live)', 'pointcloud', `${SD}/POTREE/lion_p2/metadata.json`,   'potree'),
-      live('conv-rad',    '🛰 RAD→3DT (live)',    'splat',      `${SD}/RAD/coit.rad`,                   'rad'),
-      live('conv-sog',    '🛰 SOG→3DT (live)',    'splat',      `${SD}/SOG/skatepark/lod-meta.json`,    'sog'),
-      live('conv-lcc',    '🛰 LCC→3DT (live)',    'splat',      `${SD}/LCC/Guan_Temple/meta.lcc`,       'lcc'),
-      live('conv-copc',   '🛰 COPC→3DT (live, convert)', 'pointcloud', `${SD}/COPC/autzen.copc.laz`,    'copc'),
-      // implicit ⇄ explicit tiling (COPC default implicit, Potree default explicit) via &tiling=
-      live('conv-copc-exp', '🧭 COPC explicit (live)',  'pointcloud', `${SD}/COPC/autzen.copc.laz`,        'copc',   '&tiling=explicit'),
-      live('conv-potree-imp','🧭 Potree implicit (live)','pointcloud', `${SD}/POTREE/lion_p2/metadata.json`, 'potree', '&tiling=implicit'),
-      // ── TRUE streaming (range-read per tile, nothing pre-converted) via the unified /stream dispatcher ──
-      { id: 'stream-potree-local', label: '⚡ Potree (stream, local)', type: 'pointcloud', local: false,
-        url: 'http://localhost:3001/stream/tileset.json?url=' + encodeURIComponent('http://localhost:3000/sample-data/input/POTREE/lion_p2/metadata.json') },
-      { id: 'stream-potree-org', label: '⚡ Potree (stream, potree.org)', type: 'pointcloud', local: false,
-        url: 'http://localhost:3001/stream/tileset.json?url=' + encodeURIComponent('https://potree.org/pointclouds/lion/metadata.json') },
-      { id: 'stream-copc', label: '⚡ COPC (stream, AWS)', type: 'pointcloud', local: false,
-        url: 'http://localhost:3001/stream/tileset.json?url=' + encodeURIComponent('https://s3.amazonaws.com/hobu-lidar/autzen-classified.copc.laz') },
-      { id: 'stream-potree1', label: '⚡ Potree 1.x (stream, local)', type: 'pointcloud', local: false,
-        url: 'http://localhost:3001/stream/tileset.json?format=potree&url=' + encodeURIComponent('http://localhost:3000/sample-data/input/POTREE/lion_takanawa/cloud.js') },
-      { id: 'stream-sog', label: '⚡ SOG (stream, local)', type: 'splat', local: false,
-        url: 'http://localhost:3001/stream/tileset.json?format=sog&url=' + encodeURIComponent('http://localhost:3000/sample-data/input/SOG/skatepark/lod-meta.json') },
-      { id: 'stream-lcc', label: '⚡ LCC (stream, local)', type: 'splat', local: false,
-        url: 'http://localhost:3001/stream/tileset.json?format=lcc&url=' + encodeURIComponent('http://localhost:3000/sample-data/input/LCC/Guan_Temple/meta.lcc') },
-    ];
-  })(),
-  {
-    id: 'lion-potree2',
-    label: '🌲 Lion (Potree 2.0)',
-    type: 'pointcloud',
-    url: 'http://localhost:3000/sample-data/output/potree/lion_p2/tileset.json',
-    local: false,
-  },
-  {
-    id: 'lion-takanawa-potree1',
-    label: '🌲 Lion Takanawa (Potree 1.x)',
-    type: 'pointcloud',
-    url: 'http://localhost:3000/sample-data/output/potree/lion_takanawa/tileset.json',
-    local: false,
-  },
-  {
-    id: 'lion-takanawa-laz',
-    label: '🌲 Lion Takanawa (Potree LAZ)',
-    type: 'pointcloud',
-    url: 'http://localhost:3000/sample-data/output/potree/lion_takanawa_laz/tileset.json',
-    local: false,
-  },
-  {
-    id: 'i3s-nyc',
-    label: '🧱 NYC Buildings (I3S draft)',
-    type: 'mesh',
-    url: 'http://localhost:3000/sample-data/output/i3s/Buildings_NewYork_v18/tileset.json',
-    local: false,
-  },
-  // ── Open data city meshes (3D Tiles 1.0, explicit, REPLACE, b3dm) ──
-  {
-    id: 'strasbourg',
-    label: '🏙 Strasbourg',
-    type: 'mesh',
-    url: 'https://s3.eu-west-2.wasabisys.com/ems-sgct-photomaillage/ODACIT/EMS_PM2022/tileset.json',
-    local: false,
-  },
-  {
-    id: 'clermont',
-    label: '🏙 Clermont (CRAIG)',
-    type: 'mesh',
-    url: 'https://3d.craig.fr/datasets/Clermont/3dtiles/tileset.json',
-    local: false,
-  },
-  {
-    id: 'lille',
-    label: '🏙 Lille Métropole',
-    type: 'mesh',
-    url: 'https://webimaging.lillemetropole.fr/externe/maillage/2016_mel_10cm/3dtiles/tileset.json',
-    local: false,
-  },
+// ── Pills are MODE × FORMAT driven ─────────────────────────────────────────────
+// Pick a MODE (live-stream → pre-converted-offline → preprocess-and-cache), then one pill per asset
+// per format. The same asset's URL is derived from the mode:
+//   stream  → http://localhost:3001/stream/tileset.json?format=<fmt>&url=<src>[&tiling=]
+//   offline → http://localhost:3000/sample-data/<out>/tileset.json   (pre-converted, static)
+//   convert → http://localhost:3001/convert/tileset.json?format=<fmt>&url=<src>[&tiling=]
+// `octree` formats (COPC/Potree) also honor the implicit/explicit toggle. RAD/I3S have no stream adapter.
+const MW = 'http://localhost:3001';                        // middleware
+const SDATA = 'http://localhost:3000/sample-data';         // Vite-served sample data
+let viewerMode = 'stream';                                 // 'stream' | 'offline' | 'convert'
+let tilingMode = 'implicit';                               // 'implicit' | 'explicit' (octree only)
+let selectedFormat = 'copc';                               // which FORMAT's assets are shown
+
+const FORMATS = [
+  { fmt: 'copc', icon: '☁', label: 'COPC', type: 'pointcloud', octree: true, stream: true, assets: [
+      { id: 'autzen', label: 'Autzen', src: 'input/COPC/autzen.copc.laz', out: 'output/copc/autzen-3dtiles-from-copc' },
+      { id: 'eiffel', label: 'Eiffel', src: 'input/COPC/eiffel.copc.laz', out: 'output/copc/eiffel-3dtiles-from-copc' },
+      { id: 'texas',  label: 'Texas',  src: 'input/COPC/texas.copc.laz',  out: 'output/copc/texas-3dtiles-from-copc' },
+  ]},
+  { fmt: 'potree', icon: '🌲', label: 'Potree', type: 'pointcloud', octree: true, stream: true, assets: [
+      { id: 'lion2',    label: 'Lion 2.0',         src: 'input/POTREE/lion_p2/metadata.json',       out: 'output/potree/lion_p2' },
+      { id: 'takanawa', label: 'Lion Takanawa 1.x', src: 'input/POTREE/lion_takanawa/cloud.js',      out: 'output/potree/lion_takanawa' },
+      { id: 'takalaz',  label: 'Lion Takanawa LAZ', src: 'input/POTREE/lion_takanawa_laz/cloud.js',  out: 'output/potree/lion_takanawa_laz' },
+  ]},
+  { fmt: 'sog', icon: '⬢', label: 'SOG', type: 'splat', octree: false, stream: true, assets: [
+      { id: 'skatepark', label: 'Skatepark',    src: 'input/SOG/skatepark/lod-meta.json',    out: 'output/sog/skatepark-3dtiles-from-sog' },
+      { id: 'roman',     label: 'Roman Parish', src: 'input/SOG/roman-parish/lod-meta.json', out: 'output/sog/roman-parish-3dtiles-from-sog' },
+  ]},
+  { fmt: 'lcc', icon: '◆', label: 'LCC', type: 'splat', octree: false, stream: true, assets: [
+      { id: 'guan', label: 'Guan Temple', src: 'input/LCC/Guan_Temple/meta.lcc', out: 'output/lcc/Guan_Temple-3dtiles-from-lcc' },
+  ]},
+  { fmt: 'rad', icon: '✦', label: 'RAD', type: 'splat', octree: false, stream: false, assets: [
+      { id: 'coit',    label: 'Coit',       src: 'input/RAD/coit.rad',        out: 'output/rad/coit-3dtiles-from-rad' },
+      { id: 'tastier', label: 'Tastier',    src: 'input/RAD/tastier500k.rad', out: 'output/rad/tastier500k-3dtiles-from-rad' },
+  ]},
+  { fmt: 'i3s', icon: '🧱', label: 'I3S', type: 'mesh', octree: false, stream: false, assets: [
+      { id: 'nyc', label: 'NYC Buildings', src: 'input/I3S-SLPK/Buildings_NewYork_v18.slpk', out: 'output/i3s/Buildings_NewYork_v18' },
+  ]},
 ];
+
+// Already-3D-Tiles datasets (the "3D Tiles" format): loaded directly, independent of mode.
+const DIRECT = [
+  { id: 'wl-splat1', icon: '◈', label: '3DT · GSplat 1 (WL)', type: 'splat', url: 'https://raw.githubusercontent.com/WilliamLiu-1997/3DTilesRendererJS-3DGS-Plugin/main/data/gaussianSplat1/tileset.json' },
+  { id: 'wl-splat2', icon: '◈', label: '3DT · GSplat 2 (WL)', type: 'splat', url: 'https://raw.githubusercontent.com/WilliamLiu-1997/3DTilesRendererJS-3DGS-Plugin/main/data/gaussianSplat2/tileset.json' },
+  { id: 'strasbourg', icon: '🏙', label: '3DT · Strasbourg', type: 'mesh', url: 'https://s3.eu-west-2.wasabisys.com/ems-sgct-photomaillage/ODACIT/EMS_PM2022/tileset.json' },
+  { id: 'clermont', icon: '🏙', label: '3DT · Clermont', type: 'mesh', url: 'https://3d.craig.fr/datasets/Clermont/3dtiles/tileset.json' },
+  { id: 'lille', icon: '🏙', label: '3DT · Lille', type: 'mesh', url: 'https://webimaging.lillemetropole.fr/externe/maillage/2016_mel_10cm/3dtiles/tileset.json' },
+];
+
+// Resolve an asset's tileset URL for the current mode (null = not available in this mode).
+function assetUrl(f, a) {
+  const tq = f.octree ? `&tiling=${tilingMode}` : '';
+  if (viewerMode === 'offline') return `${SDATA}/${a.out}/tileset.json`;
+  const src = encodeURIComponent(`${SDATA}/${a.src}`);
+  if (viewerMode === 'stream')  return f.stream ? `${MW}/stream/tileset.json?format=${f.fmt}&url=${src}${tq}` : null;
+  if (viewerMode === 'convert') return `${MW}/convert/tileset.json?format=${f.fmt}&url=${src}${tq}`;
+  return null;
+}
+
+const fmtMeta = fmt => FORMATS.find(f => f.fmt === fmt);
+
+// Renderable asset pills for the SELECTED format only (3dtiles → the direct datasets).
+function currentPresets() {
+  if (selectedFormat === '3dtiles') return DIRECT.map(d => ({ id: d.id, label: `${d.icon} ${d.label}`, type: d.type, url: d.url }));
+  const f = fmtMeta(selectedFormat);
+  if (!f) return [];
+  return f.assets.map(a => ({ id: `${f.fmt}-${a.id}`, label: `${f.icon} ${a.label}`, type: f.type, url: assetUrl(f, a), octree: f.octree }));
+}
 
 const SNIPPETS = {
   pointcloud: {
@@ -791,15 +673,45 @@ async function initCesium() {
 /* ──────────────────────────────────────────────
    PRESET BAR
    ────────────────────────────────────────────── */
+function setMode(m)   { viewerMode = m; rebuildAndReselect(); }
+function setTiling(t) { tilingMode = t; rebuildAndReselect(); }
+function setFormat(fmt) {                                   // pick a format → show its assets, load the first available
+  selectedFormat = fmt; buildPresetBar();
+  const first = currentPresets().find(p => p.url);
+  if (first) selectPreset(first);
+}
+function rebuildAndReselect() {
+  const id = currentPresetId;
+  buildPresetBar();
+  if (id) { const p = currentPresets().find(x => x.id === id); if (p && p.url) selectPreset(p); }  // reload same asset
+}
+
 function buildPresetBar() {
   const bar = document.getElementById('preset-bar');
   bar.innerHTML = '';
-  PRESETS.forEach(p => {
+  const seg = (cls, items, active, on, title) => {
+    for (const [val, lbl] of items) {
+      const b = document.createElement('button');
+      b.className = `preset ${cls}` + (active === val ? ' active' : '');
+      b.textContent = lbl; if (title) b.title = title;
+      b.onclick = () => on(val);
+      bar.appendChild(b);
+    }
+    bar.appendChild(Object.assign(document.createElement('span'), { className: 'preset-sep' }));
+  };
+  // 1) MODE  2) FORMAT  3) tiling (octree formats only)  4) asset pills
+  seg('mode', [['stream', '⚡ Stream'], ['offline', '💾 Offline'], ['convert', '🛠 Convert']], viewerMode, setMode, 'serving mode');
+  seg('fmt', [...FORMATS.map(f => [f.fmt, `${f.icon} ${f.label}`]), ['3dtiles', '◈ 3D Tiles']], selectedFormat, setFormat, 'source format');
+  if (fmtMeta(selectedFormat)?.octree) seg('tiling', [['implicit', '⬡ implicit'], ['explicit', '⬢ explicit']], tilingMode, setTiling, 'octree tiling');
+
+  currentPresets().forEach(p => {
     const btn = document.createElement('button');
     btn.className = 'preset';
     btn.textContent = p.label;
     btn.id = 'preset-' + p.id;
-    btn.onclick = () => selectPreset(p);
+    if (!p.url) { btn.disabled = true; btn.title = `${selectedFormat} has no ${viewerMode} adapter`; }
+    else btn.onclick = () => selectPreset(p);
+    if (p.id === currentPresetId) btn.classList.add('active');
     bar.appendChild(btn);
   });
 }
@@ -808,8 +720,8 @@ function selectPreset(p) {
   currentPresetId = p.id;
   currentType = p.type;
   document.getElementById('tileset-url').value = p.url;
-  document.querySelectorAll('.preset').forEach(b => b.classList.remove('active'));
-  document.getElementById('preset-' + p.id).classList.add('active');
+  document.querySelectorAll('.preset:not(.mode):not(.tiling):not(.fmt)').forEach(b => b.classList.remove('active'));
+  document.getElementById('preset-' + p.id)?.classList.add('active');
 
   // Update snippet
   const snip = SNIPPETS[p.type] || SNIPPETS.pointcloud;
@@ -1163,9 +1075,9 @@ document.getElementById('tileset-url').addEventListener('keydown', e => {
   if (e.key === 'Enter') loadTileset();
 });
 
-// On manual URL edit, clear active preset highlight
+// On manual URL edit, clear active preset highlight (but keep the mode/tiling selector state)
 document.getElementById('tileset-url').addEventListener('input', () => {
-  document.querySelectorAll('.preset').forEach(b => b.classList.remove('active'));
+  document.querySelectorAll('.preset:not(.mode):not(.tiling):not(.fmt)').forEach(b => b.classList.remove('active'));
   currentPresetId = null;
   currentType = 'pointcloud'; // default
 });

@@ -14,32 +14,36 @@
  * The tileset's relative content URIs (`tile/<key>.glb?url=…`) get `&format=<fmt>` appended so the
  * follow-up `/stream/tile/...` requests carry the format and dispatch to the same adapter.
  */
-import { copcTileset, copcTile, copcTileRe } from './copc-live.js';
-import { potreeTileset, potreeTile, potreeTileRe } from './potree-live.js';
+import { copcTileset, copcTile, copcSubtree, copcTileRe } from './copc-live.js';
+import { potreeTileset, potreeTile, potreeSubtree, potreeTileRe } from './potree-live.js';
 import { sogTileset, sogTile, sogTileRe } from './sog-live.js';
 import { lccTileset, lccTile, lccTileRe } from './lcc-live.js';
 import { detectFormatByName } from '../core/index.js';
 
 const CORS = { 'Access-Control-Allow-Origin': '*', 'Access-Control-Allow-Headers': '*' };
+const COORD_RE = /^\d+-\d+-\d+-\d+$/;
 
 // format → range adapter. Add an entry here as each format gains a streaming adapter.
 // Streamable iff the source lets us build the tileset WITHOUT decoding geometry: COPC/Potree (octree
 // boxes), SOG (lod-meta tree), LCC (grid cell boxes from index.bin). RAD persists no tile bounds and
 // isn't spatially tiled → use /convert (see docs-references/rad-format-notes.md).
+// COPC/Potree are octrees → support &tiling=implicit|explicit (default implicit) + on-the-fly subtrees.
 const ADAPTERS = {
-  copc:   { tileset: copcTileset,   tile: copcTile,   tileRe: copcTileRe },
-  potree: { tileset: potreeTileset, tile: potreeTile, tileRe: potreeTileRe },
+  copc:   { tileset: copcTileset,   tile: copcTile,   subtree: copcSubtree,   tileRe: copcTileRe,   octree: true },
+  potree: { tileset: potreeTileset, tile: potreeTile, subtree: potreeSubtree, tileRe: potreeTileRe, octree: true },
   sog:    { tileset: sogTileset,    tile: sogTile,    tileRe: sogTileRe },
   lcc:    { tileset: lccTileset,    tile: lccTile,    tileRe: lccTileRe },
 };
 export const streamableFormats = Object.keys(ADAPTERS);
 
-// Append &format=<fmt> to every relative content URI so /stream/tile requests reach the right adapter.
+// Append &format=<fmt> to every relative content/subtree URI (so the follow-up /stream/{tile,subtrees}
+// requests carry the format and dispatch to the same adapter). Handles both the explicit nested-tree
+// uris and the implicit `{level}-{x}-{y}-{z}` templates.
 function tagContentUris(node, fmt) {
   if (Array.isArray(node)) { for (const v of node) tagContentUris(v, fmt); return; }
   if (!node || typeof node !== 'object') return;
   for (const [k, v] of Object.entries(node)) {
-    if (k === 'uri' && typeof v === 'string' && v.startsWith('tile/')) node[k] = v + `&format=${fmt}`;
+    if (k === 'uri' && typeof v === 'string' && (v.startsWith('tile/') || v.startsWith('subtrees/'))) node[k] = v + `&format=${fmt}`;
     else tagContentUris(v, fmt);
   }
 }
@@ -59,7 +63,8 @@ export async function handleStream(req, res, u) {
   }
 
   if (u.pathname === '/stream/tileset.json') {
-    const ts = await adapter.tileset(url);
+    // octree adapters honor &tiling (default implicit); non-octree (sog/lcc) ignore it.
+    const ts = await adapter.tileset(url, { tiling: u.searchParams.get('tiling') });
     tagContentUris(ts.root, fmt);
     res.writeHead(200, { 'Content-Type': 'application/json', ...CORS });
     res.end(JSON.stringify(ts));
@@ -71,6 +76,12 @@ export async function handleStream(req, res, u) {
     if (!glb) { res.writeHead(404, CORS); res.end('no such node'); return true; }
     res.writeHead(200, { 'Content-Type': 'model/gltf-binary', ...CORS });
     res.end(glb);
+    return true;
+  }
+  const s = u.pathname.match(/^\/stream\/subtrees\/(.+)\.subtree$/);
+  if (s && adapter.subtree && COORD_RE.test(s[1])) {
+    res.writeHead(200, { 'Content-Type': 'application/octet-stream', ...CORS });
+    res.end(await adapter.subtree(url, s[1]));
     return true;
   }
   res.writeHead(404, CORS); res.end('not found');

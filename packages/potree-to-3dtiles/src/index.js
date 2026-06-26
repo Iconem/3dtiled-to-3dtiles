@@ -91,7 +91,8 @@ export async function convert(inDir, outDir, opts = {}) {
 
   // ── 2) Parallel per-node: decode → build POINTS GLB → write ─────────────────
   // Bounded concurrency keeps at most N nodes' point arrays alive at once.
-  const tiling = opts.tiling === 'implicit' ? 'implicit' : 'explicit';
+  // Both COPC and Potree are octrees → default to IMPLICIT tiling (subtree files); explicit is opt-out.
+  const tiling = opts.tiling === 'explicit' ? 'explicit' : 'implicit';
   const rootCube = [...src.rootBox.min, ...src.rootBox.max];
   const concurrency = defaultConcurrency();
   let written = 0;
@@ -183,6 +184,8 @@ export async function convert(inDir, outDir, opts = {}) {
 
 // ── CLI shim: run only when invoked directly (not when imported by the meta-converter) ──
 if (process.argv[1] && fileURLToPath(import.meta.url) === path.resolve(process.argv[1])) {
-  const a = process.argv.slice(2).filter(x => !x.startsWith('--'));
-  convert(a[0], a[1]).then(() => process.exit(0)).catch(e => { console.error(e); process.exit(1); });
+  const args = process.argv.slice(2);
+  const flag = n => { const i = args.indexOf(`--${n}`); if (i >= 0) return args[i + 1]; const eq = args.find(a => a.startsWith(`--${n}=`)); return eq ? eq.slice(n.length + 3) : undefined; };
+  const pos = []; for (let i = 0; i < args.length; i++) { if (args[i].startsWith('--')) { if (args[i] === '--tiling') i++; continue; } pos.push(args[i]); }
+  convert(pos[0], pos[1], { tiling: flag('tiling') }).then(() => process.exit(0)).catch(e => { console.error(e); process.exit(1); });
 }
