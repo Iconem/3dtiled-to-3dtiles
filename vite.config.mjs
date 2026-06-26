@@ -10,6 +10,11 @@ import { stat } from 'node:fs/promises';
 //   npm run dev      → http://localhost:3000/viewer.html  (serves sample-data/ too)
 //   npm run build    → static bundle in dist/
 export default defineConfig({
+  // MPA (not SPA): disable the history fallback that rewrites every missing path to index.html.
+  // The viewer is a static page accessed as /viewer.html (no client-side routing), and the
+  // streaming adapters probe for optional resources (e.g. I3S `foo.bin` vs `foo.bin.gz`) — they
+  // must get a real 404 for a missing file, not a 200 index.html masquerading as the resource.
+  appType: 'mpa',
   plugins: [
     cesium(),
     // T1: serve sample-data/**/*.js files raw (no Vite module transform / HMR footer).

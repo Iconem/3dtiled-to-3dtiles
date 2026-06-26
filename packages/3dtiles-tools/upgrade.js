@@ -10,6 +10,19 @@
 import fs   from 'node:fs/promises';
 import fss  from 'node:fs';
 import path from 'node:path';
+import gltfPipeline from 'gltf-pipeline';
+
+const { processGlb } = gltfPipeline;
+
+/**
+ * Upgrade a legacy glTF 1.0 GLB (version 1) buffer to glTF 2.0 (version 2) via gltf-pipeline.
+ * gltf-pipeline's processGlb runs updateVersion (1.0→2.0) + KHR_techniques_webgl handling.
+ * Returns a glTF 2.0 GLB Buffer that Three.js / 3DTRjs can load.
+ */
+export async function glbV1toV2(glbV1) {
+  const { glb } = await processGlb(glbV1, { keepUnusedElements: true });
+  return Buffer.from(glb);
+}
 
 // ── b3dm ─────────────────────────────────────────────────────────────────────
 
@@ -23,58 +36,112 @@ export function b3dmGlbOffset(buf) {
   return 28 + buf.readUInt32LE(12) + buf.readUInt32LE(16) + buf.readUInt32LE(20) + buf.readUInt32LE(24);
 }
 
-/**
- * Slice the embedded GLB out of a b3dm Buffer.
- * Returns null when the embedded GLB is version 1 (glTF 1.0 JSON schema) — callers
- * should fall back to serving the raw b3dm so CesiumJS can handle it natively.
- * Three.js / 3DTRjs does not support glTF 1.0 content.
- */
+/** Slice the embedded GLB out of a b3dm Buffer (zero-copy view, no version check). */
 export function b3dmToGlb(buf) {
-  const glb = buf.slice(b3dmGlbOffset(buf));
-  if (glb.readUInt32LE(4) === 1) return null; // glTF 1.0 — caller must handle
-  return glb;
+  return buf.slice(b3dmGlbOffset(buf));
 }
 
 /**
- * Pipe the embedded GLB portion of a .b3dm file directly to a Node http.ServerResponse,
- * reading only the header prefix first (28 bytes), then streaming the rest from disk.
- * Returns a Promise that resolves when the response is finished.
+ * Extract the embedded GLB from a b3dm Buffer, upgrading glTF 1.0 → 2.0 on the fly
+ * AND baking any CESIUM_RTC center into a node translation. Returns a plain glTF 2.0
+ * GLB Buffer loadable by both CesiumJS and Three.js/3DTRjs.
+ *
+ * We serve GLB directly (bypassing each renderer's native b3dm loader), so the b3dm's
+ * RTC_CENTER / CESIUM_RTC offset — which Three.js does NOT support — must be folded in
+ * here, else the mesh renders at the local origin instead of its real (ECEF) position.
+ */
+export async function b3dmToGlb2(buf) {
+  let glb = buf.slice(b3dmGlbOffset(buf));
+  if (glb.readUInt32LE(4) === 1) glb = await glbV1toV2(glb);
+  return bakeCesiumRtc(glb);
+}
+
+// ── CESIUM_RTC → node translation ──────────────────────────────────────────────
+
+/** Re-serialize a glTF 2.0 JSON object + BIN buffer into a GLB Buffer. */
+function repackGlb(json, bin) {
+  const jsonBuf = Buffer.from(JSON.stringify(json), 'utf8');
+  const jsonPad = (4 - (jsonBuf.length & 3)) & 3;
+  const binLen  = bin ? bin.length : 0;
+  const binPad  = bin ? (4 - (binLen & 3)) & 3 : 0;
+  const total = 12 + 8 + jsonBuf.length + jsonPad + (bin ? 8 + binLen + binPad : 0);
+  const out = Buffer.allocUnsafe(total);
+  let o = 0;
+  out.writeUInt32LE(0x46546C67, o); o += 4;            // 'glTF'
+  out.writeUInt32LE(2,           o); o += 4;            // version 2
+  out.writeUInt32LE(total,       o); o += 4;
+  out.writeUInt32LE(jsonBuf.length + jsonPad, o); o += 4;
+  out.writeUInt32LE(0x4E4F534A,  o); o += 4;            // 'JSON'
+  jsonBuf.copy(out, o); o += jsonBuf.length;
+  out.fill(0x20, o, o + jsonPad); o += jsonPad;
+  if (bin) {
+    out.writeUInt32LE(binLen + binPad, o); o += 4;
+    out.writeUInt32LE(0x004E4942,      o); o += 4;      // 'BIN\0'
+    bin.copy(out, o); o += binLen;
+    out.fill(0, o, o + binPad);
+  }
+  return out;
+}
+
+/**
+ * If a GLB declares CESIUM_RTC, fold its center into a wrapper node translation and
+ * strip the extension — so plain glTF 2.0 loaders (Three.js) place the mesh correctly.
+ *
+ * Subtlety: a 3D Tiles renderer applies the glTF Y-up→Z-up rotation (RX+90°: (x,y,z)→(x,−z,y))
+ * to the WHOLE glTF, including our wrapper node. RTC_CENTER, however, is an ECEF offset that must
+ * NOT be rotated (in native b3dm it's applied outside the up-axis). If we stored the raw center,
+ * the renderer would place geometry at UpAxis·RTC — a ~6378 km-magnitude vector rotated 90°, i.e.
+ * flung thousands of km away (bboxes look right, tiles render empty). So we pre-rotate the center
+ * by the INVERSE up-axis (RX−90°: (x,y,z)→(x,z,−y)); the renderer's RX+90° then restores the true
+ * RTC. The (small, relative) mesh vertices still get RX+90° applied — correct, as in native b3dm.
+ * No-op (returns the input) when CESIUM_RTC is absent.
+ */
+export function bakeCesiumRtc(glb) {
+  if (glb.readUInt32LE(0) !== 0x46546C67) return glb;   // not a GLB
+  const jsonLen   = glb.readUInt32LE(12);
+  const jsonStart = 20;                                  // 12 header + 8 chunk header
+  let json;
+  try { json = JSON.parse(glb.slice(jsonStart, jsonStart + jsonLen).toString('utf8')); }
+  catch { return glb; }
+
+  const rtc = json.extensions?.CESIUM_RTC?.center;
+  if (!rtc) return glb;
+
+  const scene = json.scenes?.[json.scene ?? 0];
+  if (!scene) return glb;
+  json.nodes = json.nodes || [];
+  const wrapper = json.nodes.length;
+  // RX(−90°): (x,y,z) → (x, z, −y) — pre-rotate so the renderer's RX(+90°) yields the true RTC.
+  json.nodes.push({ translation: [rtc[0], rtc[2], -rtc[1]], children: scene.nodes ?? [] });
+  scene.nodes = [wrapper];
+
+  delete json.extensions.CESIUM_RTC;
+  if (Object.keys(json.extensions).length === 0) delete json.extensions;
+  const strip = a => (a ? a.filter(e => e !== 'CESIUM_RTC') : a);
+  if (json.extensionsUsed)     { json.extensionsUsed = strip(json.extensionsUsed);         if (!json.extensionsUsed.length)     delete json.extensionsUsed; }
+  if (json.extensionsRequired) { json.extensionsRequired = strip(json.extensionsRequired); if (!json.extensionsRequired.length) delete json.extensionsRequired; }
+
+  // Extract the BIN chunk (unchanged) and repack with the new JSON.
+  const binStart = jsonStart + jsonLen;
+  let bin = null;
+  if (binStart + 8 <= glb.length) {
+    const binLen = glb.readUInt32LE(binStart);
+    bin = glb.slice(binStart + 8, binStart + 8 + binLen);
+  }
+  return repackGlb(json, bin);
+}
+
+/**
+ * Read a local .b3dm file and write its embedded GLB to a Node http.ServerResponse,
+ * upgrading glTF 1.0 → 2.0 and baking CESIUM_RTC into a node translation (see b3dmToGlb2).
+ * (We parse the GLB to bake RTC, so this isn't zero-copy — fine for local disk reads.)
  */
 export async function pipeB3dmAsGlb(filePath, res) {
-  const fd = await fs.open(filePath, 'r');
-  try {
-    const { size } = await fd.stat();
-    // Read enough to get b3dm header (28) + GLB version field (4 bytes at offset +4 into GLB)
-    const peek = Buffer.allocUnsafe(Math.min(64, size));
-    await fd.read(peek, 0, peek.length, 0);
-    const glbStart = b3dmGlbOffset(peek);
-
-    // Check embedded GLB version
-    const glbVersion = (glbStart + 8 <= peek.length) ? peek.readUInt32LE(glbStart + 4) : 2;
-    if (glbVersion === 1) {
-      // glTF 1.0 content — serve raw b3dm so CesiumJS can handle it natively.
-      // Three.js (3DTRjs) does not support glTF 1.0 schema.
-      res.setHeader('Content-Type', 'application/octet-stream');
-      res.setHeader('Content-Length', String(size));
-      await new Promise((resolve, reject) => {
-        const stream = fss.createReadStream(filePath, { fd: fd.fd, autoClose: false });
-        stream.on('error', reject).on('end', resolve);
-        stream.pipe(res, { end: false });
-      });
-      return;
-    }
-
-    const glbLen = size - glbStart;
-    res.setHeader('Content-Type', 'model/gltf-binary');
-    res.setHeader('Content-Length', String(glbLen));
-    await new Promise((resolve, reject) => {
-      const stream = fss.createReadStream(filePath, { start: glbStart, fd: fd.fd, autoClose: false });
-      stream.on('error', reject).on('end', resolve);
-      stream.pipe(res, { end: false });
-    });
-  } finally {
-    await fd.close().catch(() => {});
-  }
+  const buf = await fs.readFile(filePath);
+  const glb = await b3dmToGlb2(buf);
+  res.setHeader('Content-Type', 'model/gltf-binary');
+  res.setHeader('Content-Length', String(glb.length));
+  res.end(glb);
 }
 
 // ── pnts ─────────────────────────────────────────────────────────────────────

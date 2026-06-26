@@ -25,7 +25,7 @@ import fs   from 'node:fs/promises';
 import fss  from 'node:fs';
 import path from 'node:path';
 import { buildExplicitFromUrl, transcodeToExplicit } from 'implicit-to-explicit';
-import { pipeB3dmAsGlb, pntsToGlb, b3dmToGlb } from '3dtiles-tools';
+import { pipeB3dmAsGlb, pntsToGlb, b3dmToGlb2 } from '3dtiles-tools';
 
 const CORS_JSON = { 'Access-Control-Allow-Origin': '*', 'Access-Control-Allow-Headers': '*', 'Content-Type': 'application/json' };
 const CORS_GLB  = { 'Access-Control-Allow-Origin': '*', 'Access-Control-Allow-Headers': '*', 'Content-Type': 'model/gltf-binary' };
@@ -118,12 +118,8 @@ async function serveI2ETile(relPath, u, res) {
     if (!r.ok) { res.writeHead(r.status, CORS_ERR); res.end(`upstream ${r.status}`); return; }
     if (ext === '.b3dm') {
       const buf = Buffer.from(await r.arrayBuffer());
-      const glb = b3dmToGlb(buf);
-      if (!glb) {
-        res.writeHead(200, { 'Access-Control-Allow-Origin': '*', 'Content-Type': 'application/octet-stream', 'Content-Length': String(buf.length) }); res.end(buf);
-      } else {
-        res.writeHead(200, { ...CORS_GLB, 'Content-Length': String(glb.length) }); res.end(glb);
-      }
+      const glb = await b3dmToGlb2(buf);
+      res.writeHead(200, { ...CORS_GLB, 'Content-Length': String(glb.length) }); res.end(glb);
     } else if (ext === '.pnts') {
       const buf = Buffer.from(await r.arrayBuffer());
       const glb = pntsToGlb(buf);
@@ -203,13 +199,8 @@ async function serveUpgradeTile(relPath, u, res) {
     const r = await fetch(tileUrl);
     if (!r.ok) { res.writeHead(r.status, CORS_ERR); res.end(`upstream ${r.status}`); return; }
     if (ext === '.b3dm') {
-      const buf = Buffer.from(await r.arrayBuffer()); const glb = b3dmToGlb(buf);
-      if (!glb) {
-        // glTF 1.0 content — serve raw b3dm; CesiumJS handles it, 3DTRjs does not support glTF 1.0
-        res.writeHead(200, { 'Access-Control-Allow-Origin': '*', 'Content-Type': 'application/octet-stream', 'Content-Length': String(buf.length) }); res.end(buf);
-      } else {
-        res.writeHead(200, { ...CORS_GLB, 'Content-Length': String(glb.length) }); res.end(glb);
-      }
+      const buf = Buffer.from(await r.arrayBuffer()); const glb = await b3dmToGlb2(buf);
+      res.writeHead(200, { ...CORS_GLB, 'Content-Length': String(glb.length) }); res.end(glb);
     } else if (ext === '.pnts') {
       const buf = Buffer.from(await r.arrayBuffer()); const glb = pntsToGlb(buf);
       res.writeHead(200, { ...CORS_GLB, 'Content-Length': String(glb.length) }); res.end(glb);

@@ -6,5 +6,11 @@
   "bin": {
     "i3s-to-3dtiles": "src/index.js"
   },
-  "main": "src/index.js"
+  "main": "src/index.js",
+  "dependencies": {
+    "@loaders.gl/core": "^4.4.3",
+    "@loaders.gl/i3s": "^4.4.3",
+    "@loaders.gl/polyfills": "^4.4.3",
+    "@loaders.gl/tiles": "^4.4.3"
+  }
 }

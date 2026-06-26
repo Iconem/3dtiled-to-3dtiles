@@ -168,9 +168,83 @@ function decodeOrientationToQuat(raw, count) {
 
 // ── SPZ-v2/GLB encoder + bounds: now imported from the shared core (see top import). ──
 
+// ── Cheap centers-only bounds (for streaming tileset construction) ─────────────
+
+/**
+ * Decode ONLY the `center` column of a chunk and return its AABB + splat count.
+ * This is the cheap pass the streaming adapter uses to build the tileset tree
+ * without the full decode + SPZ encode + gzip of every tile.
+ * Mirrors the default (unfiltered) convert bounds, since filtering is opt-in/off by default.
+ */
+export function chunkBounds(buf, chunk, payloadBase) {
+  const { count, props } = parseRadcChunk(buf, chunk, payloadBase, ['center']);
+  const positions = decodeF32LeBytes(props.get('center'), 3, count);
+  const b = computeBounds(positions, count);
+  return { bounds: [b.cx, b.cy, b.cz, b.hx, b.hy, b.hz], count };
+}
+
+/**
+ * Single-pass per-chunk reader for the streaming adapter: decode the `center` column for bounds AND
+ * the `child_count`/`child_start` columns for LoD-tree topology from ONE chunk buffer. Merging both
+ * (vs. buildNodeTable + chunkBounds in two passes) halves the decompressions over a big RAD, and lets
+ * the caller feed a per-chunk buffer (range-fetched) instead of the whole file.
+ *
+ * @param chunkBuf  a Buffer holding just this chunk (so payloadBase=0, chunk.offset=0), OR the full file
+ * @param chunk     { offset, bytes } — use {offset:0} with a per-chunk buffer
+ * @param payloadBase  0 for a per-chunk buffer
+ * @param chunkSize  header.chunkSize (splats per chunk)
+ * @param ci         this chunk's index
+ * @param totalChunks header.chunks.length
+ * @returns { bounds:[cx,cy,cz,hx,hy,hz], count, children:number[] }
+ */
+export function chunkBoundsAndTopology(chunkBuf, chunk, payloadBase, chunkSize, ci, totalChunks) {
+  const { count, props } = parseRadcChunk(chunkBuf, chunk, payloadBase, ['center', 'child_count', 'child_start']);
+  const positions = decodeF32LeBytes(props.get('center'), 3, count);
+  const b = computeBounds(positions, count);
+
+  const children = [];
+  const ccBuf = props.get('child_count'), csBuf = props.get('child_start');
+  if (ccBuf && csBuf) {
+    const ccView = new DataView(ccBuf.buffer, ccBuf.byteOffset, ccBuf.byteLength);
+    const csView = new DataView(csBuf.buffer, csBuf.byteOffset, csBuf.byteLength);
+    const SCAN = Math.min(count, 1000);   // coarse splats reference all child chunks (BhattLod order)
+    const set = new Set();
+    for (let i = 0; i < SCAN; i++) {
+      const cc = ccView.getUint16(i * 2, true), cs = csView.getUint32(i * 4, true);
+      if (cc > 0 && cs > 0) { const c = Math.floor(cs / chunkSize); if (c > ci && c < totalChunks) set.add(c); }
+    }
+    children.push(...[...set].sort((a, b) => a - b));
+  }
+  return { bounds: [b.cx, b.cy, b.cz, b.hx, b.hy, b.hz], count, children };
+}
+
+// ── Per-chunk GLB encoder (returns the buffer; shared by offline + streaming) ──
+
+/**
+ * Decode one RAD chunk fully and encode it to an SPZ-v2 GLB Buffer.
+ * Returns { glb, bounds, featureSize, count, kept } — no file I/O.
+ * `opts` overrides OPTS for this call (e.g. centroidsOnly); omitted keys keep current OPTS.
+ */
+export async function encodeChunkGlb(buf, chunk, payloadBase, opts = {}) {
+  const prevOpts = { ...OPTS };
+  Object.assign(OPTS, opts);
+  try {
+    return await _encodeChunkGlb(buf, chunk, payloadBase);
+  } finally {
+    Object.assign(OPTS, prevOpts);
+  }
+}
+
 // ── Per-chunk GLB writer ──────────────────────────────────────────────────────
 
 async function writeChunkGlb(buf, chunk, payloadBase, outputPath) {
+  const { glb, bounds, featureSize, count, kept } = await _encodeChunkGlb(buf, chunk, payloadBase);
+  await ensureDir(path.dirname(outputPath));
+  await fs.writeFile(outputPath, glb);
+  return { bounds, featureSize, count, kept };
+}
+
+async function _encodeChunkGlb(buf, chunk, payloadBase) {
   const { meta, count, props } = parseRadcChunk(buf, chunk, payloadBase,
     ['center', 'alpha', 'rgb', 'scales', 'orientation']);
 
@@ -276,10 +350,8 @@ async function writeChunkGlb(buf, chunk, payloadBase, outputPath) {
   // the bounding volume to the real geometry (no more inflated 15000m boxes).
   const bounds = computeBounds(posArr, count2);
   const glb    = await buildSplatTileGlb({ positions: posArr, alphas: alphaArr, rgb, scales, rotations }, count2, bounds, OPTS.centroidsOnly);
-  await ensureDir(path.dirname(outputPath));
-  await fs.writeFile(outputPath, glb);
 
-  return { bounds, featureSize, count, kept: count2 };
+  return { glb, bounds, featureSize, count, kept: count2 };
 }
 
 // ── Main ──────────────────────────────────────────────────────────────────────

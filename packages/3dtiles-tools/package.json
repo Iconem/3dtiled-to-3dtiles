@@ -6,6 +6,7 @@
   "main": "index.js",
   "dependencies": {
     "3dtiles-convert-core": "workspace:*",
+    "gltf-pipeline": "^4.3.1",
     "implicit-to-explicit": "workspace:*"
   }
 }

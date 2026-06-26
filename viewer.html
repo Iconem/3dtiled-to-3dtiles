@@ -510,7 +510,7 @@
 //   convert → http://localhost:3001/convert/tileset.json?format=<fmt>&url=<src>[&tiling=]
 //   tools   → http://localhost:3001/3dtiles-tools/tileset.json?tool=<t>&url=<remoteUrl>
 //             Streaming semantics like /stream: tileset JSON cached once, tiles converted on-demand.
-// `octree` formats (COPC/Potree) also honor the implicit/explicit toggle. RAD/I3S have no stream adapter.
+// `octree` formats (COPC/Potree) also honor the implicit/explicit toggle. All formats now stream.
 const MW = 'http://localhost:3001';                        // middleware
 const SDATA = 'http://localhost:3000/sample-data';         // Vite-served sample data
 let viewerMode = 'stream';                                 // 'stream' | 'offline' | 'convert' | 'tools'
@@ -532,6 +532,13 @@ const TOOLS_DATASETS = {
   'upgrade': [
     { id: 'lille-pyramid', label: 'Lille Pyramid (b3dm→glb)', type: 'mesh',
       url: 'https://webimaging.lillemetropole.fr/externe/maillage/2016_mel_10cm/3dtiles/pyramid/tileset.json' },
+  ],
+  // 'packages' streams the OTHER way: a self-contained .3tz/.3dtiles package → a standard 3D Tiles
+  // endpoint, on the fly (range-reads for .3tz, sql.js for .3dtiles) — like `3d-tiles-tools serve`.
+  // `pkg` is a repo-relative path the tile-server resolves; type drives the renderer (splat/mesh).
+  'packages': [
+    { id: 'tastier-3tz',     label: 'tastier .3tz (ZIP+index)',  type: 'splat', pkg: 'sample-data/input/3DTILES-PACKAGES/tastier.3tz' },
+    { id: 'tastier-3dtiles', label: 'tastier .3dtiles (SQLite)', type: 'splat', pkg: 'sample-data/input/3DTILES-PACKAGES/tastier.3dtiles' },
   ],
 };
 
@@ -556,14 +563,14 @@ const FORMATS = [
       { id: 'guanlan',   label: 'Guanlan Town',      src: 'input/LCC/Guanlan Ancient Town/meta.lcc',        out: 'output/lcc/Guanlan_Ancient_Town-3dtiles-from-lcc'    },
       { id: 'religious', label: 'Religious Center',  src: 'input/LCC/religious_center_L2_P/meta.lcc',       out: 'output/lcc/religious_center_L2_P-3dtiles-from-lcc'   },
   ]},
-  { fmt: 'rad', icon: '✦', label: 'RAD', type: 'splat', octree: false, stream: false, assets: [
+  { fmt: 'rad', icon: '✦', label: 'RAD', type: 'splat', octree: false, stream: true, assets: [
       { id: 'coit',      label: 'Coit',       src: 'input/RAD/coit.rad',             out: 'output/rad/coit-3dtiles-from-rad'        },
       { id: 'tastier',   label: 'Tastier',    src: 'input/RAD/tastier500k.rad',      out: 'output/rad/tastier500k-3dtiles-from-rad' },
       { id: 'elevator',  label: 'Elevator',   src: 'input/PLY/Elevator-lod.rad',     out: 'output/rad/Elevator-3dtiles-from-rad'    },
       { id: 'svir',      label: 'Svirnas',    src: 'input/PLY/SvirnasAlyt-lod.rad',  out: 'output/rad/SvirnasAlyt-3dtiles-from-rad' },
   ]},
-  { fmt: 'i3s', icon: '🧱', label: 'I3S', type: 'mesh', octree: false, stream: false, assets: [
-      { id: 'nyc',    label: 'NYC Buildings', src: 'input/I3S-SLPK/Buildings_NewYork_v18.slpk', out: 'output/i3s/Buildings_NewYork_v18' },
+  { fmt: 'i3s', icon: '🧱', label: 'I3S', type: 'mesh', octree: false, stream: true, assets: [
+      { id: 'nyc',    label: 'NYC Buildings', src: 'input/I3S-SLPK/Buildings_NewYork_v18.slpk', streamSrc: 'input/I3S-SLPK/Buildings_NewYork_v18/3dSceneLayer.json.gz', out: 'output/i3s/Buildings_NewYork_v18' },
       { id: 'autzen-i3s', label: 'Autzen LAS (LEPCC—unsupported)', src: 'input/I3S-SLPK/SMALL_AUTZEN_LAS_All.slpk', out: 'output/i3s/SMALL_AUTZEN_LAS_All' },
   ]},
 ];
@@ -575,6 +582,10 @@ const DIRECT = [
   { id: 'strasbourg', icon: '🏙', label: '3DT · Strasbourg', type: 'mesh', url: 'https://s3.eu-west-2.wasabisys.com/ems-sgct-photomaillage/ODACIT/EMS_PM2022/tileset.json' },
   { id: 'clermont', icon: '🏙', label: '3DT · Clermont', type: 'mesh', url: 'https://3d.craig.fr/datasets/Clermont/3dtiles/tileset.json' },
   { id: 'lille', icon: '🏙', label: '3DT · Lille', type: 'mesh', url: 'https://webimaging.lillemetropole.fr/externe/maillage/2016_mel_10cm/3dtiles/tileset.json' },
+  // Self-contained single-file packages (.3tz ZIP / .3dtiles SQLite), served in-place by /3dtiles-self-contained.
+  // Built locally by scripts/pack-3dtiles.mjs from the tastier RAD splat tileset. Paths resolve from repo root.
+  { id: 'pkg-3tz',     icon: '📦', label: '3DT · tastier .3tz',     type: 'splat', url: `${MW}/3dtiles-self-contained/tileset.json?url=${encodeURIComponent('sample-data/input/3DTILES-PACKAGES/tastier.3tz')}` },
+  { id: 'pkg-3dtiles', icon: '📦', label: '3DT · tastier .3dtiles', type: 'splat', url: `${MW}/3dtiles-self-contained/tileset.json?url=${encodeURIComponent('sample-data/input/3DTILES-PACKAGES/tastier.3dtiles')}` },
 ];
 
 // Resolve an asset's tileset URL for the current mode (null = not available in this mode).
@@ -587,8 +598,11 @@ function assetUrl(f, a) {
     }
     return `${SDATA}/${a.out}/tileset.json`;
   }
+  // stream may use a different source than convert/offline (e.g. I3S streams the extracted
+  // 3dSceneLayer.json rather than fetching the whole multi-GB .slpk) — honor a.streamSrc.
+  const streamSrc = encodeURIComponent(`${SDATA}/${a.streamSrc ?? a.src}`);
   const src = encodeURIComponent(`${SDATA}/${a.src}`);
-  if (viewerMode === 'stream')  return f.stream ? `${MW}/stream/tileset.json?format=${f.fmt}&url=${src}${tq}` : null;
+  if (viewerMode === 'stream')  return f.stream ? `${MW}/stream/tileset.json?format=${f.fmt}&url=${streamSrc}${tq}` : null;
   if (viewerMode === 'convert') return `${MW}/convert/tileset.json?format=${f.fmt}&url=${src}${tq}`;
   return null;
 }
@@ -600,10 +614,19 @@ function currentPresets() {
   if (viewerMode === 'tools') {
     return (TOOLS_DATASETS[toolName] || []).map(a => ({
       id: `tool-${toolName}-${a.id}`, label: a.label, type: a.type,
-      url: `${MW}/3dtiles-tools/tileset.json?tool=${encodeURIComponent(toolName)}&url=${encodeURIComponent(a.url)}`,
+      // 'packages' serves a self-contained package in-place; the others transcode a remote tileset.
+      url: toolName === 'packages'
+        ? `${MW}/3dtiles-self-contained/tileset.json?url=${encodeURIComponent(a.pkg)}`
+        : `${MW}/3dtiles-tools/tileset.json?tool=${encodeURIComponent(toolName)}&url=${encodeURIComponent(a.url)}`,
     }));
   }
   if (selectedFormat === '3dtiles') return DIRECT.map(d => ({ id: d.id, label: `${d.icon} ${d.label}`, type: d.type, url: d.url }));
+  // 'packages' pseudo-format: same datasets as Tools → packages, but routed through the unified
+  // /stream endpoint (format=3tz | 3dtiles-pkg) to exercise the package streaming path there.
+  if (selectedFormat === 'packages') return (TOOLS_DATASETS['packages'] || []).map(a => ({
+    id: `fmt-pkg-${a.id}`, label: `📦 ${a.label}`, type: a.type,
+    url: `${MW}/stream/tileset.json?format=${a.pkg.toLowerCase().endsWith('.3tz') ? '3tz' : '3dtiles-pkg'}&url=${encodeURIComponent(a.pkg)}`,
+  }));
   const f = fmtMeta(selectedFormat);
   if (!f) return [];
   return f.assets.map(a => ({ id: `${f.fmt}-${a.id}`, label: `${f.icon} ${a.label}`, type: f.type, url: assetUrl(f, a), octree: f.octree }));
@@ -749,10 +772,10 @@ function buildPresetBar() {
 
   if (viewerMode === 'tools') {
     // 2) TOOL NAME  3) asset pills (tool-specific open datasets)
-    seg('tiling', [['implicit-to-explicit', '⬡→⬢ i→e'], ['upgrade', '⬆ upgrade']], toolName, setTool, '3dtiles-tools operation');
+    seg('tiling', [['implicit-to-explicit', '⬡→⬢ i→e'], ['upgrade', '⬆ upgrade'], ['packages', '📦 packages']], toolName, setTool, '3dtiles-tools operation');
   } else {
     // 2) FORMAT  3) tiling toggle (octree only)  4) asset pills
-    seg('fmt', [...FORMATS.map(f => [f.fmt, `${f.icon} ${f.label}`]), ['3dtiles', '◈ 3D Tiles']], selectedFormat, setFormat, 'source format');
+    seg('fmt', [...FORMATS.map(f => [f.fmt, `${f.icon} ${f.label}`]), ['3dtiles', '◈ 3D Tiles'], ['packages', '📦 Packages']], selectedFormat, setFormat, 'source format');
     if (fmtMeta(selectedFormat)?.octree) seg('tiling', [['implicit', '⬡ implicit'], ['explicit', '⬢ explicit']], tilingMode, setTiling, 'octree tiling');
   }
 
@@ -1189,6 +1212,9 @@ function toggle3DT() {
     document.getElementById('three-container').style.display = 'none';
     document.getElementById('cesium-container').style.display = 'block';
     window.__3dtrjs?.pause();
+    // Load the currently-selected dataset into Cesium (switching renderers should keep the dataset).
+    const url = document.getElementById('tileset-url').value.trim();
+    if (url) loadTileset();
     setStatus('Cesium mode.');
   }
 }
@@ -1267,8 +1293,8 @@ let tilesUp = new Vector3(0, 1, 0); // radial up at the tileset (raw ECEF) for z
 let zOffset = 0;
 let lastLoad = null;                // remember args so a mode switch can re-load
 let debugPlugin = null;             // DebugTilesPlugin on the current tileset
-let debugOn = false;                // show bounding boxes + colour-by-depth
-const DEBUG_COLOR_DEPTH = 4;        // DebugTilesPlugin ColorModes.DEPTH
+let debugOn = false;                // show bounding boxes + per-tile random colour
+const DEBUG_COLOR_RANDOM = 7;       // DebugTilesPlugin ColorModes.RANDOM_COLOR (per-tile, like Cesium)
 let needsFraming = false;           // fly-to once the root bounding sphere is ready
 let framingForceEcef;               // forceEcef arg captured for the deferred framing
 let lastCenter = new Vector3();     // last tileset bounds centre (for mode switches / fly-to)
@@ -1503,7 +1529,7 @@ function _makeTiles(url, isSplat, fetchOptions) {
   // (cheap when off); the checkbox flips displayBoxBounds + colorMode live.
   debugPlugin = new DebugTilesPlugin({
     displayBoxBounds: debugOn,
-    colorMode: debugOn ? DEBUG_COLOR_DEPTH : 0,
+    colorMode: debugOn ? DEBUG_COLOR_RANDOM : 0,
   });
   t.registerPlugin(debugPlugin);
   t.setCamera(camera);
@@ -1533,7 +1559,7 @@ function setDebug(on) {
   debugOn = !!on;
   if (debugPlugin) {
     debugPlugin.displayBoxBounds = debugOn;
-    debugPlugin.colorMode = debugOn ? DEBUG_COLOR_DEPTH : 0;
+    debugPlugin.colorMode = debugOn ? DEBUG_COLOR_RANDOM : 0;
   }
 }
 
@@ -1660,6 +1686,7 @@ function pause() {
 }
 
 let _frames = 0;
+let _tilesUpdateErrLogged = false;
 function animate() {
   animId = requestAnimationFrame(animate);
   _frames++;
@@ -1674,7 +1701,11 @@ function animate() {
   if (tiles) {
     tiles.setCamera(camera);
     tiles.setResolutionFromRenderer(camera, renderer);
-    tiles.update();
+    // Guard: DebugTilesPlugin can throw "Cannot read properties of null (reading 'traverse')"
+    // when a tile is disposed mid-frame (or splat/empty content has no scene). One bad frame
+    // must not kill the rAF loop — swallow + log once so rendering continues.
+    try { tiles.update(); }
+    catch (e) { if (!_tilesUpdateErrLogged) { console.warn('[3DTRJS] tiles.update() threw (continuing):', e.message); _tilesUpdateErrLogged = true; } }
     if (debugOn) _dimDebugBoxes();
     applySparkLodSettings();   // applies once the shared SparkRenderer exists
   }

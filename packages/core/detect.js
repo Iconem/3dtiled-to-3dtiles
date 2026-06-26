@@ -23,6 +23,7 @@ export function detectFormatByName(name) {
   if (l.endsWith('lod-meta.json')) return 'sog';
   if (l.endsWith('.lcc')) return 'lcc';
   if (l.endsWith('3dscenelayer.json') || l.endsWith('3dscenelayer.json.gz')) return 'i3s';
+  if (l.endsWith('.3tz') || l.endsWith('.3dtiles')) return 'package';
   return null;
 }
 
@@ -31,6 +32,7 @@ export async function detectFormat(input) {
 
   // ── file-based ──
   if (lower.endsWith('.rad')) return 'rad';
+  if (lower.endsWith('.3tz') || lower.endsWith('.3dtiles')) return 'package';
   if (lower.endsWith('.copc.laz') || lower.endsWith('.copc')) return 'copc';
   if (lower.endsWith('.slpk')) return 'i3s';
   if (lower.endsWith('.laz') || lower.endsWith('.las')) {

@@ -1,7 +1,24 @@
 # 3TZ and .3dtiles — single-file 3D Tiles packaging formats
 
 Both formats package a 3D Tiles tileset (tileset.json + tile files) into a single transportable
-file. They are served by this project's `/package` endpoint.
+file. They are served by this project's `/3dtiles-self-contained` endpoint, and can be built with the
+in-repo `scripts/pack-3dtiles.mjs` (no external deps) or the official `3d-tiles-tools convert`.
+
+## Canonical specs & references
+
+- **`.3tz`** — [erikdahlstrom/3tz-specification](https://github.com/erikdahlstrom/3tz-specification)
+  (the underlying spec, originally Maxar `MAXAR_content_3tz`). "ZIP with an index for random access."
+- **`.3dtiles`** — [A proposal for a 3D Tiles packaging format specification — CesiumGS/3d-tiles#727](https://github.com/CesiumGS/3d-tiles/issues/727)
+  (SQLite-based; the PDF `3DTilesPackageSpecification-1.0.0` is attached in the first comment). Keys are
+  relative Unix-style filesystem paths (not percent-encoded URIs) — see CesiumGS/3d-tiles-tools#149.
+- **Tooling** — [`3d-tiles-tools convert`](https://github.com/CesiumGS/3d-tiles-tools#convert) converts
+  between a tileset dir / `tileset.json` / `.3tz` / `.3dtiles` / `.zip` in any direction (it replaces the
+  old `databaseToTileset` / `tilesetToDatabase` commands). Extended package server demo:
+  [CesiumGS/3d-tiles-tools#86](https://github.com/CesiumGS/3d-tiles-tools/pull/86). Related design
+  threads: packages as external tilesets ([#804](https://github.com/CesiumGS/3d-tiles/issues/804)),
+  entry compression ([#806](https://github.com/CesiumGS/3d-tiles/issues/806)).
+
+> Note: this repo's endpoint is `/3dtiles-self-contained` (older docs may call it `/package`).
 
 ---
 

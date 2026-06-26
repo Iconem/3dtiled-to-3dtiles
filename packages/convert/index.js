@@ -8,6 +8,7 @@
  * (`opts.extraArgs`) that the in-process options object doesn't model.
  */
 import { spawn } from 'child_process';
+import fs from 'fs/promises';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import { detectFormat, detectFormatByName } from '3dtiles-convert-core';
@@ -24,6 +25,41 @@ const REGISTRY = {
   potree: { module: 'potree-to-3dtiles', script: 'packages/potree-to-3dtiles/src/index.js' },
   i3s:    { module: 'i3s-to-3dtiles',    script: 'packages/i3s-to-3dtiles/src/index.js' },
 };
+
+/**
+ * Unpack a self-contained 3D Tiles package (.3tz ZIP / .3dtiles SQLite) into a plain tileset
+ * directory (tileset.json + tile files). This is the meta-converter's "package → 3D Tiles" path:
+ * the content is already 3D Tiles, so converting just means extracting the container.
+ */
+async function unpackPackage(input, outDir) {
+  const lower = input.toLowerCase();
+  await fs.mkdir(outDir, { recursive: true });
+  const writeEntry = async (key, bytes) => {
+    if (key === '@3dtilesIndex1@' || !bytes?.length) return false;   // .3tz index entry — not a tile
+    const dest = path.join(outDir, key);
+    await fs.mkdir(path.dirname(dest), { recursive: true });
+    await fs.writeFile(dest, Buffer.from(bytes));
+    return true;
+  };
+
+  let count = 0;
+  if (lower.endsWith('.3tz')) {
+    const { unzipSync } = await import('fflate');
+    const files = unzipSync(new Uint8Array(await fs.readFile(input)));
+    for (const [name, bytes] of Object.entries(files)) { if (await writeEntry(name, bytes)) count++; }
+  } else if (lower.endsWith('.3dtiles')) {
+    const { default: initSqlJs } = await import('sql.js');
+    const SQL = await initSqlJs();
+    const db = new SQL.Database(new Uint8Array(await fs.readFile(input)));
+    const r = db.exec('SELECT key, content FROM media');
+    if (r.length) for (const [key, content] of r[0].values) { if (await writeEntry(key, content)) count++; }
+    db.close();
+  } else {
+    throw new Error(`Not a package file: ${input}`);
+  }
+  console.log(`[package] unpacked ${count} entries → ${outDir}`);
+  return { format: 'package', outDir, tiles: count };
+}
 
 /** Map JS options → the underlying converter's CLI flags (only those it understands). */
 function optsToFlags(fmt, opts = {}) {
@@ -48,14 +84,18 @@ export async function convert(input, outDir, opts = {}) {
   const format = opts.format
     || (isRemote(input) ? detectFormatByName(input) : await detectFormat(input));
   if (!format) throw new Error(`Could not detect input format for "${input}". Pass { format } explicitly.`);
-  const entry = REGISTRY[format];
-  if (!entry) throw new Error(`No converter registered for format "${format}".`);
 
   // Remote input → download (with the sibling files the format needs) to a temp dir, then convert locally.
   if (isRemote(input)) {
     const { input: localInput } = await resolveSource(input, format);
     input = localInput;
   }
+
+  // Self-contained packages (.3tz / .3dtiles) → unpack to a plain tileset dir (no geometry convert).
+  if (format === 'package') return unpackPackage(input, outDir);
+
+  const entry = REGISTRY[format];
+  if (!entry) throw new Error(`No converter registered for format "${format}".`);
 
   // In-process dispatch (preferred). Fall back to child-process only when the caller passed
   // format-specific CLI flags (extraArgs) that the in-process options object doesn't model.
@@ -80,4 +120,4 @@ export async function convert(input, outDir, opts = {}) {
 }
 
 export { detectFormat };
-export const supportedFormats = Object.keys(REGISTRY);
+export const supportedFormats = [...Object.keys(REGISTRY), 'package'];

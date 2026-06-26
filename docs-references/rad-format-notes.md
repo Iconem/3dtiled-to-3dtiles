@@ -22,13 +22,40 @@ Sources:
   are never split across chunks), which requires the LoD tree — only available in `spark-lib` (wasm),
   not persisted in the `.rad` file.
 
-## Why RAD has no `/stream` range adapter
+## RAD `/stream` adapter (centers-only tree + on-demand encode)
 
 A 3D-Tiles tileset needs **per-tile spatial bounds** to emit the tree. RAD persists **neither** tile
-bounds **nor** a spatial tile partition. So you cannot build the hierarchy by reading metadata alone —
-you must decode splats to compute bounds. That is exactly what `/convert` (preprocess+cache) does, so a
-dedicated streaming adapter would do the same decode work with **no** benefit. → **RAD is served by
-`/convert`.** (Contrast COPC/Potree/SOG, which persist bounds and stream cleanly.)
+bounds **nor** a spatial tile partition, so — unlike COPC/Potree/SOG — we can't build the tree from
+metadata alone. But the full `/convert` is overkill: the *tree* only needs each chunk's AABB, which
+comes from the **`center` column alone**. So `/stream` (see `packages/tile-server/rad-live.js`) does:
+
+- **tileset.json** — range-fetch the header, then range-fetch **every chunk in parallel** and decode,
+  per chunk, the `center` column (→ AABB) **and** the `child_count`/`child_start` columns (→ LoD-tree
+  topology) in a **single combined pass** (`chunkBoundsAndTopology`). No SPZ encode, no gzip.
+- **tile/`<i>`.glb** — range-fetch that **one** chunk and full-decode + SPZ-v2 encode it on demand
+  (~200 ms / 65k-splat chunk), reusing the shared `encodeChunkGlb`.
+
+This defers the expensive per-tile decode+encode+gzip (which `/convert` runs for the *whole* dataset up
+front) to on-demand. Bounds match the default (unfiltered) `/convert` output (outlier filtering is
+opt-in/off by default).
+
+**Cost of the cold tileset build (important for huge clouds).** RAD has *no top-level spatial index*,
+so the tree build must touch **every chunk** — both the topology (child columns) and the bounds (center
+column) live per-chunk. That's inherent, not a wart: a 100 M-splat `.rad` (~1500+ chunks) requires
+reading + decompressing every chunk's center+child columns before the first tile appears. The adapter
+mitigates this with (a) **HTTP range requests** (never buffers the whole multi-GB file; falls back to a
+single full download only if the host ignores `Range`), (b) a **single parallel pass** (one decode per
+chunk, bounded concurrency) instead of two sequential passes, and (c) per-URL caching of the result.
+But the *first* load of a very large `.rad` is still bound by reading all chunk centers — for clouds
+that big, **`/convert` (preprocess + cache once)** is the better mode, or persist a bounds/topology
+sidecar. (This is why the original notes said RAD doesn't stream like COPC/Potree: those persist bounds;
+RAD does not.)
+
+**Caveat:** only **monolithic** `.rad` files stream (streaming-manifest `.rad` has no embedded chunk
+data). And the LoD-tree-vs-chunking-octree subtlety above still applies — a chunk may mix LoD levels;
+the adapter renders whole chunks, same as `/convert`. For a fully faithful per-LoD-leaf tiling you still
+need the offline `spark-lib` path. `/convert` (preprocess+cache) remains available and produces
+identical tiles; `/stream` just trades up-front conversion for on-demand latency.
 
 The Spark team's own recommendation for a faithful converter is an **offline** process written against
 `spark-lib` (or by adjusting the `build-lod` command to emit tile data directly), so the spatial

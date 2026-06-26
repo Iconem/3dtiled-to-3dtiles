@@ -2,15 +2,19 @@
   "name": "3dtiles-convert",
   "version": "0.1.0",
   "type": "module",
-  "bin": { "3dtiled": "cli.js" },
+  "bin": {
+    "3dtiled": "cli.js"
+  },
   "main": "index.js",
   "dependencies": {
     "3dtiles-convert-core": "workspace:*",
+    "copc-to-3dtiles": "workspace:*",
+    "fflate": "^0.8.3",
+    "i3s-to-3dtiles": "workspace:*",
+    "lcc-to-3dtiles": "workspace:*",
+    "potree-to-3dtiles": "workspace:*",
     "rad-to-3dtiles": "workspace:*",
     "sog-to-3dtiles": "workspace:*",
-    "lcc-to-3dtiles": "workspace:*",
-    "copc-to-3dtiles": "workspace:*",
-    "potree-to-3dtiles": "workspace:*",
-    "i3s-to-3dtiles": "workspace:*"
+    "sql.js": "^1.14.1"
   }
 }

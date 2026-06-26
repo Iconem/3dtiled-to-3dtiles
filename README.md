@@ -50,6 +50,12 @@ Each source format's authoritative spec, with a distilled local copy under [`doc
 | **RAD** (SparkJS) | **spec:** [LoD getting started](https://sparkjs.dev/docs/lod-getting-started/) · **blog:** [Spark 2.0 — spatially partitioned LoD](https://www.worldlabs.ai/blog/spark-2.0) · [ext-splats](https://sparkjs.dev/docs/ext-splats/) | [`rad-format-notes.md`](docs-references/rad-format-notes.md) · [`spark-2.0-blog-post.md`](docs-references/spark-2.0-blog-post.md) |
 | **I3S** (Esri) | [esri/i3s-spec](https://github.com/esri/i3s-spec) (OGC Community Standard) | [`i3s-spec.md`](docs-references/i3s-spec.md) |
 | **SPZ / glTF splat exts** | [SPZ](https://github.com/nianticlabs/spz) · [KHR_gaussian_splatting](https://github.com/CesiumGS/glTF/tree/proposal-KHR_gaussian_splatting) | [`spz-format.md`](docs-references/spz-format.md) · [`KHR_gaussian_splatting.md`](docs-references/KHR_gaussian_splatting.md) |
+| **3D Tiles packages** | [`.3tz` spec](https://github.com/erikdahlstrom/3tz-specification) · [`.3dtiles` proposal (#727)](https://github.com/CesiumGS/3d-tiles/issues/727) | [`3tz-3dtiles-packages.md`](docs-references/3tz-3dtiles-packages.md) |
+| **USD splats (ParticleField)** | [OpenUSD v26.03](https://aousd.org/blog/openusd-v26-03/) · [ParticleField3DGaussianSplat](https://openusd.org/release/user_guides/schemas/usdVol/ParticleField3DGaussianSplat.html) | [`usd-gaussian-splats.md`](docs-references/usd-gaussian-splats.md) |
+
+**Producing the tiled inputs (offline tilers):** point-cloud tilers (PotreeConverter, py3dtiles,
+gocesiumtiler, PDAL→COPC), splat LoD builders (SparkJS `build-lod`, PlayCanvas `splat-transform`,
+XGRIDS LCC), and a note on **why PotreeConverter 2.0 is so fast** — see [`offline-tilers.md`](docs-references/offline-tilers.md).
 
 (Several spec sites block automated fetching — the `docs-references/` mirrors are hand-distilled from
 the canonical sources above and kept in sync as the converters evolve.)
@@ -371,6 +377,19 @@ out-rad/
 > [`@cesium/3d-tiles-tools`](https://github.com/CesiumGS/3d-tiles-tools) installed.
 > `npm install @cesium/3d-tiles-tools` in the `rad-to-3dtiles` directory, then pass the flag.
 > Plan to eventually promote this to a first-class dependency.
+
+**Live `/stream` (no pre-conversion)** — `packages/tile-server/rad-live.js`, served at
+`GET /stream/tileset.json?url=<.rad>&format=rad` (or the dedicated `/rad/tileset.json?url=<.rad>`):
+
+- **tileset.json** — fetch the `.rad` once (cached in memory), build the node table, and decode
+  **only the `center` column** per chunk for bounds — no SPZ encode, no gzip. Reuses the shared
+  `buildTileset`. This is the cheap pass that makes the first paint fast.
+- **tile/`<i>`.glb** — full-decode + SPZ-v2 encode that **one** chunk on demand (~200 ms / 65k-splat
+  chunk), via the shared `encodeChunkGlb`.
+
+This defers the expensive per-tile decode+encode+gzip (which `/convert` runs for the *whole* dataset
+up front) to on-demand, so tiles stream as the camera requests them. Only **monolithic** `.rad` files
+stream (a streaming-manifest `.rad` has no embedded chunk data); `/convert` produces identical tiles.
 
 ---
 
@@ -1300,30 +1319,64 @@ first open, then serves each tile with a single `fs.read()` at the stored offset
 pnpm add -w better-sqlite3   # needs C++ build toolchain
 ```
 
-**Create packages** with `3d-tiles-tools`:
+**Create packages** — this repo ships a dependency-free packer (`scripts/pack-3dtiles.mjs`, ZIP+STORED
+for `.3tz`, sql.js for `.3dtiles`), or use the official `3d-tiles-tools`:
 ```sh
-npx 3d-tiles-tools packageCreate -i tileset/ -o scene.3tz        # ZIP
-npx 3d-tiles-tools packageCreate -i tileset/ -o scene.3dtiles    # SQLite
+# In-repo packer (no external deps): writes <out>.3tz AND <out>.3dtiles
+node scripts/pack-3dtiles.mjs sample-data/output/rad/tastier500k-3dtiles-from-rad sample-data/input/3DTILES-PACKAGES/tastier
+
+# Official tool (CesiumGS) — `convert` replaces the old packageCreate/databaseToTileset commands:
+npx 3d-tiles-tools convert -i ./tileset/ -o ./scene.3tz        # ZIP package
+npx 3d-tiles-tools convert -i ./tileset/ -o ./scene.3dtiles    # SQLite package
+#   --inputTilesetJsonFileName <name>   when the top-level JSON isn't called tileset.json
+#   input/output may be a dir, a tileset.json, a .3tz, a .3dtiles, or a .zip containing tileset.json
 ```
 
-Spec reference: Maxar `MAXAR_content_3tz`, [CesiumGS/3d-tiles-tools#86](https://github.com/CesiumGS/3d-tiles-tools/pull/86).
+A ready-made sample is built into `sample-data/input/3DTILES-PACKAGES/tastier.{3tz,3dtiles}` (from the
+tastier RAD splat tileset) — open it via `GET /3dtiles-self-contained/tileset.json?url=sample-data/input/3DTILES-PACKAGES/tastier.3tz`.
+
+#### Packaging-format specifications
+
+| Format | What it is | Spec |
+|--------|-----------|------|
+| **`.3tz`** | ZIP with a `@3dtilesIndex1@` binary index for random access; STORED (uncompressed) tile entries | [erikdahlstrom/3tz-specification](https://github.com/erikdahlstrom/3tz-specification) · Maxar `MAXAR_content_3tz` |
+| **`.3dtiles`** | SQLite DB, `media(key TEXT, content BLOB)`; keys are relative POSIX paths | [3D Tiles package format proposal — CesiumGS/3d-tiles#727](https://github.com/CesiumGS/3d-tiles/issues/727) ([PDF spec 1.0.0](https://github.com/CesiumGS/3d-tiles/issues/727)) |
+
+Tooling & discussion: [`3d-tiles-tools convert`](https://github.com/CesiumGS/3d-tiles-tools#convert) ·
+[extended package server — CesiumGS/3d-tiles-tools#86](https://github.com/CesiumGS/3d-tiles-tools/pull/86).
 Local notes: [`docs-references/3tz-3dtiles-packages.md`](docs-references/3tz-3dtiles-packages.md).
 
 ### 3D Tiles → 3D Tiles transcodes
 
 The input is *already* 3D Tiles — these are tileset-level transforms (the live/streaming-flavored
 counterparts to [`3d-tiles-tools`](https://github.com/CesiumGS/3d-tiles-tools), referenced above).
+Served live by the **`/3dtiles-tools`** endpoint (`packages/tile-server/3dtiles-tools-live.js`):
+tileset JSON is rewritten once and cached; each tile is converted on demand (like `/stream`).
 
-**Planned / in progress:**
-- **Implicit → explicit** — read a tileset with `implicitTiling` (OCTREE/QUADTREE) + `.subtree` files,
-  walk the availability bitstreams, and emit an **explicit** nested tree (derived boxes via the same
-  `octreeSubCube`/`cubeToBox` core helpers we use for the octree converters). For viewers/tools that
-  don't implement implicit tiling. (We already generate implicit *and* explicit on the write side, so
-  this is the read side of the same machinery.)
-- **Legacy upgrade → 3D Tiles 1.1** — the JSON-level upgrades (`asset.version` → 1.1, `url` → `uri`,
-  `refine` → upper-case, drop `3DTILES_content_gltf`) plus **`b3dm` → `glb`** content extraction (a
-  b3dm is a header + feature/batch tables + an embedded GLB — strip to the GLB). `pnts`/`i3dm`/`cmpt`
-  → glTF and full PBR material conversion are deferred to `3d-tiles-tools` (`upgrade --targetVersion 1.1`).
+**`tool=implicit-to-explicit`** — read a tileset with `implicitTiling` (OCTREE/QUADTREE) + `.subtree`
+files, walk the availability bitstreams, and emit an **explicit** nested tree (derived boxes via the
+same `octreeSubCube`/`cubeToBox` core helpers as the octree converters). Per-tile `.b3dm`/`.pnts`
+content is converted to glb on the fly; `.glb` is proxied as-is. Works on local dirs and remote URLs.
+
+**`tool=upgrade`** — legacy → 3D Tiles 1.1 with per-tile content conversion (`packages/3dtiles-tools/upgrade.js`):
+- **JSON-level:** `asset.version` → `1.1`, legacy `content.url` → `uri` (older 1.0/0.0 tilesets).
+- **`b3dm` → `glb`:** a b3dm is a header + feature/batch tables + an embedded GLB — extracted by slicing
+  to the GLB (zero-copy where possible).
+- **`pnts` → `glb`:** parsed and re-encoded to a glTF `POINTS` GLB (native fast builder; POSITION /
+  POSITION_QUANTIZED, RGBA/RGB/RGB565/CONSTANT_RGBA, RTC_CENTER → node translation).
+- **glTF 1.0 → 2.0:** if the embedded GLB is **version 1** (legacy `pg2b3dm`/older exporters), it is
+  upgraded to glTF 2.0 via **`gltf-pipeline`** (`processGlb`) so Three.js/3DTRjs can load it (CesiumJS
+  reads glTF 1.0 natively, Three.js does not).
+- **`CESIUM_RTC` baking:** because we serve a plain GLB (bypassing each renderer's native b3dm/RTC
+  handling), the b3dm's `CESIUM_RTC.center` (an ECEF offset) is folded into a wrapper **node
+  translation** and the extension stripped. The center is **pre-rotated by the inverse glTF up-axis**
+  (RX−90°: `(x,y,z)→(x,z,−y)`) so the renderer's Y-up→Z-up RX+90° restores the true ECEF position —
+  otherwise the ~6378 km-magnitude center is itself rotated 90° and the geometry lands thousands of km
+  away (correct bounding boxes, empty tiles). The small relative mesh vertices still get RX+90°, as in
+  native b3dm.
+
+`i3dm`/`cmpt` content and full PBR material rebuilds are deferred to `3d-tiles-tools`
+(`upgrade --targetVersion 1.1`).
 
 **Doable but low value (noted, not planned):**
 - **Point-budget / downsample proxy** — serve fewer/decimated tiles to weak clients. Marginal: a

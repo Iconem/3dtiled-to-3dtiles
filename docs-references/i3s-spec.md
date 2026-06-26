@@ -1,7 +1,24 @@
 # I3S — Esri Indexed 3D Scene Layer
 
-> Status: 🟡 **draft converter `i3s-to-3dtiles/` — UNTESTED** (no SLPK sample in this repo to validate).
+> Status: 🟢 **live `/stream` adapter** (`packages/tile-server/i3s-live.js`, loaders.gl-based) +
+> 🟡 offline draft converter `i3s-to-3dtiles/`. Validated on `Buildings_NewYork_v18` (3DObject v1.8).
 > Ref: https://github.com/esri/i3s-spec (OGC Community Standard), docs/1.8.
+
+## Live streaming (`/stream?format=i3s` · `i3s-live.js`)
+
+A "v2" adapter built on the **loaders.gl** SDK (`@loaders.gl/i3s` SLPK archive + scene-layer/nodepage
+parsing) that reuses this repo's I3S geometry decoder + ENU placement:
+
+- **tileset.json** — read `3dSceneLayer.json` + all nodepages (node **OBBs + children + mesh refs**).
+  Each tile's box comes from the OBB's enclosing AABB in a shared ENU frame — **no geometry decode**.
+  One ENU→ECEF root transform; content URIs route to `/i3s/tile/<nodeIndex>.glb`.
+- **tile/`<i>`.glb** — fetch ONE node's uncompressed `DefaultGeometrySchema` buffer, decode it,
+  place vertices in the ENU frame, build a glTF (TRIANGLES / POINTS) on demand.
+
+Two source modes, auto-detected: **REST / extracted-SLPK dir** (`…/3dSceneLayer.json[.gz]`, fetched
+file-by-file — best for multi-GB layers like NYC, never pulls the whole dataset) and **SLPK archive**
+(`….slpk`, fetched once and read via loaders.gl). Scope: uncompressed geometry only (Draco/LEPCC
+gated out), no textures yet — same subset as the offline draft.
 
 ## Gist
 I3S is Esri's streaming format for large 3D scene layers. Distributed as a **REST service** or a

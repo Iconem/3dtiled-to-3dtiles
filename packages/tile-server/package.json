@@ -3,13 +3,18 @@
   "version": "0.1.0",
   "private": true,
   "type": "module",
-  "bin": { "3dtiles-serve": "server.js" },
+  "bin": {
+    "3dtiles-serve": "server.js"
+  },
   "main": "server.js",
   "dependencies": {
-    "copc": "^0.0.8",
-    "proj4": "^2.11.0",
     "3dtiles-convert-core": "workspace:*",
+    "3dtiles-tools": "workspace:*",
+    "@loaders.gl/i3s": "^4.4.3",
+    "@loaders.gl/zip": "^4.4.3",
+    "copc": "^0.0.8",
+    "i3s-to-3dtiles": "workspace:*",
     "implicit-to-explicit": "workspace:*",
-    "3dtiles-tools": "workspace:*"
+    "proj4": "^2.11.0"
   }
 }

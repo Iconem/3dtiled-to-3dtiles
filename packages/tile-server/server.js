@@ -20,6 +20,8 @@ import { handleCopc } from './copc-live.js';
 import { handlePotree } from './potree-live.js';
 import { handleSog } from './sog-live.js';
 import { handleLcc } from './lcc-live.js';
+import { handleRad } from './rad-live.js';
+import { handleI3s } from './i3s-live.js';
 import { handleStream } from './stream-live.js';
 import { handleConvert } from './convert-live.js';
 import { handleSelfContained } from './3dtiles-self-contained.js';
@@ -46,6 +48,8 @@ http.createServer(async (req, res) => {
     if (await handlePotree(req, res, u)) return;     // Potree 2.0 → 3D Tiles live (range-streamed)
     if (await handleSog(req, res, u)) return;        // streamed-SOG → 3D Tiles live (chunk-on-demand)
     if (await handleLcc(req, res, u)) return;        // LCC → 3D Tiles live (grid boxes + range-read runs)
+    if (await handleRad(req, res, u)) return;        // RAD → 3D Tiles live (centers-only tree + on-demand encode)
+    if (await handleI3s(req, res, u)) return;        // I3S/SLPK → 3D Tiles live (loaders.gl; OBB tree + on-demand geometry)
     if (await handleConvert(req, res, u)) return;    // any <fmt> → 3D Tiles live (preprocess + cache)
     if (await handleSelfContained(req, res, u)) return;   // .3tz / .3dtiles self-contained packages
     if (await handle3dtilesTools(req, res, u)) return;    // /3dtiles-tools?tool=implicit-to-explicit|upgrade
