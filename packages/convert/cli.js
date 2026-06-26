@@ -21,7 +21,7 @@ const sepIdx = rawArgv.indexOf('--');
 const argv = sepIdx >= 0 ? rawArgv.slice(0, sepIdx) : rawArgv;
 const extraArgs = sepIdx >= 0 ? rawArgv.slice(sepIdx + 1) : [];
 
-const VALUE_FLAGS = new Set(['format', 'scale', 'ge-scale', 'ge-layer']);
+const VALUE_FLAGS = new Set(['format', 'scale', 'ge-scale', 'ge-layer', 'tiling']);
 function flag(name) { const i = argv.indexOf(`--${name}`); return i >= 0 ? argv[i + 1] : undefined; }
 
 // positionals = tokens that aren't a --flag nor the value following a value-flag
@@ -51,6 +51,7 @@ if (!input || !outDir) {
     geScale: flag('ge-scale')!= null ? Number(flag('ge-scale')): undefined,
     geLayer: flag('ge-layer')!= null ? Number(flag('ge-layer')): undefined,
     centroidsOnly: argv.includes('--centroids-only'),   // splat fmts → POINTS centroid tileset
+    tiling: flag('tiling'),                             // 'implicit' | 'explicit' (copc, potree)
     extraArgs,
   };
   await convert(input, outDir, opts);

@@ -7,3 +7,5 @@ export { buildSpzBuffer, buildSpzGlb, buildSplatTileGlb, computeBounds } from '.
 export { buildPointsGlb } from './points-glb.js';
 export { parallelMap, WorkerPool, defaultConcurrency } from './parallel.js';
 export { detectFormat, detectFormatByName } from './detect.js';
+export { keyToCoords, coordsToKey, octreeChildKeys, octreeSubCube, cubeToBox,
+         buildExplicitTree, buildSubtreeBuffer, subtreeRootKeys } from './tiling.js';

@@ -19,11 +19,11 @@ import path  from 'path';
 import { fileURLToPath } from 'node:url';
 import { Copc, Las, Getter } from 'copc';
 
-import { buildSubtreeBuffer, keyToCoords } from './subtreeBuilder.js';
 import { writeTileGlb }                    from './glbWriter.js';
 import { convertPlainLas }                 from './plainLas.js';
 import { buildEcefTransform }              from './georef.js';
-import { parallelMap, defaultConcurrency } from '../../core/index.js';
+import { parallelMap, defaultConcurrency, keyToCoords, octreeSubCube, cubeToBox,
+         buildExplicitTree, buildSubtreeBuffer, subtreeRootKeys } from '../../core/index.js';
 
 const SUBTREE_LEVELS = 3; // subtree covers levels d, d+1, d+2 (73 nodes max)
 
@@ -126,57 +126,51 @@ export async function convert(inputPath, outDir, opts = {}) {
   }, { concurrency });
   console.log(`\r  ${done}/${nodeMap.size} tiles`);
 
-  // ── Write subtrees ─────────────────────────────────────────────────────────
-  // Subtree roots are nodes at levels 0, SUBTREE_LEVELS, 2*SUBTREE_LEVELS, …
-  console.log('Writing subtrees...');
-  let subtreeDone = 0;
-  const subtreeRoots = new Set();
-  // Always include the tileset root subtree at 0-0-0-0
-  subtreeRoots.add('0-0-0-0');
-  for (const key of nodeMap.keys()) {
-    const { level, x, y, z } = keyToCoords(key);
-    if (level % SUBTREE_LEVELS === 0) subtreeRoots.add(key);
-  }
-
-  for (const key of subtreeRoots) {
-    const { level, x, y, z } = keyToCoords(key);
-    const subtreePath = path.join(outDir, 'subtrees', `${level}`, `${x}`, `${y}`, `${z}.subtree`);
-    await ensureDir(path.dirname(subtreePath));
-    const buf = buildSubtreeBuffer(key, nodeMap, SUBTREE_LEVELS);
-    await fs.writeFile(subtreePath, buf);
-    subtreeDone++;
-  }
-  console.log(`  ${subtreeDone} subtrees`);
-
-  // ── tileset.json ───────────────────────────────────────────────────────────
   const rootError = rootGeometricError(cube);
-  const tileset = {
-    asset: { version: '1.1' },
-    geometricError: rootError,
-    root: {
-      // Center at (0,0,0) in local space — the ENU transform moves that to ECEF.
-      // Half-extents stay in CRS units (metres for projected CRS).
-      boundingVolume: { box: [
-        0, 0, 0,
-        (cube[3]-cube[0])/2, 0, 0,
-        0, (cube[4]-cube[1])/2, 0,
-        0, 0, (cube[5]-cube[2])/2,
-      ]},
+  const tiling = opts.tiling === 'explicit' ? 'explicit' : 'implicit';
+  let tileset;
+
+  if (tiling === 'explicit') {
+    // ── Explicit nested tree (no subtrees): each node carries its own box + content URI. ──
+    // Boxes are relative to `origin`; the root ENU transform maps origin → ECEF (same as implicit).
+    const root = buildExplicitTree('0-0-0-0', {
+      exists: k => nodeMap.has(k),
+      boxOf: k => { const { level, x, y, z } = keyToCoords(k); return cubeToBox(octreeSubCube(cube, level, x, y, z), origin); },
+      geometricErrorOf: k => rootError / 2 ** keyToCoords(k).level,
+      contentUriOf: k => { if (!nodeMap.has(k)) return null; const { level, x, y, z } = keyToCoords(k); return `tiles/${level}/${x}/${y}/${z}.glb`; },
       refine: 'ADD',
-      geometricError: rootError,
-      implicitTiling: {
-        subdivisionScheme: 'OCTREE',
-        availableLevels: maxLevel + 1,
-        subtreeLevels: SUBTREE_LEVELS,
-        subtrees: { uri: 'subtrees/{level}/{x}/{y}/{z}.subtree' }
-      },
-      content: { uri: 'tiles/{level}/{x}/{y}/{z}.glb' }
+    });
+    if (transform) root.transform = transform;
+    tileset = { asset: { version: '1.1' }, geometricError: rootError, root };
+    console.log('  explicit tree (no subtrees)');
+  } else {
+    // ── Implicit octree (subtree files). Subtree roots: every node at level % SUBTREE_LEVELS === 0. ──
+    console.log('Writing subtrees...');
+    let subtreeDone = 0;
+    for (const key of subtreeRootKeys(nodeMap, maxLevel, SUBTREE_LEVELS)) {
+      const { level, x, y, z } = keyToCoords(key);
+      const subtreePath = path.join(outDir, 'subtrees', `${level}`, `${x}`, `${y}`, `${z}.subtree`);
+      await ensureDir(path.dirname(subtreePath));
+      await fs.writeFile(subtreePath, buildSubtreeBuffer(key, nodeMap, SUBTREE_LEVELS));
+      subtreeDone++;
     }
-  };
-  if (transform) tileset.root.transform = transform;
+    console.log(`  ${subtreeDone} subtrees`);
+    tileset = {
+      asset: { version: '1.1' },
+      geometricError: rootError,
+      root: {
+        boundingVolume: { box: [0,0,0, (cube[3]-cube[0])/2,0,0, 0,(cube[4]-cube[1])/2,0, 0,0,(cube[5]-cube[2])/2] },
+        refine: 'ADD',
+        geometricError: rootError,
+        implicitTiling: { subdivisionScheme: 'OCTREE', availableLevels: maxLevel + 1, subtreeLevels: SUBTREE_LEVELS, subtrees: { uri: 'subtrees/{level}/{x}/{y}/{z}.subtree' } },
+        content: { uri: 'tiles/{level}/{x}/{y}/{z}.glb' },
+      },
+    };
+    if (transform) tileset.root.transform = transform;
+  }
 
   await fs.writeFile(path.join(outDir, 'tileset.json'), JSON.stringify(tileset, null, 2));
-  console.log(`\nDone → ${outDir}/tileset.json`);
+  console.log(`\nDone → ${outDir}/tileset.json  (${tiling} tiling)`);
   if (!hasGeoref) console.log('  (no CRS found — local coordinate output)');
 }
 

@@ -5,6 +5,66 @@ Format loosely follows [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+### Added — 2026-06-23d (implicit/explicit tiling option; LCC live streaming; core/tiling)
+- **Implicit ⇄ explicit tiling, both converters.** New `--tiling=implicit|explicit` (CLI) /
+  `opts.tiling` (API) / `&tiling=` (`/convert`). **COPC** gained an **explicit** nested-tree mode (was
+  implicit-only); **Potree** gained an **implicit** subtree mode (was explicit-only). Defaults unchanged
+  (COPC implicit, Potree explicit). Potree implicit derives each node's `(level,x,y,z)` from its box vs
+  the root box and **validates** that the implicit-derived box equals the explicit box before writing
+  (0 mismatches on lion_p2; 116 subtrees, 6 levels).
+- **Factored shared tiling into `3dtiles-convert-core/tiling`**: `keyToCoords`/`coordsToKey`,
+  `octreeChildKeys`, `octreeSubCube`, `cubeToBox`, `buildExplicitTree`, `buildSubtreeBuffer` (moved from
+  copc, BigInt Morton decode — fixes the >level-10 wrap), `subtreeRootKeys`. COPC's `subtreeBuilder.js`
+  is now a thin re-export. Used by both copc + potree converters.
+- **LCC live streaming** (`/lcc` + `/stream`): `meta.lcc` grid (`cellLengthX/Y` + `boundingBox`) +
+  `index.bin` (cell packed x16/y16, per-LOD `{points,offset,size}`) → tileset built **without decoding**;
+  each tile range-reads its `[offset,size)` slice of `data.bin` → SPZ-v2 GLB. Verified (Guan_Temple: 41
+  units, 154 runs).
+
+### Added — 2026-06-23c (true on-the-fly streaming: SOG + Potree 1.x; unified /stream)
+- **Unified `/stream` dispatcher** — one front-door that detects the format and delegates to its range
+  adapter; 501 (→ use `/convert`) for formats without one. Each streamed format is now a uniform
+  `*-live.js` module (COPC extracted out of `server.js`).
+- **streamed-SOG live streaming** (`/sog` + `/stream`): tileset built from `lod-meta.json` (bounds +
+  leaf runs persisted, **no decode**); each tile fetches just that chunk's WebP set, decodes once
+  (LRU-cached), extracts the `[offset,count)` run → SPZ-v2 GLB. Verified (skatepark).
+- **Potree 1.x live streaming**: `potree1.js` refactored to read through an **injectable reader** (fs
+  offline, fetch live) so the same authoritative reader serves both. `/potree` + `/stream` now handle
+  1.x (`.hrc`/inline, `.bin` + per-node `.laz`) and 2.0. Verified live (lion_takanawa `.bin` 167 nodes,
+  lion_takanawa_laz 200 nodes, potree.org 2.0 1624 nodes).
+- **Potree 2.0 true range-streaming** (`/potree`): metadata.json + hierarchy.bin → tree; one HTTP-206
+  range read of octree.bin per tile → POINTS GLB. `potree2.js` factored into pure
+  `preparePotree2Schema`/`parsePotree2Hierarchy`/`decodePotree2Node` (shared offline + live).
+- **Streaming roadmap documented**: a format streams only if it persists per-tile bounds — COPC, Potree
+  2.0/1.x, SOG, LCC do; **RAD doesn't and isn't spatially tiled** → `/convert` only
+  (`docs-references/rad-format-notes.md`, distilled from the SparkJS-team GitHub replies). Added the
+  loaders.gl `@loaders.gl/tile-converter` reference (bidirectional I3S⇄3D Tiles).
+
+### Added — 2026-06-23b (generic `/convert` live middleware; `--centroids-only`)
+- **`/convert` — live any-format → 3D Tiles** (preprocess+cache): converts the whole dataset once on
+  first request (cached on disk by `sha1(format|src)`), then serves static; rewrites the root tileset's
+  relative URIs to absolute `/convert/<key>/…`. Works for every meta-converter format. `<SRC>` may be a
+  **remote URL or local path**; remote directory formats are mirrored with the sibling files each
+  converter needs.
+- **Remote URLs across CLI + JS API + middleware** via shared `packages/convert/fetch-source.js`
+  (`3dtiled https://…/metadata.json out/`, `convert('https://…', out)`); name-based detection
+  (`detectFormatByName`) for remote inputs.
+- **`--centroids-only` / `?centroids=1`**: splat formats (RAD/SOG/LCC) emit a plain glTF **POINTS**
+  tileset of splat centroids (POSITION+COLOR_0, no `KHR_gaussian_splatting`) so point-cloud-only
+  renderers can display tiled-splat scenes. Shared `core.buildSplatTileGlb` + a `swizzle` option on
+  `buildPointsGlb`. Offline pills (RAD/LCC/SOG centroids) + live `&centroids=1`.
+
+### Fixed — 2026-06-23a (dev ergonomics; viewer placement of local point clouds)
+- **`pnpm run dev` now starts the viewer (:3000) AND tile-server (:3001) together** via `concurrently`
+  (`dev:web` + `serve:tiles`; `serve:live` alias added).
+- **Vite no longer crawls** — `server.watch.ignored: ['**/sample-data/**']` (sample-data moved into the
+  repo is ~119k files / 29 GB; watching it stalled startup & HMR). Still served on demand.
+- **Local point clouds now auto-place & zoom in CesiumJS** (centroid / non-georef Potree tilesets
+  previously loaded but never framed — only splats auto-placed). Now any local-origin tileset is placed
+  at the local frame and flown to.
+- **pnpm workspace fix**: `3dtiles-convert` now declares the `<fmt>-to-3dtiles` packages as
+  `workspace:*` deps (it `import()`s them by bare name; npm auto-links all workspaces, pnpm doesn't).
+
 ### Added — 2026-06-22g (live COPC→3D Tiles middleware; I3S geometricError; Potree CRS)
 - **`tile-server` — live COPC → 3D Tiles middleware** (`packages/tile-server`, the "TiTiler for 3D"):
   `GET /copc/tileset.json?url=<COPC>` builds a 3D Tiles tree from the COPC hierarchy (HTTP-range), and

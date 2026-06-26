@@ -508,29 +508,6 @@ const PRESETS = [
     url: 'http://localhost:3000/sample-data/output/rad/tastier500k-3dtiles-from-rad/tileset.json',
     local: false,
   },
-  // Coit opacity A/B variants (--alpha-scale): α×0.5 undoes the lodOpacity doubling,
-  // α×1 is current, α×2 doubles it. Load each to judge which opacity looks right.
-  {
-    id: 'coit-a05',
-    label: '✦ Coit α×0.5',
-    type: 'splat',
-    url: 'http://localhost:3000/sample-data/output/rad/coit-a05-3dtiles-from-rad/tileset.json',
-    local: false,
-  },
-  {
-    id: 'coit-a1',
-    label: '✦ Coit α×1',
-    type: 'splat',
-    url: 'http://localhost:3000/sample-data/output/rad/coit-a1-3dtiles-from-rad/tileset.json',
-    local: false,
-  },
-  {
-    id: 'coit-a2',
-    label: '✦ Coit α×2',
-    type: 'splat',
-    url: 'http://localhost:3000/sample-data/output/rad/coit-a2-3dtiles-from-rad/tileset.json',
-    local: false,
-  },
   // Same-scene comparison: Elevator.ply via two pipelines (our RAD path vs William's PLY converter).
   {
     id: 'elevator-ours',
@@ -630,19 +607,22 @@ const PRESETS = [
   // ── Generic <fmt>→3D Tiles live middleware (/convert): converts on first request (cached), then
   //    serves the static output. `url` may be a remote URL OR a local path the server can read. ──
   ...(() => {
-    const SD = 'C:/Users/jonathan/Downloads/3dtiles-converters/sample-data/input';
+    // Sample data is served by Vite at :3000 (the dataset folder moved into the repo). The middleware
+    // fetches these over HTTP (no local-filesystem dependency), so `url` is an http URL to the INDEX
+    // file of each dataset (metadata.json / lod-meta.json / meta.lcc / the .laz/.rad file).
+    const SD = 'http://localhost:3000/sample-data/input';
     const live = (id, label, type, src, format, extra = '') =>
       ({ id, label, type, local: false,
          url: `http://localhost:3001/convert/tileset.json?url=${encodeURIComponent(src)}` + (format ? `&format=${format}` : '') + extra });
     return [
-      live('conv-potree', '🛰 Potree→3DT (live)', 'pointcloud', `${SD}/POTREE/lion_p2`,      'potree'),
-      live('conv-rad',    '🛰 RAD→3DT (live)',    'splat',      `${SD}/RAD/coit.rad`,         'rad'),
-      live('conv-sog',    '🛰 SOG→3DT (live)',    'splat',      `${SD}/SOG/skatepark`,        'sog'),
-      live('conv-lcc',    '🛰 LCC→3DT (live)',    'splat',      `${SD}/LCC/Guan_Temple`,      'lcc'),
-      live('conv-copc',   '🛰 COPC→3DT (live, convert)', 'pointcloud', `${SD}/COPC/autzen.copc.laz`, 'copc'),
-      // centroids=1 → splats served as a POINTS tileset (centroids) for point-cloud-only renderers
-      live('conv-rad-c',  '🔵 RAD centroids (live)', 'pointcloud', `${SD}/RAD/coit.rad`,    'rad', '&centroids=1'),
-      live('conv-sog-c',  '🔵 SOG centroids (live)', 'pointcloud', `${SD}/SOG/skatepark`,   'sog', '&centroids=1'),
+      live('conv-potree', '🛰 Potree→3DT (live)', 'pointcloud', `${SD}/POTREE/lion_p2/metadata.json`,   'potree'),
+      live('conv-rad',    '🛰 RAD→3DT (live)',    'splat',      `${SD}/RAD/coit.rad`,                   'rad'),
+      live('conv-sog',    '🛰 SOG→3DT (live)',    'splat',      `${SD}/SOG/skatepark/lod-meta.json`,    'sog'),
+      live('conv-lcc',    '🛰 LCC→3DT (live)',    'splat',      `${SD}/LCC/Guan_Temple/meta.lcc`,       'lcc'),
+      live('conv-copc',   '🛰 COPC→3DT (live, convert)', 'pointcloud', `${SD}/COPC/autzen.copc.laz`,    'copc'),
+      // implicit ⇄ explicit tiling (COPC default implicit, Potree default explicit) via &tiling=
+      live('conv-copc-exp', '🧭 COPC explicit (live)',  'pointcloud', `${SD}/COPC/autzen.copc.laz`,        'copc',   '&tiling=explicit'),
+      live('conv-potree-imp','🧭 Potree implicit (live)','pointcloud', `${SD}/POTREE/lion_p2/metadata.json`, 'potree', '&tiling=implicit'),
       // ── TRUE streaming (range-read per tile, nothing pre-converted) via the unified /stream dispatcher ──
       { id: 'stream-potree-local', label: '⚡ Potree (stream, local)', type: 'pointcloud', local: false,
         url: 'http://localhost:3001/stream/tileset.json?url=' + encodeURIComponent('http://localhost:3000/sample-data/input/POTREE/lion_p2/metadata.json') },
@@ -654,6 +634,8 @@ const PRESETS = [
         url: 'http://localhost:3001/stream/tileset.json?format=potree&url=' + encodeURIComponent('http://localhost:3000/sample-data/input/POTREE/lion_takanawa/cloud.js') },
       { id: 'stream-sog', label: '⚡ SOG (stream, local)', type: 'splat', local: false,
         url: 'http://localhost:3001/stream/tileset.json?format=sog&url=' + encodeURIComponent('http://localhost:3000/sample-data/input/SOG/skatepark/lod-meta.json') },
+      { id: 'stream-lcc', label: '⚡ LCC (stream, local)', type: 'splat', local: false,
+        url: 'http://localhost:3001/stream/tileset.json?format=lcc&url=' + encodeURIComponent('http://localhost:3000/sample-data/input/LCC/Guan_Temple/meta.lcc') },
     ];
   })(),
   {
@@ -684,17 +666,6 @@ const PRESETS = [
     url: 'http://localhost:3000/sample-data/output/i3s/Buildings_NewYork_v18/tileset.json',
     local: false,
   },
-  // ── Offline centroid-only splats (3dtiled --centroids-only → POINTS tileset of splat centroids) ──
-  { id: 'cent-rad', label: '🔵 RAD centroids',  type: 'pointcloud', url: 'http://localhost:3000/sample-data/output/centroids/rad-tastier500k/tileset.json', local: false },
-  { id: 'cent-lcc', label: '🔵 LCC centroids',  type: 'pointcloud', url: 'http://localhost:3000/sample-data/output/centroids/lcc-Guan_Temple/tileset.json', local: false },
-  { id: 'cent-sog', label: '🔵 SOG centroids',  type: 'pointcloud', url: 'http://localhost:3000/sample-data/output/centroids/sog-skatepark/tileset.json',  local: false },
-  // ── Meta-converter outputs (3dtiled auto-detect → dispatch; written to output-meta-converter/) ──
-  { id: 'meta-rad',    label: '🔀 RAD (meta)',    type: 'splat',      url: 'http://localhost:3000/sample-data/output-meta-converter/rad-tastier500k/tileset.json', local: false },
-  { id: 'meta-sog',    label: '🔀 SOG (meta)',    type: 'splat',      url: 'http://localhost:3000/sample-data/output-meta-converter/sog-skatepark/tileset.json',   local: false },
-  { id: 'meta-lcc',    label: '🔀 LCC (meta)',    type: 'splat',      url: 'http://localhost:3000/sample-data/output-meta-converter/lcc-Guan_Temple/tileset.json',  local: false },
-  { id: 'meta-copc',   label: '🔀 COPC (meta)',   type: 'pointcloud', url: 'http://localhost:3000/sample-data/output-meta-converter/copc-autzen/tileset.json',     local: false },
-  { id: 'meta-potree', label: '🔀 Potree (meta)', type: 'pointcloud', url: 'http://localhost:3000/sample-data/output-meta-converter/potree-lion_p2/tileset.json',  local: false },
-  { id: 'meta-i3s',    label: '🔀 I3S (meta)',    type: 'mesh',       url: 'http://localhost:3000/sample-data/output-meta-converter/i3s-NYC/tileset.json',          local: false },
   // ── Open data city meshes (3D Tiles 1.0, explicit, REPLACE, b3dm) ──
   {
     id: 'strasbourg',

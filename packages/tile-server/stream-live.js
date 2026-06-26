@@ -17,17 +17,20 @@
 import { copcTileset, copcTile, copcTileRe } from './copc-live.js';
 import { potreeTileset, potreeTile, potreeTileRe } from './potree-live.js';
 import { sogTileset, sogTile, sogTileRe } from './sog-live.js';
+import { lccTileset, lccTile, lccTileRe } from './lcc-live.js';
 import { detectFormatByName } from '../core/index.js';
 
 const CORS = { 'Access-Control-Allow-Origin': '*', 'Access-Control-Allow-Headers': '*' };
 
 // format → range adapter. Add an entry here as each format gains a streaming adapter.
-// Streamable iff the source persists per-tile spatial bounds (octree cube / lod-meta tree). LCC/RAD
-// don't persist tile bounds, so they can't build a tileset without a decode pass → use /convert.
+// Streamable iff the source lets us build the tileset WITHOUT decoding geometry: COPC/Potree (octree
+// boxes), SOG (lod-meta tree), LCC (grid cell boxes from index.bin). RAD persists no tile bounds and
+// isn't spatially tiled → use /convert (see docs-references/rad-format-notes.md).
 const ADAPTERS = {
   copc:   { tileset: copcTileset,   tile: copcTile,   tileRe: copcTileRe },
   potree: { tileset: potreeTileset, tile: potreeTile, tileRe: potreeTileRe },
   sog:    { tileset: sogTileset,    tile: sogTile,    tileRe: sogTileRe },
+  lcc:    { tileset: lccTileset,    tile: lccTile,    tileRe: lccTileRe },
 };
 export const streamableFormats = Object.keys(ADAPTERS);
 

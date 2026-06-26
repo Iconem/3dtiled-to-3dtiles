@@ -1119,7 +1119,7 @@ emitted without decoding any geometry). That's the dividing line:
 | **Potree 2.0** | ✅ octree boxes; node = `octree.bin` byte range | **live `/potree` + `/stream`** ✅ |
 | **Potree 1.x** | ✅ octree boxes (.hrc / inline); node = one `.bin`/`.laz` file fetch | **live `/potree` + `/stream`** ✅ |
 | **streamed-SOG** | ✅ `lod-meta.json` tree carries per-node bounds + leaf `[file,offset,count]` runs | **live `/sog` + `/stream`** ✅ (fetch+decode the chunk WebP per leaf) |
-| **LCC** | 🟡 grid is persisted (`cellLengthX/Y` + per-unit index) → X/Y boxes derivable, Z from scene bounds | feasible — next (needs the unit-id→cell mapping); `/convert` serves it now |
+| **LCC** | ✅ grid persisted (`cellLengthX/Y` + index cell x16/y16) → X/Y boxes, Z from scene bounds; unit LOD = `data.bin` byte range | **live `/lcc` + `/stream`** ✅ |
 | **RAD** | ❌ chunk bounds NOT persisted, and **chunks aren't spatial tiles** (a chunk mixes LoD-tree levels — confirmed by the Spark team, see RAD notes) | **not streamed** — use `/convert` |
 | **I3S (REST)** | 🟡 REST node-page tree; multi-resource | larger effort — `/convert` for `.slpk` |
 
@@ -1173,6 +1173,9 @@ npm run serve:tiles
   every chunk `meta.json` + its WebP textures). Single-file formats (COPC/RAD/SLPK) download the one file.
 - `&format=` is optional — auto-detected from the path/extension (pass it for remote directory
   formats where the index filename isn't decisive, or to override).
+- `&tiling=implicit|explicit` (COPC & Potree) chooses the tree encoding — implicit (subtree files) or
+  an explicit nested tree. CLI: `--tiling=…`; API: `opts.tiling`. Defaults: COPC implicit, Potree
+  explicit. Same flag works for the offline converters.
 - `&centroids=1` (point clouds get this for free) renders **splat** datasets (RAD/SOG/LCC) as a
   POINTS tileset of splat **centroids** — so renderers without `KHR_gaussian_splatting` support can
   still display the scene. See [`--centroids-only`](#centroids-only-splats-as-point-clouds) below.

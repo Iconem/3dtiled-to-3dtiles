@@ -48,6 +48,11 @@ const ctxCache = new Map();
 async function getCtx(url) {
   if (ctxCache.has(url)) return ctxCache.get(url);
   const getter = Getter.http(url);
+  // Cheap guard: every LAS/COPC file starts with "LASF". Without this, pointing /copc at a non-LAS
+  // resource (e.g. a JSON metadata.json / meta.lcc by mistake) makes copc + laz-perf hang and can
+  // abort the whole process. Fail fast with a clear error instead.
+  const magic = Buffer.from(await getter(0, 4)).toString('latin1');
+  if (magic !== 'LASF') throw new Error(`not a LAS/COPC file (got "${magic}" not "LASF") — is this the right URL for /copc?`);
   const copc = await Copc.create(getter);
   const nodeMap = new Map();
   const loadPage = async (ref) => {
