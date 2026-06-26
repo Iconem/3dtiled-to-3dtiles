@@ -85,6 +85,7 @@ export async function loadPotree1(dir, opts = {}) {
   }
   const posA = attrs.find(a => /POSITION/i.test(a.name));
   const colA = attrs.find(a => /RGBA|RGB|COLOR/i.test(a.name));
+  const intA = attrs.find(a => /INTENSITY/i.test(a.name));   // T5: intensity fallback when no colour
 
   // Node file path: flat for inline (1.4); chunked dirs for .hrc (1.7). Forward-slash relative.
   const chunkDirs = (name) => {                            // ["r","00000",…] up to the node's chunk depth
@@ -143,14 +144,16 @@ export async function loadPotree1(dir, opts = {}) {
     const positions = new Float32Array(n * 3);
     const colors = new Float32Array(n * 4);
     const gx = view.getter('X'), gy = view.getter('Y'), gz = view.getter('Z');
-    let gr = null, gg = null, gb = null;
+    let gr = null, gg = null, gb = null, gi = null;
     try { gr = view.getter('Red'); gg = view.getter('Green'); gb = view.getter('Blue'); } catch { /* no colour */ }
+    try { gi = view.getter('Intensity'); } catch { /* no intensity */ }
     // LAS colour is nominally 16-bit; detect 8-bit-in-16 by sampling the max.
     let cmax = 0; if (gr) for (let i = 0; i < Math.min(n, 4096); i++) cmax = Math.max(cmax, gr(i), gg(i), gb(i));
     const cdiv = cmax > 255 ? 65535 : 255;
     for (let i = 0; i < n; i++) {
-      positions[i*3] = gx(i); positions[i*3+1] = gy(i); positions[i*3+2] = gz(i);   // absolute (header scale/offset)
+      positions[i*3] = gx(i); positions[i*3+1] = gy(i); positions[i*3+2] = gz(i);
       if (gr) { colors[i*4]=gr(i)/cdiv; colors[i*4+1]=gg(i)/cdiv; colors[i*4+2]=gb(i)/cdiv; colors[i*4+3]=1; }
+      else if (gi) { const v=gi(i)/65535; colors[i*4]=v; colors[i*4+1]=v; colors[i*4+2]=v; colors[i*4+3]=1; } // T5: intensity fallback
       else    { colors[i*4]=colors[i*4+1]=colors[i*4+2]=colors[i*4+3]=1; }
     }
     return { positions, colors, count: n };
@@ -160,7 +163,7 @@ export async function loadPotree1(dir, opts = {}) {
     let buf; try { buf = await read(nodeFile(node.name)); } catch { return null; }
     const n = Math.floor(buf.length / pointSize);
     const positions = new Float32Array(n * 3);
-    const colors = colA ? new Float32Array(n * 4) : null;
+    const colors = (colA || intA) ? new Float32Array(n * 4) : null;
     // Potree 1.x POSITION_CARTESIAN is NODE-RELATIVE: world = raw·scale + THIS NODE's box.min.
     // (Raw values span 0..nodeWidth, so the global cloud min would pile every node at the corner;
     // the node's box.min — from the correct octant subdivision in childBox — places it right.
@@ -171,7 +174,8 @@ export async function loadPotree1(dir, opts = {}) {
       positions[i*3]   = buf.readUInt32LE(b + posA.offset)     * scale[0] + nmin[0];
       positions[i*3+1] = buf.readUInt32LE(b + posA.offset + 4) * scale[1] + nmin[1];
       positions[i*3+2] = buf.readUInt32LE(b + posA.offset + 8) * scale[2] + nmin[2];
-      if (colors) { const c=b+colA.offset; colors[i*4]=buf[c]/255; colors[i*4+1]=buf[c+1]/255; colors[i*4+2]=buf[c+2]/255; colors[i*4+3]=1; }
+      if (colA && colors) { const c=b+colA.offset; colors[i*4]=buf[c]/255; colors[i*4+1]=buf[c+1]/255; colors[i*4+2]=buf[c+2]/255; colors[i*4+3]=1; }
+      else if (intA && colors) { const v=buf.readUInt16LE(b+intA.offset)/65535; colors[i*4]=v; colors[i*4+1]=v; colors[i*4+2]=v; colors[i*4+3]=1; } // T5
     }
     return { positions, colors, count: n };
   }

@@ -161,6 +161,10 @@ export async function convert(input, outDir, opts = {}) {
     }
   }
 
+  // SOG (PlayCanvas Y-up) → 3D Tiles (Z-up): RX(−90°) root transform (col-major).
+  // col0=X→X, col1=Y→−Z, col2=Z→Y. Bounding volumes already use boundToZUpBox.
+  root.tile.transform = [1,0,0,0, 0,0,-1,0, 0,1,0,0, 0,0,0,1];
+
   const tileset = {
     asset: { version: '1.1' },
     geometricError: root.tile.geometricError,

@@ -1,6 +1,8 @@
 import { defineConfig } from 'vite';
 import cesium from 'vite-plugin-cesium';
 import path from 'node:path';
+import { createReadStream } from 'node:fs';
+import { stat } from 'node:fs/promises';
 
 // Self-contained, offline-capable viewer dev/build. `vite-plugin-cesium` copies Cesium's
 // Workers/Assets/ThirdParty/Widgets and sets CESIUM_BASE_URL; three / 3d-tiles-renderer /
@@ -8,7 +10,28 @@ import path from 'node:path';
 //   npm run dev      → http://localhost:3000/viewer.html  (serves sample-data/ too)
 //   npm run build    → static bundle in dist/
 export default defineConfig({
-  plugins: [cesium()],
+  plugins: [
+    cesium(),
+    // T1: serve sample-data/**/*.js files raw (no Vite module transform / HMR footer).
+    // Potree 1.x stores its tree descriptor as cloud.js — pure JSON with a .js extension.
+    // Vite would append an HMR/sourcemap footer, corrupting JSON.parse on the tile-server side.
+    {
+      name: 'raw-sample-data-js',
+      configureServer(server) {
+        server.middlewares.use(async (req, res, next) => {
+          const url = req.url || '';
+          if (!url.includes('/sample-data/') || !/\.js(\?|$)/.test(url)) return next();
+          const filePath = path.resolve('.' + decodeURIComponent(url.split('?')[0]));
+          if (!filePath.startsWith(path.resolve('.'))) return next();
+          try { await stat(filePath); }
+          catch { return next(); }
+          res.setHeader('Content-Type', 'application/json');
+          res.setHeader('Access-Control-Allow-Origin', '*');
+          createReadStream(filePath).pipe(res);
+        });
+      },
+    },
+  ],
   server: {
     port: 3000,
     // Serve the whole repo (viewer.html + sample-data/output/** that the presets reference).

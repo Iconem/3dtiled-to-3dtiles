@@ -73,8 +73,7 @@
   #url-bar {
     display: flex;
     gap: 6px;
-    flex: 1;
-    min-width: 260px;
+    flex-basis: 100%;   /* T4: force own line below the pill rows */
   }
 
   #url-bar input {
@@ -509,37 +508,63 @@
 //   stream  → http://localhost:3001/stream/tileset.json?format=<fmt>&url=<src>[&tiling=]
 //   offline → http://localhost:3000/sample-data/<out>/tileset.json   (pre-converted, static)
 //   convert → http://localhost:3001/convert/tileset.json?format=<fmt>&url=<src>[&tiling=]
+//   tools   → http://localhost:3001/3dtiles-tools/tileset.json?tool=<t>&url=<remoteUrl>
+//             Streaming semantics like /stream: tileset JSON cached once, tiles converted on-demand.
 // `octree` formats (COPC/Potree) also honor the implicit/explicit toggle. RAD/I3S have no stream adapter.
 const MW = 'http://localhost:3001';                        // middleware
 const SDATA = 'http://localhost:3000/sample-data';         // Vite-served sample data
-let viewerMode = 'stream';                                 // 'stream' | 'offline' | 'convert'
+let viewerMode = 'stream';                                 // 'stream' | 'offline' | 'convert' | 'tools'
 let tilingMode = 'implicit';                               // 'implicit' | 'explicit' (octree only)
 let selectedFormat = 'copc';                               // which FORMAT's assets are shown
+let toolName = 'implicit-to-explicit';                     // 'implicit-to-explicit' | 'upgrade'
+
+// Tools mode: open 3D Tiles datasets processed on-the-fly by /3dtiles-tools.
+// These are NOT source formats — they are already 3D Tiles, needing a server-side tool applied.
+const TOOLS_DATASETS = {
+  'implicit-to-explicit': [
+    { id: 'utrecht',        label: 'Utrecht 3D (QT+b3dm→glb)', type: 'mesh',
+      url: 'https://bertt.github.io/cesium_3dtiles_samples/samples/utrecht3d/tileset.json' },
+    { id: 'delaware',       label: 'Delaware 1.1 (QT+glb+metadata)', type: 'mesh',
+      url: 'https://bertt.github.io/cesium_3dtiles_samples/samples/1.1/delaware/tileset.json' },
+    { id: 'grenoble-trees', label: 'Grenoble Trees 1.1 (instanced glb)', type: 'mesh',
+      url: 'https://bertt.github.io/cesium_3dtiles_samples/samples/1.1/grenoble_trees/tileset.json' },
+  ],
+  'upgrade': [
+    { id: 'lille-pyramid', label: 'Lille Pyramid (b3dm→glb)', type: 'mesh',
+      url: 'https://webimaging.lillemetropole.fr/externe/maillage/2016_mel_10cm/3dtiles/pyramid/tileset.json' },
+  ],
+};
 
 const FORMATS = [
   { fmt: 'copc', icon: '☁', label: 'COPC', type: 'pointcloud', octree: true, stream: true, assets: [
-      { id: 'autzen', label: 'Autzen', src: 'input/COPC/autzen.copc.laz', out: 'output/copc/autzen-3dtiles-from-copc' },
-      { id: 'eiffel', label: 'Eiffel', src: 'input/COPC/eiffel.copc.laz', out: 'output/copc/eiffel-3dtiles-from-copc' },
-      { id: 'texas',  label: 'Texas',  src: 'input/COPC/texas.copc.laz',  out: 'output/copc/texas-3dtiles-from-copc' },
+      { id: 'autzen', label: 'Autzen',  src: 'input/COPC/autzen.copc.laz', out: 'output/copc/autzen-3dtiles-from-copc' },
+      { id: 'eiffel', label: 'Eiffel',  src: 'input/COPC/eiffel.copc.laz', out: 'output/copc/eiffel-3dtiles-from-copc' },
+      { id: 'texas',  label: 'Texas',   src: 'input/COPC/texas.copc.laz',  out: 'output/copc/texas-3dtiles-from-copc'  },
   ]},
   { fmt: 'potree', icon: '🌲', label: 'Potree', type: 'pointcloud', octree: true, stream: true, assets: [
-      { id: 'lion2',    label: 'Lion 2.0',         src: 'input/POTREE/lion_p2/metadata.json',       out: 'output/potree/lion_p2' },
-      { id: 'takanawa', label: 'Lion Takanawa 1.x', src: 'input/POTREE/lion_takanawa/cloud.js',      out: 'output/potree/lion_takanawa' },
-      { id: 'takalaz',  label: 'Lion Takanawa LAZ', src: 'input/POTREE/lion_takanawa_laz/cloud.js',  out: 'output/potree/lion_takanawa_laz' },
+      { id: 'lion2',    label: 'Lion 2.0',          src: 'input/POTREE/lion_p2/metadata.json',       out: 'output/potree/lion_p2'          },
+      { id: 'takanawa', label: 'Lion Takanawa 1.x',  src: 'input/POTREE/lion_takanawa/cloud.js',      out: 'output/potree/lion_takanawa'    },
+      { id: 'takalaz',  label: 'Lion Takanawa LAZ',  src: 'input/POTREE/lion_takanawa_laz/cloud.js',  out: 'output/potree/lion_takanawa_laz'},
+      { id: 'voltotal', label: 'Vol Total',           src: 'input/POTREE/vol_total/cloud.js',          out: 'output/potree/vol_total'        },
   ]},
   { fmt: 'sog', icon: '⬢', label: 'SOG', type: 'splat', octree: false, stream: true, assets: [
-      { id: 'skatepark', label: 'Skatepark',    src: 'input/SOG/skatepark/lod-meta.json',    out: 'output/sog/skatepark-3dtiles-from-sog' },
+      { id: 'skatepark', label: 'Skatepark',    src: 'input/SOG/skatepark/lod-meta.json',    out: 'output/sog/skatepark-3dtiles-from-sog'    },
       { id: 'roman',     label: 'Roman Parish', src: 'input/SOG/roman-parish/lod-meta.json', out: 'output/sog/roman-parish-3dtiles-from-sog' },
   ]},
   { fmt: 'lcc', icon: '◆', label: 'LCC', type: 'splat', octree: false, stream: true, assets: [
-      { id: 'guan', label: 'Guan Temple', src: 'input/LCC/Guan_Temple/meta.lcc', out: 'output/lcc/Guan_Temple-3dtiles-from-lcc' },
+      { id: 'guan',      label: 'Guan Temple',      src: 'input/LCC/Guan_Temple/meta.lcc',                 out: 'output/lcc/Guan_Temple-3dtiles-from-lcc'             },
+      { id: 'guanlan',   label: 'Guanlan Town',      src: 'input/LCC/Guanlan Ancient Town/meta.lcc',        out: 'output/lcc/Guanlan_Ancient_Town-3dtiles-from-lcc'    },
+      { id: 'religious', label: 'Religious Center',  src: 'input/LCC/religious_center_L2_P/meta.lcc',       out: 'output/lcc/religious_center_L2_P-3dtiles-from-lcc'   },
   ]},
   { fmt: 'rad', icon: '✦', label: 'RAD', type: 'splat', octree: false, stream: false, assets: [
-      { id: 'coit',    label: 'Coit',       src: 'input/RAD/coit.rad',        out: 'output/rad/coit-3dtiles-from-rad' },
-      { id: 'tastier', label: 'Tastier',    src: 'input/RAD/tastier500k.rad', out: 'output/rad/tastier500k-3dtiles-from-rad' },
+      { id: 'coit',      label: 'Coit',       src: 'input/RAD/coit.rad',             out: 'output/rad/coit-3dtiles-from-rad'        },
+      { id: 'tastier',   label: 'Tastier',    src: 'input/RAD/tastier500k.rad',      out: 'output/rad/tastier500k-3dtiles-from-rad' },
+      { id: 'elevator',  label: 'Elevator',   src: 'input/PLY/Elevator-lod.rad',     out: 'output/rad/Elevator-3dtiles-from-rad'    },
+      { id: 'svir',      label: 'Svirnas',    src: 'input/PLY/SvirnasAlyt-lod.rad',  out: 'output/rad/SvirnasAlyt-3dtiles-from-rad' },
   ]},
   { fmt: 'i3s', icon: '🧱', label: 'I3S', type: 'mesh', octree: false, stream: false, assets: [
-      { id: 'nyc', label: 'NYC Buildings', src: 'input/I3S-SLPK/Buildings_NewYork_v18.slpk', out: 'output/i3s/Buildings_NewYork_v18' },
+      { id: 'nyc',    label: 'NYC Buildings', src: 'input/I3S-SLPK/Buildings_NewYork_v18.slpk', out: 'output/i3s/Buildings_NewYork_v18' },
+      { id: 'autzen-i3s', label: 'Autzen LAS (LEPCC—unsupported)', src: 'input/I3S-SLPK/SMALL_AUTZEN_LAS_All.slpk', out: 'output/i3s/SMALL_AUTZEN_LAS_All' },
   ]},
 ];
 
@@ -555,7 +580,13 @@ const DIRECT = [
 // Resolve an asset's tileset URL for the current mode (null = not available in this mode).
 function assetUrl(f, a) {
   const tq = f.octree ? `&tiling=${tilingMode}` : '';
-  if (viewerMode === 'offline') return `${SDATA}/${a.out}/tileset.json`;
+  if (viewerMode === 'offline') {
+    if (f.octree && tilingMode === 'explicit') {
+      const dir = encodeURIComponent(`sample-data/${a.out}`);
+      return `${MW}/3dtiles-tools/tileset.json?tool=implicit-to-explicit&dir=${dir}`;
+    }
+    return `${SDATA}/${a.out}/tileset.json`;
+  }
   const src = encodeURIComponent(`${SDATA}/${a.src}`);
   if (viewerMode === 'stream')  return f.stream ? `${MW}/stream/tileset.json?format=${f.fmt}&url=${src}${tq}` : null;
   if (viewerMode === 'convert') return `${MW}/convert/tileset.json?format=${f.fmt}&url=${src}${tq}`;
@@ -566,6 +597,12 @@ const fmtMeta = fmt => FORMATS.find(f => f.fmt === fmt);
 
 // Renderable asset pills for the SELECTED format only (3dtiles → the direct datasets).
 function currentPresets() {
+  if (viewerMode === 'tools') {
+    return (TOOLS_DATASETS[toolName] || []).map(a => ({
+      id: `tool-${toolName}-${a.id}`, label: a.label, type: a.type,
+      url: `${MW}/3dtiles-tools/tileset.json?tool=${encodeURIComponent(toolName)}&url=${encodeURIComponent(a.url)}`,
+    }));
+  }
   if (selectedFormat === '3dtiles') return DIRECT.map(d => ({ id: d.id, label: `${d.icon} ${d.label}`, type: d.type, url: d.url }));
   const f = fmtMeta(selectedFormat);
   if (!f) return [];
@@ -616,6 +653,7 @@ let viewer = null;
 let currentTileset = null;
 let currentPresetId = null;
 let currentType = 'pointcloud';
+let _loadGen = 0;   // incremented on every load; stale async completions compare and bail
 
 /* ──────────────────────────────────────────────
    INIT
@@ -673,9 +711,15 @@ async function initCesium() {
 /* ──────────────────────────────────────────────
    PRESET BAR
    ────────────────────────────────────────────── */
-function setMode(m)   { viewerMode = m; rebuildAndReselect(); }
+function setMode(m) {
+  viewerMode = m;
+  // When entering tools mode, pick first available asset for the current tool
+  if (m === 'tools') { buildPresetBar(); const first = currentPresets()[0]; if (first) selectPreset(first); }
+  else rebuildAndReselect();
+}
+function setTool(t) { toolName = t; buildPresetBar(); const first = currentPresets()[0]; if (first) selectPreset(first); }
 function setTiling(t) { tilingMode = t; rebuildAndReselect(); }
-function setFormat(fmt) {                                   // pick a format → show its assets, load the first available
+function setFormat(fmt) {
   selectedFormat = fmt; buildPresetBar();
   const first = currentPresets().find(p => p.url);
   if (first) selectPreset(first);
@@ -683,7 +727,7 @@ function setFormat(fmt) {                                   // pick a format →
 function rebuildAndReselect() {
   const id = currentPresetId;
   buildPresetBar();
-  if (id) { const p = currentPresets().find(x => x.id === id); if (p && p.url) selectPreset(p); }  // reload same asset
+  if (id) { const p = currentPresets().find(x => x.id === id); if (p && p.url) selectPreset(p); }
 }
 
 function buildPresetBar() {
@@ -699,10 +743,18 @@ function buildPresetBar() {
     }
     bar.appendChild(Object.assign(document.createElement('span'), { className: 'preset-sep' }));
   };
-  // 1) MODE  2) FORMAT  3) tiling (octree formats only)  4) asset pills
-  seg('mode', [['stream', '⚡ Stream'], ['offline', '💾 Offline'], ['convert', '🛠 Convert']], viewerMode, setMode, 'serving mode');
-  seg('fmt', [...FORMATS.map(f => [f.fmt, `${f.icon} ${f.label}`]), ['3dtiles', '◈ 3D Tiles']], selectedFormat, setFormat, 'source format');
-  if (fmtMeta(selectedFormat)?.octree) seg('tiling', [['implicit', '⬡ implicit'], ['explicit', '⬢ explicit']], tilingMode, setTiling, 'octree tiling');
+
+  // 1) MODE
+  seg('mode', [['stream', '⚡ Stream'], ['offline', '💾 Offline'], ['convert', '🛠 Convert'], ['tools', '⚙ Tools']], viewerMode, setMode, 'serving mode');
+
+  if (viewerMode === 'tools') {
+    // 2) TOOL NAME  3) asset pills (tool-specific open datasets)
+    seg('tiling', [['implicit-to-explicit', '⬡→⬢ i→e'], ['upgrade', '⬆ upgrade']], toolName, setTool, '3dtiles-tools operation');
+  } else {
+    // 2) FORMAT  3) tiling toggle (octree only)  4) asset pills
+    seg('fmt', [...FORMATS.map(f => [f.fmt, `${f.icon} ${f.label}`]), ['3dtiles', '◈ 3D Tiles']], selectedFormat, setFormat, 'source format');
+    if (fmtMeta(selectedFormat)?.octree) seg('tiling', [['implicit', '⬡ implicit'], ['explicit', '⬢ explicit']], tilingMode, setTiling, 'octree tiling');
+  }
 
   currentPresets().forEach(p => {
     const btn = document.createElement('button');
@@ -747,6 +799,9 @@ async function loadTileset() {
   const url = document.getElementById('tileset-url').value.trim();
   if (!url) return;
 
+  // Bump generation so any in-flight load from a previous click becomes stale.
+  const gen = ++_loadGen;
+
   // Clear existing
   if (currentTileset) {
     viewer.scene.primitives.remove(currentTileset);
@@ -769,6 +824,7 @@ async function loadTileset() {
 
   try {
     const tileset = await Cesium.Cesium3DTileset.fromUrl(url, opts);
+    if (gen !== _loadGen) { viewer.scene.primitives.remove(tileset); return; }  // stale: user already picked something else
     viewer.scene.primitives.add(tileset);
     currentTileset = tileset;
     if (_cesiumDebug) { tileset.debugShowBoundingVolume = true; tileset.debugColorizeTiles = true; }
@@ -1138,7 +1194,9 @@ function toggle3DT() {
 }
 
 // Cesium is imported by a `<script type="module">` (deferred), so it may not be on `window`
-// yet when this synchronous script finishes. Run initCesium once the import has resolved.
+// Build the preset bar immediately so it renders even without Cesium (artifact viewer / no WebGL).
+buildPresetBar();
+// Run initCesium once the Cesium import has resolved.
 if (window.Cesium) initCesium();
 else window.addEventListener('cesium-ready', () => initCesium(), { once: true });
 </script>
@@ -1155,6 +1213,12 @@ import {
   GeneratedSurfacePlugin, XYZTilesOverlay, ReorientationPlugin, DebugTilesPlugin,
 } from '3d-tiles-renderer/plugins';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
+import { DRACOLoader } from 'three/addons/loaders/DRACOLoader.js';
+
+// Shared DRACOLoader — reused across all TilesRenderer instances (decoder path = CDN).
+const _dracoLoader = new DRACOLoader();
+_dracoLoader.setDecoderPath('https://www.gstatic.com/draco/versioned/decoders/1.5.6/');
 
 // SparkJS + the 3DGS plugin share the importmap's single `three` instance (esm.sh
 // ?external=three), so SparkJS's getShaders() registers THREE.ShaderChunk.splatDefines
@@ -1416,6 +1480,10 @@ function _makeTiles(url, isSplat, fetchOptions) {
   t.parseQueue.maxJobs = 6;
   if (fetchOptions) t.fetchOptions = fetchOptions;
   t.registerPlugin(new ImplicitTilingPlugin());
+  // Register a GLTFLoader with Draco support so Draco-compressed tiles (e.g. Utrecht) load correctly.
+  const _gltfLoader = new GLTFLoader(t.manager);
+  _gltfLoader.setDRACOLoader(_dracoLoader);
+  t.manager.addHandler(/\.glb$|\.gltf$/i, _gltfLoader);
   if (isSplat && GaussianSplatPlugin)
     t.registerPlugin(new GaussianSplatPlugin({
       renderer, scene, minRaycastOpacity: 0.1,

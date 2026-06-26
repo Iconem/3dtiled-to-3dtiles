@@ -551,6 +551,27 @@ DEFAULT + BROTLI via Node's `zlib`). Points are emitted relative to the dataset 
 > geo-referenced** (local origin; add a root transform downstream). Samples in
 > `sample-data/input/POTREE/`. Reference: [yeyan00/potree23dtiles](https://github.com/yeyan00/potree23dtiles) + Potree `DecoderWorker_brotli.js`.
 
+**Implicit vs explicit tiling — available on all four surfaces:**
+
+| Surface | Default | Option |
+|---------|---------|--------|
+| Dedicated CLI (`node src/index.js … --tiling=explicit`) | implicit | `--tiling=explicit` |
+| Meta CLI (`node packages/convert/cli.js … --tiling=explicit`) | implicit | `--tiling=explicit` |
+| `/convert` middleware | implicit | `&tiling=explicit` |
+| `/stream` middleware | implicit | `&tiling=explicit` |
+
+Both COPC and Potree are octree hierarchies, so **implicit** is the natural default (smaller
+tileset JSON, subtrees served on demand). Pass `explicit` only when the client doesn't support
+3D Tiles 1.1 implicit tiling (e.g. legacy CesiumJS < 1.96 or simple tile fetchers).
+
+**Octree key convention:**
+The implicit `level-x-y-z` tile coordinates are derived from each node's **bounding-box
+position** relative to the root box — not from the node-name bit-decomposition. Potree's
+own naming uses bit0→Z, bit1→Y, bit2→X (opposite of the 3D Tiles OCTREE convention of
+bit0→X, bit1→Y, bit2→Z). Using the box position is convention-agnostic and self-validating
+(verified: 0 box mismatches on all tested datasets). The same `coordsOfBox()` derivation is
+used in both the offline converters and the live stream adapters.
+
 ---
 
 ## Sample Data
@@ -1089,13 +1110,15 @@ re-encoded or re-sorted. Like TiTiler for COG: zero re-tiling, zero copy.
 
 | Mode | Endpoint | What it does | Formats |
 |---|---|---|---|
-| **Stream** (true online) | **`/stream`** (+ `/copc`, `/potree`) | Range-read the hierarchy → tileset; **one byte range per tile** → GLB. Nothing pre-converted or fully downloaded. | per-format range adapters: **copc, potree** (lcc/rad next) |
+| **Stream** (true online) | **`/stream`** (+ `/copc`, `/potree`) | Range-read the hierarchy → tileset; **one byte range per tile** → GLB. Nothing pre-converted or fully downloaded. | per-format range adapters: **copc, potree, sog, lcc** |
 | **Preprocess** (cached) | **`/convert`** | Convert the **whole** dataset once on first hit (cached on disk), then serve static. | **every** format the meta-converter supports |
+| **Package serve** | **`/3dtiles-self-contained`** | Serve `.3tz` (ZIP) or `.3dtiles` (SQLite) packages in-place with random access. Supports local paths and remote URLs. | `.3tz` local only; `.3dtiles` local + remote via sql.js (pure WASM) |
 
 ```sh
 npm run serve:tiles            # alias: npm run serve:live  → http://localhost:3001
-#   GET /stream/tileset.json?url=<SRC>[&format=copc|potree]    ← unified streaming dispatcher
-#   GET /convert/tileset.json?url=<SRC>[&format=<fmt>][&centroids=1]   ← preprocess+cache, any format
+#   GET /stream/tileset.json?url=<SRC>[&format=copc|potree|sog|lcc]  ← unified streaming dispatcher
+#   GET /convert/tileset.json?url=<SRC>[&format=<fmt>][&centroids=1] ← preprocess+cache, any format
+#   GET /package/tileset.json?url=<local/path.3tz>                   ← serve .3tz/.3dtiles in-place
 ```
 
 `/stream` is the single front-door the user envisioned: it detects the format and delegates to that
@@ -1258,6 +1281,33 @@ GET /convert/tileset.json?url=<SRC>&centroids=1    # cached separately from the 
 
 Point-cloud inputs (COPC/Potree) are already POINTS, so the flag is a no-op for them. The output is a
 standard POINTS tileset with **no** `KHR_gaussian_splatting` extension advertised.
+
+### `/package` — serve `.3tz` / `.3dtiles` packages in-place ✅
+
+```sh
+# Open a .3tz package directly in any 3D Tiles viewer without extracting it:
+GET http://localhost:3001/package/tileset.json?url=/abs/path/to/scene.3tz
+GET http://localhost:3001/package/tiles/0/0/0.glb?url=/abs/path/to/scene.3tz
+```
+
+`.3tz` is a ZIP file with a `@3dtilesIndex1@` binary index that maps every tile path to its offset
+in the ZIP, enabling O(1) random-access reads (no full-file scan). This project parses the index on
+first open, then serves each tile with a single `fs.read()` at the stored offset — equivalent to
+`npx 3d-tiles-tools serve` but in-process, with CORS open and no additional CLI.
+
+`.3dtiles` is an SQLite database (`key TEXT, content BLOB`). Requires `better-sqlite3`:
+```sh
+pnpm add -w better-sqlite3   # needs C++ build toolchain
+```
+
+**Create packages** with `3d-tiles-tools`:
+```sh
+npx 3d-tiles-tools packageCreate -i tileset/ -o scene.3tz        # ZIP
+npx 3d-tiles-tools packageCreate -i tileset/ -o scene.3dtiles    # SQLite
+```
+
+Spec reference: Maxar `MAXAR_content_3tz`, [CesiumGS/3d-tiles-tools#86](https://github.com/CesiumGS/3d-tiles-tools/pull/86).
+Local notes: [`docs-references/3tz-3dtiles-packages.md`](docs-references/3tz-3dtiles-packages.md).
 
 ### 3D Tiles → 3D Tiles transcodes
 

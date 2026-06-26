@@ -94,8 +94,13 @@ function buildTileset(ctx, urlParam) {
     return { tile: child };
   }
   const rootDiagGE = rootDiag * ROOT_GE_FACTOR;
+  // SOG (PlayCanvas Y-up) needs RX(−90°) root transform so the scene appears upright in Cesium.
+  // RX(+90°) was upside-down. Column-major: col0=X→X, col1=Y→−Z, col2=Z→Y; identity for w.
+  const RX90 = [1,0,0,0, 0,0,-1,0, 0,1,0,0, 0,0,0,1];
+  const root = build(ctx.lod.tree, 0).tile;
+  root.transform = RX90;
   return {
-    asset: { version: '1.1' }, geometricError: rootDiagGE, root: build(ctx.lod.tree, 0).tile,
+    asset: { version: '1.1' }, geometricError: rootDiagGE, root,
     extensionsUsed: ['3DTILES_content_gltf'],
     extensions: { '3DTILES_content_gltf': {
       extensionsUsed: ['KHR_gaussian_splatting', 'KHR_gaussian_splatting_compression_spz_2'],

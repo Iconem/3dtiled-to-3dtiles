@@ -1,0 +1,13 @@
+{
+  "name": "implicit-to-explicit",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "bin": {
+    "implicit-to-explicit": "index.js"
+  },
+  "main": "index.js",
+  "dependencies": {
+    "3dtiles-convert-core": "workspace:*"
+  }
+}

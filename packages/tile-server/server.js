@@ -22,6 +22,8 @@ import { handleSog } from './sog-live.js';
 import { handleLcc } from './lcc-live.js';
 import { handleStream } from './stream-live.js';
 import { handleConvert } from './convert-live.js';
+import { handleSelfContained } from './3dtiles-self-contained.js';
+import { handle3dtilesTools } from './3dtiles-tools-live.js';
 
 const PORT = Number(process.env.PORT) || 3001;
 const CORS = { 'Access-Control-Allow-Origin': '*', 'Access-Control-Allow-Headers': '*' };
@@ -45,7 +47,9 @@ http.createServer(async (req, res) => {
     if (await handleSog(req, res, u)) return;        // streamed-SOG → 3D Tiles live (chunk-on-demand)
     if (await handleLcc(req, res, u)) return;        // LCC → 3D Tiles live (grid boxes + range-read runs)
     if (await handleConvert(req, res, u)) return;    // any <fmt> → 3D Tiles live (preprocess + cache)
-    res.writeHead(404, CORS); res.end('not found — try /stream, /copc, /potree, /sog, /lcc, or /convert');
+    if (await handleSelfContained(req, res, u)) return;   // .3tz / .3dtiles self-contained packages
+    if (await handle3dtilesTools(req, res, u)) return;    // /3dtiles-tools?tool=implicit-to-explicit|upgrade
+    res.writeHead(404, CORS); res.end('not found — try /stream, /copc, /potree, /sog, /lcc, /convert, /3dtiles-self-contained, or /3dtiles-tools');
   } catch (e) {
     console.error('[tile-server]', e.stack || e.message);
     // A handler may have already started streaming a response — don't double-send headers (that throw
@@ -59,4 +63,6 @@ http.createServer(async (req, res) => {
   console.log(`  copc     /copc/tileset.json?url=<COPC_URL>`);
   console.log(`  potree   /potree/tileset.json?url=<metadata.json URL>`);
   console.log(`  convert  (preprocess+cache, any fmt) /convert/tileset.json?url=<SRC>[&format=<fmt>][&centroids=1]`);
+  console.log(`  3dtiles-self-contained  /3dtiles-self-contained/tileset.json?url=<path-or-URL.3tz|.3dtiles>`);
+  console.log(`  3dtiles-tools  /3dtiles-tools/tileset.json?tool=implicit-to-explicit|upgrade&dir=<path>[&base=<url>]`);
 });

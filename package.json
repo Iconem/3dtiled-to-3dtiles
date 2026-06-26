@@ -2,7 +2,9 @@
   "name": "3dtiled-to-3dtiles",
   "version": "0.1.0",
   "private": true,
-  "workspaces": ["packages/*"],
+  "workspaces": [
+    "packages/*"
+  ],
   "scripts": {
     "convert": "node packages/convert/cli.js",
     "dev": "concurrently -n web,tiles -c cyan,magenta \"npm:dev:web\" \"npm:serve:tiles\"",
@@ -13,11 +15,12 @@
     "serve:live": "node packages/tile-server/server.js"
   },
   "dependencies": {
-    "cesium": "1.142.0",
-    "three": "0.180.0",
     "3d-tiles-renderer": "0.4.28",
+    "3d-tiles-rendererjs-3dgs-plugin": "0.1.13",
     "@sparkjsdev/spark": "2.1.0",
-    "3d-tiles-rendererjs-3dgs-plugin": "0.1.13"
+    "cesium": "1.142.0",
+    "sql.js": "^1.14.1",
+    "three": "0.180.0"
   },
   "devDependencies": {
     "concurrently": "^9.1.0",

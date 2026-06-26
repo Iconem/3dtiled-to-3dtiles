@@ -136,6 +136,11 @@ async function serveTileGlb(ctx, key) {
     const gr = view.getter('Red'), gg = view.getter('Green'), gb = view.getter('Blue'), s = d.Red.size === 2 ? 1/65535 : 1/255;
     colors = new Float32Array(n * 4);
     for (let i = 0; i < n; i++) { colors[i*4]=gr(i)*s; colors[i*4+1]=gg(i)*s; colors[i*4+2]=gb(i)*s; colors[i*4+3]=1; }
+  } else if (d.Intensity) {
+    // T5: no RGB — use Intensity as greyscale so the point cloud isn't a featureless white blob.
+    const gi = view.getter('Intensity'), s = d.Intensity.size === 2 ? 1/65535 : 1/255;
+    colors = new Float32Array(n * 4);
+    for (let i = 0; i < n; i++) { const v = gi(i)*s; colors[i*4]=v; colors[i*4+1]=v; colors[i*4+2]=v; colors[i*4+3]=1; }
   }
   return Buffer.from(await buildPointsGlb(pos, colors, n));   // core applies the (E,U,−N) Y-up swizzle
 }

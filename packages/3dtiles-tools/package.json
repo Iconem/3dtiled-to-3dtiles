@@ -1,0 +1,11 @@
+{
+  "name": "3dtiles-tools",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "main": "index.js",
+  "dependencies": {
+    "3dtiles-convert-core": "workspace:*",
+    "implicit-to-explicit": "workspace:*"
+  }
+}

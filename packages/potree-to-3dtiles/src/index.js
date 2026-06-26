@@ -42,8 +42,10 @@ export async function convert(inDir, outDir, opts = {}) {
   if (!inDir || !outDir) throw new Error('Usage: potree-to-3dtiles <potree-dir> <outDir>');
   const t0 = Date.now();
   const has = async f => !!(await fs.stat(path.join(inDir, f)).catch(() => null));
-  const src = (await has('metadata.json')) ? await loadPotree2(inDir)
-            : (await has('cloud.js'))      ? await loadPotree1(inDir)
+  // Prefer cloud.js (Potree 1.x) over metadata.json: the mirrored .src dir may contain stale
+  // Potree 2.0 files from a previous run with a colliding cache key.
+  const src = (await has('cloud.js'))      ? await loadPotree1(inDir)
+            : (await has('metadata.json')) ? await loadPotree2(inDir)
             : null;
   if (!src) throw new Error('No metadata.json (Potree 2.0) or cloud.js (Potree 1.x) found in ' + inDir);
 

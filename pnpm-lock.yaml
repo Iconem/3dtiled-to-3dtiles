@@ -20,6 +20,9 @@ importers:
       cesium:
         specifier: 1.142.0
         version: 1.142.0
+      sql.js:
+        specifier: ^1.14.1
+        version: 1.14.1
       three:
         specifier: 0.180.0
         version: 0.180.0
@@ -33,6 +36,15 @@ importers:
       vite-plugin-cesium:
         specifier: ^1.2.23
         version: 1.2.23(cesium@1.142.0)(rollup@4.62.2)(vite@6.4.3)
+
+  packages/3dtiles-tools:
+    dependencies:
+      3dtiles-convert-core:
+        specifier: workspace:*
+        version: link:../core
+      implicit-to-explicit:
+        specifier: workspace:*
+        version: link:../implicit-to-explicit
 
   packages/convert:
     dependencies:
@@ -78,6 +90,12 @@ importers:
 
   packages/i3s-to-3dtiles: {}
 
+  packages/implicit-to-explicit:
+    dependencies:
+      3dtiles-convert-core:
+        specifier: workspace:*
+        version: link:../core
+
   packages/lcc-to-3dtiles: {}
 
   packages/potree-to-3dtiles:
@@ -109,9 +127,15 @@ importers:
       3dtiles-convert-core:
         specifier: workspace:*
         version: link:../core
+      3dtiles-tools:
+        specifier: workspace:*
+        version: link:../3dtiles-tools
       copc:
         specifier: ^0.0.8
         version: 0.0.8
+      implicit-to-explicit:
+        specifier: workspace:*
+        version: link:../implicit-to-explicit
       proj4:
         specifier: ^2.11.0
         version: 2.20.9
@@ -933,6 +957,9 @@ packages:
   sourcemap-codec@1.4.8:
     resolution: {integrity: sha512-9NykojV5Uih4lgo5So5dtw+f0JgJX30KCNI8gwhz2J9A15wD0Ml6tjHKwf6fTSa6fAdVBdZeNOs9eJ71qCk8vA==}
     deprecated: Please use @jridgewell/sourcemap-codec instead
+
+  sql.js@1.14.1:
+    resolution: {integrity: sha512-gcj8zBWU5cFsi9WUP+4bFNXAyF1iRpA3LLyS/DP5xlrNzGmPIizUeBggKa8DbDwdqaKwUcTEnChtd2grWo/x/A==}
 
   statuses@2.0.2:
     resolution: {integrity: sha512-DvEy55V3DB7uknRo+4iOGT5fP1slR8wQohVdknigZPMpMstaKJQWhwiYBACJE3Ul2pTnATihhBYnRhZQHGBiRw==}
@@ -1812,6 +1839,8 @@ snapshots:
   source-map-js@1.2.1: {}
 
   sourcemap-codec@1.4.8: {}
+
+  sql.js@1.14.1: {}
 
   statuses@2.0.2: {}
 

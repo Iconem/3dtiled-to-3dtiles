@@ -5,6 +5,59 @@ Format loosely follows [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+### Fixed — 2026-06-26 (server stability, pills, intensity, Potree 1.x convert, SOG rotation)
+- **Server crash fix** (`ERR_HTTP_HEADERS_SENT`): catch blocks no longer write a 500 after streaming
+  has started (`if (!res.headersSent)` guard). `laz-perf` WASM `abort()` handlers overridden so they
+  log instead of re-throwing. Non-LAS `/copc` requests (e.g. wrong URL) fail fast with a clear error
+  (LASF magic check) instead of hanging and killing the process.
+- **Potree 1.x stream fix**: `cloud.js` (pure JSON) was being transformed by Vite's JS module pipeline
+  (HMR footer appended), corrupting `JSON.parse`. Added a Vite plugin (`raw-sample-data-js`) that
+  serves any `sample-data/**/*.js` request as raw bytes, bypassing module transformation. Tolerant
+  brace-balanced parser in `potree1.js` as defence-in-depth.
+- **Potree 1.x convert via middleware**: `/convert` can now fully mirror a remote Potree 1.x dataset
+  (walks `cloud.js` → `.hrc` hierarchy → all per-node `.bin`/`.laz` files) before converting. Both
+  inline (v1.4) and chunked-dir (v1.7) layouts handled. First request is slow (downloads the tree);
+  subsequent requests hit the cache instantly.
+- **Implicit/explicit tiling on `/stream`**: both COPC and Potree stream adapters now default to
+  **implicit** (`implicitTiling` + on-the-fly subtrees) and support `&tiling=explicit`. Dedicated-package
+  CLI shims gained `--tiling` flag. All four surfaces (dedicated CLI, meta CLI, `/convert`, `/stream`)
+  are uniform.
+- **Viewer stale-tileset bug**: clicking a new pill before the previous tileset finished loading left
+  a ghost tileset in the scene. Fixed with a `_loadGen` counter; stale async completions remove their
+  tileset immediately.
+- **URL bar on its own line**: `#url-bar` uses `flex-basis: 100%` so it always wraps below the pill rows.
+- **Intensity greyscale fallback**: when a point-cloud tile has no RGB channels, COPC and Potree 1.x
+  decoders now emit intensity as greyscale (`Intensity/65535` → rgb). Covers `/stream` tiles. Potree
+  1.x `.bin` nodes also detect the `INTENSITY` attribute.
+- **SOG root transform (Cesium)**: `sog-live.js` now includes `root.transform = RX(+90°)` so that
+  streamed-SOG scenes (PlayCanvas Y-up) appear upright when the user applies a local ENU frame in
+  CesiumJS. Bounding volumes already used `boundToZUpBox`; content rotation now matches.
+- **LCC georef**: `lcc-live.js` converts `meta.lcc` `epsg` + `offset` → ECEF `root.transform` via
+  proj4 (CGCS2000 Gauss-Krüger EPSG 4513–4554). Handles CM-based vs zone-prefixed easting.
+
+### Added — 2026-06-26 (3TZ/.3dtiles package server, I3S converter draft, docs)
+- **`/package` endpoint (tile-server)**: serves `.3tz` (ZIP with `@3dtilesIndex1@` random-access
+  index) and `.3dtiles` (SQLite `media` table) packages as if they were unpacked tileset directories.
+  `GET /package/tileset.json?url=<local-path.3tz>` → parses the index and rewrites all tile URIs so
+  follow-up requests route back through `/package/<key>?url=<same-url>`. Mirrors `npx 3d-tiles-tools
+  serve` but in-process, with CORS and no CLI dependencies. `.3dtiles` requires `better-sqlite3`
+  (optional; 501 + install hint if absent). No extraction needed — random-access reads via file
+  descriptor + the ZIP index.
+- **`i3s-to-3dtiles` draft package**: reads Esri I3S SLPK (extracted or REST-mirror directory) and
+  converts to OGC 3D Tiles 1.1 explicit tree. Supported: IntegratedMesh / 3DObject / PointCloud
+  layers with uncompressed DefaultGeometrySchema. ENU-frame shared root transform. Already wired
+  into `3dtiles-convert` meta-converter REGISTRY and `/convert` middleware. Unsupported by this
+  draft: Draco compression, LEPCC point clouds, textures, per-feature attributes.
+
+### Added — 2026-06-26 (pill bar restructure, FORMAT selector, docs)
+- **Pill bar restructure**: mode selector (⚡ Stream / 💾 Offline / 🛠 Convert) × FORMAT selector
+  (COPC / Potree / SOG / RAD / LCC / I3S / 3D Tiles) × tiling toggle (⬡ implicit / ⬢ explicit,
+  shown only for COPC/Potree). Asset pills show only the selected format's assets. Switching mode
+  or tiling reloads the active asset. RAD/I3S disable in Stream mode (no stream adapter).
+- **README**: implicit/explicit documentation (all surfaces, defaults, octree key convention);
+  3D Tiles → 3D Tiles transcoding section (implicit→explicit, legacy upgrade, tools reference);
+  LCC X/Y-only quadtree warning for tall scans; consolidated format-specification links.
+
 ### Added — 2026-06-23d (implicit/explicit tiling option; LCC live streaming; core/tiling)
 - **Implicit ⇄ explicit tiling, both converters.** New `--tiling=implicit|explicit` (CLI) /
   `opts.tiling` (API) / `&tiling=` (`/convert`). **COPC** gained an **explicit** nested-tree mode (was
