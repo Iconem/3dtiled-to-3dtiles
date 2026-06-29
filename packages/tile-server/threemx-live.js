@@ -135,7 +135,12 @@ async function buildNodeGlb(ctx, relPath, nodeIdx) {
     // texture: follow the geometryBuffer's `texture` ref → its textureBuffer resource (jpg/png).
     const texRes = r.texture ? payload.get(r.texture) : null;
     if (g.uvs && texRes && texRes.data && (texRes.format === 'jpg' || texRes.format === 'png')) {
-      const uv = doc.createAccessor().setType('VEC2').setArray(g.uvs instanceof Float32Array ? g.uvs : new Float32Array(g.uvs)).setBuffer(buffer);
+      // 3MX/OpenCTM UVs use a bottom-left origin (V up); glTF uses top-left (V down) → flip V (v→1−v),
+      // else textures map upside-down / mis-indexed vs the Bentley viewer.
+      const srcUv = g.uvs instanceof Float32Array ? g.uvs : new Float32Array(g.uvs);
+      const flipUv = new Float32Array(srcUv.length);
+      for (let k = 0; k < srcUv.length; k += 2) { flipUv[k] = srcUv[k]; flipUv[k + 1] = 1 - srcUv[k + 1]; }
+      const uv = doc.createAccessor().setType('VEC2').setArray(flipUv).setBuffer(buffer);
       prim.setAttribute('TEXCOORD_0', uv);
       let tex = texCache.get(r.texture);
       if (!tex) {
