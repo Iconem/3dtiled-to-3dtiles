@@ -27,7 +27,7 @@ function dealign24b(mortoncode) {
 }
 
 // Potree `createChildAABB`: child index bit 0 → Z, bit 1 → Y, bit 2 → X.
-function childBox(box, octant) {
+export function childBox(box, octant) {
   const mid = [0,1,2].map(k => (box.min[k] + box.max[k]) / 2);
   const min = box.min.slice(), max = box.max.slice();
   if (octant & 1) min[2] = mid[2]; else max[2] = mid[2];   // bit0 → Z
@@ -102,6 +102,39 @@ export function parsePotree2Hierarchy(meta, hierBuf) {
 }
 
 /**
+ * Parse ONE hierarchy chunk, returning nodes in this chunk + proxy refs for child chunks.
+ * Used by potree-live.js for lazy hierarchy loading (range-read chunks on demand).
+ * @returns { nodes: Map<name, node>, proxies: Map<name, {byteOffset, byteSize, box}> }
+ */
+export function parsePotree2Chunk(buf, rootName, rootBoxLocal) {
+  const NB = 22;
+  const nodes = new Map();
+  const proxies = new Map();
+  const queue = [{ name: rootName, box: rootBoxLocal, idx: 0 }];
+  let nextIdx = 1;
+  const seen = new Set();
+  while (queue.length) {
+    const { name, box, idx } = queue.shift();
+    const o = idx * NB;
+    if (o + NB > buf.length) continue;
+    const type = buf.readUInt8(o);
+    const childMask = buf.readUInt8(o + 1);
+    const numPoints = buf.readUInt32LE(o + 2);
+    const byteOffset = Number(buf.readBigUInt64LE(o + 6));
+    const byteSize = Number(buf.readBigUInt64LE(o + 14));
+    if (type === 2) { proxies.set(name, { byteOffset, byteSize, box }); continue; }
+    nodes.set(name, { name, numPoints, byteOffset, byteSize, depth: name.length - 1, box });
+    for (let c = 0; c < 8; c++) {
+      if (!((childMask >> c) & 1)) continue;
+      const cname = name + c;
+      if (seen.has(cname)) continue; seen.add(cname);
+      queue.push({ name: cname, box: childBox(box, c), idx: nextIdx++ });
+    }
+  }
+  return { nodes, proxies };
+}
+
+/**
  * Decode one node's raw octree bytes → { positions:Float32Array(n*3) world coords, colors:?Float32Array(n*4) rgba[0,1], count }.
  * @param schema result of preparePotree2Schema(meta)
  * @param raw    node.byteSize bytes from octree.bin at node.byteOffset (whole-file or range read)
@@ -111,7 +144,10 @@ export function decodePotree2Node(meta, schema, node, raw) {
   let buf = raw;
   if (isBrotli) { try { buf = zlib.brotliDecompressSync(raw); } catch { /* leave raw */ } }
   const n = node.numPoints;
-  const positions = new Float32Array(n * 3);
+  // Float64 (not Float32): positions are absolute world coords (e.g. UTM ~5e5/5e6). Storing world in
+  // float32 quantizes to ~0.03 m and produces visible striping; the caller subtracts the dataset origin
+  // in float64 and only then casts the small local result to float32 (precise). Cf. potree1 readNode.
+  const positions = new Float64Array(n * 3);
   const colors = colAttr ? new Float32Array(n * 4) : null;
   const sc = meta.scale, off = meta.offset;
 

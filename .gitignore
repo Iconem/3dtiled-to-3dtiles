@@ -1,2 +1,4 @@
 node_modules
 sample-data
+# local Claude Code agent config
+.claude/

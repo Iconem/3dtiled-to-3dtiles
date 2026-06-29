@@ -5,6 +5,40 @@ Format loosely follows [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+### Added / Changed / Fixed — 2026-06-29 (`stream-cache` branch: lazy hierarchy, cache continuum, new adapters)
+- **Lazy hierarchy on demand** for every multi-page format (geometry was already per-tile): Potree 1.x
+  (`.hrc` chunks → lazy implicit), Potree 2.0 (hierarchy chunks), COPC (hierarchy pages), RAD (4-level
+  explicit fragments), I3S (node-page fragments). Huge clouds: Potree 1.7 302 M ~80 s → ~0.2 s; RAD 50 M
+  9.6 s → 0.015 s. Lazy paths verified to reach the same node set as eager (Potree 2.0 byte-identical
+  1624 nodes; RAD 765/765; I3S 5882/5882).
+- **Single `cache` axis** (replaced `mode × hierarchy`): `cache=none` (live, lazy) · `cache=hierarchy`
+  (whole tree in RAM, tiles per-request) · `cache=full` (whole dataset → disk, `/convert`). No "prebuilt"
+  middleware mode. Unified **`/tiles`** endpoint 307-routes by `cache`; `/stream` & `/convert` are aliases.
+  **`prefetch=N`** (0/N/-1) background-warms lazy hierarchy. **Bounded-parallel** lazy fragment builds
+  (`parallelMap`, cap `min(cpus−1,16)`).
+- **New `core/` shared services**: `geo.js` (ENU/ECEF georef, was 4× dup), `source.js` (`Source`:
+  range/parallel-ranges/full/probe), `http.js` (CORS + send helpers), `octree.js` (`buildImplicitTileset`),
+  `gltf-decompress.js`.
+- **New adapters/tools**: **`/gltf`** generic per-tile glTF-Transform pipeline (`ops=decompress|draco|meshopt|ktx`,
+  decode today — gltf-transform + draco3dgltf + Basis WASM from `three` + `pngjs`, **no sharp**, no native
+  `ktx`); **`/bing`** Bing Maps 3D (`tf=3dv4` GLB) → quadtree (verified live keyless, Berlin); **`/threemx`**
+  Bentley 3MX → lazy fragments + **OpenCTM MG1** decode (vendored js-openctm, `packages/threemx-to-3dtiles/`).
+- **`centroids`** (`&centroids=1`) for SOG/LCC/RAD — POINTS preview of splat centres.
+- **Fix — Potree live float32 precision striping**: decoders now build positions in **Float64Array**
+  (world); origin subtraction casts the small local result to float32 (verified: iconem 1.x tile positions
+  local ±351 m, not UTM ~5e5). 1.x & 2.0, implicit & explicit.
+- **Viewer**: 3 modes (Live streaming · Prebuilt offline · Tools); `cache` pill + `prefetch` input placed
+  right after the mode, before formats; **Bing 3D** + **3MX** pills; tastier `.3tz`/`.3dtiles` moved to
+  Packages; public CesiumGS samples on the 3D Tiles pill; **raw-url** checkbox (re-resolves on toggle,
+  auto-off in offline). centroids toggle for splats.
+- **Docs**: README materialization continuum, multi-page-vs-monolithic-index, tools & endpoints, candidate-
+  formats roadmap, future work; `docs-references/streaming-architecture-design-log.md`,
+  `streaming-adapter-plans.md`; full `CONVERSATION.md`.
+- **Deferred** (noted in README/CHANGELOG): glTF-Transform encode ops; `&transform=` in `/stream` (implicit
+  per-tile transform); offline-georef regen (LCC Guan, Potree vol_total) + Potree implicit offline output;
+  3MX visual debug (needs a georeferenced 3MX — public fixture has no SRS); live progress reporting;
+  browser-native bbox crop → LAS → `pdal`/`untwine` COPC; fastest JS point-cloud tiler.
+
 ### Fixed — 2026-06-26 (server stability, pills, intensity, Potree 1.x convert, SOG rotation)
 - **Server crash fix** (`ERR_HTTP_HEADERS_SENT`): catch blocks no longer write a 500 after streaming
   has started (`if (!res.headersSent)` guard). `laz-perf` WASM `abort()` handlers overridden so they

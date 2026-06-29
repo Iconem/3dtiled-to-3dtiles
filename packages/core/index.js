@@ -9,3 +9,8 @@ export { parallelMap, WorkerPool, defaultConcurrency } from './parallel.js';
 export { detectFormat, detectFormatByName } from './detect.js';
 export { keyToCoords, coordsToKey, octreeChildKeys, octreeSubCube, cubeToBox,
          buildExplicitTree, buildSubtreeBuffer, subtreeRootKeys } from './tiling.js';
+export { DEG, llhToEcef, enuFrame, enuMatrix, georefFromCrs } from './geo.js';
+export { Source } from './source.js';
+export { CORS, sendJson, sendGlb, sendBin, sendErr } from './http.js';
+export { buildImplicitTileset } from './octree.js';
+export { decompressGlb } from './gltf-decompress.js';

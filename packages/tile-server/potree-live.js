@@ -12,9 +12,8 @@
  *   GET /potree/tileset.json?url=<metadata.json | cloud.js URL>
  *   GET /potree/tile/<name>.glb?url=<…>                       → that node's points as a POINTS GLB
  */
-import proj4 from 'proj4';
-import { buildPointsGlb, coordsToKey, buildSubtreeBuffer } from '../core/index.js';
-import { preparePotree2Schema, parsePotree2Hierarchy, decodePotree2Node } from '../potree-to-3dtiles/src/potree2.js';
+import { buildPointsGlb, coordsToKey, keyToCoords, buildSubtreeBuffer, CORS, georefFromCrs, buildImplicitTileset, parallelMap, defaultConcurrency } from '../core/index.js';
+import { preparePotree2Schema, parsePotree2Hierarchy, parsePotree2Chunk, decodePotree2Node } from '../potree-to-3dtiles/src/potree2.js';
 import { loadPotree1 } from '../potree-to-3dtiles/src/potree1.js';
 
 const SUBTREE_LEVELS = 3;
@@ -26,19 +25,7 @@ function coordsOfBox(box, rootBox, depth) {
   return { level: depth, x: idx(0), y: idx(1), z: idx(2) };
 }
 
-const CORS = { 'Access-Control-Allow-Origin': '*', 'Access-Control-Allow-Headers': '*' };
-const DEG = Math.PI / 180, A = 6378137.0, E2 = 0.00669437999014;
-
-const llhToEcef = (lon, lat, h) => {
-  const sLat = Math.sin(lat*DEG), cLat = Math.cos(lat*DEG), sLon = Math.sin(lon*DEG), cLon = Math.cos(lon*DEG);
-  const N = A / Math.sqrt(1 - E2*sLat*sLat);
-  return [(N+h)*cLat*cLon, (N+h)*cLat*sLon, (N*(1-E2)+h)*sLat];
-};
-// Column-major ENU→ECEF (columns East, North, Up, origin).
-const enuMatrix = (lon, lat, cx, cy, cz) => {
-  const sl = Math.sin(lon*DEG), cl = Math.cos(lon*DEG), sp = Math.sin(lat*DEG), cp = Math.cos(lat*DEG);
-  return [-sl,cl,0,0, -sp*cl,-sp*sl,cp,0, cp*cl,cp*sl,sp,0, cx,cy,cz,1];
-};
+const georef = (origin, crs) => georefFromCrs(origin, crs, 'potree-live');
 
 async function fetchFull(url) {
   const r = await fetch(url);
@@ -51,12 +38,6 @@ async function rangeGet(url, begin, length) {
   if (r.status !== 206 && r.status !== 200) throw new Error(`range ${url} → ${r.status} (server must support HTTP 206)`);
   return Buffer.from(await r.arrayBuffer());
 }
-
-const georef = (origin, crs) => {
-  if (!crs) return null;
-  try { const [lon, lat, h] = proj4(crs, 'WGS84').forward(origin); const e = llhToEcef(lon, lat, h ?? origin[2]); return enuMatrix(lon, lat, e[0], e[1], e[2]); }
-  catch (e) { console.warn('[potree-live] georef failed:', e.message); return null; }
-};
 const finishCtx = (nodes, rootBox, crs, spacingMeta, readTile) => {
   const origin = [0,1,2].map(k => (rootBox.min[k] + rootBox.max[k]) / 2);
   const rootDiag = Math.hypot(rootBox.max[0]-rootBox.min[0], rootBox.max[1]-rootBox.min[1], rootBox.max[2]-rootBox.min[2]);
@@ -82,19 +63,149 @@ async function getCtx(url) {
   let ctx;
 
   if (/cloud\.js(\?|$)/i.test(url)) {                       // ── Potree 1.x ──
-    const src = await loadPotree1('', { read: rel => fetchFull(base + rel) });
-    const readTile = name => src.readNode(src.nodes.get(name));
-    ctx = finishCtx(src.nodes, src.rootBox, src.crs, src.spacing, readTile);
-    console.log(`[potree-live] (1.x) ${url} → ${src.nodes.size} nodes, georef=${!!ctx.transform}`);
-  } else {                                                  // ── Potree 2.0 ──
+    // lazy: skip the eager full-.hrc walk; we load one .hrc chunk per request (see buildLazyFragment).
+    const src = await loadPotree1('', { read: rel => fetchFull(base + rel), lazy: true });
+    if (src.loadChunk) {
+      // .hrc layout → LAZY hierarchy. Default output is IMPLICIT tiling: the tileset is one tiny root
+      // with an implicitTiling block; each `.subtree` is generated on demand by loading ONLY the .hrc
+      // chunk(s) covering that subtree's node block (no full-tree walk). `explicit` mode (opt-in) emits
+      // external-tileset fragments per chunk instead. Geometry is per-node on demand either way.
+      const origin = [0,1,2].map(k => (src.rootBox.min[k] + src.rootBox.max[k]) / 2);
+      const rootDiag = Math.hypot(src.rootBox.max[0]-src.rootBox.min[0], src.rootBox.max[1]-src.rootBox.min[1], src.rootBox.max[2]-src.rootBox.min[2]);
+      const availSet = new Set(), loadedChunks = new Set(), processed = new Set();
+      const stepSize = src.stepSize;
+
+      // coord (level-x-y-z) → Potree node name, by forward box-containment from the root using the
+      // authoritative octant subdivision (src.boxOf) — no hand-coded octant convention.
+      const nameForCoord = (L, x, y, z) => {
+        const cells = 2 ** L;
+        const center = [0,1,2].map(k => src.rootBox.min[k] + (([x,y,z][k]) + 0.5) * (src.rootBox.max[k]-src.rootBox.min[k]) / cells);
+        const inBox = (b) => center.every((v,k) => v >= b.min[k] && v <= b.max[k]);
+        let name = 'r';
+        for (let d = 0; d < L; d++) { let f = -1; for (let o = 0; o < 8; o++) if (inBox(src.boxOf(name + o))) { f = o; break; } if (f < 0) break; name += f; }
+        return name;
+      };
+      const chunkRootOf = (nm) => nm.slice(0, 1 + Math.floor((nm.length - 1) / stepSize) * stepSize);
+      const indexLoadedNodes = () => {        // fold newly-loaded nodes into the availability set
+        for (const [nm, node] of src.nodes) { if (processed.has(nm)) continue; processed.add(nm);
+          if (node.numPoints > 0) { const c = coordsOfBox(node.box, src.rootBox, node.depth); availSet.add(coordsToKey(c.level, c.x, c.y, c.z)); } }
+      };
+      // PARALLEL chunk-root BFS: load each band of .hrc chunks concurrently, enqueue qualifying
+      // boundaries (next-band roots) per `accept`. One round-trip-batch per band, not per chunk.
+      const loadChunkRoots = async (roots, accept) => {
+        let frontier = roots.filter(r => !loadedChunks.has(r));
+        while (frontier.length) {
+          frontier.forEach(r => loadedChunks.add(r));
+          const boundaries = await parallelMap(frontier, cr => src.loadChunk(cr, src.boxOf(cr)), { concurrency: Math.min(defaultConcurrency(), 16) });
+          const next = [];
+          for (const boundary of boundaries) for (const b of boundary) if (!loadedChunks.has(b.name) && accept(b.name)) next.push(b.name);
+          frontier = [...new Set(next)];
+        }
+        indexLoadedNodes();
+      };
+      // Ensure every .hrc chunk intersecting a subtree block [L, L+subtreeLevels] under `rootName` is loaded.
+      const ensureBlock = async (rootName, L, subtreeLevels) => {
+        const targetMax = L + subtreeLevels;
+        await loadChunkRoots([chunkRootOf(rootName)],
+          (name) => (name.length - 1) <= targetMax && (name.startsWith(rootName) || rootName.startsWith(name)));
+      };
+      // cache=hierarchy: load the WHOLE .hrc tree (every chunk) — full availability resident.
+      const drainAll = async () => { await loadChunkRoots([chunkRootOf('r')], () => true); };
+
+      ctx = { lazy: true, src, origin, transform: georef(origin, src.crs), rootDiag,
+              spacing: src.spacing || rootDiag / 128, rootBox: src.rootBox,
+              maxLevel: 24,                       // generous cap; subtrees report 0 children at the real leaf level
+              availSet, nameForCoord, ensureBlock, drainAll,
+              readTile: name => src.readNode({ name, box: src.boxOf(name) }) };
+      console.log(`[potree-live] (1.x lazy implicit) ${url} → .hrc chunked (stepSize=${stepSize}), georef=${!!ctx.transform}`);
+    } else {
+      // inline (1.4) layout → whole tiny hierarchy is in cloud.js already; build it eagerly.
+      ctx = finishCtx(src.nodes, src.rootBox, src.crs, src.spacing, name => src.readNode(src.nodes.get(name)));
+      console.log(`[potree-live] (1.4 inline) ${url} → ${src.nodes.size} nodes, georef=${!!ctx.transform}`);
+    }
+  } else {                                                  // ── Potree 2.0 (lazy) ──
     const meta = JSON.parse((await fetchFull(url)).toString('utf8'));
     if ((meta.version || '').toString()[0] !== '2') console.warn(`[potree-live] ${url}: metadata.version=${meta.version} — expected 2.x`);
     const schema = preparePotree2Schema(meta);
-    const { nodes, rootBox } = parsePotree2Hierarchy(meta, await fetchFull(base + 'hierarchy.bin'));
+    const rootBox = { min: meta.boundingBox.min.slice(), max: meta.boundingBox.max.slice() };
+    const hierUrl = base + 'hierarchy.bin';
     const octreeUrl = base + 'octree.bin';
-    const readTile = async name => { const n = nodes.get(name); if (!n || !n.byteSize) return null; return decodePotree2Node(meta, schema, n, await rangeGet(octreeUrl, n.byteOffset, n.byteSize)); };
-    ctx = finishCtx(nodes, rootBox, meta.projection || meta.crs || meta.wkt || null, meta.spacing, readTile);
-    console.log(`[potree-live] (2.0) ${url} → ${nodes.size} nodes, georef=${!!ctx.transform}`);
+    const firstChunkSize = meta.hierarchy?.firstChunkSize;
+
+    // Load only the first hierarchy chunk (range read, no full download).
+    const firstBuf = await rangeGet(hierUrl, 0, firstChunkSize);
+    const { nodes, proxies: pendingChunks2 } = parsePotree2Chunk(firstBuf, 'r', rootBox);
+    const loadedChunks2 = new Set(['r']);
+
+    // Live coord→name index (maintained as chunks load).
+    const byCoord2 = new Map();
+    const updateByCoord2 = (nodeMap) => {
+      for (const [name, node] of nodeMap) {
+        if (node.numPoints > 0) { const c = coordsOfBox(node.box, rootBox, node.depth); byCoord2.set(coordsToKey(c.level, c.x, c.y, c.z), name); }
+      }
+    };
+    updateByCoord2(nodes);
+
+    // Load one deferred proxy chunk, fold its nodes+proxies in.
+    const loadChunk2 = async (name) => {
+      if (loadedChunks2.has(name)) return;
+      const p = pendingChunks2.get(name); if (!p) return;
+      loadedChunks2.add(name); pendingChunks2.delete(name);
+      const buf = await rangeGet(hierUrl, p.byteOffset, p.byteSize);
+      const { nodes: nn, proxies: pp } = parsePotree2Chunk(buf, name, p.box);
+      for (const [k, v] of nn) nodes.set(k, v);
+      for (const [k, v] of pp) if (!loadedChunks2.has(k)) pendingChunks2.set(k, v);
+      updateByCoord2(nn);
+    };
+
+    // For a subtree at (L,x,y,z): load all pending proxy chunks overlapping the block [L, L+subtreeLevels].
+    const ensureBlock2 = async (L, x, y, z) => {
+      const maxLvl = L + SUBTREE_LEVELS;
+      const cells = 2 ** L;
+      const span = [0,1,2].map(k => (rootBox.max[k] - rootBox.min[k]) / cells);
+      const tMin = [x,y,z].map((v,k) => rootBox.min[k] + v * span[k]);
+      const tMax = tMin.map((v, k) => v + span[k]);
+      const overlaps = (b) => [0,1,2].every(k => b.min[k] < tMax[k] && b.max[k] > tMin[k]);
+      let changed = true;
+      while (changed) {
+        changed = false;
+        const toLoad = [];
+        for (const [nm, p] of pendingChunks2) {
+          if (nm.length - 1 > maxLvl) continue;
+          if (overlaps(p.box)) toLoad.push(nm);
+        }
+        if (toLoad.length) { changed = true; await Promise.all(toLoad.map(loadChunk2)); }
+      }
+    };
+
+    // hierarchy=eager: drain every pending proxy chunk (whole hierarchy in RAM).
+    const drainAll2 = async () => {
+      while (pendingChunks2.size) { const batch = [...pendingChunks2.keys()]; await Promise.all(batch.map(loadChunk2)); }
+    };
+
+    // Build avail from currently-loaded nodes (called fresh each subtree request).
+    const buildAvail2 = () => {
+      const avail = new Set();
+      for (const [, node] of nodes) {
+        if (node.numPoints > 0) { const c = coordsOfBox(node.box, rootBox, node.depth); avail.add(coordsToKey(c.level, c.x, c.y, c.z)); }
+      }
+      return avail;
+    };
+
+    const readTile = async name => {
+      const n = nodes.get(name);
+      if (!n || !n.byteSize) return null;
+      return decodePotree2Node(meta, schema, n, await rangeGet(octreeUrl, n.byteOffset, n.byteSize));
+    };
+
+    const origin2 = [0,1,2].map(k => (rootBox.min[k] + rootBox.max[k]) / 2);
+    const rootDiag2 = Math.hypot(rootBox.max[0]-rootBox.min[0], rootBox.max[1]-rootBox.min[1], rootBox.max[2]-rootBox.min[2]);
+    ctx = { lazy2: true, nodes, pendingChunks2, ensureBlock2, drainAll2, buildAvail2, byCoord: byCoord2, schema, meta,
+            rootBox, origin: origin2, transform: georef(origin2, meta.projection || meta.crs || meta.wkt || null),
+            rootDiag: rootDiag2, spacing: meta.spacing || rootDiag2 / 128,
+            maxLevel: 24,
+            readTile };
+    console.log(`[potree-live] (2.0 lazy) ${url} → first chunk loaded (${nodes.size} nodes), pending=${pendingChunks2.size} proxy chunks`);
   }
   ctxCache.set(url, ctx);
   return ctx;
@@ -130,22 +241,17 @@ function buildTilesetExplicit(ctx, urlParam) {
 // "level-x-y-z" coord token; subtrees are built on the fly from the availability set.
 function buildTilesetImplicit(ctx, urlParam) {
   const { rootBox, origin, transform, rootDiag, spacing, maxLevel } = ctx;
-  const enc = encodeURIComponent(urlParam);
   const h = [0,1,2].map(k => Math.max((rootBox.max[k] - rootBox.min[k]) / 2, 0.01));
   const c = [0,1,2].map(k => (rootBox.min[k] + rootBox.max[k]) / 2 - origin[k]);   // = 0
-  const root = {
-    boundingVolume: { box: [c[0],c[1],c[2], h[0],0,0, 0,h[1],0, 0,0,h[2]] },
-    refine: 'ADD', geometricError: spacing,
-    implicitTiling: { subdivisionScheme: 'OCTREE', availableLevels: maxLevel + 1, subtreeLevels: SUBTREE_LEVELS, subtrees: { uri: `subtrees/{level}-{x}-{y}-{z}.subtree?url=${enc}` } },
-    content: { uri: `tile/{level}-{x}-{y}-{z}.glb?url=${enc}` },
-  };
-  if (transform) root.transform = transform;
-  return { asset: { version: '1.1' }, geometricError: rootDiag, root, extensionsUsed: ['3DTILES_content_gltf'] };
+  const box = [c[0],c[1],c[2], h[0],0,0, 0,h[1],0, 0,0,h[2]];
+  return buildImplicitTileset({ box, rootGeometricError: rootDiag, contentGeometricError: spacing,
+    maxLevel, subtreeLevels: SUBTREE_LEVELS, transform, urlParam });
 }
 
 async function serveTileGlb(ctx, name) {
-  const node = ctx.nodes.get(name);
-  if (!node || !node.numPoints) return null;
+  // Eager ctx has a full node map to gate on; lazy ctx (1.x .hrc) has no map — rely on readTile
+  // returning null for a missing/empty node.
+  if (ctx.nodes) { const node = ctx.nodes.get(name); if (!node || !node.numPoints) return null; }
   const data = await ctx.readTile(name);                    // 2.0: range read+decode; 1.x: per-node fetch+decode
   if (!data || !data.count) return null;
   const { positions, colors, count } = data;
@@ -155,19 +261,91 @@ async function serveTileGlb(ctx, name) {
   return Buffer.from(await buildPointsGlb(pos, colors, count));   // core applies the (E,U,−N) Y-up swizzle
 }
 
+// ── LAZY 1.x fragment (one .hrc chunk → a tileset; chunk boundaries reference the next chunk as an
+//    external tileset, so the tree is built on demand as the camera refines — never a full-tree walk).
+//    Uses absolute /potree/... URLs so it resolves identically whether entered via /potree or /stream.
+async function buildLazyFragment(ctx, rootName, urlParam, isRoot) {
+  const { src, origin, transform, rootDiag, spacing } = ctx;
+  const enc = encodeURIComponent(urlParam);
+  await src.loadChunk(rootName, src.boxOf(rootName));   // populates src.nodes for THIS chunk only
+  const boxOfTile = (b) => {
+    const c = [0,1,2].map(k => (b.min[k]+b.max[k])/2 - origin[k]);
+    const h = [0,1,2].map(k => Math.max((b.max[k]-b.min[k])/2, 0.01));
+    return [c[0],c[1],c[2], h[0],0,0, 0,h[1],0, 0,0,h[2]];
+  };
+  const geAt = (depth) => spacing / (2 ** depth);
+  const tileFor = (name) => {
+    const node = src.nodes.get(name);
+    if (!node) return null;
+    const tile = { boundingVolume: { box: boxOfTile(node.box) }, geometricError: geAt(node.depth), refine: 'ADD' };
+    if (node.numPoints > 0) tile.content = { uri: `/potree/tile/${name}.glb?url=${enc}` };
+    const kids = [];
+    for (let c = 0; c < 8; c++) {
+      if (!((node.mask >> c) & 1)) continue;            // child doesn't exist
+      const ck = name + c;
+      if (src.nodes.has(ck)) { const t = tileFor(ck); if (t) kids.push(t); }   // in this chunk → inline
+      else kids.push({                                   // boundary → next .hrc chunk, lazily fetched
+        boundingVolume: { box: boxOfTile(src.boxOf(ck)) },
+        geometricError: geAt(ck.length - 1), refine: 'ADD',
+        content: { uri: `/potree/hrc/${ck}.json?url=${enc}` },
+      });
+    }
+    if (kids.length) tile.children = kids;
+    return tile;
+  };
+  const root = tileFor(rootName) || { boundingVolume: { box: boxOfTile(src.boxOf(rootName)) }, geometricError: geAt(rootName.length-1), refine: 'ADD' };
+  if (isRoot && transform) root.transform = transform;
+  return { asset: { version: '1.1' }, geometricError: isRoot ? rootDiag : root.geometricError, root, extensionsUsed: ['3DTILES_content_gltf'] };
+}
+
 // Pure builders the /stream dispatcher reuses. Tile token is a Potree name (explicit, "r012") OR a
 // "level-x-y-z" coord (implicit) — potreeTile resolves either.
 export const potreeTileRe = /^([r0-7]+|\d+-\d+-\d+-\d+)$/;
 export async function potreeTileset(url, opts = {}) {
   const ctx = await getCtx(url);
+  const eager = opts.hierarchy === 'eager';
+  if (eager && ctx.drainAll2) await ctx.drainAll2();        // Potree 2.0 eager hierarchy (all chunks)
+  if (eager && ctx.drainAll)  await ctx.drainAll();         // Potree 1.x eager hierarchy (all .hrc)
+  else if (!eager) {                                        // cache=none: background prefetch
+    const pf = opts.prefetch ?? 1;                          // 0 = none · N = N levels · -1 = all
+    const drain = ctx.drainAll2 || ctx.drainAll;
+    if (pf === -1 && drain) Promise.resolve().then(() => { try { return drain(); } catch {} });
+    else if (pf > 0) {
+      if (ctx.ensureBlock2) Promise.resolve().then(() => { try { for (let L = 0; L < pf; L++) ctx.ensureBlock2(L * SUBTREE_LEVELS, 0, 0, 0); } catch {} }); // 2.0
+      else if (ctx.ensureBlock) Promise.resolve().then(() => { try { ctx.ensureBlock('r', 0, SUBTREE_LEVELS * pf); } catch {} });                          // 1.x
+    }
+  }
+  if (ctx.lazy)   // 1.x .hrc: implicit by default (lazy subtrees), explicit = external-tileset fragments
+    return opts.tiling === 'explicit' ? buildLazyFragment(ctx, 'r', url, true) : buildTilesetImplicit(ctx, url);
   return opts.tiling === 'explicit' ? buildTilesetExplicit(ctx, url) : buildTilesetImplicit(ctx, url);
+}
+export async function potreeHrc(url, name) {     // explicit-mode external-tileset fragment (1.x lazy)
+  const ctx = await getCtx(url);
+  if (!ctx.lazy) return null;
+  return buildLazyFragment(ctx, name, url, false);
 }
 export async function potreeTile(url, token) {
   const ctx = await getCtx(url);
-  const name = /^[r0-7]+$/.test(token) ? token : ctx.byCoord.get(token);   // name or coord key
+  // token is a Potree name ("r012", explicit) or a "level-x-y-z" coord (implicit). Lazy ctx resolves
+  // coords by box-containment (nameForCoord); lazy2/eager ctx uses the byCoord map (populated as chunks load).
+  const name = /^[r0-7]+$/.test(token) ? token
+    : (ctx.lazy ? ctx.nameForCoord(...token.split('-').map(Number)) : ctx.byCoord?.get(token));
   return name ? serveTileGlb(ctx, name) : null;
 }
-export async function potreeSubtree(url, key) { return buildSubtreeBuffer(key, (await getCtx(url)).avail, SUBTREE_LEVELS); }
+export async function potreeSubtree(url, key) {
+  const ctx = await getCtx(url);
+  if (ctx.lazy) {                                // load only the .hrc chunk(s) this subtree block needs
+    const { level, x, y, z } = keyToCoords(key);
+    await ctx.ensureBlock(ctx.nameForCoord(level, x, y, z), level, SUBTREE_LEVELS);
+    return buildSubtreeBuffer(key, ctx.availSet, SUBTREE_LEVELS);
+  }
+  if (ctx.lazy2) {
+    const { level, x, y, z } = keyToCoords(key);
+    await ctx.ensureBlock2(level, x, y, z);
+    return buildSubtreeBuffer(key, ctx.buildAvail2(), SUBTREE_LEVELS);
+  }
+  return buildSubtreeBuffer(key, ctx.avail, SUBTREE_LEVELS);
+}
 
 /** Try to handle a /potree/* request. Returns true iff it owned the response. */
 export async function handlePotree(req, res, u) {
@@ -187,6 +365,14 @@ export async function handlePotree(req, res, u) {
     if (!glb) { res.writeHead(404, CORS); res.end('no such node'); return true; }
     res.writeHead(200, { 'Content-Type': 'model/gltf-binary', ...CORS });
     res.end(glb);
+    return true;
+  }
+  const h = u.pathname.match(/^\/potree\/hrc\/([r0-7]+)\.json$/);
+  if (h) {                                                 // lazy 1.x sub-chunk external tileset
+    const frag = await potreeHrc(url, h[1]);
+    if (!frag) { res.writeHead(404, CORS); res.end('not a lazy potree dataset'); return true; }
+    res.writeHead(200, { 'Content-Type': 'application/json', ...CORS });
+    res.end(JSON.stringify(frag));
     return true;
   }
   const s = u.pathname.match(/^\/potree\/subtrees\/(\d+-\d+-\d+-\d+)\.subtree$/);

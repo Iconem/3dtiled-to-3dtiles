@@ -13,17 +13,9 @@
  */
 import proj4 from 'proj4';
 import { decodeSplats } from '../lcc-to-3dtiles/src/lccDecode.js';
-import { buildSplatTileGlb, computeBounds } from '../core/index.js';
+import { buildSplatTileGlb, computeBounds, CORS, DEG, llhToEcef, enuFrame } from '../core/index.js';
 
-const CORS = { 'Access-Control-Allow-Origin': '*', 'Access-Control-Allow-Headers': '*' };
 const ROOT_GE_FACTOR = 0.05, DEPTH_RATIO = 0.5;
-const DEG = Math.PI / 180, A = 6378137.0, E2 = 0.00669437999014;
-
-const llhToEcef = (lon, lat, h) => {
-  const sLat = Math.sin(lat*DEG), cLat = Math.cos(lat*DEG), sLon = Math.sin(lon*DEG), cLon = Math.cos(lon*DEG);
-  const N = A / Math.sqrt(1 - E2*sLat*sLat);
-  return [(N+h)*cLat*cLon, (N+h)*cLat*sLon, (N*(1-E2)+h)*sLat];
-};
 
 // Central meridian (lon_0) for the CGCS2000 3°-Gauss-Krüger EPSG codes XGRIDS LCC uses:
 //   4513–4533 = "CM <lon>E" (lon_0 = 75 + 3·(code−4513))
@@ -50,8 +42,8 @@ function lccTransform(meta) {
   try {
     const [lon, lat] = proj4(def, 'WGS84').forward([meta.offset[0], meta.offset[1]]);
     const e = llhToEcef(lon, lat, meta.offset[2] || 0);
-    const sl = Math.sin(lon*DEG), cl = Math.cos(lon*DEG), sp = Math.sin(lat*DEG), cp = Math.cos(lat*DEG);
-    const East = [-sl, cl, 0], North = [-sp*cl, -sp*sl, cp], Up = [cp*cl, cp*sl, sp];
+    // Column layout bakes the splat Y-up→Z-up RX into the frame: columns East, −Up, North, origin.
+    const { EAST: East, NORTH: North, UP: Up } = enuFrame(lon, lat);
     console.log(`[lcc-live] georef EPSG:${meta.epsg} (lon_0=${lon0}) → ${lon.toFixed(4)},${lat.toFixed(4)}`);
     return [East[0],East[1],East[2],0, -Up[0],-Up[1],-Up[2],0, North[0],North[1],North[2],0, e[0],e[1],e[2],1];
   } catch (err) { console.warn(`[lcc-live] georef failed for EPSG:${meta.epsg}: ${err.message} — local origin`); return null; }
@@ -111,7 +103,7 @@ async function getCtx(url) {
   return ctx;
 }
 
-function buildTileset(ctx, urlParam) {
+function buildTileset(ctx, urlParam, centroids = false) {
   const enc = encodeURIComponent(urlParam);
   const geAt = d => ctx.rootGE * Math.pow(DEPTH_RATIO, d);
   const children = [];
@@ -127,28 +119,28 @@ function buildTileset(ctx, urlParam) {
   }
   const root = { boundingVolume: { box: ctx.sceneBox }, geometricError: ctx.rootGE * 2, refine: 'REPLACE', children };
   if (ctx.transform) root.transform = ctx.transform;        // ENU→ECEF placement from meta.lcc epsg+offset
-  return {
-    asset: { version: '1.1' }, geometricError: ctx.rootGE * 2,
-    root,
-    extensionsUsed: ['3DTILES_content_gltf'],
-    extensions: { '3DTILES_content_gltf': {
-      extensionsUsed: ['KHR_gaussian_splatting', 'KHR_gaussian_splatting_compression_spz_2'],
-      extensionsRequired: ['KHR_gaussian_splatting', 'KHR_gaussian_splatting_compression_spz_2'],
-    }},
-  };
+  const ts = { asset: { version: '1.1' }, geometricError: ctx.rootGE * 2, root, extensionsUsed: ['3DTILES_content_gltf'] };
+  // centroids mode emits glTF POINTS tiles → do NOT advertise the gaussian-splatting extension.
+  if (!centroids) ts.extensions = { '3DTILES_content_gltf': {
+    extensionsUsed: ['KHR_gaussian_splatting', 'KHR_gaussian_splatting_compression_spz_2'],
+    extensionsRequired: ['KHR_gaussian_splatting', 'KHR_gaussian_splatting_compression_spz_2'],
+  }};
+  return ts;
 }
 
-async function serveTileGlb(ctx, off, size, pts) {
+async function serveTileGlb(ctx, off, size, pts, centroids = false) {
   const buf = await rangeGet(ctx.dataUrl, off, size);
   const { positions, alphas, rgb, scales, rotations } = decodeSplats(buf, 0, pts, ctx.scaleMin, ctx.scaleMax);
   const bounds = computeBounds(positions, pts);
-  return Buffer.from(await buildSplatTileGlb({ positions, alphas, rgb, scales, rotations }, pts, bounds, false));
+  return Buffer.from(await buildSplatTileGlb({ positions, alphas, rgb, scales, rotations }, pts, bounds, centroids));
 }
 
 // Pure builders for the /stream dispatcher.
 export const lccTileRe = /^\d+_\d+_\d+$/;
-export async function lccTileset(url) { return buildTileset(await getCtx(url), url); }
-export async function lccTile(url, key) { const [o, s, p] = key.split('_').map(Number); return serveTileGlb(await getCtx(url), o, s, p); }
+// hierarchy/prefetch are no-ops (LCC's unit grid lives in one index.bin — monolithic flat index,
+// cache=none ≡ cache=hierarchy; cache=full routes to /convert). `centroids` → POINTS preview.
+export async function lccTileset(url, opts = {}) { return buildTileset(await getCtx(url), url, opts.centroids); }
+export async function lccTile(url, key, opts = {}) { const [o, s, p] = key.split('_').map(Number); return serveTileGlb(await getCtx(url), o, s, p, opts.centroids); }
 
 /** Try to handle a /lcc/* request. Returns true iff it owned the response. */
 export async function handleLcc(req, res, u) {

@@ -13,9 +13,7 @@
 import path from 'node:path';
 import { readFile as readSplatFile, MemoryReadFileSystem } from '@playcanvas/splat-transform';
 import { extractRange } from '../sog-to-3dtiles/src/sogChunk.js';
-import { buildSplatTileGlb, computeBounds } from '../core/index.js';
-
-const CORS = { 'Access-Control-Allow-Origin': '*', 'Access-Control-Allow-Headers': '*' };
+import { buildSplatTileGlb, computeBounds, CORS } from '../core/index.js';
 
 // glTF Y-up → 3D Tiles Z-up box (RX +90°): centre (cx,cy,cz)→(cx,−cz,cy); half-extents y↔z.
 function boundToZUpBox(min, max) {
@@ -68,7 +66,7 @@ async function getChunkTable(ctx, fileIdx) {
 
 // Build the 3D Tiles tree from lod.tree (bounds persisted → no decode). Each leaf LOD run becomes a
 // REPLACE-chain tile whose content URI encodes the run: tile/<file>_<offset>_<count>.glb.
-function buildTileset(ctx, urlParam) {
+function buildTileset(ctx, urlParam, centroids = false) {
   const enc = encodeURIComponent(urlParam);
   const rootDiag = boundDiagonal(ctx.lod.tree.bound.min, ctx.lod.tree.bound.max);
   const ROOT_GE = rootDiag * ROOT_GE_FACTOR;
@@ -99,27 +97,28 @@ function buildTileset(ctx, urlParam) {
   const RX90 = [1,0,0,0, 0,0,-1,0, 0,1,0,0, 0,0,0,1];
   const root = build(ctx.lod.tree, 0).tile;
   root.transform = RX90;
-  return {
-    asset: { version: '1.1' }, geometricError: rootDiagGE, root,
-    extensionsUsed: ['3DTILES_content_gltf'],
-    extensions: { '3DTILES_content_gltf': {
-      extensionsUsed: ['KHR_gaussian_splatting', 'KHR_gaussian_splatting_compression_spz_2'],
-      extensionsRequired: ['KHR_gaussian_splatting', 'KHR_gaussian_splatting_compression_spz_2'],
-    }},
-  };
+  const ts = { asset: { version: '1.1' }, geometricError: rootDiagGE, root, extensionsUsed: ['3DTILES_content_gltf'] };
+  // centroids mode emits glTF POINTS tiles → do NOT advertise the gaussian-splatting extension.
+  if (!centroids) ts.extensions = { '3DTILES_content_gltf': {
+    extensionsUsed: ['KHR_gaussian_splatting', 'KHR_gaussian_splatting_compression_spz_2'],
+    extensionsRequired: ['KHR_gaussian_splatting', 'KHR_gaussian_splatting_compression_spz_2'],
+  }};
+  return ts;
 }
 
-async function serveTileGlb(ctx, file, offset, count) {
+async function serveTileGlb(ctx, file, offset, count, centroids = false) {
   const table = await getChunkTable(ctx, file);
   const { positions, alphas, rgb, scales, rotations } = extractRange(table, offset, count);
   const bounds = computeBounds(positions, count);
-  return Buffer.from(await buildSplatTileGlb({ positions, alphas, rgb, scales, rotations }, count, bounds, false));
+  return Buffer.from(await buildSplatTileGlb({ positions, alphas, rgb, scales, rotations }, count, bounds, centroids));
 }
 
 // Pure builders for the /stream dispatcher.
 export const sogTileRe = /^\d+_\d+_\d+$/;
-export async function sogTileset(url) { return buildTileset(await getCtx(url), url); }
-export async function sogTile(url, key) { const [f, o, c] = key.split('_').map(Number); return serveTileGlb(await getCtx(url), f, o, c); }
+// hierarchy/prefetch are no-ops (streamed-SOG's whole tree lives in one lod-meta.json — monolithic
+// index, cache=none ≡ cache=hierarchy; cache=full routes to /convert). `centroids` → POINTS preview.
+export async function sogTileset(url, opts = {}) { return buildTileset(await getCtx(url), url, opts.centroids); }
+export async function sogTile(url, key, opts = {}) { const [f, o, c] = key.split('_').map(Number); return serveTileGlb(await getCtx(url), f, o, c, opts.centroids); }
 
 /** Try to handle a /sog/* request. Returns true iff it owned the response. */
 export async function handleSog(req, res, u) {

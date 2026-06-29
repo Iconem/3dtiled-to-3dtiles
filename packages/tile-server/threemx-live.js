@@ -1,0 +1,157 @@
+/**
+ * threemx-live.js — live **Bentley/Acute3D 3MX → OGC 3D Tiles** streaming middleware.
+ *
+ * 3MX is a named-node mesh-pyramid DAG (not an octree), so — like the I3S/RAD adapters — it's served as
+ * **lazy external-tileset fragments keyed by file path**: one `.3mxb` → one tileset.json fragment, whose
+ * child `.3mxb` references become external-tileset refs fetched as the camera refines in. Geometry is
+ * **OpenCTM** (decoded via the vendored js-openctm) + **JPEG** textures (passthrough); each node's
+ * textured mesh is assembled into a glTF with glTF-Transform.
+ *
+ *   GET /threemx/tileset.json?url=<Scene.3mx | root.3mxb URL>
+ *   GET /threemx/node/<encRelPath>.json?url=<master>     (lazy fragment for a child .3mxb)
+ *   GET /threemx/tile/<encRelPath>__<nodeIdx>.glb?url=<master>
+ *
+ * Master `.3mx` JSON: layers[0] = { SRS, SRSOrigin, root }. `.3mxb`: "3MXBO" + uint32LE headerSize +
+ * JSON header { nodes:[{bbMin,bbMax,maxScreenDiameter,children,resources}], resources:[{id,type,format,size}] }
+ * + concatenated payload buffers (sliced by resource size, in order). Child paths are relative to the
+ * containing `.3mxb`'s directory → remote-friendly (we URL-join against the master's base).
+ */
+import path from 'node:path';
+import { Document, NodeIO } from '@gltf-transform/core';
+import { sendJson, sendGlb, sendErr, georefFromCrs } from '../core/index.js';
+import { decodeCTM } from '../threemx-to-3dtiles/src/ctm-decode.js';
+
+const CTM_RE = /__\d+$/;
+const fetchBuf = async (u) => { const r = await fetch(u); if (!r.ok) throw new Error(`fetch ${u} → ${r.status}`); return Buffer.from(await r.arrayBuffer()); };
+const baseOf = (u) => u.slice(0, u.lastIndexOf('/') + 1);
+const joinRel = (relDir, child) => path.posix.normalize(path.posix.join(relDir, child));
+
+// ── per-URL context (master .3mx parse → base + root rel path + georef) ─────────
+const ctxCache = new Map();
+async function getCtx(url) {
+  if (ctxCache.has(url)) return ctxCache.get(url);
+  const base = baseOf(url);
+  let rootRel, transform = null;
+  if (/\.3mx(\?|$)/i.test(url)) {
+    const master = JSON.parse((await fetchBuf(url)).toString('utf8'));
+    const layer = (master.layers || [])[0] || {};
+    rootRel = layer.root;
+    const origin = layer.SRSOrigin || layer.offset;
+    if (layer.SRS && Array.isArray(origin)) transform = georefFromCrs(origin, layer.SRS, 'threemx-live');
+  } else {
+    rootRel = path.posix.basename(url);        // pointed straight at a root .3mxb (no master / SRS)
+  }
+  const ctx = { base, rootRel, transform };
+  ctxCache.set(url, ctx);
+  console.log(`[threemx-live] ${url} → root=${rootRel}, georef=${!!transform}`);
+  return ctx;
+}
+
+// Parse a .3mxb → { nodes, payload:Map<resourceId,{format,data}> }.
+function parse3mxb(buf) {
+  if (buf.toString('latin1', 0, 5) !== '3MXBO') throw new Error('not a 3MXBO file');
+  let hs = buf.readUInt32LE(5), jsonEnd = 9 + hs;
+  if (jsonEnd > buf.length) {                  // some files (e.g. hand-authored roots) carry a bogus size
+    const txt = buf.toString('latin1'); const s = txt.indexOf('{'); let d = 0, e = -1;
+    for (let i = s; i < txt.length; i++) { const c = txt[i]; if (c === '{') d++; else if (c === '}' && --d === 0) { e = i; break; } }
+    jsonEnd = e + 1;
+  }
+  const header = JSON.parse(buf.toString('utf8', 9, jsonEnd));
+  const payload = new Map();
+  let off = jsonEnd;
+  for (const r of header.resources || []) { payload.set(r.id, { format: r.format, data: buf.subarray(off, off + r.size) }); off += r.size; }
+  return { nodes: header.nodes || [], payload };
+}
+
+// 3D Tiles box [cx,cy,cz, hx,0,0, 0,hy,0, 0,0,hz] from bbMin/bbMax (3MX SRS-origin-relative coords).
+const boxOf = (mn, mx) => {
+  const c = [0, 1, 2].map(k => (mn[k] + mx[k]) / 2), h = [0, 1, 2].map(k => Math.max((mx[k] - mn[k]) / 2, 1e-3));
+  return [c[0], c[1], c[2], h[0], 0, 0, 0, h[1], 0, 0, 0, h[2]];
+};
+const diagOf = (mn, mx) => Math.hypot(mx[0] - mn[0], mx[1] - mn[1], mx[2] - mn[2]);
+// maxScreenDiameter is screen-px-on-bounding-sphere; 0 = "always refine". Use bbox diagonal as a
+// monotonic geometric error (children are smaller → naturally decreasing). Tunable.
+const geOf = (node) => { const d = diagOf(node.bbMin, node.bbMax); return node.maxScreenDiameter > 0 ? d / node.maxScreenDiameter : d; };
+
+// ── lazy fragment: one .3mxb → a tileset.json (its nodes as children; child .3mxb → external refs) ──
+async function buildFragment(ctx, relPath, masterUrl, isRoot) {
+  const enc = encodeURIComponent(masterUrl);
+  const buf = await fetchBuf(ctx.base + relPath);
+  const { nodes } = parse3mxb(buf);
+  const relDir = path.posix.dirname(relPath);
+
+  const tiles = nodes.map((node, i) => {
+    const tile = { boundingVolume: { box: boxOf(node.bbMin, node.bbMax) }, geometricError: geOf(node), refine: 'REPLACE' };
+    if ((node.resources || []).length) tile.content = { uri: `/threemx/tile/${encodeURIComponent(relPath)}__${i}.glb?url=${enc}` };
+    const kids = [];
+    for (const childRel of node.children || []) {
+      const cr = joinRel(relDir, childRel);
+      kids.push({ boundingVolume: { box: boxOf(node.bbMin, node.bbMax) }, geometricError: geOf(node) * 0.5, refine: 'REPLACE',
+                  content: { uri: `/threemx/node/${encodeURIComponent(cr)}.json?url=${enc}` } });
+    }
+    if (kids.length) tile.children = kids;
+    return tile;
+  });
+
+  // Wrap this file's nodes under one root tile (union box) so the fragment has a single root.
+  let mn = [Infinity, Infinity, Infinity], mx = [-Infinity, -Infinity, -Infinity];
+  for (const n of nodes) for (let k = 0; k < 3; k++) { mn[k] = Math.min(mn[k], n.bbMin[k]); mx[k] = Math.max(mx[k], n.bbMax[k]); }
+  const root = { boundingVolume: { box: boxOf(mn, mx) }, geometricError: diagOf(mn, mx) * 2, refine: 'REPLACE', children: tiles };
+  if (isRoot && ctx.transform) root.transform = ctx.transform;
+  return { asset: { version: '1.1' }, geometricError: root.geometricError, root, extensionsUsed: ['3DTILES_content_gltf'] };
+}
+
+// ── per-node textured GLB (OpenCTM → glTF + JPEG baseColor) ─────────────────────
+async function buildNodeGlb(ctx, relPath, nodeIdx) {
+  const { nodes, payload } = parse3mxb(await fetchBuf(ctx.base + relPath));
+  const node = nodes[nodeIdx];
+  if (!node) return null;
+  let ctm = null, jpg = null;
+  for (const id of node.resources || []) { const r = payload.get(id); if (!r) continue; if (r.format === 'ctm') ctm = r.data; else if (r.format === 'jpg') jpg = r.data; }
+  if (!ctm) return null;
+  const g = decodeCTM(ctm);
+
+  const doc = new Document();
+  const buffer = doc.createBuffer();
+  const pos = doc.createAccessor().setType('VEC3').setArray(g.positions instanceof Float32Array ? g.positions : new Float32Array(g.positions)).setBuffer(buffer);
+  const idx = doc.createAccessor().setType('SCALAR').setArray(g.indices instanceof Uint32Array ? g.indices : new Uint32Array(g.indices)).setBuffer(buffer);
+  const prim = doc.createPrimitive().setAttribute('POSITION', pos).setIndices(idx);
+  if (g.uvs && jpg) {
+    const uv = doc.createAccessor().setType('VEC2').setArray(g.uvs instanceof Float32Array ? g.uvs : new Float32Array(g.uvs)).setBuffer(buffer);
+    prim.setAttribute('TEXCOORD_0', uv);
+    const tex = doc.createTexture().setImage(jpg instanceof Uint8Array ? jpg : new Uint8Array(jpg)).setMimeType('image/jpeg');
+    prim.setMaterial(doc.createMaterial().setBaseColorTexture(tex).setMetallicFactor(0).setRoughnessFactor(1));
+  }
+  const n = doc.createNode().setMesh(doc.createMesh().addPrimitive(prim));
+  doc.createScene().addChild(n);
+  return Buffer.from(await new NodeIO().writeBinary(doc));
+}
+
+// Pure builders for the dispatcher.
+export const threemxTileRe = /^.+$/;
+export async function threemxTileset(url) { const ctx = await getCtx(url); return buildFragment(ctx, ctx.rootRel, url, true); }
+
+/** Try to handle a /threemx/* request. Returns true iff it owned the response. */
+export async function handleThreemx(req, res, u) {
+  if (!u.pathname.startsWith('/threemx/')) return false;
+  const url = u.searchParams.get('url');
+  if (!url) { sendErr(res, 400, 'missing ?url=<.3mx or .3mxb URL>'); return true; }
+  try {
+    if (u.pathname === '/threemx/tileset.json') { sendJson(res, await threemxTileset(url)); return true; }
+    const ctx = await getCtx(url);
+    const n = u.pathname.match(/^\/threemx\/node\/(.+)\.json$/);
+    if (n) { sendJson(res, await buildFragment(ctx, decodeURIComponent(n[1]), url, false)); return true; }
+    const t = u.pathname.match(/^\/threemx\/tile\/(.+)__(\d+)\.glb$/);
+    if (t) {
+      const glb = await buildNodeGlb(ctx, decodeURIComponent(t[1]), Number(t[2]));
+      if (!glb) { sendErr(res, 404, 'no geometry'); return true; }
+      sendGlb(res, glb);
+      return true;
+    }
+    sendErr(res, 404, 'not found');
+  } catch (e) {
+    console.error('[threemx-live]', e.message);
+    if (!res.headersSent) sendErr(res, 500, e.message); else res.end();
+  }
+  return true;
+}

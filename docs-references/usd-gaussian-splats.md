@@ -41,9 +41,9 @@ leaf splat content** (sibling to our SPZ glb tiles), but the **streaming HLOD tr
 until a USD streaming-LOD standard matures. Watch the AOUSD working groups and Omniverse's spatial /
 "Nucleus"-side streaming for movement here.
 
-## Apple Maps splats (2025)
+## Apple Maps splats (2026)
 
-Apple Maps' photorealistic "splat" content (rolled out 2025) is almost certainly a **custom HLOD tree
+Apple Maps' photorealistic "splat" content (introduced early 2026) is almost certainly a **custom HLOD tree
 of Gaussian splats** — they would not stream city-scale splats without a spatial level-of-detail
 hierarchy (the same problem 3D Tiles / our RAD path solve). Given Apple's USD investment, a plausible
 shape is **leaf nodes carrying `ParticleField3DGaussianSplat`** (or an internal equivalent) under a

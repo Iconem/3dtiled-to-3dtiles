@@ -51,12 +51,12 @@ export const streamableFormats = Object.keys(ADAPTERS);
 // Append &format=<fmt> to every relative content/subtree URI (so the follow-up /stream/{tile,subtrees}
 // requests carry the format and dispatch to the same adapter). Handles both the explicit nested-tree
 // uris and the implicit `{level}-{x}-{y}-{z}` templates.
-function tagContentUris(node, fmt) {
-  if (Array.isArray(node)) { for (const v of node) tagContentUris(v, fmt); return; }
+function tagContentUris(node, suffix) {
+  if (Array.isArray(node)) { for (const v of node) tagContentUris(v, suffix); return; }
   if (!node || typeof node !== 'object') return;
   for (const [k, v] of Object.entries(node)) {
-    if (k === 'uri' && typeof v === 'string' && (v.startsWith('tile/') || v.startsWith('subtrees/'))) node[k] = v + `&format=${fmt}`;
-    else tagContentUris(v, fmt);
+    if (k === 'uri' && typeof v === 'string' && (v.startsWith('tile/') || v.startsWith('subtrees/'))) node[k] = v + suffix;
+    else tagContentUris(v, suffix);
   }
 }
 
@@ -86,16 +86,28 @@ export async function handleStream(req, res, u) {
   }
 
   if (u.pathname === '/stream/tileset.json') {
-    // octree adapters honor &tiling (default implicit); non-octree (sog/lcc) ignore it.
-    const ts = await adapter.tileset(url, { tiling: u.searchParams.get('tiling') });
-    tagContentUris(ts.root, fmt);
+    // Unified live knobs (Axis B): hierarchy=eager|lazy (default lazy) + prefetch=<N levels>.
+    // octree adapters also honor &tiling (default implicit). Non-octree (sog/lcc) ignore the lot.
+    // Back-compat: &lazy=1 still forces lazy. hierarchy=lazy ⇒ I3S lazy fragments.
+    const hierarchy = u.searchParams.get('hierarchy') || (/(^|&)lazy=(1|true)/.test(u.search) ? 'lazy' : null);
+    // prefetch: 0 = warm nothing · N≥1 = warm N hierarchy levels in the background · -1 = warm ALL
+    // (lazy cold start + full background drain). Applies to cache=none only. Default 1.
+    const prefetch = u.searchParams.has('prefetch') ? Math.trunc(Number(u.searchParams.get('prefetch')) || 0) : undefined;
+    const lazy = hierarchy ? hierarchy !== 'eager' : (u.searchParams.get('lazy') === '1' || u.searchParams.get('lazy') === 'true');
+    // centroids: tiled-splat formats (sog/lcc/rad) emit glTF POINTS of splat centres instead of full
+    // gaussians — a cheap preview. Affects the tileset (drops the KHR_gaussian_splatting requirement)
+    // and each tile, so it must ride along on the child tile URIs too.
+    const centroids = u.searchParams.get('centroids') === '1' || u.searchParams.get('centroids') === 'true';
+    const ts = await adapter.tileset(url, { tiling: u.searchParams.get('tiling'), lazy, hierarchy, prefetch, centroids });
+    tagContentUris(ts.root, `&format=${fmt}` + (centroids ? '&centroids=1' : ''));
     res.writeHead(200, { 'Content-Type': 'application/json', ...CORS });
     res.end(JSON.stringify(ts));
     return true;
   }
   const m = u.pathname.match(/^\/stream\/tile\/(.+)\.glb$/);
   if (m && adapter.tileRe.test(m[1])) {
-    const glb = await adapter.tile(url, m[1]);
+    const centroids = u.searchParams.get('centroids') === '1' || u.searchParams.get('centroids') === 'true';
+    const glb = await adapter.tile(url, m[1], { centroids });
     if (!glb) { res.writeHead(404, CORS); res.end('no such node'); return true; }
     res.writeHead(200, { 'Content-Type': 'model/gltf-binary', ...CORS });
     res.end(glb);

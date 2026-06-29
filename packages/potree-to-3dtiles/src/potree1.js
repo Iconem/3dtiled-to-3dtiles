@@ -100,6 +100,10 @@ export async function loadPotree1(dir, opts = {}) {
   const hrcRel = (name) => [octreeDir, ...chunkDirs(name)].join('/');   // dir holding <name>.hrc
 
   const nodes = new Map();
+  // Box of any node, derived purely from its name (octant path) — lets the lazy path place a node
+  // without having the whole hierarchy in memory.
+  const boxOf = (name) => { let b = rootBox; for (const ch of name.slice(1)) b = childBox(b, +ch); return b; };
+  let loadChunk = null;   // lazy single-.hrc-chunk loader (set below for the .hrc layout)
 
   if (inline) {
     // Build the tree directly from the inline [name, numPoints] list; boxes by octant subdivision.
@@ -110,10 +114,11 @@ export async function loadPotree1(dir, opts = {}) {
       nodes.set(name, { name, numPoints, depth: name.length - 1, box });
     }
   } else {
-    // Walk the `.hrc` chunks (5 B/node: childMask u8 + numPoints u32), recursing at chunk edges.
-    async function loadHrc(name, box) {
+    // Load ONE `.hrc` chunk (5 B/node: childMask u8 + numPoints u32) covering `stepSize` levels from
+    // `name`; fills `nodes`; returns the boundary children [{name,box}] where the NEXT chunk begins.
+    async function loadOneChunk(name, box) {
       let buf;
-      try { buf = await read(`${hrcRel(name)}/${name}.hrc`); } catch { return; }
+      try { buf = await read(`${hrcRel(name)}/${name}.hrc`); } catch { return []; }
       const queue = [{ name, box }]; let rec = 0; const boundary = [];
       while (queue.length && rec * 5 < buf.length) {
         const { name: nm, box: bx } = queue.shift();
@@ -129,9 +134,21 @@ export async function loadPotree1(dir, opts = {}) {
           else queue.push({ name: cn, box: cb });
         }
       }
-      for (const b of boundary) await loadHrc(b.name, b.box);
+      return boundary;
     }
-    await loadHrc('r', rootBox);
+    loadChunk = loadOneChunk;   // expose for the lazy streaming path (one chunk per request)
+
+    // Eager full walk (offline converter + non-lazy live): recurse into every child chunk. Bounded
+    // parallel — the original sequential `for…await` serialized thousands of HTTP round-trips for big
+    // clouds (e.g. a 302M-pt Potree 1.7 cloud) and hung for minutes. `nodes` is a Map; concurrent
+    // .set() is safe in single-threaded JS (async interleaving, no data race).
+    async function loadHrc(name, box) {
+      const boundary = await loadOneChunk(name, box);
+      const LIMIT = 24;
+      for (let i = 0; i < boundary.length; i += LIMIT)
+        await Promise.all(boundary.slice(i, i + LIMIT).map(b => loadHrc(b.name, b.box)));
+    }
+    if (!opts.lazy) await loadHrc('r', rootBox);
   }
 
   // ── Node decoders ──────────────────────────────────────────────────────────
@@ -141,7 +158,7 @@ export async function loadPotree1(dir, opts = {}) {
     const records = await Las.PointData.decompressFile(bytes);   // laz-perf WASM
     const view = Las.View.create(records, header);
     const n = view.pointCount;
-    const positions = new Float32Array(n * 3);
+    const positions = new Float64Array(n * 3);   // world coords (UTM etc.) → float64; caller subtracts origin then casts
     const colors = new Float32Array(n * 4);
     const gx = view.getter('X'), gy = view.getter('Y'), gz = view.getter('Z');
     let gr = null, gg = null, gb = null, gi = null;
@@ -162,7 +179,7 @@ export async function loadPotree1(dir, opts = {}) {
   async function readBinNode(node) {
     let buf; try { buf = await read(nodeFile(node.name)); } catch { return null; }
     const n = Math.floor(buf.length / pointSize);
-    const positions = new Float32Array(n * 3);
+    const positions = new Float64Array(n * 3);   // world coords → float64; caller subtracts origin then casts to float32
     const colors = (colA || intA) ? new Float32Array(n * 4) : null;
     // Potree 1.x POSITION_CARTESIAN is NODE-RELATIVE: world = raw·scale + THIS NODE's box.min.
     // (Raw values span 0..nodeWidth, so the global cloud min would pile every node at the corner;
@@ -184,5 +201,6 @@ export async function loadPotree1(dir, opts = {}) {
   // cloud.js may carry a CRS (`projection` = WKT/proj4) — surface it for downstream geo-referencing
   // (e.g. a future potree-to-copc, which needs the CRS in the COPC/LAS WKT VLR).
   const crs = cloud.projection || cloud.srs || cloud.wkt || null;
-  return { version: cloud.version || '1.x', meta: cloud, nodes, rootBox, spacing: cloud.spacing, crs, readNode, close: () => {} };
+  return { version: cloud.version || '1.x', meta: cloud, nodes, rootBox, spacing: cloud.spacing, crs,
+           readNode, boxOf, loadChunk, stepSize, inline, close: () => {} };
 }

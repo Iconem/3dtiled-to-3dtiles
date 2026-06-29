@@ -10,24 +10,9 @@
  *   GET /copc/tile/<D-X-Y-Z>.glb?url=<COPC_URL>    → that node's points as a POINTS GLB
  */
 import { Copc, Getter } from 'copc';
-import proj4 from 'proj4';
-import { buildPointsGlb, keyToCoords, buildSubtreeBuffer } from '../core/index.js';
+import { buildPointsGlb, keyToCoords, coordsToKey, buildSubtreeBuffer, CORS, georefFromCrs, buildImplicitTileset } from '../core/index.js';
 
 const SUBTREE_LEVELS = 3;
-
-const CORS = { 'Access-Control-Allow-Origin': '*', 'Access-Control-Allow-Headers': '*' };
-const DEG = Math.PI / 180, A = 6378137.0, E2 = 0.00669437999014;
-
-const llhToEcef = (lon, lat, h) => {
-  const sLat = Math.sin(lat*DEG), cLat = Math.cos(lat*DEG), sLon = Math.sin(lon*DEG), cLon = Math.cos(lon*DEG);
-  const N = A / Math.sqrt(1 - E2*sLat*sLat);
-  return [(N+h)*cLat*cLon, (N+h)*cLat*sLon, (N*(1-E2)+h)*sLat];
-};
-// Column-major ENU→ECEF (columns East, North, Up, origin).
-const enuMatrix = (lon, lat, cx, cy, cz) => {
-  const sl = Math.sin(lon*DEG), cl = Math.cos(lon*DEG), sp = Math.sin(lat*DEG), cp = Math.cos(lat*DEG);
-  return [-sl,cl,0,0, -sp*cl,-sp*sl,cp,0, cp*cl,cp*sl,sp,0, cx,cy,cz,1];
-};
 
 // Read the LASF_Projection/2112 WKT VLR via a range read (copc exposes offset+length, not bytes).
 async function readWkt(getter, copc) {
@@ -56,24 +41,67 @@ async function getCtx(url) {
   if (magic !== 'LASF') throw new Error(`not a LAS/COPC file (got "${magic}" not "LASF") — is this the right URL for /copc?`);
   const copc = await Copc.create(getter);
   const nodeMap = new Map();
-  const loadPage = async (ref) => {
-    const { nodes, pages } = await Copc.loadHierarchyPage(getter, ref);
-    for (const k of Object.keys(nodes)) nodeMap.set(k, nodes[k]);
-    for (const k of Object.keys(pages)) if (pages[k]) await loadPage(pages[k]);
+  const pendingPages = new Map();    // key → pageRef (known but not yet loaded)
+
+  // Load ONE hierarchy page: fold its nodes into nodeMap, its sub-pages into pendingPages.
+  const loadOnePage = async (ref) => {
+    const { nodes: pn, pages: pp } = await Copc.loadHierarchyPage(getter, ref);
+    for (const k of Object.keys(pn)) nodeMap.set(k, pn[k]);
+    for (const k of Object.keys(pp)) if (pp[k] && !nodeMap.has(k)) pendingPages.set(k, pp[k]);
   };
-  await loadPage(copc.info.rootHierarchyPage);
+  // Eagerly load only the root page (fast — small, contains the top levels).
+  await loadOnePage(copc.info.rootHierarchyPage);
+
   const cube = copc.info.cube;
   const origin = [(cube[0]+cube[3])/2, (cube[1]+cube[4])/2, (cube[2]+cube[5])/2];
   let transform = null;
   try {
     const wkt = await readWkt(getter, copc);
-    if (wkt) { const [lon, lat, h] = proj4(wkt, 'WGS84').forward(origin); const e = llhToEcef(lon, lat, h ?? origin[2]); transform = enuMatrix(lon, lat, e[0], e[1], e[2]); }
+    if (wkt) transform = georefFromCrs(origin, wkt, 'copc-live');
     else console.warn(`[copc-live] no WKT CRS in ${url} — local-origin (not geo-referenced)`);
   } catch (e) { console.warn('[copc-live] georef failed:', e.message); }
   const rootDiag = Math.hypot(cube[3]-cube[0], cube[4]-cube[1], cube[5]-cube[2]);
-  const ctx = { getter, copc, nodeMap, origin, transform, rootDiag, cube };
+
+  // For subtree (L,x,y,z): load pending pages whose cells overlap the [L, L+SUBTREE_LEVELS] block.
+  const ensureForSubtree = async (L, x, y, z) => {
+    const maxLvl = L + SUBTREE_LEVELS;
+    const cells = 2 ** L;
+    const span = [(cube[3]-cube[0])/cells, (cube[4]-cube[1])/cells, (cube[5]-cube[2])/cells];
+    const tMin = [cube[0]+x*span[0], cube[1]+y*span[1], cube[2]+z*span[2]];
+    const tMax = [tMin[0]+span[0], tMin[1]+span[1], tMin[2]+span[2]];
+    let changed = true;
+    while (changed) {
+      changed = false;
+      const toLoad = [];
+      for (const [pageKey, pageRef] of pendingPages) {
+        const { level: pl, x: px, y: py, z: pz } = keyToCoords(pageKey);
+        if (pl > maxLvl) continue;
+        const pCells = 2 ** pl;
+        const pSp = [(cube[3]-cube[0])/pCells, (cube[4]-cube[1])/pCells, (cube[5]-cube[2])/pCells];
+        const pMin = [cube[0]+px*pSp[0], cube[1]+py*pSp[1], cube[2]+pz*pSp[2]];
+        const pMax = [pMin[0]+pSp[0], pMin[1]+pSp[1], pMin[2]+pSp[2]];
+        if ([0,1,2].every(k => pMin[k] < tMax[k] && pMax[k] > tMin[k])) toLoad.push([pageKey, pageRef]);
+      }
+      if (toLoad.length) {
+        changed = true;
+        await Promise.all(toLoad.map(async ([k, ref]) => { pendingPages.delete(k); await loadOnePage(ref); }));
+      }
+    }
+  };
+
+  // cache=hierarchy: drain ALL pending pages into the shared ctx (whole index in RAM, warm forever).
+  // Mutates the single cached ctx (like Potree's drainAll2) so later subtree requests reuse it.
+  let drained = false;
+  const drainAll = async () => {
+    if (drained) return; drained = true;
+    while (pendingPages.size) { const batch = [...pendingPages]; pendingPages.clear(); await Promise.all(batch.map(([, ref]) => loadOnePage(ref))); }
+  };
+
+  let warmed = false;   // guard so background prefetch fires at most once per ctx
+  const ctx = { getter, copc, nodeMap, origin, transform, rootDiag, cube, ensureForSubtree, drainAll,
+                get warmed() { return warmed; }, set warmed(v) { warmed = v; } };
   ctxCache.set(url, ctx);
-  console.log(`[copc-live] ${url} → ${nodeMap.size} nodes, georef=${!!transform}`);
+  console.log(`[copc-live] ${url} → root page loaded (${nodeMap.size} nodes), pending=${pendingPages.size} child pages, georef=${!!transform}`);
   return ctx;
 }
 
@@ -109,18 +137,13 @@ function buildTilesetExplicit(ctx, urlParam) {
 
 // Implicit octree: one root with implicitTiling + content/subtree templates (subtrees built on the fly).
 function buildTilesetImplicit(ctx, urlParam) {
-  const { origin, transform, rootDiag, cube } = ctx;
-  const enc = encodeURIComponent(urlParam);
+  const { transform, rootDiag, cube } = ctx;
   let maxLevel = 0;
   for (const key of ctx.nodeMap.keys()) { const l = keyToCoords(key).level; if (l > maxLevel) maxLevel = l; }
-  const root = {
-    boundingVolume: { box: [0,0,0, (cube[3]-cube[0])/2,0,0, 0,(cube[4]-cube[1])/2,0, 0,0,(cube[5]-cube[2])/2] },
-    refine: 'ADD', geometricError: rootDiag,
-    implicitTiling: { subdivisionScheme: 'OCTREE', availableLevels: maxLevel + 1, subtreeLevels: SUBTREE_LEVELS, subtrees: { uri: `subtrees/{level}-{x}-{y}-{z}.subtree?url=${enc}` } },
-    content: { uri: `tile/{level}-{x}-{y}-{z}.glb?url=${enc}` },
-  };
-  if (transform) root.transform = transform;
-  return { asset: { version: '1.1' }, geometricError: rootDiag, root, extensionsUsed: ['3DTILES_content_gltf'] };
+  if (maxLevel < 8) maxLevel = 8;   // generous floor: lazy root page may cover only a few levels
+  const box = [0,0,0, (cube[3]-cube[0])/2,0,0, 0,(cube[4]-cube[1])/2,0, 0,0,(cube[5]-cube[2])/2];
+  return buildImplicitTileset({ box, rootGeometricError: rootDiag, contentGeometricError: rootDiag,
+    maxLevel, subtreeLevels: SUBTREE_LEVELS, transform, urlParam });
 }
 
 async function serveTileGlb(ctx, key) {
@@ -150,10 +173,25 @@ async function serveTileGlb(ctx, key) {
 export const copcTileRe = /^[0-9]+-[0-9]+-[0-9]+-[0-9]+$/;
 export async function copcTileset(url, opts = {}) {
   const ctx = await getCtx(url);
+  if (opts.hierarchy === 'eager') {
+    await ctx.drainAll();                                   // cache=hierarchy: full index resident now
+  } else if (!ctx.warmed) {                                 // cache=none: background prefetch (once)
+    ctx.warmed = true;
+    const pf = opts.prefetch ?? 1;                          // 0 = none · N = N levels · -1 = all
+    if (pf === -1) Promise.resolve().then(() => { try { return ctx.drainAll(); } catch {} });
+    else if (pf > 0) Promise.resolve().then(async () => { try { for (let L = 0; L < pf; L++) await ctx.ensureForSubtree(L, 0, 0, 0); } catch {} });
+  }
   return opts.tiling === 'explicit' ? buildTilesetExplicit(ctx, url) : buildTilesetImplicit(ctx, url);
 }
 export async function copcTile(url, key) { return serveTileGlb(await getCtx(url), key); }
-export async function copcSubtree(url, key) { return buildSubtreeBuffer(key, (await getCtx(url)).nodeMap, SUBTREE_LEVELS); }
+export async function copcSubtree(url, key) {
+  const ctx = await getCtx(url);
+  if (ctx.ensureForSubtree) {
+    const { level, x, y, z } = keyToCoords(key);
+    await ctx.ensureForSubtree(level, x, y, z);
+  }
+  return buildSubtreeBuffer(key, ctx.nodeMap, SUBTREE_LEVELS);
+}
 
 /** Try to handle a /copc/* request. Returns true iff it owned the response. */
 export async function handleCopc(req, res, u) {

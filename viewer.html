@@ -366,6 +366,9 @@
   </div>
 
   <div id="url-bar">
+    <label id="rawurl-toggle" title="ON: field holds the RAW dataset URL — the viewer URL-encodes it and wraps it with the current format + cache + params. OFF: field holds a ready middleware/tileset URL, loaded as-is.">
+      <input id="rawurl-mode" type="checkbox" onchange="setRawUrlMode(this.checked)" /> raw url
+    </label>
     <input id="tileset-url" type="text" placeholder="http://localhost:3000/…/tileset.json" />
     <button onclick="loadTileset()">Load</button>
   </div>
@@ -513,8 +516,13 @@
 // `octree` formats (COPC/Potree) also honor the implicit/explicit toggle. All formats now stream.
 const MW = 'http://localhost:3001';                        // middleware
 const SDATA = 'http://localhost:3000/sample-data';         // Vite-served sample data
-let viewerMode = 'stream';                                 // 'stream' | 'offline' | 'convert' | 'tools'
+let viewerMode = 'stream';                                 // 'stream' (live streaming) | 'offline' (prebuilt) | 'tools'
 let tilingMode = 'implicit';                               // 'implicit' | 'explicit' (octree only)
+let cacheScope = 'none';                                   // 'none' (lazy) | 'hierarchy' (eager) | 'all' (→ /convert)
+let prefetchN  = 1;                                        // background-warm N hierarchy levels (cache=none); 0=none, -1=all
+let centroidsOnly = false;                                 // tiled-splat preview: POINTS centroids instead of gaussians
+let rawUrlMode = false;                                    // url field holds a RAW dataset url (wrap it) vs a ready url
+const SPLAT_FORMATS = new Set(['sog', 'lcc', 'rad']);      // formats that support centroids-only
 let selectedFormat = 'copc';                               // which FORMAT's assets are shown
 let toolName = 'implicit-to-explicit';                     // 'implicit-to-explicit' | 'upgrade'
 
@@ -582,15 +590,14 @@ const DIRECT = [
   { id: 'strasbourg', icon: '🏙', label: '3DT · Strasbourg', type: 'mesh', url: 'https://s3.eu-west-2.wasabisys.com/ems-sgct-photomaillage/ODACIT/EMS_PM2022/tileset.json' },
   { id: 'clermont', icon: '🏙', label: '3DT · Clermont', type: 'mesh', url: 'https://3d.craig.fr/datasets/Clermont/3dtiles/tileset.json' },
   { id: 'lille', icon: '🏙', label: '3DT · Lille', type: 'mesh', url: 'https://webimaging.lillemetropole.fr/externe/maillage/2016_mel_10cm/3dtiles/tileset.json' },
-  // Self-contained single-file packages (.3tz ZIP / .3dtiles SQLite), served in-place by /3dtiles-self-contained.
-  // Built locally by scripts/pack-3dtiles.mjs from the tastier RAD splat tileset. Paths resolve from repo root.
-  { id: 'pkg-3tz',     icon: '📦', label: '3DT · tastier .3tz',     type: 'splat', url: `${MW}/3dtiles-self-contained/tileset.json?url=${encodeURIComponent('sample-data/input/3DTILES-PACKAGES/tastier.3tz')}` },
-  { id: 'pkg-3dtiles', icon: '📦', label: '3DT · tastier .3dtiles', type: 'splat', url: `${MW}/3dtiles-self-contained/tileset.json?url=${encodeURIComponent('sample-data/input/3DTILES-PACKAGES/tastier.3dtiles')}` },
+  // Public CesiumGS open-data samples (raw GitHub, CORS-friendly) — verified 200.
+  { id: 'cgs-implicit', icon: '◈', label: '3DT · CesiumGS implicit (1.1)', type: 'mesh', url: 'https://raw.githubusercontent.com/CesiumGS/3d-tiles-samples/main/1.1/SparseImplicitQuadtree/tileset.json' },
+  { id: 'cgs-lod',      icon: '◈', label: '3DT · CesiumGS discrete-LOD',   type: 'mesh', url: 'https://raw.githubusercontent.com/CesiumGS/3d-tiles-samples/main/1.0/TilesetWithDiscreteLOD/tileset.json' },
+  // (tastier .3tz / .3dtiles packages live under the 📦 Packages pill, not here.)
 ];
 
 // Resolve an asset's tileset URL for the current mode (null = not available in this mode).
 function assetUrl(f, a) {
-  const tq = f.octree ? `&tiling=${tilingMode}` : '';
   if (viewerMode === 'offline') {
     if (f.octree && tilingMode === 'explicit') {
       const dir = encodeURIComponent(`sample-data/${a.out}`);
@@ -600,12 +607,32 @@ function assetUrl(f, a) {
   }
   // stream may use a different source than convert/offline (e.g. I3S streams the extracted
   // 3dSceneLayer.json rather than fetching the whole multi-GB .slpk) — honor a.streamSrc.
-  const streamSrc = encodeURIComponent(`${SDATA}/${a.streamSrc ?? a.src}`);
-  const src = encodeURIComponent(`${SDATA}/${a.src}`);
-  if (viewerMode === 'stream')  return f.stream ? `${MW}/stream/tileset.json?format=${f.fmt}&url=${streamSrc}${tq}` : null;
-  if (viewerMode === 'convert') return `${MW}/convert/tileset.json?format=${f.fmt}&url=${src}${tq}`;
+  if (viewerMode === 'stream') {
+    if (!f.stream) return null;
+    const rawSrc = `${SDATA}/${(cacheScope === 'all' ? a.src : (a.streamSrc ?? a.src))}`;
+    return buildMiddlewareUrl(rawSrc, f);
+  }
   return null;
 }
+
+// Extra stream/convert query for the CURRENT controls: octree tiling + centroids (tiled splats).
+function streamParams(f) {
+  let q = (f && f.octree) ? `&tiling=${tilingMode}` : '';
+  if (canCentroids() && centroidsOnly) q += '&centroids=1';
+  return q;
+}
+// Wrap a RAW source URL with the current format + cache scope + params → a middleware tileset URL.
+// cache=all → /convert (whole-dataset cache); cache=none|hierarchy → /stream (lazy|eager hierarchy).
+function buildMiddlewareUrl(rawSrc, f) {
+  f = f || fmtMeta(selectedFormat);
+  const fmt = f ? f.fmt : selectedFormat;
+  const enc = encodeURIComponent(rawSrc);
+  if (cacheScope === 'all') return `${MW}/convert/tileset.json?format=${fmt}&url=${enc}${streamParams(f)}`;
+  let q = `&hierarchy=${cacheScope === 'hierarchy' ? 'eager' : 'lazy'}`;
+  if (cacheScope === 'none') q += `&prefetch=${prefetchN}`;
+  return `${MW}/stream/tileset.json?format=${fmt}&url=${enc}${q}${streamParams(f)}`;
+}
+const canCentroids = () => SPLAT_FORMATS.has(selectedFormat);
 
 const fmtMeta = fmt => FORMATS.find(f => f.fmt === fmt);
 
@@ -627,9 +654,22 @@ function currentPresets() {
     id: `fmt-pkg-${a.id}`, label: `📦 ${a.label}`, type: a.type,
     url: `${MW}/stream/tileset.json?format=${a.pkg.toLowerCase().endsWith('.3tz') ? '3tz' : '3dtiles-pkg'}&url=${encodeURIComponent(a.pkg)}`,
   }));
+  // Bing Maps 3D (tf=3dv4 GLB → quadtree) — dedicated /bing endpoint; root quadkey + genid.
+  if (selectedFormat === 'bing') return [
+    { id: 'bing-berlin', label: '🗺 Berlin (z14 root)', type: 'mesh', url: `${MW}/bing/tileset.json?root=12021023322201&g=15340&maxLevel=19` },
+  ];
+  // Bentley 3MX (.3mx/.3mxb → lazy fragments) — dedicated /threemx endpoint; url = master .3mx or root .3mxb.
+  if (selectedFormat === 'threemx') return [
+    { id: '3mx-unity', label: '🏛 Unity-3mxb fixture', type: 'mesh', url: `${MW}/threemx/tileset.json?url=${encodeURIComponent('https://raw.githubusercontent.com/colorwlof/Unity-3mxb/master/Assets/StreamingAssets/root.3mxb')}` },
+  ];
   const f = fmtMeta(selectedFormat);
   if (!f) return [];
-  return f.assets.map(a => ({ id: `${f.fmt}-${a.id}`, label: `${f.icon} ${a.label}`, type: f.type, url: assetUrl(f, a), octree: f.octree }));
+  const pills = f.assets.map(a => ({ id: `${f.fmt}-${a.id}`, label: `${f.icon} ${a.label}`, type: f.type, url: assetUrl(f, a), octree: f.octree,
+    rawSrc: `${SDATA}/${a.streamSrc ?? a.src}` }));   // raw source URL (for the raw-url toggle)
+  // Last option for every format: custom URL. Selecting it clears the field; you type a URL and Load.
+  // Tip: tick "raw url" to paste a raw dataset URL — it's wrapped with the current format + cache + params.
+  pills.push({ id: `${f.fmt}-custom`, label: `${f.icon} ✎ custom url`, type: f.type, url: '__custom__', custom: true, octree: f.octree });
+  return pills;
 }
 
 const SNIPPETS = {
@@ -675,6 +715,7 @@ tileset.modelMatrix = enu;`,
 let viewer = null;
 let currentTileset = null;
 let currentPresetId = null;
+let currentPresetObj = null;   // the selected preset {url, rawSrc?} — for raw-url toggle re-resolution
 let currentType = 'pointcloud';
 let _loadGen = 0;   // incremented on every load; stale async completions compare and bail
 
@@ -736,12 +777,30 @@ async function initCesium() {
    ────────────────────────────────────────────── */
 function setMode(m) {
   viewerMode = m;
+  // Prebuilt-offline serves ready static tileset URLs — raw-url wrapping (which builds /stream|/convert
+  // middleware URLs) would mangle them, so force it off when entering offline.
+  if (m === 'offline' && rawUrlMode) { document.getElementById('rawurl-mode').checked = false; setRawUrlMode(false); }
   // When entering tools mode, pick first available asset for the current tool
   if (m === 'tools') { buildPresetBar(); const first = currentPresets()[0]; if (first) selectPreset(first); }
   else rebuildAndReselect();
 }
 function setTool(t) { toolName = t; buildPresetBar(); const first = currentPresets()[0]; if (first) selectPreset(first); }
 function setTiling(t) { tilingMode = t; rebuildAndReselect(); }
+function setCacheScope(s) { cacheScope = s; rebuildAndReselect(); }
+function setPrefetch(n) { n = parseInt(n, 10); prefetchN = Number.isFinite(n) ? n : 1; rebuildAndReselect(); }
+function setCentroids(v) { centroidsOnly = !!v; rebuildAndReselect(); }
+function setRawUrlMode(v) {                  // toggle raw-source vs ready-url interpretation of the field
+  rawUrlMode = !!v;
+  const inp = document.getElementById('tileset-url');
+  inp.placeholder = rawUrlMode
+    ? 'raw dataset URL (e.g. https://host/cloud.copc.laz) — wrapped with current format + cache'
+    : 'http://localhost:3000/…/tileset.json';
+  // Re-resolve the field for the already-selected preset so the toggle is reflected immediately:
+  // raw ON → show the raw source URL; raw OFF → show the ready middleware/tileset URL.
+  if (currentPresetObj && !currentPresetObj.custom) {
+    inp.value = (rawUrlMode && currentPresetObj.rawSrc) ? currentPresetObj.rawSrc : (currentPresetObj.url || '');
+  }
+}
 function setFormat(fmt) {
   selectedFormat = fmt; buildPresetBar();
   const first = currentPresets().find(p => p.url);
@@ -767,16 +826,53 @@ function buildPresetBar() {
     bar.appendChild(Object.assign(document.createElement('span'), { className: 'preset-sep' }));
   };
 
-  // 1) MODE
-  seg('mode', [['stream', '⚡ Stream'], ['offline', '💾 Offline'], ['convert', '🛠 Convert'], ['tools', '⚙ Tools']], viewerMode, setMode, 'serving mode');
+  // 1) MODE — three only: live streaming · prebuilt offline · tools.
+  seg('mode', [['stream', '⚡ Live streaming'], ['offline', '💾 Prebuilt offline'], ['tools', '⚙ Tools']], viewerMode, setMode, 'serving mode');
+
+  // 2) CACHE SCOPE + prefetch — right after the mode, before the formats (stream only).
+  if (viewerMode === 'stream') {
+    const cacheTips = {
+      none:      'cache=none (live, lazy): instant cold start; first view into a new region pays a small fetch. prefetch warms ahead.',
+      hierarchy: 'cache=hierarchy (eager tree in RAM): slower cold start (reads whole hierarchy once), then every refinement is warm. Tiles still per-request.',
+      all:       'cache=all (→ /convert): converts the WHOLE dataset to disk on first request (slow once), then served static forever. Survives restart.',
+    };
+    for (const [val, lbl] of [['none', '◔ cache=none'], ['hierarchy', '◑ cache=hierarchy'], ['all', '● cache=all']]) {
+      const b = document.createElement('button');
+      b.className = 'preset mode' + (cacheScope === val ? ' active' : '');
+      b.textContent = lbl; b.title = cacheTips[val];
+      b.onclick = () => setCacheScope(val);
+      bar.appendChild(b);
+    }
+    if (cacheScope === 'none') {              // prefetch only applies to lazy hierarchy
+      const wrap = document.createElement('span');
+      wrap.className = 'preset mode'; wrap.style.cursor = 'default';
+      wrap.title = 'prefetch: background-warm N hierarchy levels (0 = none · -1 = all)';
+      wrap.append('prefetch ');
+      const inp = document.createElement('input');
+      inp.type = 'number'; inp.value = prefetchN; inp.min = -1; inp.step = 1;
+      inp.style.cssText = 'width:3.2em; background:transparent; color:inherit; border:1px solid currentColor; border-radius:4px;';
+      inp.onchange = () => setPrefetch(inp.value);
+      wrap.appendChild(inp);
+      bar.appendChild(wrap);
+    }
+    bar.appendChild(Object.assign(document.createElement('span'), { className: 'preset-sep' }));
+  }
 
   if (viewerMode === 'tools') {
-    // 2) TOOL NAME  3) asset pills (tool-specific open datasets)
-    seg('tiling', [['implicit-to-explicit', '⬡→⬢ i→e'], ['upgrade', '⬆ upgrade'], ['packages', '📦 packages']], toolName, setTool, '3dtiles-tools operation');
+    // 3) TOOL NAME  4) asset pills (tool-specific open datasets)
+    seg('tiling', [['implicit-to-explicit', '⬡→⬢ implicit→explicit'], ['upgrade', '⬆ upgrade'], ['packages', '📦 packages']], toolName, setTool, '3dtiles-tools operation');
   } else {
-    // 2) FORMAT  3) tiling toggle (octree only)  4) asset pills
-    seg('fmt', [...FORMATS.map(f => [f.fmt, `${f.icon} ${f.label}`]), ['3dtiles', '◈ 3D Tiles'], ['packages', '📦 Packages']], selectedFormat, setFormat, 'source format');
+    // 3) FORMAT  4) tiling toggle (octree)  5) centroids (splat, stream)  6) asset pills
+    seg('fmt', [...FORMATS.map(f => [f.fmt, `${f.icon} ${f.label}`]), ['3dtiles', '◈ 3D Tiles'], ['packages', '📦 Packages'], ['bing', '🗺 Bing 3D'], ['threemx', '🏛 3MX']], selectedFormat, setFormat, 'source format');
     if (fmtMeta(selectedFormat)?.octree) seg('tiling', [['implicit', '⬡ implicit'], ['explicit', '⬢ explicit']], tilingMode, setTiling, 'octree tiling');
+    if (viewerMode === 'stream' && canCentroids()) {     // centroids-only: tiled-splat formats → POINTS preview
+      const cb = document.createElement('button');
+      cb.className = 'preset mode' + (centroidsOnly ? ' active' : '');
+      cb.textContent = '◦ centroids'; cb.title = 'Render splat centres as glTF POINTS (cheap preview) instead of full gaussians';
+      cb.onclick = () => setCentroids(!centroidsOnly);
+      bar.appendChild(cb);
+      bar.appendChild(Object.assign(document.createElement('span'), { className: 'preset-sep' }));
+    }
   }
 
   currentPresets().forEach(p => {
@@ -793,8 +889,8 @@ function buildPresetBar() {
 
 function selectPreset(p) {
   currentPresetId = p.id;
+  currentPresetObj = p;
   currentType = p.type;
-  document.getElementById('tileset-url').value = p.url;
   document.querySelectorAll('.preset:not(.mode):not(.tiling):not(.fmt)').forEach(b => b.classList.remove('active'));
   document.getElementById('preset-' + p.id)?.classList.add('active');
 
@@ -804,6 +900,17 @@ function selectPreset(p) {
   document.getElementById('code-block').textContent = snip.code;
   document.getElementById('code-note').textContent = snip.note;
 
+  // Custom: clear the field and wait for the user to paste a URL + Load (no auto-load).
+  if (p.custom) {
+    document.getElementById('tileset-url').value = '';
+    document.getElementById('tileset-url').focus();
+    setStatus(rawUrlMode
+      ? `Custom · paste a RAW ${selectedFormat} dataset URL, then Load (wrapped with current format + cache).`
+      : 'Custom · paste a full middleware/tileset URL, then Load. (Tick "raw url" to paste a raw dataset URL instead.)');
+    return;
+  }
+
+  document.getElementById('tileset-url').value = p.url;
   if (_3dtMode) {
     // 3DTRJS mode: reload the tileset in Three.js
     if (window.__3dtrjs) window.__3dtrjs.load(p.url, p.type === 'splat');
@@ -817,10 +924,23 @@ function selectPreset(p) {
    LOAD TILESET
    ────────────────────────────────────────────── */
 async function loadTileset() {
-  if (!viewer) { showError('Cesium still initializing…'); return; }
+  const field = document.getElementById('tileset-url').value.trim();
+  if (!field) return;
+  // raw mode: the field is a RAW dataset URL → wrap it with the current format + cache + params.
+  // Guard: never re-wrap a URL that already points at our middleware (e.g. a preset that set a ready
+  // /stream or /convert URL while "raw url" happened to stay ticked) — that would nest the URL.
+  const url = (rawUrlMode && !field.startsWith(MW)) ? buildMiddlewareUrl(field) : field;
 
-  const url = document.getElementById('tileset-url').value.trim();
-  if (!url) return;
+  // Route to whichever renderer is active. In 3DTRjs mode, loading into the (hidden) Cesium view
+  // would show nothing — hand the URL to the Three.js renderer instead. (Fixes: typing a custom URL
+  // + Load/Enter doing nothing while 3DTRjs is selected.)
+  if (_3dtMode) {
+    if (window.__3dtrjs) { window.__3dtrjs.load(url, currentType === 'splat'); setStatus('3DTilesRendererJS — ' + url); }
+    else setStatus('3DTRJS: module still loading — try again in a moment.');
+    return;
+  }
+
+  if (!viewer) { showError('Cesium still initializing…'); return; }
 
   // Bump generation so any in-flight load from a previous click becomes stale.
   const gen = ++_loadGen;

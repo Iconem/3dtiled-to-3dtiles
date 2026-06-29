@@ -114,16 +114,40 @@ it's **moving bytes**: disk → RAM → (PCIe) → VRAM → back. So:
   can still help the per-chunk hot loops if you keep data resident and hide transfers. The biggest
   lever remains **fast sequential I/O + counting sort + chunk parallelism** — exactly Potree 2.0's design.
 
-### Is PDAL/COPC doing roughly the same?
+### Is COPC building the same as Potree 2.0? (corrected — they are NOT equally fast)
 
-Similar *spirit*, different *target*. COPC is a **single LAZ file** whose chunks are laid out in an
-**octree (EPT-style) order with a hierarchy page** for random access — so building it is also a
-spatial bucketing + chunked-write problem. The fast COPC/EPT builders ([untwine](https://github.com/hobuinc/untwine),
-[entwine](https://github.com/connormanning/entwine), `pdal` writers.copc) use the same **out-of-core,
-multi-pass, bin-by-spatial-cell-then-write** approach (untwine specifically does a two-phase
-"bin to temp files per cell, then assemble" to bound memory). The difference is the *output container*
-(one indexed LAZ vs Potree's directory of node files), not the core algorithm. And yes — `untwine`/
-`entwine`/`pdal` are the same tools listed under "Building COPC via PDAL" above.
+I over-simplified earlier. The right framing: the **output container** differs (COPC = one indexed LAZ
+with an EPT-style octree + hierarchy page; Potree = a directory of node files), but more importantly the
+**implementations differ enormously in speed**, and "PDAL builds COPC" hides which engine does it:
+
+- **PotreeConverter 2.0** is a *purpose-built, heavily-parallel* out-of-core tiler (the counting-sort /
+  Morton-histogram + pre-allocate + scatter-with-spill described above). It's about the fastest thing
+  there is for LAS/LAZ → octree, and saturates disk bandwidth.
+- **PDAL `writers.copc`** is part of PDAL's general **pipeline** engine. It is *not* the same optimized
+  out-of-core counting-sort builder — it's a more general, less parallel writer, and in practice users
+  report it is **much slower** than PotreeConverter 2.0 (matching your experience). PDAL's strength is
+  generality (filters, reprojection, formats), not raw octree-build throughput.
+- **untwine** (hobuinc) is the **fast, dedicated COPC builder** — a two-phase "bin points into temp
+  files per cell, then assemble" out-of-core approach, multi-threaded, designed to bound memory on huge
+  clouds. If you want fast COPC, reach for `untwine` (PDAL can shell out to it), not `writers.copc`.
+- **entwine** (connormanning) builds EPT (not COPC) with a similar out-of-core spatial-binning design;
+  mature and reasonably fast, but EPT is a directory of many files rather than one COPC LAZ.
+
+So: the *algorithm family* (spatial bin → chunked write) is shared, but **only some implementations are
+counting-sort-fast**. PotreeConverter 2.0 and untwine are in that tier; `pdal writers.copc` is not.
+
+> ⚠️ The notes below on `py3dtiles` / `gocesiumtiler` / `mago-3d-tiler` are **best-effort from
+> general knowledge, not benchmarked here** — treat as hypotheses to verify:
+> - **py3dtiles** (Python) — convenient, supports tileset merge & docker; Python + multiprocessing
+>   makes it generally **slower** than the C++/Go tilers on very large clouds (GIL/serialization
+>   overhead), though fine for moderate sizes.
+> - **gocesiumtiler** (Go) — concurrent (goroutines), typically **fast** and a good middle ground;
+>   compiled, parallel, simple LAS→3D Tiles. Often the pragmatic fast choice for 3D Tiles output.
+> - **mago-3d-tiler** (Java) — broad input support (point clouds + meshes); JVM, multi-threaded;
+>   performance is decent but I have **no measured comparison** vs PotreeConverter 2.0.
+>
+> Bottom line you can rely on: for raw octree-build speed, **PotreeConverter 2.0** (Potree output) and
+> **untwine** (COPC output) are the proven-fast tier; `pdal writers.copc` is the slow one you hit.
 
 ### Toward an out-of-core LAS/LAZ → 3D Tiles / COPC / Potree tiler (note)
 
