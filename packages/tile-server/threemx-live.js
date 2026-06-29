@@ -59,7 +59,9 @@ function parse3mxb(buf) {
   const header = JSON.parse(buf.toString('utf8', 9, jsonEnd));
   const payload = new Map();
   let off = jsonEnd;
-  for (const r of header.resources || []) { payload.set(r.id, { format: r.format, data: buf.subarray(off, off + r.size) }); off += r.size; }
+  // Each resource def carries id/type/format and, for geometryBuffer, a `texture` ref → its textureBuffer
+  // id (the texture is NOT listed in node.resources, only referenced here). Keep all fields + the bytes.
+  for (const r of header.resources || []) { payload.set(r.id, { id: r.id, type: r.type, format: r.format, texture: r.texture, data: r.size ? buf.subarray(off, off + r.size) : null }); off += (r.size || 0); }
   return { nodes: header.nodes || [], payload };
 }
 
@@ -101,36 +103,53 @@ async function buildFragment(ctx, relPath, masterUrl, isRoot) {
   return { asset: { version: '1.1' }, geometricError: root.geometricError, root, extensionsUsed: ['3DTILES_content_gltf'] };
 }
 
-// ── per-node textured GLB (OpenCTM → glTF + JPEG baseColor) ─────────────────────
+// ── per-node textured GLB (OpenCTM → glTF + JPEG/PNG baseColor) ──────────────────
+// A 3MX node can carry MULTIPLE geometryBuffer resources (each its own CTM, optionally its own texture)
+// — render one primitive per geometry. The texture is NOT in node.resources; the geometryBuffer's
+// `texture` field references its textureBuffer id (resolved from the payload).
 async function buildNodeGlb(ctx, relPath, nodeIdx) {
   const { nodes, payload } = parse3mxb(await fetchBuf(ctx.base + relPath));
   const node = nodes[nodeIdx];
   if (!node) return null;
-  let ctm = null, jpg = null;
-  for (const id of node.resources || []) { const r = payload.get(id); if (!r) continue; if (r.format === 'ctm') ctm = r.data; else if (r.format === 'jpg') jpg = r.data; }
-  if (!ctm) return null;
-  const g = decodeCTM(ctm);
 
   const doc = new Document();
   const buffer = doc.createBuffer();
-  // 3MX mesh verts are SRS Z-up (E,N,U) relative to SRSOrigin, but 3D Tiles glTF content is Y-up (Cesium
-  // auto-rotates +Y→+Z). Swizzle (E,N,U)→(E,U,−N) so after that rotation the mesh lands back in the
-  // (E,N,U) frame the root ENU transform + the bounding box expect — otherwise it sits 90° rotated
-  // (vertical instead of horizontal). Same swizzle the COPC/Potree/LCC point paths apply.
-  const srcPos = g.positions instanceof Float32Array ? g.positions : new Float32Array(g.positions);
-  const swPos = new Float32Array(srcPos.length);
-  for (let i = 0; i < srcPos.length; i += 3) { swPos[i] = srcPos[i]; swPos[i + 1] = srcPos[i + 2]; swPos[i + 2] = -srcPos[i + 1]; }
-  const pos = doc.createAccessor().setType('VEC3').setArray(swPos).setBuffer(buffer);
-  const idx = doc.createAccessor().setType('SCALAR').setArray(g.indices instanceof Uint32Array ? g.indices : new Uint32Array(g.indices)).setBuffer(buffer);
-  const prim = doc.createPrimitive().setAttribute('POSITION', pos).setIndices(idx);
-  if (g.uvs && jpg) {
-    const uv = doc.createAccessor().setType('VEC2').setArray(g.uvs instanceof Float32Array ? g.uvs : new Float32Array(g.uvs)).setBuffer(buffer);
-    prim.setAttribute('TEXCOORD_0', uv);
-    const tex = doc.createTexture().setImage(jpg instanceof Uint8Array ? jpg : new Uint8Array(jpg)).setMimeType('image/jpeg');
-    prim.setMaterial(doc.createMaterial().setBaseColorTexture(tex).setMetallicFactor(0).setRoughnessFactor(1));
+  const mesh = doc.createMesh();
+  const texCache = new Map();                               // textureBuffer id → glTF Texture (dedup)
+  let primCount = 0;
+
+  for (const id of node.resources || []) {
+    const r = payload.get(id);
+    if (!r || r.format !== 'ctm' || !r.data) continue;      // geometryBuffer only
+    const g = decodeCTM(r.data);
+    // 3MX mesh verts are SRS Z-up (E,N,U) relative to SRSOrigin, but 3D Tiles glTF content is Y-up
+    // (Cesium auto-rotates +Y→+Z). Swizzle (E,N,U)→(E,U,−N) so after that rotation the mesh lands back
+    // in the (E,N,U) frame the root ENU transform + bounding box expect (else it sits 90° vertical).
+    const srcPos = g.positions instanceof Float32Array ? g.positions : new Float32Array(g.positions);
+    const swPos = new Float32Array(srcPos.length);
+    for (let i = 0; i < srcPos.length; i += 3) { swPos[i] = srcPos[i]; swPos[i + 1] = srcPos[i + 2]; swPos[i + 2] = -srcPos[i + 1]; }
+    const pos = doc.createAccessor().setType('VEC3').setArray(swPos).setBuffer(buffer);
+    const idx = doc.createAccessor().setType('SCALAR').setArray(g.indices instanceof Uint32Array ? g.indices : new Uint32Array(g.indices)).setBuffer(buffer);
+    const prim = doc.createPrimitive().setAttribute('POSITION', pos).setIndices(idx);
+
+    // texture: follow the geometryBuffer's `texture` ref → its textureBuffer resource (jpg/png).
+    const texRes = r.texture ? payload.get(r.texture) : null;
+    if (g.uvs && texRes && texRes.data && (texRes.format === 'jpg' || texRes.format === 'png')) {
+      const uv = doc.createAccessor().setType('VEC2').setArray(g.uvs instanceof Float32Array ? g.uvs : new Float32Array(g.uvs)).setBuffer(buffer);
+      prim.setAttribute('TEXCOORD_0', uv);
+      let tex = texCache.get(r.texture);
+      if (!tex) {
+        tex = doc.createTexture().setImage(texRes.data instanceof Uint8Array ? texRes.data : new Uint8Array(texRes.data))
+          .setMimeType(texRes.format === 'png' ? 'image/png' : 'image/jpeg');
+        texCache.set(r.texture, tex);
+      }
+      prim.setMaterial(doc.createMaterial().setBaseColorTexture(tex).setMetallicFactor(0).setRoughnessFactor(1));
+    }
+    mesh.addPrimitive(prim);
+    primCount++;
   }
-  const n = doc.createNode().setMesh(doc.createMesh().addPrimitive(prim));
-  doc.createScene().addChild(n);
+  if (!primCount) return null;
+  doc.createScene().addChild(doc.createNode().setMesh(mesh));
   return Buffer.from(await new NodeIO().writeBinary(doc));
 }
 

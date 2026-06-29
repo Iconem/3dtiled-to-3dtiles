@@ -684,7 +684,9 @@ function currentPresets() {
   ];
   // Bentley 3MX (.3mx/.3mxb → lazy fragments) — dedicated /threemx endpoint; url = master .3mx or root .3mxb.
   if (selectedFormat === 'threemx') return [
-    { id: '3mx-tende',  label: '🏛 Tende village (dept06)', type: 'mesh', url: `${MW}/threemx/tileset.json?url=${encodeURIComponent('https://3d.departement06.fr/3mx/2019_07_Village_Tende_Resolution/Scene/2019_07_Village_Tende_Resolution.3mx')}` },
+    { id: '3mx-tende',  label: '🏛 Tende village (dept06, colormap)', type: 'mesh', url: `${MW}/threemx/tileset.json?url=${encodeURIComponent('https://3d.departement06.fr/3mx/2019_07_Village_Tende_Resolution/Scene/2019_07_Village_Tende_Resolution.3mx')}` },
+    { id: '3mx-byu',    label: '🏛 BYU Athletic (RGB)', type: 'mesh', url: `${MW}/threemx/tileset.json?url=${encodeURIComponent('https://campusmodel.groups.et.byu.net/Athletic_Buildings_3MX/Scene/Athletic_Buildings_3MX.3mx')}` },
+    { id: '3mx-chapelle', label: '🏛 Chapelle (scanit, .3mxb)', type: 'mesh', url: `${MW}/threemx/tileset.json?url=${encodeURIComponent('https://www.scanit-alsace.fr/PARTAGE/CHAPELLE/Scene/Data/MESH.3mxb')}` },
     { id: '3mx-unity',  label: '🏛 Unity-3mxb fixture', type: 'mesh', url: `${MW}/threemx/tileset.json?url=${encodeURIComponent('https://raw.githubusercontent.com/colorwlof/Unity-3mxb/master/Assets/StreamingAssets/root.3mxb')}` },
   ];
   const f = fmtMeta(selectedFormat);

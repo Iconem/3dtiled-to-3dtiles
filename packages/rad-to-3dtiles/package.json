@@ -10,7 +10,7 @@
     "start": "node src/index.js"
   },
   "dependencies": {
-    "@gltf-transform/core": "^4.0.0",
+    "@gltf-transform/core": "^4.4.0",
     "@sparkjsdev/spark": "^2.1.0"
   },
   "optionalDependencies": {

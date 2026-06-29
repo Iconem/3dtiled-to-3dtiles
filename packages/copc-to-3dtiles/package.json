@@ -11,7 +11,7 @@
   },
   "dependencies": {
     "copc": "^0.0.8",
-    "@gltf-transform/core": "^4.0.0",
+    "@gltf-transform/core": "^4.4.0",
     "proj4": "^2.11.0"
   },
   "optionalDependencies": {
