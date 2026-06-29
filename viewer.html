@@ -960,6 +960,12 @@ async function loadTileset() {
   // /stream or /convert URL while "raw url" happened to stay ticked) — that would nest the URL.
   const url = (rawUrlMode && !field.startsWith(MW)) ? buildMiddlewareUrl(field) : field;
 
+  // Stamp the timing log: cache mode + transform (stream) or the viewer mode, plus the format.
+  const ctx = viewerMode === 'stream'
+    ? `cache=${cacheScope}${cacheScope === 'none' ? ` prefetch=${prefetchN}` : ''}${transformOp ? ` transform=${transformOp}` : ''} · ${selectedFormat}`
+    : `${viewerMode} · ${selectedFormat}`;
+  tlogReset(ctx + (_3dtMode ? ' [3DTRJS]' : ' [Cesium]'));
+
   // Route to whichever renderer is active. In 3DTRjs mode, loading into the (hidden) Cesium view
   // would show nothing — hand the URL to the Three.js renderer instead. (Fixes: typing a custom URL
   // + Load/Enter doing nothing while 3DTRjs is selected.)
@@ -996,6 +1002,7 @@ async function loadTileset() {
 
   try {
     const tileset = await Cesium.Cesium3DTileset.fromUrl(url, opts);
+    tlog('tileset.json resolved');
     if (gen !== _loadGen) { viewer.scene.primitives.remove(tileset); return; }  // stale: user already picked something else
     viewer.scene.primitives.add(tileset);
     currentTileset = tileset;
@@ -1042,19 +1049,23 @@ async function loadTileset() {
       setStatus('Loaded: ' + url);
     }
 
+    let _firstTile = false;
     tileset.allTilesLoaded.addEventListener(() => {
       const n = tileset.statistics.numberOfTilesWithContentReady;
       setStatus(`Tiles ready: ${n}  —  ${url}`);
+      tlog(`✓ tiles ready: ${n}`);
     });
 
     // Log tile-load failures to the status panel and console for debugging
     tileset.tileFailed.addEventListener(e => {
       console.error('[3DTiles] Tile failed:', e.url, e.message);
       setStatus(`⚠ Tile failed: ${e.message || e.url}`);
+      tlog(`⚠ tile failed: ${(e.message || e.url || '').toString().slice(0, 40)}`);
     });
     tileset.tileLoad.addEventListener(t => {
-      console.log('[3DTiles] Tile loaded:', t.tile?.content?.url ?? '?',
-        'ready:', tileset.statistics?.numberOfTilesWithContentReady);
+      const ready = tileset.statistics?.numberOfTilesWithContentReady;
+      if (!_firstTile) { _firstTile = true; tlog('first tile loaded'); }
+      tlogProgress(`streaming… ${ready} tiles ready`);
     });
 
   } catch (e) {
@@ -1065,6 +1076,7 @@ async function loadTileset() {
       'Note: mixed-content (HTTP from HTTPS page) is blocked by browsers.'
     );
     setStatus('Load failed.');
+    tlog('✗ load failed: ' + (e.message || '').slice(0, 50));
   }
 }
 
@@ -1287,6 +1299,51 @@ function setFov(deg) {
    ────────────────────────────────────────────── */
 function setStatus(msg) {
   document.getElementById('status').textContent = msg;
+}
+
+// ── permanent timing log (bottom-left) ─────────────────────────────────────────
+// A persistent, non-transient record of load milestones with elapsed times — unlike the status
+// overlay (which is overwritten), this keeps the last N lines so you can see cold-start vs warm
+// timing across cache=none|hierarchy|all loads. tlogReset() stamps t0; tlog() appends "+Δs msg".
+const _tlogLines = [];
+let _tlogT0 = 0, _tlogLastProg = 0;
+function tlogReset(label) {
+  _tlogT0 = performance.now(); _tlogLastProg = 0; _tlogLines.length = 0;
+  if (label) _tlogLines.push('▶ ' + label);
+  _tlogRender();
+}
+function tlog(msg) {
+  const dt = _tlogT0 ? `+${((performance.now() - _tlogT0) / 1000).toFixed(2)}s ` : '';
+  _tlogLines.push(dt + msg);
+  while (_tlogLines.length > 14) _tlogLines.shift();
+  _tlogRender();
+  console.log('[timing]', dt + msg);
+}
+// Throttled running-count line (Cesium streams many tiles) — rewrites the last line if it's a progress one.
+function tlogProgress(msg) {
+  const now = performance.now();
+  if (now - _tlogLastProg < 400) {
+    if (_tlogLines.length && _tlogLines[_tlogLines.length - 1].startsWith('  …')) _tlogLines.pop();
+    else return _tlogRenderMaybe();
+  }
+  _tlogLastProg = now;
+  if (_tlogLines.length && _tlogLines[_tlogLines.length - 1].startsWith('  …')) _tlogLines.pop();
+  _tlogLines.push('  … ' + msg);
+  while (_tlogLines.length > 14) _tlogLines.shift();
+  _tlogRender();
+}
+function _tlogRenderMaybe() {}
+function _tlogRender() {
+  let el = document.getElementById('timing-log');
+  if (!el) {
+    el = document.createElement('div'); el.id = 'timing-log';
+    el.style.cssText = 'position:fixed; left:8px; bottom:8px; z-index:50; max-width:52ch; '
+      + 'font:11px/1.45 ui-monospace,Menlo,Consolas,monospace; color:#bfe3ff; '
+      + 'background:rgba(8,14,22,.74); border:1px solid rgba(120,160,200,.25); border-radius:6px; '
+      + 'padding:6px 9px; pointer-events:none; white-space:pre; backdrop-filter:blur(3px);';
+    document.body.appendChild(el);
+  }
+  el.textContent = _tlogLines.join('\n');
 }
 
 function showError(msg) {
