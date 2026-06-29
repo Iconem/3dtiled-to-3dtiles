@@ -41,7 +41,11 @@ import { handleGltf } from './gltf-live.js';
 import { handleBing } from './bing-live.js';
 import { handleThreemx } from './threemx-live.js';
 
-const PORT = Number(process.env.PORT) || 3001;
+// Port resolution order: --port <n> (CLI, wins) → TILE_PORT → PORT → 3001. The CLI/TILE_PORT escape
+// hatches matter under dev harnesses that inject PORT=<vite port> into the whole `pnpm run dev` process
+// (which would otherwise collide the tile-server onto vite's port); `serve:tiles` passes --port 3001.
+const _argPort = (() => { const i = process.argv.indexOf('--port'); return i >= 0 ? Number(process.argv[i + 1]) : NaN; })();
+const PORT = _argPort || Number(process.env.TILE_PORT) || Number(process.env.PORT) || 3001;
 const CORS = { 'Access-Control-Allow-Origin': '*', 'Access-Control-Allow-Headers': '*' };
 
 // Keep the server alive through bad input. laz-perf's WASM build installs its OWN process-level

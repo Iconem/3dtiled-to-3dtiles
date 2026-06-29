@@ -323,6 +323,13 @@
     line-height: 1.6;
     white-space: pre-line;
   }
+  #status-line { white-space: pre-line; }
+  /* timing log shares the status modal (no longer a separate fighting panel) */
+  #timing-log:not(:empty) {
+    margin-top: 6px; padding-top: 5px; border-top: 1px solid rgba(150,170,200,0.25);
+    font: 10px/1.45 ui-monospace, Menlo, Consolas, monospace; color: #bfe3ff; white-space: pre;
+    max-height: 180px; overflow-y: auto;
+  }
 
   /* ── Error overlay ── */
   #error {
@@ -498,7 +505,7 @@
 </div>
 
 <!-- Status / error -->
-<div id="status">Initializing Cesium…</div>
+<div id="status"><div id="status-line">Initializing Cesium…</div><div id="timing-log"></div></div>
 <div id="error"></div>
 
 <script>
@@ -562,10 +569,14 @@ const FORMATS = [
       { id: 'takanawa', label: 'Lion Takanawa 1.x',  src: 'input/POTREE/lion_takanawa/cloud.js',      out: 'output/potree/lion_takanawa'    },
       { id: 'takalaz',  label: 'Lion Takanawa LAZ',  src: 'input/POTREE/lion_takanawa_laz/cloud.js',  out: 'output/potree/lion_takanawa_laz'},
       { id: 'voltotal', label: 'Vol Total',           src: 'input/POTREE/vol_total/cloud.js',          out: 'output/potree/vol_total'        },
+      { id: 'geghard',  label: 'Geghard (iconem) ⬀',  src: 'https://api.iconem.com/s/rIdPkRfOmEdRtgsoO08TgNt9MSxh-woC/cloud.js' },  // remote, stream-only
   ]},
   { fmt: 'sog', icon: '⬢', label: 'SOG', type: 'splat', octree: false, stream: true, assets: [
       { id: 'skatepark', label: 'Skatepark',    src: 'input/SOG/skatepark/lod-meta.json',    out: 'output/sog/skatepark-3dtiles-from-sog'    },
       { id: 'roman',     label: 'Roman Parish', src: 'input/SOG/roman-parish/lod-meta.json', out: 'output/sog/roman-parish-3dtiles-from-sog' },
+      // Arrival.Space `.lod` IS the SOG format (same lod-meta.json tree + per-chunk version:2 webp
+      // splats) — so the SOG adapter reads it directly; no Arrival-specific converter needed.
+      { id: 'arrival-jaffa', label: 'Arrival jaffa3 (.lod) ⬀', src: 'https://ugc.arrival.space/71585765/14ae36863868a5f74fbc29389e156bc5f18e0d7a612af78c492cd84cfa4a9c44_jaffa3_1777965648677_LOD/lod-meta.json' },  // remote, stream-only
   ]},
   { fmt: 'lcc', icon: '◆', label: 'LCC', type: 'splat', octree: false, stream: true, assets: [
       { id: 'guan',      label: 'Guan Temple',      src: 'input/LCC/Guan_Temple/meta.lcc',                 out: 'output/lcc/Guan_Temple-3dtiles-from-lcc'             },
@@ -594,15 +605,21 @@ const DIRECT = [
   // Public CesiumGS open-data samples (raw GitHub, CORS-friendly) — verified 200.
   { id: 'cgs-implicit', icon: '◈', label: '3DT · CesiumGS implicit (1.1)', type: 'mesh', url: 'https://raw.githubusercontent.com/CesiumGS/3d-tiles-samples/main/1.1/SparseImplicitQuadtree/tileset.json' },
   { id: 'cgs-lod',      icon: '◈', label: '3DT · CesiumGS discrete-LOD',   type: 'mesh', url: 'https://raw.githubusercontent.com/CesiumGS/3d-tiles-samples/main/1.0/TilesetWithDiscreteLOD/tileset.json' },
+  { id: 'marseille',    icon: '🏙', label: '3DT · Marseille (root.json)',   type: 'mesh', url: 'https://d3h9zulrmcj1j6.cloudfront.net/Marseille_Cesium/root.json' },
   // Live KTX2+Draco decompress (→ JPG) via /gltf over a tileset that HAS them (Bing 3dv4). For any
   // KTX/Draco tileset, point /gltf at its tileset.json: /gltf/tileset.json?ops=decompress&url=<tileset>.
   { id: 'gltf-ktx', icon: '◈', label: '3DT · KTX→decode (Bing via /gltf)', type: 'mesh', url: `${MW}/gltf/tileset.json?ops=decompress&tex=jpg&url=${encodeURIComponent(`${MW}/bing/tileset.json?root=1202322211321&g=15530&maxLevel=18`)}` },
   // (tastier .3tz / .3dtiles packages live under the 📦 Packages pill, not here.)
 ];
 
+// A source may be a local sample-data path or an absolute remote URL (e.g. iconem/arrival hosts).
+const isRemoteUrl = s => /^https?:\/\//i.test(s);
+const srcUrl = s => isRemoteUrl(s) ? s : `${SDATA}/${s}`;
+
 // Resolve an asset's tileset URL for the current mode (null = not available in this mode).
 function assetUrl(f, a) {
   if (viewerMode === 'offline') {
+    if (!a.out) return null;                         // remote / stream-only asset → no prebuilt output
     if (f.octree && tilingMode === 'explicit') {
       const dir = encodeURIComponent(`sample-data/${a.out}`);
       return `${MW}/3dtiles-tools/tileset.json?tool=implicit-to-explicit&dir=${dir}`;
@@ -613,7 +630,7 @@ function assetUrl(f, a) {
   // 3dSceneLayer.json rather than fetching the whole multi-GB .slpk) — honor a.streamSrc.
   if (viewerMode === 'stream') {
     if (!f.stream) return null;
-    const rawSrc = `${SDATA}/${(cacheScope === 'all' ? a.src : (a.streamSrc ?? a.src))}`;
+    const rawSrc = srcUrl(cacheScope === 'all' ? a.src : (a.streamSrc ?? a.src));
     return buildMiddlewareUrl(rawSrc, f);
   }
   return null;
@@ -667,12 +684,14 @@ function currentPresets() {
   ];
   // Bentley 3MX (.3mx/.3mxb → lazy fragments) — dedicated /threemx endpoint; url = master .3mx or root .3mxb.
   if (selectedFormat === 'threemx') return [
-    { id: '3mx-unity', label: '🏛 Unity-3mxb fixture', type: 'mesh', url: `${MW}/threemx/tileset.json?url=${encodeURIComponent('https://raw.githubusercontent.com/colorwlof/Unity-3mxb/master/Assets/StreamingAssets/root.3mxb')}` },
+    { id: '3mx-tende',  label: '🏛 Tende village (dept06)', type: 'mesh', url: `${MW}/threemx/tileset.json?url=${encodeURIComponent('https://3d.departement06.fr/3mx/2019_07_Village_Tende_Resolution/Scene/2019_07_Village_Tende_Resolution.3mx')}` },
+    { id: '3mx-unity',  label: '🏛 Unity-3mxb fixture', type: 'mesh', url: `${MW}/threemx/tileset.json?url=${encodeURIComponent('https://raw.githubusercontent.com/colorwlof/Unity-3mxb/master/Assets/StreamingAssets/root.3mxb')}` },
   ];
   const f = fmtMeta(selectedFormat);
   if (!f) return [];
   const pills = f.assets.map(a => ({ id: `${f.fmt}-${a.id}`, label: `${f.icon} ${a.label}`, type: f.type, url: assetUrl(f, a), octree: f.octree,
-    rawSrc: `${SDATA}/${a.streamSrc ?? a.src}` }));   // raw source URL (for the raw-url toggle)
+    rawSrc: srcUrl(a.streamSrc ?? a.src) }))         // raw source URL (for the raw-url toggle)
+    .filter(p => p.url);                              // drop assets not available in this mode (e.g. remote in offline)
   // Last option for every format: custom URL. Selecting it clears the field; you type a URL and Load.
   // Tip: tick "raw url" to paste a raw dataset URL — it's wrapped with the current format + cache + params.
   pills.push({ id: `${f.fmt}-custom`, label: `${f.icon} ✎ custom url`, type: f.type, url: '__custom__', custom: true, octree: f.octree });
@@ -1298,7 +1317,9 @@ function setFov(deg) {
    UI HELPERS
    ────────────────────────────────────────────── */
 function setStatus(msg) {
-  document.getElementById('status').textContent = msg;
+  // write only the status LINE, so the timing log (sibling in the same modal) isn't clobbered.
+  const el = document.getElementById('status-line') || document.getElementById('status');
+  el.textContent = msg;
 }
 
 // ── permanent timing log (bottom-left) ─────────────────────────────────────────
@@ -1334,14 +1355,13 @@ function tlogProgress(msg) {
 }
 function _tlogRenderMaybe() {}
 function _tlogRender() {
+  // Renders into the #timing-log child of the #status modal (shared panel — no separate fixed div
+  // fighting the status overlay). Falls back to creating it inside #status if missing.
   let el = document.getElementById('timing-log');
   if (!el) {
+    const status = document.getElementById('status');
     el = document.createElement('div'); el.id = 'timing-log';
-    el.style.cssText = 'position:fixed; left:8px; bottom:8px; z-index:50; max-width:52ch; '
-      + 'font:11px/1.45 ui-monospace,Menlo,Consolas,monospace; color:#bfe3ff; '
-      + 'background:rgba(8,14,22,.74); border:1px solid rgba(120,160,200,.25); border-radius:6px; '
-      + 'padding:6px 9px; pointer-events:none; white-space:pre; backdrop-filter:blur(3px);';
-    document.body.appendChild(el);
+    (status || document.body).appendChild(el);
   }
   el.textContent = _tlogLines.join('\n');
 }
