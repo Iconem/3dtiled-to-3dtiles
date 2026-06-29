@@ -5,6 +5,13 @@ Format loosely follows [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+### Added — 2026-06-29 (`stream-cache` cont.: server-side per-cache progress)
+- **Server-side progress** for long ops — `core/progress.js` registry + `GET /progress?key=<srcUrl>`
+  (JSON `{label, done, total, finished, elapsedMs}`). Hooked the Potree eager-drain (`cache=hierarchy`):
+  ticks per `.hrc` chunk loaded. The viewer polls it (1.5s) during `cache=hierarchy`/`cache=all` loads and
+  surfaces it in the timing-log modal (`server … drain: N`). Verified: drain reports 252→844→1776 chunks.
+  (COPC/Potree-2.0 drains + convert follow the same pattern — easy to extend.)
+
 ### Fixed — 2026-06-29 (`stream-cache` cont.: Bing geometry renders)
 - **Bing 3D now renders at the right location** (verified: photogrammetry mesh of Rome, 900+ tiles). Two
   bugs: (1) the viewer's auto-placement treated Bing's **world-spanning `region`** as local data (its

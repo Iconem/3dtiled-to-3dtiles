@@ -12,7 +12,7 @@
  *   GET /potree/tileset.json?url=<metadata.json | cloud.js URL>
  *   GET /potree/tile/<name>.glb?url=<…>                       → that node's points as a POINTS GLB
  */
-import { buildPointsGlb, coordsToKey, keyToCoords, buildSubtreeBuffer, CORS, georefFromCrs, buildImplicitTileset, parallelMap, defaultConcurrency } from '../core/index.js';
+import { buildPointsGlb, coordsToKey, keyToCoords, buildSubtreeBuffer, CORS, georefFromCrs, buildImplicitTileset, parallelMap, defaultConcurrency, progressStart, progressTick, progressDone } from '../core/index.js';
 import { preparePotree2Schema, parsePotree2Hierarchy, parsePotree2Chunk, decodePotree2Node } from '../potree-to-3dtiles/src/potree2.js';
 import { loadPotree1 } from '../potree-to-3dtiles/src/potree1.js';
 
@@ -99,7 +99,7 @@ async function getCtx(url) {
         if (loadedChunks.has(cr)) return Promise.resolve([]);
         if (inFlight.has(cr)) return inFlight.get(cr);
         const p = Promise.resolve(src.loadChunk(cr, src.boxOf(cr)))
-          .then(b => { loadedChunks.add(cr); inFlight.delete(cr); return b || []; })
+          .then(b => { loadedChunks.add(cr); inFlight.delete(cr); progressTick(url); return b || []; })
           .catch(e => { inFlight.delete(cr); throw e; });
         inFlight.set(cr, p);
         return p;
@@ -317,8 +317,10 @@ export const potreeTileRe = /^([r0-7]+|\d+-\d+-\d+-\d+)$/;
 export async function potreeTileset(url, opts = {}) {
   const ctx = await getCtx(url);
   const eager = opts.hierarchy === 'eager';
+  if (eager) progressStart(url, 'Potree hierarchy drain (cache=hierarchy)');   // reported via /progress?key=url
   if (eager && ctx.drainAll2) await ctx.drainAll2();        // Potree 2.0 eager hierarchy (all chunks)
   if (eager && ctx.drainAll)  await ctx.drainAll();         // Potree 1.x eager hierarchy (all .hrc)
+  if (eager) progressDone(url);
   else if (!eager) {                                        // cache=none: background prefetch
     const pf = opts.prefetch ?? 1;                          // 0 = none · N = N levels · -1 = all
     const drain = ctx.drainAll2 || ctx.drainAll;

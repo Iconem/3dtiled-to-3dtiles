@@ -985,6 +985,7 @@ async function loadTileset() {
     ? `cache=${cacheScope}${cacheScope === 'none' ? ` prefetch=${prefetchN}` : ''}${transformOp ? ` transform=${transformOp}` : ''} · ${selectedFormat}`
     : `${viewerMode} · ${selectedFormat}`;
   tlogReset(ctx + (_3dtMode ? ' [3DTRJS]' : ' [Cesium]'));
+  startProgressPoll(url);   // surface server-side cache=hierarchy/all progress in the timing log
 
   // Route to whichever renderer is active. In 3DTRjs mode, loading into the (hidden) Cesium view
   // would show nothing — hand the URL to the Three.js renderer instead. (Fixes: typing a custom URL
@@ -1077,6 +1078,7 @@ async function loadTileset() {
       const n = tileset.statistics.numberOfTilesWithContentReady;
       setStatus(`Tiles ready: ${n}  —  ${url}`);
       tlog(`✓ tiles ready: ${n}`);
+      stopProgressPoll();
     });
 
     // Log tile-load failures to the status panel and console for debugging
@@ -1100,6 +1102,7 @@ async function loadTileset() {
     );
     setStatus('Load failed.');
     tlog('✗ load failed: ' + (e.message || '').slice(0, 50));
+    stopProgressPoll();
   }
 }
 
@@ -1371,6 +1374,24 @@ function tlogProgress(msg) {
   _tlogLines.push('  … ' + msg);
   while (_tlogLines.length > 14) _tlogLines.shift();
   _tlogRender();
+}
+// Poll the server's /progress for long ops (cache=hierarchy eager-drain, cache=all convert) and surface
+// it in the timing log. Keyed by the raw source URL (the `url=` param of the middleware URL).
+let _progressTimer = null;
+function stopProgressPoll() { if (_progressTimer) { clearInterval(_progressTimer); _progressTimer = null; } }
+function startProgressPoll(loadUrl) {
+  stopProgressPoll();
+  if (!/hierarchy=eager/.test(loadUrl) && !/\/convert\//.test(loadUrl)) return;   // only the slow caches
+  let inner; try { inner = new URL(loadUrl).searchParams.get('url'); } catch { return; }
+  if (!inner) return;
+  const key = encodeURIComponent(inner);
+  _progressTimer = setInterval(async () => {
+    try {
+      const p = await (await fetch(`${MW}/progress?key=${key}`)).json();
+      if (p && (p.done || p.finished)) tlogProgress(`server ${p.label || 'drain'}: ${p.done}${p.total ? '/' + p.total : ''}${p.finished ? ' ✓' : ''}`);
+      if (p && p.finished) stopProgressPoll();
+    } catch {}
+  }, 1500);
 }
 function _tlogRenderMaybe() {}
 function _tlogRender() {

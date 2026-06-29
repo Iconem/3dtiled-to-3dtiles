@@ -15,4 +15,5 @@ export { CORS, sendJson, sendGlb, sendBin, sendErr } from './http.js';
 export { buildImplicitTileset } from './octree.js';
 export { decompressGlb } from './gltf-decompress.js';
 export { compressGlb } from './gltf-compress.js';
+export { progressStart, progressTick, progressDone, progressGet } from './progress.js';
 export { LasWriter, writeLasBuffer } from './las-writer.js';

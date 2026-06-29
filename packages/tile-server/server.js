@@ -40,6 +40,7 @@ import { handle3dtilesTools } from './3dtiles-tools-live.js';
 import { handleGltf } from './gltf-live.js';
 import { handleBing } from './bing-live.js';
 import { handleThreemx } from './threemx-live.js';
+import { progressGet } from '../core/index.js';
 
 // Port resolution order: --port <n> (CLI, wins) → TILE_PORT → PORT → 3001. The CLI/TILE_PORT escape
 // hatches matter under dev harnesses that inject PORT=<vite port> into the whole `pnpm run dev` process
@@ -88,6 +89,11 @@ http.createServer(async (req, res) => {
   try {
     if (req.method === 'OPTIONS') { res.writeHead(204, CORS); return res.end(); }
     const u = new URL(req.url, `http://localhost:${PORT}`);
+    if (u.pathname === '/progress') {                // server-side progress of cache=hierarchy/full ops
+      const snap = progressGet(u.searchParams.get('key') || '');
+      res.writeHead(200, { 'Content-Type': 'application/json', ...CORS });
+      return res.end(JSON.stringify(snap || { done: 0, total: 0, finished: false }));
+    }
     if (handleTiles(req, res, u)) return;            // unified /tiles?mode= continuum entry
     if (await handleStream(req, res, u)) return;     // unified true-streaming dispatcher
     if (await handleCopc(req, res, u)) return;       // COPC → 3D Tiles live (range-streamed)
