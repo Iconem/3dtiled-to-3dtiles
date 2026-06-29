@@ -90,15 +90,28 @@ async function getCtx(url) {
         for (const [nm, node] of src.nodes) { if (processed.has(nm)) continue; processed.add(nm);
           if (node.numPoints > 0) { const c = coordsOfBox(node.box, src.rootBox, node.depth); availSet.add(coordsToKey(c.level, c.x, c.y, c.z)); } }
       };
+      // Idempotent single-chunk load: concurrent subtree requests SHARE one in-flight fetch and only
+      // mark `loadedChunks` AFTER the chunk's nodes land in src.nodes. (The old code marked loaded
+      // *before* awaiting, so a concurrent request would skip the chunk and index empty availability →
+      // implicit refinement stalled until something else warmed the cache.) Returns the chunk boundaries.
+      const inFlight = new Map();          // chunkName → Promise<boundaries[]>
+      const loadOne = (cr) => {
+        if (loadedChunks.has(cr)) return Promise.resolve([]);
+        if (inFlight.has(cr)) return inFlight.get(cr);
+        const p = Promise.resolve(src.loadChunk(cr, src.boxOf(cr)))
+          .then(b => { loadedChunks.add(cr); inFlight.delete(cr); return b || []; })
+          .catch(e => { inFlight.delete(cr); throw e; });
+        inFlight.set(cr, p);
+        return p;
+      };
       // PARALLEL chunk-root BFS: load each band of .hrc chunks concurrently, enqueue qualifying
       // boundaries (next-band roots) per `accept`. One round-trip-batch per band, not per chunk.
       const loadChunkRoots = async (roots, accept) => {
-        let frontier = roots.filter(r => !loadedChunks.has(r));
+        let frontier = [...new Set(roots)];
         while (frontier.length) {
-          frontier.forEach(r => loadedChunks.add(r));
-          const boundaries = await parallelMap(frontier, cr => src.loadChunk(cr, src.boxOf(cr)), { concurrency: Math.min(defaultConcurrency(), 16) });
+          const boundaries = await parallelMap(frontier, loadOne, { concurrency: Math.min(defaultConcurrency(), 16) });
           const next = [];
-          for (const boundary of boundaries) for (const b of boundary) if (!loadedChunks.has(b.name) && accept(b.name)) next.push(b.name);
+          for (const boundary of boundaries) for (const b of boundary) if (!loadedChunks.has(b.name) && !inFlight.has(b.name) && accept(b.name)) next.push(b.name);
           frontier = [...new Set(next)];
         }
         indexLoadedNodes();
