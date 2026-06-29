@@ -609,7 +609,7 @@ const DIRECT = [
   { id: 'marseille',    icon: '🏙', label: '3DT · Marseille (root.json)',   type: 'mesh', url: 'https://d3h9zulrmcj1j6.cloudfront.net/Marseille_Cesium/root.json' },
   // Live KTX2+Draco decompress (→ JPG) via /gltf over a tileset that HAS them (Bing 3dv4). For any
   // KTX/Draco tileset, point /gltf at its tileset.json: /gltf/tileset.json?ops=decompress&url=<tileset>.
-  { id: 'gltf-ktx', icon: '◈', label: '3DT · KTX→decode (Bing via /gltf)', type: 'mesh', url: `${MW}/gltf/tileset.json?ops=decompress&tex=jpg&url=${encodeURIComponent(`${MW}/bing/tileset.json?root=1202322211321&g=15530&maxLevel=18`)}` },
+  { id: 'gltf-ktx', icon: '◈', label: '3DT · KTX→decode (Bing via /gltf)', type: 'mesh', url: `${MW}/gltf/tileset.json?ops=decompress&tex=jpg&url=${encodeURIComponent(`${MW}/bing/tileset.json?g=15530`)}` },
   // (tastier .3tz / .3dtiles packages live under the 📦 Packages pill, not here.)
 ];
 
@@ -679,9 +679,8 @@ function currentPresets() {
   }));
   // Bing Maps 3D (tf=3dv4 GLB → quadtree) — dedicated /bing endpoint; root quadkey + genid.
   if (selectedFormat === 'bing') return [
-    { id: 'bing-berlin', label: '🗺 Berlin', type: 'mesh', url: `${MW}/bing/tileset.json?root=12021023322201&g=15530&maxLevel=20` },
-    { id: 'bing-rome',   label: '🗺 Rome',   type: 'mesh', url: `${MW}/bing/tileset.json?root=1202322211321&g=15530&maxLevel=20` },
-    { id: 'bing-world',  label: '🗺 World (z3 NW)', type: 'mesh', url: `${MW}/bing/tileset.json?root=120&g=15530&maxLevel=20` },
+    // One world tileset (the td1 implicit manifest); navigate/zoom to any city. genid drifts — override &g=.
+    { id: 'bing-world', label: '🗺 Bing 3D — world (td1)', type: 'mesh', url: `${MW}/bing/tileset.json?g=15530` },
   ];
   // Bentley 3MX (.3mx/.3mxb → lazy fragments) — dedicated /threemx endpoint; url = master .3mx or root .3mxb.
   if (selectedFormat === 'threemx') return [

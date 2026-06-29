@@ -120,6 +120,6 @@ http.createServer(async (req, res) => {
   console.log(`  3dtiles-self-contained  /3dtiles-self-contained/tileset.json?url=<path-or-URL.3tz|.3dtiles>`);
   console.log(`  3dtiles-tools  /3dtiles-tools/tileset.json?tool=implicit-to-explicit|upgrade&dir=<path>[&base=<url>]`);
   console.log(`  gltf     (per-tile glTF-Transform) /gltf/tileset.json?url=<tileset>&ops=decompress  (Draco/meshopt/KTX2 decode)`);
-  console.log(`  bing     Bing Maps 3D → /bing/tileset.json?root=<quadkey>&g=<genid>[&decompress=1]`);
+  console.log(`  bing     Bing Maps 3D (td1 implicit manifest) → /bing/tileset.json?g=<genid>[&decompress=1]`);
   console.log(`  threemx  Bentley 3MX → /threemx/tileset.json?url=<Scene.3mx | root.3mxb>`);
 });

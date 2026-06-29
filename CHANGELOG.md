@@ -5,6 +5,20 @@ Format loosely follows [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+### Added / Changed / Fixed — 2026-06-29 (`stream-cache` cont.: Bing td1 rewrite)
+- **Bing rewritten to the `td1` implicit manifest** — the old `mtx<quadkey>` HTTP-probe quadtree couldn't
+  discover Bing's deep-only tiles (intermediate LODs are 0-byte, so probing from a shallow root pruned the
+  whole tree → "only one request, world shows nothing"). Now: fetch `td1`, strip the `MICROSOFT_*`
+  `extensionsRequired`, rewrite the `mtx`/`st` templates to proxy through `/bing/{tile,subtree}/{face}-{level}-{x}-{y}`
+  with a standard `{y}`, and flip `y→reverseY` (= 2^level−1−y) when fetching from Bing. Subtree availability
+  is standard `subt` morton(x,y) → passed through untouched. **Verified end-to-end**: manifest rewrites
+  (MS exts stripped, templates routed), subtrees proxy with real availability, and a known-good tile
+  (`/bing/tile/1-14-1141-4206.glb` → reverseY 12177) returns the real 203 KB glTF. **No API key needed.**
+  Viewer: one "Bing 3D — world (td1)" pill (navigate/zoom to any city) replacing the root-quadkey pills.
+  Caveat: `MICROSOFT_webmercator_subdivision` is dropped, so Cesium subdivides bounding regions
+  cartographically (not mercator) — geometry is ECEF-baked so it renders correctly, but culling/LOD near
+  the poles may be approximate; needs a live-viewer check.
+
 ### Added / Changed / Fixed — 2026-06-29 (`stream-cache` cont.: 3MX georef/orientation, Z-offset, diagnostics)
 - **Fix 3MX orientation** — node GLBs stored SRS Z-up `(E,N,U)` verbatim, so Cesium's glTF Y-up→Z-up
   rotation tipped meshes 90° (vertical instead of horizontal). Now swizzled `(E,N,U)→(E,U,−N)` like the

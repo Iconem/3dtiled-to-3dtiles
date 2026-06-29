@@ -906,12 +906,12 @@ Composability goal: `source → convert → [centroids] → [gltf: draco/ktx2 de
   Plus `simplify` / `weld` / `quantize`, and exposing encode on the `/gltf` proxy (not just `/stream`).
 - **`rtc_center` / decompress for ingestion** — apply per-tile to *existing remote 3D Tiles* so consumers
   that can't read Draco/KTX2/`CESIUM_RTC` (e.g. blender **BLOSM**) can load them.
-- **Bing: switch to the `td1` implicit manifest** — Bing 3D serves a standard **implicit-tiling** 3D Tiles
-  root at `td1?g=<genid>&tf=3dv4` (QUADTREE, `subtreeLevels:7`, `availableLevels:21`; per-face children
-  with tile template `mtx{face}-{level}-{x}-{reverseY}` and subtree template `st{face}-…`). The current
-  `/bing` adapter reverse-engineers a quadkey quadtree by HTTP-probing `mtx<quadkey>`, which only catches
-  sparse deep tiles (0-byte at low LOD) → "subsample" / "world root shows nothing". Fix: proxy `td1` as the
-  tileset and route the `mtx`/`st` templates through `/bing/{tile,subtree}` (add `g`/`tf`/key).
+- **Bing `td1` implicit manifest — DONE** — `/bing` now proxies the `td1` implicit-tiling root (QUADTREE,
+  per-face children, tiles `mtx{face}-{level}-{x}-{reverseY}`, subtrees `st{face}-…`), stripping the
+  `MICROSOFT_*` extensions and flipping `y→reverseY`. Replaced the old `mtx<quadkey>` probe (couldn't find
+  Bing's deep-only tiles). No API key needed. *Remaining*: `MICROSOFT_webmercator_subdivision` is dropped,
+  so Cesium subdivides regions cartographically — geometry (ECEF-baked) renders right, but culling/LOD may
+  be approximate near the poles (revisit if visible).
 - **Browser-native bbox crop / subsample extract** — pull a cropped/decimated copy of a tiled asset
   (point cloud, mesh, or splat) by an OBB defined in the viewer — BLOSM-style but JS/browser-native.
   See [[dump-tiles-feature-idea]] (memory). **Refinement-aware traversal**: for **ADD** octrees (COPC/Potree)
