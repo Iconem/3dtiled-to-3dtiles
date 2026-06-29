@@ -35,7 +35,7 @@ import { detectFormatByName, compressGlb, decompressGlb } from '../core/index.js
 async function applyTransform(glb, transform, tex) {
   if (!glb || !transform) return glb;
   try {
-    if (transform === 'decompress') return (await decompressGlb(glb, { texFormat: tex === 'png' ? 'png' : 'jpg' })).glb;
+    if (transform === 'decompress') return (await decompressGlb(glb, { texFormat: (tex === 'png' || tex === 'webp') ? tex : 'jpg' })).glb;
     if (transform === 'meshopt' || transform === 'draco') return (await compressGlb(glb, { [transform]: true })).glb;
     if (transform === 'ktx') return (await compressGlb(glb, { ktx: true })).glb;
     if (transform === 'ktx-uastc') return (await compressGlb(glb, { ktx: true, uastc: true })).glb;

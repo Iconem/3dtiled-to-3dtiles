@@ -102,6 +102,9 @@ importers:
       '@gltf-transform/functions':
         specifier: ^4.4.0
         version: 4.4.0
+      '@jsquash/webp':
+        specifier: ^1.5.0
+        version: 1.5.0
       draco3dgltf:
         specifier: ^1.5.7
         version: 1.5.7
@@ -548,6 +551,9 @@ packages:
     engines: {node: ^18.17.0 || ^20.3.0 || >=21.0.0}
     cpu: [x64]
     os: [win32]
+
+  '@jsquash/webp@1.5.0':
+    resolution: {integrity: sha512-KggLoj2MnRSfIqTeKe1EmbljTX2vuV7mh79k89PCL1pyqiDULcPM1L47twxXt0hkb68F70bXiL31MxsuoZtKFw==}
 
   '@loaders.gl/compression@4.4.3':
     resolution: {integrity: sha512-v3feEE48FblxBPaILwejV48plcLmjvOh2yBQrgvKvLCaQdQ9bVz7PzhrUdLW0VDVlGnoR1NUJtI833627U8Heg==}
@@ -1812,6 +1818,9 @@ packages:
       yaml:
         optional: true
 
+  wasm-feature-detect@1.8.0:
+    resolution: {integrity: sha512-zksaLKM2fVlnB5jQQDqKXXwYHLQUVH9es+5TOOHwGOVJOCeRBCiPjwSg+3tN2AdTCzjgli4jijCH290kXb/zWQ==}
+
   web-streams-polyfill@4.3.0:
     resolution: {integrity: sha512-/Gnggvj9oSrEvJbDyyPtAnxBt5fGQM2iWOKQNu7ie1OxDgK40iZpyV3TKaRiEzVj1oA1UxKnEy9XPXh6PW3eVw==}
     engines: {node: '>= 8'}
@@ -2099,6 +2108,10 @@ snapshots:
 
   '@img/sharp-win32-x64@0.34.5':
     optional: true
+
+  '@jsquash/webp@1.5.0':
+    dependencies:
+      wasm-feature-detect: 1.8.0
 
   '@loaders.gl/compression@4.4.3(@loaders.gl/core@4.4.3)':
     dependencies:
@@ -3478,6 +3491,8 @@ snapshots:
     optionalDependencies:
       '@types/node': 26.0.1
       fsevents: 2.3.3
+
+  wasm-feature-detect@1.8.0: {}
 
   web-streams-polyfill@4.3.0: {}
 

@@ -17,7 +17,7 @@ import { decompressGlb, sendJson, sendGlb, sendErr, CORS } from '../core/index.j
 
 const opsToOpts = (ops, tex) => {
   const set = new Set((ops || 'decompress').split(',').map(s => s.trim()));
-  const texFormat = (tex === 'png' || tex === 'jpg') ? tex : 'jpg';   // KTX2 → jpg (default, fast) | png
+  const texFormat = (tex === 'png' || tex === 'jpg' || tex === 'webp') ? tex : 'jpg';   // KTX2 → jpg (default) | png | webp
   if (set.has('decompress')) return { draco: true, meshopt: true, ktx: true, texFormat };
   return { draco: set.has('draco'), meshopt: set.has('meshopt'), ktx: set.has('ktx'), texFormat };
 };

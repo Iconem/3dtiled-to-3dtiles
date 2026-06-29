@@ -59,9 +59,24 @@ async function basisModule() {
 
 const cTFRGBA32 = 13;   // basis transcoder_texture_format: uncompressed RGBA8888
 
-const MIME = { png: 'image/png', jpg: 'image/jpeg', jpeg: 'image/jpeg' };
-/** KTX2 bytes → {img:Buffer, mime} (RGBA via Basis transcode, then encode to png|jpg). `jpg` is the
- *  default: pure-JS jpeg-js encodes far faster than pngjs and is much smaller (no sharp/native dep). */
+// @jsquash/webp is a WASM webp encoder; in Node it would otherwise try to fetch its .wasm over the
+// network (Node fetch can't do file://), so we compile the codec .wasm beside the package and init once.
+let _webpEncode = null;
+async function getWebpEncoder() {
+  if (_webpEncode) return _webpEncode;
+  const webp = await import('@jsquash/webp/encode.js');
+  const pkgDir = dirname(require.resolve('@jsquash/webp/package.json'));
+  // init() loads the SIMD glue when SIMD is available (Node has it) → pass the matching SIMD wasm.
+  const wasm = await WebAssembly.compile(readFileSync(pkgDir + '/codec/enc/webp_enc_simd.wasm'));
+  await webp.init(wasm);
+  _webpEncode = webp.default;
+  return _webpEncode;
+}
+
+const MIME = { png: 'image/png', jpg: 'image/jpeg', jpeg: 'image/jpeg', webp: 'image/webp' };
+/** KTX2 bytes → {img:Buffer, mime} (RGBA via Basis transcode, then encode to jpg|png|webp). `jpg` is
+ *  the default: pure-JS jpeg-js encodes far faster than pngjs and is much smaller. `webp` (WASM,
+ *  @jsquash) is ~25-30% smaller than jpg at similar quality. All no sharp/native dep. */
 async function ktx2ToImage(ktx2Bytes, fmt = 'jpg', quality = 85) {
   const mod = await basisModule();
   const file = new mod.KTX2File(ktx2Bytes);
@@ -72,6 +87,13 @@ async function ktx2ToImage(ktx2Bytes, fmt = 'jpg', quality = 85) {
     const rgba = new Uint8Array(size);
     if (!file.transcodeImage(rgba, 0, 0, 0, cTFRGBA32, 0, -1, -1)) throw new Error('KTX2File.transcodeImage failed');
     const data = Buffer.from(rgba.buffer, rgba.byteOffset, rgba.byteLength);
+    if (fmt === 'webp') {
+      try {
+        const webpEncode = await getWebpEncoder();
+        const ab = await webpEncode({ data: new Uint8ClampedArray(data.buffer, data.byteOffset, data.byteLength), width, height }, { quality });
+        return { img: Buffer.from(ab), mime: 'image/webp' };
+      } catch (e) { console.warn('[gltf-decompress] webp encode failed, falling back to jpg:', e.message); }
+    }
     if (fmt === 'jpg' || fmt === 'jpeg') return { img: jpeg.encode({ data, width, height }, quality).data, mime: 'image/jpeg' };
     const png = new PNG({ width, height }); png.data = data;
     return { img: PNG.sync.write(png), mime: 'image/png' };
@@ -100,9 +122,9 @@ export async function decompressGlb(buf, opts = {}) {
     else if (meshopt && n === 'EXT_meshopt_compression') { ext.dispose(); decoded.meshopt = true; }
   }
 
-  // Textures: transcode each KTX2 image to png|jpg (default jpg — faster + smaller), drop KHR_texture_basisu.
+  // Textures: transcode each KTX2 image to jpg|png|webp (default jpg — faster + smaller), drop KHR_texture_basisu.
   if (ktx) {
-    const ext = (MIME[texFormat] === 'image/jpeg') ? '.jpg' : '.png';
+    const ext = texFormat === 'webp' ? '.webp' : (MIME[texFormat] === 'image/jpeg' ? '.jpg' : '.png');
     for (const tex of doc.getRoot().listTextures()) {
       if (tex.getMimeType() !== 'image/ktx2') continue;
       const src = tex.getImage();
