@@ -5,6 +5,28 @@ Format loosely follows [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+### Added / Changed — 2026-06-29 (`stream-cache` cont.: pills, Arrival=SOG, timing modal, dev port)
+- **Arrival.Space `.lod` = SOG** (confirmed by fetching the live fixture): identical `lod-meta.json` tree
+  and per-chunk `version:2` webp splats (`means_l/u`, `quats`, `scales`, `sh0`, `shN_*`). The SOG adapter
+  reads it directly — **no Arrival converter needed**. Added an Arrival jaffa3 pill (verified streaming).
+- **Viewer pills**: Geghard (iconem Potree, remote), Marseille `root.json` (3D Tiles, CORS-ok), Tende
+  village 3MX (dept06 — a real georeferenced 3MX; the earlier "white" was the SRS-less fixture), Arrival.
+  Pills can now be absolute remote URLs (`isRemoteUrl`/`srcUrl`); offline mode hides assets with no output.
+- **Timing log merged into the `#status` modal** (was a separate bottom-left panel overlapping the status
+  overlay) — `#status` = `#status-line` + `#timing-log`.
+- **Dev port fix**: the preview harness injects `PORT=3000` into `pnpm run dev`, collapsing the tile-server
+  onto vite's port. `server.js` now resolves `--port > TILE_PORT > PORT > 3001`; `serve:tiles` passes
+  `--port 3001`. `pnpm run dev` → vite 3000 + tiles 3001 under the harness.
+- **Findings (answers, see Future work for the resulting tasks)**: (a) the Float32 world-coord precision
+  bug was **Potree-only** — COPC subtracts origin in float64 before the f32 cast, and LCC/SOG/RAD store
+  local model coords + georef via the root transform. (b) **Bing**: the `mtx<quadkey>` probe model is wrong
+  — Bing serves a standard **implicit-tiling** 3D Tiles root at **`td1`** (QUADTREE, `subtreeLevels:7`,
+  `availableLevels:21`, tile template `mtx{face}-{level}-{x}-{reverseY}`, subtree template `st{face}-…`);
+  the probe only catches sparse deep `mtx` tiles (0-byte at low LOD) → "subsample"/"world shows nothing".
+  (c) **No in-process KTX2 encode** (no `basis_encoder`/`toktx`; `three` ships only the transcoder) and no
+  webp encoder (would pull `sharp`) — both need a new WASM dep. (d) **Nira** has no proprietary tiled format
+  (adopting 3D Tiles `.3tz`/`b3dm`). (e) tastier `.3tz`/`.3dtiles` are already under the 📦 Packages pill.
+
 ### Added / Changed — 2026-06-29 (`stream-cache` cont.: encode/transform, texture format, LAS writer)
 - **Per-tile encode + `&transform=` on `/stream`** — closes the implicit-octree gap the `/gltf` proxy
   can't reach (it URL-rewrites explicit tilesets; `/stream` builds each GLB itself). `transform=meshopt`

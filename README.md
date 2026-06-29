@@ -892,16 +892,33 @@ Composability goal: `source → convert → [centroids] → [gltf: draco/ktx2 de
 #### Future work (noted, not yet built)
 
 - **Encode ops** — **done for geometry**: `/stream?transform=meshopt|draco` (and `core/gltf-compress.js`
-  `compressGlb`). Still to add: KTX2/WebP **texture** encode (needs native `toktx`), plus `simplify` /
-  `weld` / `quantize`, and exposing encode on the `/gltf` proxy (not just `/stream`).
+  `compressGlb`). Still to add: **KTX2/WebP texture encode** — confirmed there is **no in-process path**:
+  gltf-transform's KTX2 encode shells to the native `toktx` binary (the basis *encoder* isn't bundled;
+  `three` ships only the transcoder/*decoder*), and `textureCompress(webp)` uses `sharp`. So in-process
+  needs a new WASM dep (a basis-universal encoder for KTX2/uastc/etc1s; a WASM webp encoder for WebP).
+  Plus `simplify` / `weld` / `quantize`, and exposing encode on the `/gltf` proxy (not just `/stream`).
 - **`rtc_center` / decompress for ingestion** — apply per-tile to *existing remote 3D Tiles* so consumers
   that can't read Draco/KTX2/`CESIUM_RTC` (e.g. blender **BLOSM**) can load them.
+- **Bing: switch to the `td1` implicit manifest** — Bing 3D serves a standard **implicit-tiling** 3D Tiles
+  root at `td1?g=<genid>&tf=3dv4` (QUADTREE, `subtreeLevels:7`, `availableLevels:21`; per-face children
+  with tile template `mtx{face}-{level}-{x}-{reverseY}` and subtree template `st{face}-…`). The current
+  `/bing` adapter reverse-engineers a quadkey quadtree by HTTP-probing `mtx<quadkey>`, which only catches
+  sparse deep tiles (0-byte at low LOD) → "subsample" / "world root shows nothing". Fix: proxy `td1` as the
+  tileset and route the `mtx`/`st` templates through `/bing/{tile,subtree}` (add `g`/`tf`/key).
 - **Browser-native bbox crop / subsample extract** — pull a cropped/decimated copy of a tiled asset
   (point cloud, mesh, or splat) by an OBB defined in the viewer — BLOSM-style but JS/browser-native.
-  See [[dump-tiles-feature-idea]] (memory): dump → **hand-written LAS** (streamable, O(1) RAM even for
-  500 GB via header back-patch) → shell out to **`pdal writers.copc` / untwine** (out-of-core) for LAZ/COPC.
-  No JS/WASM LAS *writer* exists (node-las is archived; entwine/untwine are C++-only), and `laz-perf` WASM
-  is decode-only — so hand-write LAS + native CLI is the path.
+  See [[dump-tiles-feature-idea]] (memory). **Refinement-aware traversal**: for **ADD** octrees (COPC/Potree)
+  accumulate all points down to the desired geometric error within the OBB; for **REPLACE** trees (3D Tiles
+  mesh) descend only where a parent's GE still exceeds the target. **Point clouds** → **hand-written LAS**
+  (streamable, O(1) RAM even for 500 GB via header back-patch — `core/las-writer.js`, built) → shell to
+  **`pdal writers.copc` / untwine** (out-of-core) for LAZ/COPC. **Meshes** → merge tile GLBs (geometry+UV+
+  texture) via glTF-Transform → a binary mesh (glb/USD/USDZ). No JS/WASM LAS *writer* exists (node-las is
+  archived; entwine/untwine are C++-only) and `laz-perf` WASM is decode-only — so hand-write + native CLI.
+- **3MX siblings** — add Bentley **ContextCapture / Scalable Mesh** (`.3sm`) next to 3MX
+  ([Bentley docs](https://docs.bentley.com/LiveContent/web/ContextCapture%20Help-v18/en/GUID-569C1E44-D86A-4942-9ABE-36C33FB5A7EB.html);
+  cf. [OctopusET/mxmxmx2tiles](https://github.com/OctopusET/mxmxmx2tiles)). Working 3MX test: Tende village (dept06).
+- **Server-side per-cache progress** — the eager-drain (`cache=hierarchy`) and convert (`cache=full`) loops
+  need a job-progress endpoint the viewer can poll (the timing-log modal already renders client milestones).
 - **Fastest JS point-cloud tiler** — a Potree-2.0-architecture out-of-core tiler (counting-sort on Morton
   codes → pre-allocated layout → scatter+spill) in JS, emitting COPC/Potree/3D Tiles.
 - **Speed**: the per-tile Draco+KTX2 decode (~250 ms/tile) can be cut by (1) **passing KTX2 through
