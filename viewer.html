@@ -1042,7 +1042,10 @@ async function loadTileset() {
     // zoom and ask the user to place it via the local frame panel.
     const bs = tileset.boundingSphere;
     const distFromEcefOrigin = Cesium.Cartesian3.magnitude(bs.center);
-    const isLocalCoords = distFromEcefOrigin < 1e6; // < 1000 km from Earth center
+    // Local (needs placement) = center near earth origin AND a small extent. A global/continental
+    // georeferenced tileset (e.g. Bing's world `region`) also has its center near the origin, but a
+    // huge radius — so guard on radius too, else we'd wrongly apply a local frame and shift it off-globe.
+    const isLocalCoords = distFromEcefOrigin < 1e6 && bs.radius < 1e6; // < 1000 km from origin AND compact
 
     if (isLocalCoords) {
       // Auto-place ANY non-geo-referenced tileset (splats AND local point clouds — e.g. centroid

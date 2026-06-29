@@ -129,7 +129,7 @@ async function buildFragment(faceMeta, L, x, y, g, isRoot) {
   const root = await tileNode(L, x, y);
   if (!root) return null;
   if (isRoot) root.geometricError = rootGEof(faceMeta);
-  return { asset: { version: '1.1', gltfUpAxis: 'Z' }, geometricError: root.geometricError, root, extensionsUsed: ['3DTILES_content_gltf'] };
+  return { asset: { version: '1.1' }, geometricError: root.geometricError, root, extensionsUsed: ['3DTILES_content_gltf'] };
 }
 const rootGEof = (faceMeta) => faceMeta._rootGE;
 
@@ -142,9 +142,9 @@ export async function bingTileset(g = DEFAULT_G) {
              content: { uri: `/bing/fragment/${f.face}-0-0-0.json?g=${g}` } };
   });
   const region = [-Math.PI, -invMerc(Math.PI), Math.PI, invMerc(Math.PI), -500, 9000];   // whole web-mercator world
-  // gltfUpAxis:'Z' — Bing GLBs bake absolute ECEF (Z-up) in the node matrix; without this Cesium applies
-  // its default glTF Y-up→Z-up rotation to that ECEF transform → content lands ~Earth-radius off + rotated.
-  return { asset: { version: '1.1', gltfUpAxis: 'Z' }, geometricError: m.rootGE,
+  // NB: Bing tile GLBs are standard glTF **Y-up** with the ECEF placement in the node matrix — Cesium's
+  // default Y-up→Z-up correctly lands them on the globe, so leave gltfUpAxis at its default (do NOT set Z).
+  return { asset: { version: '1.1' }, geometricError: m.rootGE,
            root: { boundingVolume: { region }, geometricError: m.rootGE, refine: 'REPLACE', children },
            extensionsUsed: ['3DTILES_content_gltf'] };
 }

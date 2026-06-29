@@ -5,6 +5,15 @@ Format loosely follows [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+### Fixed — 2026-06-29 (`stream-cache` cont.: Bing geometry renders)
+- **Bing 3D now renders at the right location** (verified: photogrammetry mesh of Rome, 900+ tiles). Two
+  bugs: (1) the viewer's auto-placement treated Bing's **world-spanning `region`** as local data (its
+  bounding-sphere centre sits at the earth's centre) and applied a San-Francisco local frame `modelMatrix`
+  → shifted everything off-globe. Now `isLocalCoords` also requires a **compact bounding radius** (`< 1e6`),
+  so global/continental georeferenced tilesets are left at identity. (2) A wrong `gltfUpAxis:"Z"` I'd added
+  — Bing GLBs are standard **Y-up** with ECEF in the node matrix, so Cesium's default Y-up→Z-up already
+  places them correctly; setting Z put geometry in the Indian Ocean. Reverted.
+
 ### Added — 2026-06-29 (`stream-cache` cont.: in-process KTX2 texture encode)
 - **In-process KTX2 encode** (`KHR_texture_basisu`) — `compressGlb({ktx, uastc})` and `/stream?transform=ktx`
   (ETC1S) / `ktx-uastc` (UASTC), via the **`ktx2-encoder` WASM basis encoder** + our pngjs/jpeg-js source
