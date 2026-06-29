@@ -15,10 +15,11 @@
  */
 import { decompressGlb, sendJson, sendGlb, sendErr, CORS } from '../core/index.js';
 
-const opsToOpts = (ops) => {
+const opsToOpts = (ops, tex) => {
   const set = new Set((ops || 'decompress').split(',').map(s => s.trim()));
-  if (set.has('decompress')) return { draco: true, meshopt: true, ktx: true };
-  return { draco: set.has('draco'), meshopt: set.has('meshopt'), ktx: set.has('ktx') };
+  const texFormat = (tex === 'png' || tex === 'jpg') ? tex : 'jpg';   // KTX2 → jpg (default, fast) | png
+  if (set.has('decompress')) return { draco: true, meshopt: true, ktx: true, texFormat };
+  return { draco: set.has('draco'), meshopt: set.has('meshopt'), ktx: set.has('ktx'), texFormat };
 };
 
 async function fetchBuf(url) {
@@ -33,34 +34,36 @@ const resolve = (uri, base) => isAbs(uri) ? uri : base + uri;
 // Rewrite every content.uri in the tree → route through /gltf. External tilesets (.json) recurse via
 // /gltf/tileset.json; tile GLBs go through /gltf/tile.glb. Query-string URIs (our own stream adapters'
 // `tile/x.glb?url=…`) are absolutized by joining to the upstream base. Implicit templates are skipped.
-function rewriteTree(node, base, ops) {
+function rewriteTree(node, base, qs) {
   if (!node || typeof node !== 'object') return;
   if (node.content && typeof node.content.uri === 'string') {
     const uri = node.content.uri;
     if (!/\{level\}|\{x\}|\{y\}|\{z\}/.test(uri)) {          // skip implicit templates
       const enc = encodeURIComponent(resolve(uri, base));
       const isExternal = /\.json$/i.test(uri.split('?')[0]);   // external tileset vs tile GLB
-      node.content.uri = isExternal ? `tileset.json?url=${enc}&ops=${ops}` : `tile.glb?url=${enc}&ops=${ops}`;
+      node.content.uri = isExternal ? `tileset.json?url=${enc}&${qs}` : `tile.glb?url=${enc}&${qs}`;
     }
   }
-  for (const c of node.children || []) rewriteTree(c, base, ops);
+  for (const c of node.children || []) rewriteTree(c, base, qs);
 }
 
 export async function handleGltf(req, res, u) {
   if (!u.pathname.startsWith('/gltf/')) return false;
   const url = u.searchParams.get('url');
   const ops = u.searchParams.get('ops') || 'decompress';
+  const tex = u.searchParams.get('tex') || 'jpg';            // KTX2 output: jpg (default) | png
+  const qs = `ops=${encodeURIComponent(ops)}&tex=${encodeURIComponent(tex)}`;
   if (!url) { sendErr(res, 400, 'missing ?url='); return true; }
 
   try {
     if (u.pathname === '/gltf/tileset.json') {
       const ts = JSON.parse((await fetchBuf(url)).toString('utf8'));
-      if (ts.root) rewriteTree(ts.root, baseOf(url), ops);
+      if (ts.root) rewriteTree(ts.root, baseOf(url), qs);
       sendJson(res, ts);
       return true;
     }
     if (u.pathname === '/gltf/tile.glb') {
-      const { glb } = await decompressGlb(await fetchBuf(url), opsToOpts(ops));
+      const { glb } = await decompressGlb(await fetchBuf(url), opsToOpts(ops, tex));
       sendGlb(res, glb);
       return true;
     }

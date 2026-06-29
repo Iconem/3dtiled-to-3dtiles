@@ -19,6 +19,7 @@ import { ALL_EXTENSIONS } from '@gltf-transform/extensions';
 import draco3d from 'draco3dgltf';
 import { MeshoptDecoder } from 'meshoptimizer';
 import { PNG } from 'pngjs';
+import jpeg from 'jpeg-js';
 
 const require = createRequire(import.meta.url);
 
@@ -58,19 +59,22 @@ async function basisModule() {
 
 const cTFRGBA32 = 13;   // basis transcoder_texture_format: uncompressed RGBA8888
 
-/** KTX2 bytes → PNG bytes (RGBA via Basis transcode, level 0 / layer 0 / face 0). */
-async function ktx2ToPng(ktx2Bytes) {
+const MIME = { png: 'image/png', jpg: 'image/jpeg', jpeg: 'image/jpeg' };
+/** KTX2 bytes → {img:Buffer, mime} (RGBA via Basis transcode, then encode to png|jpg). `jpg` is the
+ *  default: pure-JS jpeg-js encodes far faster than pngjs and is much smaller (no sharp/native dep). */
+async function ktx2ToImage(ktx2Bytes, fmt = 'jpg', quality = 85) {
   const mod = await basisModule();
   const file = new mod.KTX2File(ktx2Bytes);
   try {
     if (!file.startTranscoding()) throw new Error('KTX2File.startTranscoding failed');
-    const w = file.getWidth(), h = file.getHeight();
+    const width = file.getWidth(), height = file.getHeight();
     const size = file.getImageTranscodedSizeInBytes(0, 0, 0, cTFRGBA32);   // (level, layer, face, format)
     const rgba = new Uint8Array(size);
     if (!file.transcodeImage(rgba, 0, 0, 0, cTFRGBA32, 0, -1, -1)) throw new Error('KTX2File.transcodeImage failed');
-    const png = new PNG({ width: w, height: h });
-    png.data = Buffer.from(rgba.buffer, rgba.byteOffset, rgba.byteLength);
-    return { png: PNG.sync.write(png), w, h };
+    const data = Buffer.from(rgba.buffer, rgba.byteOffset, rgba.byteLength);
+    if (fmt === 'jpg' || fmt === 'jpeg') return { img: jpeg.encode({ data, width, height }, quality).data, mime: 'image/jpeg' };
+    const png = new PNG({ width, height }); png.data = data;
+    return { img: PNG.sync.write(png), mime: 'image/png' };
   } finally {
     file.close(); file.delete();
   }
@@ -83,7 +87,7 @@ async function ktx2ToPng(ktx2Bytes) {
  * @returns {Promise<{glb:Buffer, decoded:{draco:boolean,meshopt:boolean,ktx:number}}>}
  */
 export async function decompressGlb(buf, opts = {}) {
-  const { draco = true, meshopt = true, ktx = true } = opts;
+  const { draco = true, meshopt = true, ktx = true, texFormat = 'jpg' } = opts;
   const io = await decodeIO();
   const doc = await io.readBinary(buf instanceof Uint8Array ? buf : new Uint8Array(buf));
   const decoded = { draco: false, meshopt: false, ktx: 0 };
@@ -96,16 +100,17 @@ export async function decompressGlb(buf, opts = {}) {
     else if (meshopt && n === 'EXT_meshopt_compression') { ext.dispose(); decoded.meshopt = true; }
   }
 
-  // Textures: transcode each KTX2 image to PNG, then drop the KHR_texture_basisu extension.
+  // Textures: transcode each KTX2 image to png|jpg (default jpg — faster + smaller), drop KHR_texture_basisu.
   if (ktx) {
+    const ext = (MIME[texFormat] === 'image/jpeg') ? '.jpg' : '.png';
     for (const tex of doc.getRoot().listTextures()) {
       if (tex.getMimeType() !== 'image/ktx2') continue;
-      const img = tex.getImage();
-      if (!img) continue;
+      const src = tex.getImage();
+      if (!src) continue;
       try {
-        const { png } = await ktx2ToPng(img instanceof Uint8Array ? img : new Uint8Array(img));
-        tex.setImage(png); tex.setMimeType('image/png');
-        if (!tex.getURI || !tex.getURI()) { /* embedded — fine */ } else tex.setURI(tex.getURI().replace(/\.ktx2$/i, '.png'));
+        const { img, mime } = await ktx2ToImage(src instanceof Uint8Array ? src : new Uint8Array(src), texFormat);
+        tex.setImage(img); tex.setMimeType(mime);
+        if (tex.getURI && tex.getURI()) tex.setURI(tex.getURI().replace(/\.ktx2$/i, ext));
         decoded.ktx++;
       } catch (e) { console.warn('[gltf-decompress] KTX2 decode failed for a texture:', e.message); }
     }

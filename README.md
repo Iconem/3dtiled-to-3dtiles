@@ -747,6 +747,11 @@ tiling   = implicit | explicit           # octree/quadtree only — default: imp
 dynamic; `cache=full` = convert-and-store. The parameter name carries the concept, so nobody has to
 memorise what "live" vs "cached" means.
 
+> **Where each persists (explicit):** `cache=full` writes the **whole converted output to disk** (`/convert`
+> — tiles can be huge, so disk), served static afterwards and **surviving restart**; `cache=hierarchy`
+> holds **only the tree in RAM** (ephemeral, per process — it should fit); `cache=none` persists **nothing**
+> (re-derived per request, with the per-URL `getCtx` cache warming as you go).
+
 The same spectrum has three well-known names elsewhere, if it helps: **DB** materialized-table →
 materialized-view → view; **Next.js** SSG → ISR → SSR; **GIS/TiTiler** pre-rendered tile cache →
 cache-on-demand → dynamic tiling.
@@ -1239,6 +1244,13 @@ Cesium and partner organizations publish open 3D Tiles datasets:
 **CesiumGS open data (Ion)** — https://cesium.com/platform/cesium-ion/content/
 - Assets marked "open data" are publicly accessible with any Ion account token.
 - Examples: Google Photorealistic 3D Tiles (assetId 2275207), Bing Imagery basemap.
+
+**More public 3D Tiles / 3DGS / OSM-3D endpoints** — see the curated list in
+[blosm#498](https://github.com/vvoovv/blosm/issues/498) (3D Tiles + Gaussian-splat + city-model sources).
+
+**CesiumGS 3d-tiles-samples** (raw GitHub, CORS-friendly, verified 200) — handy for testing:
+- `https://raw.githubusercontent.com/CesiumGS/3d-tiles-samples/main/1.1/SparseImplicitQuadtree/tileset.json` (mesh, implicit 1.1)
+- `https://raw.githubusercontent.com/CesiumGS/3d-tiles-samples/main/1.0/TilesetWithRequestVolume/tileset.json` (mesh + point cloud)
 
 **Strasbourg Od@CiT** — 3D Tiles 1.0, explicit tiling, **REPLACE**, b3dm photogrammetry mesh
 ```

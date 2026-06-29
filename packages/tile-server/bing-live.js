@@ -18,7 +18,9 @@
 import { decompressGlb, sendJson, sendGlb, sendErr, CORS } from '../core/index.js';
 
 const BING_HOST = 't.ssl.ak.tiles.virtualearth.net';
-const DEFAULT_G = '15340';            // working generation id (drifts; override with &g=)
+const DEFAULT_G = '15530';            // working generation id (drifts; override with &g=). Any root quadkey
+                                      // works (full-world coverage) — pass &root=<quadkey>. (Bing's newer
+                                      // `td1`/`st1-{lod}-{x}-{y}` manifest addressing is a future upgrade.)
 const BING_SUB_DEPTH = 3;             // quadtree levels per lazy fragment
 const D2R = Math.PI / 180;
 const bingUrl = (qk, g) => `https://${BING_HOST}/tiles/mtx${qk}?g=${g}&tf=3dv4&n=z&form=web3d`;

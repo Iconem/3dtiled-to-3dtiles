@@ -593,6 +593,9 @@ const DIRECT = [
   // Public CesiumGS open-data samples (raw GitHub, CORS-friendly) — verified 200.
   { id: 'cgs-implicit', icon: '◈', label: '3DT · CesiumGS implicit (1.1)', type: 'mesh', url: 'https://raw.githubusercontent.com/CesiumGS/3d-tiles-samples/main/1.1/SparseImplicitQuadtree/tileset.json' },
   { id: 'cgs-lod',      icon: '◈', label: '3DT · CesiumGS discrete-LOD',   type: 'mesh', url: 'https://raw.githubusercontent.com/CesiumGS/3d-tiles-samples/main/1.0/TilesetWithDiscreteLOD/tileset.json' },
+  // Live KTX2+Draco decompress (→ JPG) via /gltf over a tileset that HAS them (Bing 3dv4). For any
+  // KTX/Draco tileset, point /gltf at its tileset.json: /gltf/tileset.json?ops=decompress&url=<tileset>.
+  { id: 'gltf-ktx', icon: '◈', label: '3DT · KTX→decode (Bing via /gltf)', type: 'mesh', url: `${MW}/gltf/tileset.json?ops=decompress&tex=jpg&url=${encodeURIComponent(`${MW}/bing/tileset.json?root=1202322211321&g=15530&maxLevel=18`)}` },
   // (tastier .3tz / .3dtiles packages live under the 📦 Packages pill, not here.)
 ];
 
@@ -656,7 +659,9 @@ function currentPresets() {
   }));
   // Bing Maps 3D (tf=3dv4 GLB → quadtree) — dedicated /bing endpoint; root quadkey + genid.
   if (selectedFormat === 'bing') return [
-    { id: 'bing-berlin', label: '🗺 Berlin (z14 root)', type: 'mesh', url: `${MW}/bing/tileset.json?root=12021023322201&g=15340&maxLevel=19` },
+    { id: 'bing-berlin', label: '🗺 Berlin', type: 'mesh', url: `${MW}/bing/tileset.json?root=12021023322201&g=15530&maxLevel=20` },
+    { id: 'bing-rome',   label: '🗺 Rome',   type: 'mesh', url: `${MW}/bing/tileset.json?root=1202322211321&g=15530&maxLevel=20` },
+    { id: 'bing-world',  label: '🗺 World (z3 NW)', type: 'mesh', url: `${MW}/bing/tileset.json?root=120&g=15530&maxLevel=20` },
   ];
   // Bentley 3MX (.3mx/.3mxb → lazy fragments) — dedicated /threemx endpoint; url = master .3mx or root .3mxb.
   if (selectedFormat === 'threemx') return [
@@ -910,10 +915,13 @@ function selectPreset(p) {
     return;
   }
 
-  document.getElementById('tileset-url').value = p.url;
+  // In raw-url mode show the raw source in the field (consistent with the toggle); loadTileset() then
+  // wraps it. Otherwise show the ready middleware/tileset URL. Always auto-load on pill click.
+  const field = (rawUrlMode && p.rawSrc) ? p.rawSrc : p.url;
+  document.getElementById('tileset-url').value = field;
+  const loadUrl = (rawUrlMode && p.rawSrc) ? buildMiddlewareUrl(p.rawSrc) : p.url;
   if (_3dtMode) {
-    // 3DTRJS mode: reload the tileset in Three.js
-    if (window.__3dtrjs) window.__3dtrjs.load(p.url, p.type === 'splat');
+    if (window.__3dtrjs) window.__3dtrjs.load(loadUrl, p.type === 'splat');
     setStatus('3DTilesRendererJS — ' + p.label);
   } else {
     loadTileset();
