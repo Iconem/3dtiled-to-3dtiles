@@ -25,11 +25,14 @@ Format loosely follows [Keep a Changelog](https://keepachangelog.com/).
 - **Viewer permanent timing log** (bottom-left) — persistent per-load milestones with elapsed times
   (context: cache mode + prefetch + transform + format + renderer; then tileset resolved / first tile /
   streaming N / tiles ready N / failure). The **timing-log half** of the requested progress reporting.
+- **Offline georef baked** — the prebuilt LCC + Potree converters now write `root.transform` from the
+  data's own CRS, sharing the live adapters' math (new `core/geo.js` `cgcs2000Lon0`/`lccGeoref`; Potree
+  via `georefFromCrs`). Regenerated **Guan_Temple** (EPSG:4547) + **vol_total** (Swiss somerc) — verified
+  offline placement == live `/stream` adapter. Clouds with no CRS (Guanlan EPSG:0) correctly stay local.
 - **Still deferred** (unverifiable here / greenfield): **server-side per-cache progress** (eager-drain /
-  convert need a progress endpoint — the other half of progress reporting); offline-georef regen (LCC Guan,
-  Potree vol_total — offline converters don't bake georef, and the sample-data layout has moved);
-  Arrival.Space `.lod` adapter; Potree live zoom-stop above a level (needs live-viewer repro); 3MX visual
-  debug (public fixture has no SRS); KTX2 *texture* encode (needs native `toktx`).
+  convert need a progress endpoint — the other half of progress reporting); Arrival.Space `.lod` adapter;
+  Potree live zoom-stop above a level (needs live-viewer repro); 3MX visual debug (public fixture has no
+  SRS); KTX2 *texture* encode (needs native `toktx`).
 
 ### Added / Changed / Fixed — 2026-06-29 (`stream-cache` branch: lazy hierarchy, cache continuum, new adapters)
 - **Lazy hierarchy on demand** for every multi-page format (geometry was already per-tile): Potree 1.x
