@@ -898,12 +898,11 @@ Composability goal: `source → convert → [centroids] → [gltf: draco/ktx2 de
 
 #### Future work (noted, not yet built)
 
-- **Encode ops** — **done for geometry**: `/stream?transform=meshopt|draco` (and `core/gltf-compress.js`
-  `compressGlb`). Still to add: **KTX2/WebP texture encode** — confirmed there is **no in-process path**:
-  gltf-transform's KTX2 encode shells to the native `toktx` binary (the basis *encoder* isn't bundled;
-  `three` ships only the transcoder/*decoder*), and `textureCompress(webp)` uses `sharp`. So in-process
-  needs a new WASM dep (a basis-universal encoder for KTX2/uastc/etc1s; a WASM webp encoder for WebP).
-  Plus `simplify` / `weld` / `quantize`, and exposing encode on the `/gltf` proxy (not just `/stream`).
+- **Encode ops** — **done**: geometry (`/stream?transform=meshopt|draco`) AND **KTX2 textures
+  in-process** (`/stream?transform=ktx` [ETC1S] · `ktx-uastc` [UASTC]; `compressGlb({ktx,uastc})`) via the
+  **`ktx2-encoder` WASM basis encoder** + our pngjs/jpeg-js source decoder — **no native `toktx`**. Still
+  to add: **WebP** texture encode (needs a WASM webp encoder; `textureCompress(webp)` would pull `sharp`),
+  `simplify` / `weld` / `quantize`, and exposing encode on the `/gltf` proxy (not just `/stream`).
 - **`rtc_center` / decompress for ingestion** — apply per-tile to *existing remote 3D Tiles* so consumers
   that can't read Draco/KTX2/`CESIUM_RTC` (e.g. blender **BLOSM**) can load them.
 - **Bing `td1` → explicit lazy fragments — DONE** — `/bing` reads Bing's `td1` implicit manifest + `st`

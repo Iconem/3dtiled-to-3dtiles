@@ -82,7 +82,7 @@ importers:
   packages/copc-to-3dtiles:
     dependencies:
       '@gltf-transform/core':
-        specifier: ^4.0.0
+        specifier: ^4.4.0
         version: 4.4.0
       copc:
         specifier: ^0.0.8
@@ -94,20 +94,26 @@ importers:
   packages/core:
     dependencies:
       '@gltf-transform/core':
-        specifier: ^4.0.0
+        specifier: ^4.4.0
         version: 4.4.0
       '@gltf-transform/extensions':
-        specifier: ^4.0.0
+        specifier: ^4.4.0
         version: 4.4.0
       '@gltf-transform/functions':
-        specifier: ^4.0.0
+        specifier: ^4.4.0
         version: 4.4.0
       draco3dgltf:
         specifier: ^1.5.7
         version: 1.5.7
+      jpeg-js:
+        specifier: ^0.4.4
+        version: 0.4.4
       ktx-parse:
         specifier: ^1.0.0
         version: 1.1.0
+      ktx2-encoder:
+        specifier: ^0.5.3
+        version: 0.5.3
       pngjs:
         specifier: ^7.0.0
         version: 7.0.0
@@ -141,7 +147,7 @@ importers:
   packages/potree-to-3dtiles:
     dependencies:
       '@gltf-transform/core':
-        specifier: ^4.0.0
+        specifier: ^4.4.0
         version: 4.4.0
       copc:
         specifier: ^0.0.8
@@ -150,7 +156,7 @@ importers:
   packages/rad-to-3dtiles:
     dependencies:
       '@gltf-transform/core':
-        specifier: ^4.0.0
+        specifier: ^4.4.0
         version: 4.4.0
       '@sparkjsdev/spark':
         specifier: ^2.1.0
@@ -161,6 +167,8 @@ importers:
       '@playcanvas/splat-transform':
         specifier: ^2.6.0
         version: 2.6.0(playcanvas@2.19.7)
+
+  packages/threemx-to-3dtiles: {}
 
   packages/tile-server:
     dependencies:
@@ -1285,6 +1293,9 @@ packages:
 
   ktx-parse@1.1.0:
     resolution: {integrity: sha512-mKp3y+FaYgR7mXWAbyyzpa/r1zDWeaunH+INJO4fou3hb45XuNSwar+7llrRyvpMWafxSIi99RNFJ05MHedaJQ==}
+
+  ktx2-encoder@0.5.3:
+    resolution: {integrity: sha512-VkoccU/EHSf1690w6znOhp2Hz4UJuKMnfuZhtaymVYge3okU64myyZ/v1Wui926rDuAoi1LfVNqilKm/k4nlqQ==}
 
   laz-perf@0.0.7:
     resolution: {integrity: sha512-2xRqm/f/2UqDS5qqkjOyDb6uVIjkVw6SGmQlMoTQliVWkZhPfIbUJTubUl3mTloaWqKcjlS/urmP1CYoxelsEg==}
@@ -2879,6 +2890,10 @@ snapshots:
   ktx-parse@0.7.1: {}
 
   ktx-parse@1.1.0: {}
+
+  ktx2-encoder@0.5.3:
+    dependencies:
+      ktx-parse: 0.7.1
 
   laz-perf@0.0.7: {}
 

@@ -5,6 +5,13 @@ Format loosely follows [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+### Added — 2026-06-29 (`stream-cache` cont.: in-process KTX2 texture encode)
+- **In-process KTX2 encode** (`KHR_texture_basisu`) — `compressGlb({ktx, uastc})` and `/stream?transform=ktx`
+  (ETC1S) / `ktx-uastc` (UASTC), via the **`ktx2-encoder` WASM basis encoder** + our pngjs/jpeg-js source
+  decoder (the in-Node `imageDecoder` it needs). **No native `toktx`** — closes the encode gap. Verified
+  end-to-end on a real textured 3MX tile (encoded.ktx=1, round-trips through the decoder). Pinned
+  `@gltf-transform/*` to `^4.4.0`. (WebP texture encode still needs a WASM webp encoder.)
+
 ### Added / Changed / Fixed — 2026-06-29 (`stream-cache` cont.: Bing td1 rewrite)
 - **Bing rewritten to the `td1` implicit manifest** — the old `mtx<quadkey>` HTTP-probe quadtree couldn't
   discover Bing's deep-only tiles (intermediate LODs are 0-byte, so probing from a shallow root pruned the

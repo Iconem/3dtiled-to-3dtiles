@@ -7,19 +7,31 @@
  *                                 point-cloud stream tiles, which have no indices)
  *   • KHR_draco_mesh_compression → meshes only (Draco skips non-indexed/POINTS primitives — a no-op
  *                                 for point clouds, useful for b3dm/glTF mesh tiles)
+ *   • KHR_texture_basisu (KTX2)  → textures, ETC1S (default) or UASTC, IN-PROCESS via the `ktx2-encoder`
+ *                                 WASM basis encoder + our pngjs/jpeg-js source decoder — NO native
+ *                                 `toktx` binary (the route gltf-transform's CLI would otherwise force).
  *
- * KTX2 *encode* needs the native `toktx`/`ktx` binary (no in-process WASM encoder ships with
- * gltf-transform), so it is intentionally NOT wired here — decode stays in-process (Basis+pngjs in
- * gltf-decompress.js), encode is a documented future add when a native binary is acceptable.
- *
- *   const { glb, encoded } = await compressGlb(buf, { meshopt:true });   // default for point tiles
- *   const { glb }          = await compressGlb(buf, { draco:true });     // mesh tiles
+ *   const { glb, encoded } = await compressGlb(buf, { meshopt:true });        // default for point tiles
+ *   const { glb }          = await compressGlb(buf, { draco:true });          // mesh geometry
+ *   const { glb }          = await compressGlb(buf, { ktx:true });            // textures → KTX2 ETC1S
+ *   const { glb }          = await compressGlb(buf, { ktx:true, uastc:true }); // textures → KTX2 UASTC
  */
 import { NodeIO } from '@gltf-transform/core';
 import { ALL_EXTENSIONS } from '@gltf-transform/extensions';
 import { draco as dracoFn, meshopt as meshoptFn } from '@gltf-transform/functions';
+import { ktx2 as ktx2Fn } from 'ktx2-encoder/gltf-transform';
 import draco3d from 'draco3dgltf';
 import { MeshoptEncoder, MeshoptDecoder } from 'meshoptimizer';
+import { PNG } from 'pngjs';
+import jpeg from 'jpeg-js';
+
+// KTX2 encode needs raw RGBA; `ktx2-encoder` requires an imageDecoder in Node (no browser ImageDecoder).
+// Decode the source PNG/JPEG with the pure-JS codecs we already ship (no sharp/native).
+const imageDecoder = (b) => {
+  if (b[0] === 0x89 && b[1] === 0x50) { const p = PNG.sync.read(Buffer.from(b)); return Promise.resolve({ width: p.width, height: p.height, data: new Uint8Array(p.data) }); }
+  const j = jpeg.decode(Buffer.from(b), { useTArray: true, formatAsRGBA: true });
+  return Promise.resolve({ width: j.width, height: j.height, data: new Uint8Array(j.data) });
+};
 
 // ── lazy singletons ──────────────────────────────────────────────────────────────
 let _meshoptIO = null;
@@ -52,32 +64,39 @@ async function readIO() {
 }
 
 /**
- * Encode a GLB's geometry. `opts`: { meshopt?, draco? }. meshopt is the default — it compresses POINTS
- * (point clouds) as well as meshes; draco only compresses indexed (mesh) primitives.
- * @returns {Promise<{glb:Buffer, encoded:{meshopt:boolean,draco:boolean}}>}
+ * Encode a GLB. `opts`: { meshopt?, draco?, ktx?, uastc? }.
+ *   - geometry: `draco` (mesh primitives only) OR `meshopt` (everything incl. POINTS). `meshopt` is the
+ *     default ONLY when no other op is requested.
+ *   - textures: `ktx` → KHR_texture_basisu (ETC1S by default; `uastc:true` for UASTC), in-process WASM.
+ * ktx composes with a geometry op (e.g. {draco:true, ktx:true}).
+ * @returns {Promise<{glb:Buffer, encoded:{meshopt:boolean,draco:boolean,ktx:number}}>}
  */
 export async function compressGlb(buf, opts = {}) {
-  const { meshopt = !opts.draco, draco = false } = opts;
+  const { draco = false, ktx = false, uastc = false } = opts;
+  const meshopt = opts.meshopt ?? (!draco && !ktx);      // default geometry op only if nothing else asked
   const bytes = buf instanceof Uint8Array ? buf : new Uint8Array(buf);
   const reader = await readIO();
   const doc = await reader.readBinary(bytes);
-  const encoded = { meshopt: false, draco: false };
+  const encoded = { meshopt: false, draco: false, ktx: 0 };
 
-  // Draco first (mesh primitives), then meshopt (everything, incl. POINTS). They target the same
-  // primitives, so apply only one per request to avoid double-encoding; meshopt is the general choice.
+  // Textures first (independent of geometry): PNG/JPEG → KTX2 via the WASM basis encoder.
+  if (ktx) {
+    try {
+      await doc.transform(ktx2Fn({ imageDecoder, isUASTC: !!uastc }));
+      encoded.ktx = doc.getRoot().listTextures().filter(t => t.getMimeType() === 'image/ktx2').length;
+    } catch (e) { console.warn('[gltf-compress] KTX2 encode failed:', e.message); }
+  }
+  // Geometry: draco (mesh) OR meshopt (general). Apply at most one; both target the same primitives.
   if (draco) {
     await doc.transform(dracoFn());
     encoded.draco = true;
-    const glb = Buffer.from(await (await dracoIO()).writeBinary(doc));
-    return { glb, encoded };
+    return { glb: Buffer.from(await (await dracoIO()).writeBinary(doc)), encoded };
   }
   if (meshopt) {
     await doc.transform(meshoptFn({ encoder: MeshoptEncoder }));
     encoded.meshopt = true;
-    const glb = Buffer.from(await (await meshoptIO()).writeBinary(doc));
-    return { glb, encoded };
+    return { glb: Buffer.from(await (await meshoptIO()).writeBinary(doc)), encoded };
   }
-  // nothing requested → re-serialize uncompressed (no-op passthrough)
-  const glb = Buffer.from(await new NodeIO().registerExtensions(ALL_EXTENSIONS).writeBinary(doc));
-  return { glb, encoded };
+  // ktx-only (or no-op) → write with a plain ALL_EXTENSIONS IO (includes KHR_texture_basisu for output).
+  return { glb: Buffer.from(await new NodeIO().registerExtensions(ALL_EXTENSIONS).writeBinary(doc)), encoded };
 }

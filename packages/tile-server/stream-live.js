@@ -28,6 +28,8 @@ import { detectFormatByName, compressGlb, decompressGlb } from '../core/index.js
 // this also covers the implicit COPC/Potree octrees that /gltf cannot URL-rewrite.
 //   transform=meshopt    → EXT_meshopt_compression (works on POINTS — shrinks point tiles to ~37%)
 //   transform=draco      → KHR_draco_mesh_compression (mesh tiles only; no-op on point clouds)
+//   transform=ktx        → KHR_texture_basisu (KTX2 ETC1S) textures, in-process WASM (mesh tiles w/ textures)
+//   transform=ktx-uastc  → KTX2 UASTC (higher quality / larger)
 //   transform=decompress → decode draco+meshopt+KTX2 (for consumers like blosm that can't read them)
 // &tex=jpg|png chooses the KTX2 decode output (decompress only). No-op transforms pass the GLB through.
 async function applyTransform(glb, transform, tex) {
@@ -35,10 +37,12 @@ async function applyTransform(glb, transform, tex) {
   try {
     if (transform === 'decompress') return (await decompressGlb(glb, { texFormat: tex === 'png' ? 'png' : 'jpg' })).glb;
     if (transform === 'meshopt' || transform === 'draco') return (await compressGlb(glb, { [transform]: true })).glb;
+    if (transform === 'ktx') return (await compressGlb(glb, { ktx: true })).glb;
+    if (transform === 'ktx-uastc') return (await compressGlb(glb, { ktx: true, uastc: true })).glb;
   } catch (e) { console.warn(`[stream] transform=${transform} failed:`, e.message); }
   return glb;
 }
-const TRANSFORMS = new Set(['meshopt', 'draco', 'decompress']);
+const TRANSFORMS = new Set(['meshopt', 'draco', 'ktx', 'ktx-uastc', 'decompress']);
 
 // Package formats are already 3D Tiles inside a single file — they don't "convert" geometry, they
 // stream a tileset out of a .3tz/.3dtiles container. /stream delegates them to the self-contained
