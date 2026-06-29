@@ -5,6 +5,28 @@ Format loosely follows [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+### Added / Changed — 2026-06-29 (`stream-cache` cont.: encode/transform, texture format, LAS writer)
+- **Per-tile encode + `&transform=` on `/stream`** — closes the implicit-octree gap the `/gltf` proxy
+  can't reach (it URL-rewrites explicit tilesets; `/stream` builds each GLB itself). `transform=meshopt`
+  (EXT_meshopt — works on **POINTS**, where Draco no-ops; verified Potree tile 203 KB → 65 KB, ~32%),
+  `transform=draco` (mesh tiles), `transform=decompress` (decode draco/meshopt/KTX2, `+&tex=jpg|png`).
+  New `core/gltf-compress.js` `compressGlb({meshopt|draco})`; verified end-to-end through the live server
+  + round-trip decode. Viewer: **transform** dropdown next to cache/prefetch (before formats).
+- **Configurable KTX2 decode output** — `core/gltf-decompress.js` + `/gltf?tex=jpg|png`. Default **jpg**
+  (pure-JS `jpeg-js`, no native/sharp): measured ~30% smaller and ~2.6× faster than the prior `pngjs` path.
+- **Out-of-core LAS writer** (`core/las-writer.js`) — hand-written LAS 1.4 / PDRF7 (no maintained JS/WASM
+  LAS *writer* exists). Streaming `LasWriter` (O(1) RAM — header back-patch for count/bbox, so a 500 GB
+  cloud needs ~constant memory) + in-memory `writeLasBuffer` for the browser. Hand off to
+  `laszip`/`pdal writers.copc`/`untwine` for LAZ/COPC. Self-tested (LASF/PDRF7/count/bbox round-trip).
+- **Bing**: default genid `15340 → 15530`; any root quadkey works (full-world); viewer World/Rome pills.
+- **Viewer**: raw-url field re-resolves on toggle **and** on pill click; KTX→decode demo pill (Bing via
+  `/gltf`). **Docs**: `/stream?transform=` + `/gltf?tex=` in the endpoints table; cache disk/RAM/none
+  persistence note; blosm#498 + CesiumGS public-data refs.
+- **Still deferred** (unverifiable here / greenfield): offline-georef regen (LCC Guan, Potree vol_total —
+  offline converters don't bake georef, and the sample-data layout has moved); Arrival.Space `.lod`
+  adapter; full live progress-reporting UI; Potree live zoom-stop above a level (needs live-viewer repro);
+  3MX visual debug (public fixture has no SRS); KTX2 *texture* encode (needs native `toktx`).
+
 ### Added / Changed / Fixed — 2026-06-29 (`stream-cache` branch: lazy hierarchy, cache continuum, new adapters)
 - **Lazy hierarchy on demand** for every multi-page format (geometry was already per-tile): Potree 1.x
   (`.hrc` chunks → lazy implicit), Potree 2.0 (hierarchy chunks), COPC (hierarchy pages), RAD (4-level

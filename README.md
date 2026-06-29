@@ -868,17 +868,20 @@ Composability goal: `source → convert → [centroids] → [gltf: draco/ktx2 de
 | Endpoint | What | Ops / params (current) |
 |---|---|---|
 | `/3dtiles-tools/tileset.json?tool=<t>&dir=<path>\|url=<tileset>` | per-tile tileset transforms | `tool=implicit-to-explicit` · `tool=upgrade` (b3dm/pnts→glb, glTF 1.0→2.0, `CESIUM_RTC` bake) |
-| `/gltf/tileset.json?url=<tileset>&ops=<ops>` (+ `/gltf/tile.glb?url=<glb>&ops=`) | generic per-tile **glTF-Transform** pipeline (proxies an explicit tileset, recurses external refs) | `ops=decompress` (= `draco,meshopt,ktx`) · or any of `draco` · `meshopt` · `ktx` (all **decode** today; encode/simplify next) |
+| `/gltf/tileset.json?url=<tileset>&ops=<ops>[&tex=jpg\|png]` (+ `/gltf/tile.glb?url=<glb>&ops=`) | generic per-tile **glTF-Transform** pipeline (proxies an explicit tileset, recurses external refs) | `ops=decompress` (= `draco,meshopt,ktx`) · or any of `draco` · `meshopt` · `ktx` (decode); KTX2 decodes to `tex=jpg` (default, fast/small) or `png` |
+| `/stream/tileset.json?url=<SRC>&format=<fmt>&transform=<op>` | per-tile transform applied to **every streamed tile** (covers implicit COPC/Potree the `/gltf` proxy can't reach, since `/stream` builds each GLB itself) | `transform=meshopt` (**encode** — EXT_meshopt, works on POINTS → point tiles ~⅓ size) · `transform=draco` (encode, mesh tiles only) · `transform=decompress` (decode draco/meshopt/KTX2, `+&tex=jpg\|png`) |
 | `/bing/tileset.json?root=<quadkey>&g=<genid>&maxLevel=<L>[&decompress=1]` | Bing Maps 3D (`tf=3dv4`) → 3D Tiles | `root` quadkey, `g` genid (default 15340), `maxLevel`, `decompress` |
 | `/threemx/tileset.json?url=<Scene.3mx\|root.3mxb>` | Bentley 3MX → 3D Tiles | (georef from SRS+SRSOrigin when present) |
 
 > The `/gltf` pipeline runs per-tile **only on explicit tilesets** (concrete tile URIs — 3MX/Bing/RAD/I3S
 > outputs and external mesh 3D Tiles); it recurses external-tileset refs. **Implicit** COPC/Potree octree
-> templates (`{level}-{x}-{y}`) can't be URL-rewritten per tile, so they pass through — chain
-> `implicit-to-explicit` first, or (future) apply the op inside the `/stream` tile path. Note: in practice
-> **decompress** is mainly for *ingesting existing remote 3D Tiles* into consumers that can't read
-> Draco/KTX2/`CESIUM_RTC` (e.g. blender BLOSM); the more common need going forward is the **encode**
-> direction (Draco/KTX2 compress), which is **not yet implemented**.
+> templates (`{level}-{x}-{y}`) can't be URL-rewritten per tile — so for those use **`/stream?transform=`**,
+> which applies the op as `/stream` builds each tile GLB itself (no URL rewrite needed). `transform=meshopt`
+> is the standout: it compresses **POINTS** (where Draco no-ops, having no indices), shrinking COPC/Potree
+> point tiles to ~⅓ over the wire (decoded transparently by Cesium/3DTilesRendererJS). `transform=decompress`
+> is the reverse — mainly for *ingesting existing remote 3D Tiles* into consumers that can't read
+> Draco/KTX2/`CESIUM_RTC` (e.g. blender BLOSM). KTX2 **encode** still needs a native `toktx`/`ktx` binary
+> (no in-process WASM encoder), so it stays a documented future add.
 >
 > **Why no built-in KTX decode dep / do we vendor the `ktx` CLI?** No — we do **not** use (or vendor)
 > glTF-Transform's `ktxdecompress`, which is **CLI-only and shells out to the native KTX-Software `ktx`
@@ -888,8 +891,9 @@ Composability goal: `source → convert → [centroids] → [gltf: draco/ktx2 de
 
 #### Future work (noted, not yet built)
 
-- **Encode ops** for `/gltf` — Draco / KTX2(etc1s,uastc) / WebP / `simplify` / `weld` / `quantize`, per
-  tile. The decompress direction is done; **compress is the bigger future need**.
+- **Encode ops** — **done for geometry**: `/stream?transform=meshopt|draco` (and `core/gltf-compress.js`
+  `compressGlb`). Still to add: KTX2/WebP **texture** encode (needs native `toktx`), plus `simplify` /
+  `weld` / `quantize`, and exposing encode on the `/gltf` proxy (not just `/stream`).
 - **`rtc_center` / decompress for ingestion** — apply per-tile to *existing remote 3D Tiles* so consumers
   that can't read Draco/KTX2/`CESIUM_RTC` (e.g. blender **BLOSM**) can load them.
 - **Browser-native bbox crop / subsample extract** — pull a cropped/decimated copy of a tiled asset

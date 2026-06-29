@@ -21,7 +21,24 @@ import { lccTileset, lccTile, lccTileRe } from './lcc-live.js';
 import { radTileset, radTile, radTileRe } from './rad-live.js';
 import { i3sTileset, i3sTile, i3sTileRe } from './i3s-live.js';
 import { handleSelfContained } from './3dtiles-self-contained.js';
-import { detectFormatByName } from '../core/index.js';
+import { detectFormatByName, compressGlb, decompressGlb } from '../core/index.js';
+
+// Per-tile glTF-Transform op applied to every streamed tile GLB, the streaming counterpart of the
+// /gltf proxy (which only reaches *explicit* tilesets). Because /stream builds each tile GLB itself,
+// this also covers the implicit COPC/Potree octrees that /gltf cannot URL-rewrite.
+//   transform=meshopt    → EXT_meshopt_compression (works on POINTS — shrinks point tiles to ~37%)
+//   transform=draco      → KHR_draco_mesh_compression (mesh tiles only; no-op on point clouds)
+//   transform=decompress → decode draco+meshopt+KTX2 (for consumers like blosm that can't read them)
+// &tex=jpg|png chooses the KTX2 decode output (decompress only). No-op transforms pass the GLB through.
+async function applyTransform(glb, transform, tex) {
+  if (!glb || !transform) return glb;
+  try {
+    if (transform === 'decompress') return (await decompressGlb(glb, { texFormat: tex === 'png' ? 'png' : 'jpg' })).glb;
+    if (transform === 'meshopt' || transform === 'draco') return (await compressGlb(glb, { [transform]: true })).glb;
+  } catch (e) { console.warn(`[stream] transform=${transform} failed:`, e.message); }
+  return glb;
+}
+const TRANSFORMS = new Set(['meshopt', 'draco', 'decompress']);
 
 // Package formats are already 3D Tiles inside a single file — they don't "convert" geometry, they
 // stream a tileset out of a .3tz/.3dtiles container. /stream delegates them to the self-contained
@@ -98,8 +115,12 @@ export async function handleStream(req, res, u) {
     // gaussians — a cheap preview. Affects the tileset (drops the KHR_gaussian_splatting requirement)
     // and each tile, so it must ride along on the child tile URIs too.
     const centroids = u.searchParams.get('centroids') === '1' || u.searchParams.get('centroids') === 'true';
+    // transform: per-tile glTF-Transform op; rides along on child tile URIs so /stream/tile carries it.
+    const transform = TRANSFORMS.has(u.searchParams.get('transform')) ? u.searchParams.get('transform') : null;
+    const tex = u.searchParams.get('tex') === 'png' ? 'png' : 'jpg';
     const ts = await adapter.tileset(url, { tiling: u.searchParams.get('tiling'), lazy, hierarchy, prefetch, centroids });
-    tagContentUris(ts.root, `&format=${fmt}` + (centroids ? '&centroids=1' : ''));
+    tagContentUris(ts.root, `&format=${fmt}` + (centroids ? '&centroids=1' : '')
+      + (transform ? `&transform=${transform}` + (transform === 'decompress' && tex === 'png' ? '&tex=png' : '') : ''));
     res.writeHead(200, { 'Content-Type': 'application/json', ...CORS });
     res.end(JSON.stringify(ts));
     return true;
@@ -107,8 +128,10 @@ export async function handleStream(req, res, u) {
   const m = u.pathname.match(/^\/stream\/tile\/(.+)\.glb$/);
   if (m && adapter.tileRe.test(m[1])) {
     const centroids = u.searchParams.get('centroids') === '1' || u.searchParams.get('centroids') === 'true';
-    const glb = await adapter.tile(url, m[1], { centroids });
+    let glb = await adapter.tile(url, m[1], { centroids });
     if (!glb) { res.writeHead(404, CORS); res.end('no such node'); return true; }
+    const transform = TRANSFORMS.has(u.searchParams.get('transform')) ? u.searchParams.get('transform') : null;
+    if (transform) glb = await applyTransform(glb, transform, u.searchParams.get('tex'));
     res.writeHead(200, { 'Content-Type': 'model/gltf-binary', ...CORS });
     res.end(glb);
     return true;

@@ -14,4 +14,5 @@ export { Source } from './source.js';
 export { CORS, sendJson, sendGlb, sendBin, sendErr } from './http.js';
 export { buildImplicitTileset } from './octree.js';
 export { decompressGlb } from './gltf-decompress.js';
+export { compressGlb } from './gltf-compress.js';
 export { LasWriter, writeLasBuffer } from './las-writer.js';

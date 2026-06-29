@@ -520,6 +520,7 @@ let viewerMode = 'stream';                                 // 'stream' (live str
 let tilingMode = 'implicit';                               // 'implicit' | 'explicit' (octree only)
 let cacheScope = 'none';                                   // 'none' (lazy) | 'hierarchy' (eager) | 'all' (→ /convert)
 let prefetchN  = 1;                                        // background-warm N hierarchy levels (cache=none); 0=none, -1=all
+let transformOp = '';                                      // per-tile glTF-Transform on /stream: ''|meshopt|draco|decompress
 let centroidsOnly = false;                                 // tiled-splat preview: POINTS centroids instead of gaussians
 let rawUrlMode = false;                                    // url field holds a RAW dataset url (wrap it) vs a ready url
 const SPLAT_FORMATS = new Set(['sog', 'lcc', 'rad']);      // formats that support centroids-only
@@ -633,6 +634,7 @@ function buildMiddlewareUrl(rawSrc, f) {
   if (cacheScope === 'all') return `${MW}/convert/tileset.json?format=${fmt}&url=${enc}${streamParams(f)}`;
   let q = `&hierarchy=${cacheScope === 'hierarchy' ? 'eager' : 'lazy'}`;
   if (cacheScope === 'none') q += `&prefetch=${prefetchN}`;
+  if (transformOp) q += `&transform=${transformOp}`;       // per-tile encode (meshopt/draco) or decode (decompress)
   return `${MW}/stream/tileset.json?format=${fmt}&url=${enc}${q}${streamParams(f)}`;
 }
 const canCentroids = () => SPLAT_FORMATS.has(selectedFormat);
@@ -793,6 +795,7 @@ function setTool(t) { toolName = t; buildPresetBar(); const first = currentPrese
 function setTiling(t) { tilingMode = t; rebuildAndReselect(); }
 function setCacheScope(s) { cacheScope = s; rebuildAndReselect(); }
 function setPrefetch(n) { n = parseInt(n, 10); prefetchN = Number.isFinite(n) ? n : 1; rebuildAndReselect(); }
+function setTransform(v) { transformOp = v || ''; rebuildAndReselect(); }
 function setCentroids(v) { centroidsOnly = !!v; rebuildAndReselect(); }
 function setRawUrlMode(v) {                  // toggle raw-source vs ready-url interpretation of the field
   rawUrlMode = !!v;
@@ -858,6 +861,24 @@ function buildPresetBar() {
       inp.style.cssText = 'width:3.2em; background:transparent; color:inherit; border:1px solid currentColor; border-radius:4px;';
       inp.onchange = () => setPrefetch(inp.value);
       wrap.appendChild(inp);
+      bar.appendChild(wrap);
+    }
+    // per-tile glTF-Transform on the streamed GLBs (meshopt/draco encode = smaller over the wire;
+    // decompress = decode KTX2/draco/meshopt for consumers that can't read them, e.g. blosm).
+    {
+      const wrap = document.createElement('span');
+      wrap.className = 'preset mode'; wrap.style.cursor = 'default';
+      wrap.title = 'per-tile transform: meshopt/draco compress streamed tiles (smaller); decompress decodes KTX2/draco/meshopt';
+      wrap.append('transform ');
+      const sel = document.createElement('select');
+      sel.style.cssText = 'background:transparent; color:inherit; border:1px solid currentColor; border-radius:4px;';
+      for (const [v, l] of [['', 'none'], ['meshopt', 'meshopt ↓'], ['draco', 'draco ↓ (mesh)'], ['decompress', 'decompress ↑']]) {
+        const o = document.createElement('option'); o.value = v; o.textContent = l;
+        if (v === transformOp) o.selected = true;
+        o.style.color = '#000'; sel.appendChild(o);
+      }
+      sel.onchange = () => setTransform(sel.value);
+      wrap.appendChild(sel);
       bar.appendChild(wrap);
     }
     bar.appendChild(Object.assign(document.createElement('span'), { className: 'preset-sep' }));
