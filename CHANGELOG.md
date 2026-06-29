@@ -5,6 +5,19 @@ Format loosely follows [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+### Added — 2026-06-29 (`stream-cache` cont.: bbox crop engine + shadeless rendering)
+- **bbox crop / subsample extract — engine (point clouds → LAS)**. New `/dump/las?url=<potree>&bbox=
+  minx,miny,minz,maxx,maxy,maxz[&maxLevel=N]` traverses the octree (ADD: accumulate every point inside the
+  bbox from all nodes down to `maxLevel`), filters to the bbox, and streams an uncompressed LAS
+  (`core/las-writer.js`; offset = points' min so int32 quantization stays in range). Verified on Potree
+  lion: full = 272 768 pts / 167 nodes (valid LASF), a half-X bbox = 94 417 pts clipped exactly at the cut.
+  First increment of the BLOSM-style crop feature. *Next*: COPC source, 3D-Tiles-mesh→merged glb/USD,
+  lazy traversal for huge remote clouds (non-lazy full-hierarchy load is slow on big datasets), and the
+  in-viewer draw-bbox UI (→ `pdal writers.copc`/`untwine` for LAZ/COPC).
+- **Viewer shadeless (unlit) + brightness** — Bing/3MX bake lighting into textures, so a Cesium
+  `CustomShader` (LightingModel.UNLIT + brightness multiply, default 1.6, on by default) renders them
+  bright/clear instead of dark. Toggles in the Tileset & LoD panel.
+
 ### Added — 2026-06-29 (`stream-cache` cont.: server-side per-cache progress)
 - **Server-side progress** for long ops — `core/progress.js` registry + `GET /progress?key=<srcUrl>`
   (JSON `{label, done, total, finished, elapsedMs}`). Hooked the Potree eager-drain (`cache=hierarchy`):
