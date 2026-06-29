@@ -113,7 +113,14 @@ async function buildNodeGlb(ctx, relPath, nodeIdx) {
 
   const doc = new Document();
   const buffer = doc.createBuffer();
-  const pos = doc.createAccessor().setType('VEC3').setArray(g.positions instanceof Float32Array ? g.positions : new Float32Array(g.positions)).setBuffer(buffer);
+  // 3MX mesh verts are SRS Z-up (E,N,U) relative to SRSOrigin, but 3D Tiles glTF content is Y-up (Cesium
+  // auto-rotates +Y→+Z). Swizzle (E,N,U)→(E,U,−N) so after that rotation the mesh lands back in the
+  // (E,N,U) frame the root ENU transform + the bounding box expect — otherwise it sits 90° rotated
+  // (vertical instead of horizontal). Same swizzle the COPC/Potree/LCC point paths apply.
+  const srcPos = g.positions instanceof Float32Array ? g.positions : new Float32Array(g.positions);
+  const swPos = new Float32Array(srcPos.length);
+  for (let i = 0; i < srcPos.length; i += 3) { swPos[i] = srcPos[i]; swPos[i + 1] = srcPos[i + 2]; swPos[i + 2] = -srcPos[i + 1]; }
+  const pos = doc.createAccessor().setType('VEC3').setArray(swPos).setBuffer(buffer);
   const idx = doc.createAccessor().setType('SCALAR').setArray(g.indices instanceof Uint32Array ? g.indices : new Uint32Array(g.indices)).setBuffer(buffer);
   const prim = doc.createPrimitive().setAttribute('POSITION', pos).setIndices(idx);
   if (g.uvs && jpg) {

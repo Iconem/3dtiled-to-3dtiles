@@ -475,6 +475,7 @@
       <div class="sb-row"><label>Lat</label><input id="lf-lat" type="number" step="0.0001" value="37.7749" /></div>
       <div class="sb-row"><label>Alt (m)</label><input id="lf-alt" type="number" step="1" value="0" /></div>
       <div class="sb-row"><label>Range (m)</label><input id="lf-range" type="number" step="10" value="200" /></div>
+      <div class="sb-row"><label>Z offset (m)</label><input id="lf-zoffset" type="number" step="10" value="0" oninput="applyZOffset()" title="Nudge an ALREADY-georeferenced tileset vertically along its local up (geodetic), e.g. -500 to lower Geghard. Composes with the dataset's own georef — does not replace it." /></div>
       <button class="sb-btn" id="use-current-view" onclick="useCurrentView()">↖ Use current view</button>
       <button class="sb-btn" id="fly-to-localframe" onclick="flyToLocalFrame()">↗ Fly to (no transform)</button>
       <button class="sb-btn primary" id="apply-localframe" onclick="applyLocalFrame()">Apply &amp; fly to</button>
@@ -1161,6 +1162,21 @@ function applyLocalFrame() {
   });
 
   setStatus(`Local frame applied.\nOrigin: ${lon.toFixed(5)}, ${lat.toFixed(5)}, ${alt}m`);
+}
+
+// Vertical nudge for an ALREADY-georeferenced tileset (e.g. Geghard with wrong altitude): translate
+// along **geodetic up** (the dataset's local vertical — NOT the global ECEF Z axis) by `dz` metres.
+// Set as tileset.modelMatrix, which Cesium applies ON TOP of the tileset's intrinsic root.transform —
+// so the georef placement is preserved, just shifted in altitude. (±hundreds of m → up dir ~constant.)
+function applyZOffset() {
+  if (!currentTileset) { setStatus('Load a georeferenced tileset first, then set a Z offset.'); return; }
+  const dz = parseFloat(document.getElementById('lf-zoffset').value) || 0;
+  const c = currentTileset.boundingSphere.center;
+  const up = Cesium.Ellipsoid.WGS84.geodeticSurfaceNormal(c, new Cesium.Cartesian3())
+          || Cesium.Cartesian3.normalize(c, new Cesium.Cartesian3());
+  const t = Cesium.Cartesian3.multiplyByScalar(up, dz, new Cesium.Cartesian3());
+  currentTileset.modelMatrix = Cesium.Matrix4.fromTranslation(t);
+  setStatus(`Vertical Z offset: ${dz} m along local up (georef preserved).`);
 }
 
 /* ──────────────────────────────────────────────

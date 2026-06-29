@@ -5,6 +5,22 @@ Format loosely follows [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+### Added / Changed / Fixed — 2026-06-29 (`stream-cache` cont.: 3MX georef/orientation, Z-offset, diagnostics)
+- **Fix 3MX orientation** — node GLBs stored SRS Z-up `(E,N,U)` verbatim, so Cesium's glTF Y-up→Z-up
+  rotation tipped meshes 90° (vertical instead of horizontal). Now swizzled `(E,N,U)→(E,U,−N)` like the
+  point paths, matching the ENU root transform + bounding box.
+- **Fix 3MX georef for compound CRS** — `core/geo.js` `georefFromCrs` now unwraps `COMPD_CS[...]` WKT
+  (horizontal PROJCS/GEOGCS + vertical) that proj4 can't parse. Verified: Tende village (dept06, EPSG:2154
+  Lambert-93 + NGF-IGN69) now georeferences to 7.59°E / 43.9°N instead of sitting at the local origin.
+- **Viewer vertical Z-offset** — a "Z offset (m)" control nudges an already-georeferenced tileset along
+  **geodetic up** (local vertical, not ECEF Z) via `tileset.modelMatrix`, composing with the dataset's
+  own georef (for wrong-altitude datasets like Geghard). Verified it applies without replacing the georef.
+- **README**: noted Arrival.Space `.lod` uses the streamed-SOG format (SOG adapter reads it directly).
+- **Diagnostics (no viewer fix this pass)**: the Potree implicit "stops refining" report — verified
+  **server-side is correct** (BFS reaches subtree level 9 / tile level 11, 161 subtrees, 0 errors; deep
+  tiles load; implicit and explicit produce identical geometric errors). Any remaining under-refinement is
+  Cesium-side and needs live repro; workaround = the viewer's tiling→explicit toggle.
+
 ### Added / Changed — 2026-06-29 (`stream-cache` cont.: pills, Arrival=SOG, timing modal, dev port)
 - **Arrival.Space `.lod` = SOG** (confirmed by fetching the live fixture): identical `lod-meta.json` tree
   and per-chunk `version:2` webp splats (`means_l/u`, `quats`, `scales`, `sh0`, `shN_*`). The SOG adapter

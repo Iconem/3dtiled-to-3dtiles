@@ -29,9 +29,25 @@ export const enuMatrix = (lon, lat, cx, cy, cz) => {
   return [E[0],E[1],E[2],0, N[0],N[1],N[2],0, U[0],U[1],U[2],0, cx,cy,cz,1];
 };
 
+// proj4 cannot parse a COMPD_CS[...] (compound horizontal+vertical CRS — common in ContextCapture/3MX
+// WKT, e.g. "RGF93 / Lambert-93 + NGF-IGN69 height"). Unwrap it to the inner horizontal PROJCS/GEOGCS
+// (the vertical component is just height, already carried by origin[2]).
+function unwrapCompoundWkt(crs) {
+  if (typeof crs !== 'string' || !/^\s*COMPD_CS/i.test(crs)) return crs;
+  const start = crs.search(/PROJCS\[/i) >= 0 ? crs.search(/PROJCS\[/i) : crs.search(/GEOGCS\[/i);
+  if (start < 0) return crs;
+  let depth = 0;                                            // extract the first balanced [...] block
+  for (let i = crs.indexOf('[', start); i < crs.length; i++) {
+    if (crs[i] === '[') depth++;
+    else if (crs[i] === ']' && --depth === 0) return crs.slice(start, i + 1);
+  }
+  return crs.slice(start);
+}
+
 /** Georeference a local origin via a proj4-parsable CRS/WKT → ENU→ECEF transform, or null. */
 export function georefFromCrs(origin, crs, tag = 'geo') {
   if (!crs) return null;
+  crs = unwrapCompoundWkt(crs);
   try {
     const [lon, lat, h] = proj4(crs, 'WGS84').forward(origin);
     const e = llhToEcef(lon, lat, h ?? origin[2]);
