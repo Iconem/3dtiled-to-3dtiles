@@ -11,43 +11,10 @@
  *
  * Note: data.bin is a sibling of meta.lcc (named `data.bin`); `index.bin` likewise.
  */
-import proj4 from 'proj4';
 import { decodeSplats } from '../lcc-to-3dtiles/src/lccDecode.js';
-import { buildSplatTileGlb, computeBounds, CORS, DEG, llhToEcef, enuFrame } from '../core/index.js';
+import { buildSplatTileGlb, computeBounds, CORS, lccGeoref } from '../core/index.js';
 
 const ROOT_GE_FACTOR = 0.05, DEPTH_RATIO = 0.5;
-
-// Central meridian (lon_0) for the CGCS2000 3°-Gauss-Krüger EPSG codes XGRIDS LCC uses:
-//   4513–4533 = "CM <lon>E" (lon_0 = 75 + 3·(code−4513))
-//   4534–4554 = "zone <n>"  (n = 25 + (code−4534), lon_0 = 3·n)   ← zone-prefixed easting (x_0 = n·1e6+5e5)
-// proj4 doesn't ship these, so we build the +proj string on the fly.
-function cgcs2000Lon0(epsg) {
-  if (epsg >= 4513 && epsg <= 4533) return 75 + 3 * (epsg - 4513);
-  if (epsg >= 4534 && epsg <= 4554) return 3 * (25 + (epsg - 4534));
-  return null;
-}
-
-// Georeference an LCC scene: `offset` is the projected (EPSG:<epsg>) coordinate of the local origin.
-// Returns the root `transform` placing the local frame on the globe — column-major [East, −Up, North,
-// origin], composing the ENU→ECEF frame with the renderer's glTF Y-up→Z-up RX(+90°) on the SPZ-verbatim
-// splat positions (so the scene sits upright + located). null if no/unknown CRS.
-// Note: XGRIDS sometimes stores a CM-based easting (x_0=500000) even under a zone-prefixed EPSG, so the
-// false easting is detected from the magnitude of offset.x rather than assumed from the code.
-function lccTransform(meta) {
-  if (!meta.epsg || !Array.isArray(meta.offset)) return null;
-  const lon0 = cgcs2000Lon0(meta.epsg);
-  if (lon0 == null) { console.warn(`[lcc-live] EPSG:${meta.epsg} not a known CGCS2000 GK zone — local origin`); return null; }
-  const x0 = meta.offset[0] >= 1e6 ? Math.floor(meta.offset[0] / 1e6) * 1e6 + 5e5 : 5e5;   // strip zone prefix if present
-  const def = `+proj=tmerc +lat_0=0 +lon_0=${lon0} +k=1 +x_0=${x0} +y_0=0 +ellps=GRS80 +towgs84=0,0,0,0,0,0,0 +units=m +no_defs`;
-  try {
-    const [lon, lat] = proj4(def, 'WGS84').forward([meta.offset[0], meta.offset[1]]);
-    const e = llhToEcef(lon, lat, meta.offset[2] || 0);
-    // Column layout bakes the splat Y-up→Z-up RX into the frame: columns East, −Up, North, origin.
-    const { EAST: East, NORTH: North, UP: Up } = enuFrame(lon, lat);
-    console.log(`[lcc-live] georef EPSG:${meta.epsg} (lon_0=${lon0}) → ${lon.toFixed(4)},${lat.toFixed(4)}`);
-    return [East[0],East[1],East[2],0, -Up[0],-Up[1],-Up[2],0, North[0],North[1],North[2],0, e[0],e[1],e[2],1];
-  } catch (err) { console.warn(`[lcc-live] georef failed for EPSG:${meta.epsg}: ${err.message} — local origin`); return null; }
-}
 
 // Right-handed source AABB → 3D Tiles Z-up box (RX +90°): centre (cx,cy,cz)→(cx,−cz,cy); halves y↔z.
 function boundToZUpBox(min, max) {
@@ -96,7 +63,7 @@ async function getCtx(url) {
     if (lods.length) units.push({ box: boundToZUpBox(min, max), lods });
   }
   const diag = Math.hypot(bb.max[0]-bb.min[0], bb.max[1]-bb.min[1], bb.max[2]-bb.min[2]) || 1;
-  const transform = lccTransform(meta);
+  const transform = lccGeoref(meta, 'lcc-live');
   const ctx = { dataUrl: base + 'data.bin', units, scaleMin: scaleAttr.min, scaleMax: scaleAttr.max, sceneBox: boundToZUpBox(bb.min, bb.max), rootGE: diag * ROOT_GE_FACTOR, transform };
   ctxCache.set(url, ctx);
   console.log(`[lcc-live] ${url} → ${units.length} units, georef=${!!transform}${meta.epsg ? ' (EPSG:'+meta.epsg+')' : ''}`);

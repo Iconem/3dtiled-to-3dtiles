@@ -22,7 +22,7 @@ import { fileURLToPath } from 'node:url';
 import { decodeSplats } from './lccDecode.js';
 // Shared, parallel-friendly encoder from 3dtiles-convert-core (async gzip) + bounded-concurrency map.
 // (Relative path during the monorepo migration; becomes `3dtiles-convert-core` once lcc moves to packages/.)
-import { buildSplatTileGlb, computeBounds, parallelMap, defaultConcurrency } from '../../core/index.js';
+import { buildSplatTileGlb, computeBounds, parallelMap, defaultConcurrency, lccGeoref } from '../../core/index.js';
 
 const ROOT_GE_FACTOR = 0.05;   // root GE = sceneDiagonal × this (matches sog/reference magnitude)
 const DEPTH_RATIO    = 0.5;    // GE halves per LOD step down
@@ -117,10 +117,15 @@ export async function convert(input, outDir, opts = {}) {
   }
   const rootBox = [ (mn[0]+mx[0])/2,(mn[1]+mx[1])/2,(mn[2]+mx[2])/2,
                     (mx[0]-mn[0])/2,0,0, 0,(mx[1]-mn[1])/2,0, 0,0,(mx[2]-mn[2])/2 ];
+  // Bake georef into the root transform (same source of truth as the live /lcc adapter — meta.epsg +
+  // projected offset). Without this the prebuilt tileset sits at the local origin (the Guan_Temple
+  // misalignment); null when the scene has no/unknown CRS (e.g. epsg 0 → stays local).
+  const transform = lccGeoref(meta, 'lcc-offline');
   const tileset = {
     asset: { version: '1.1' },
     geometricError: ROOT_GE * 2,
-    root: { boundingVolume: { box: rootBox }, geometricError: ROOT_GE * 2, refine: 'REPLACE', children: unitTiles },
+    root: { boundingVolume: { box: rootBox }, geometricError: ROOT_GE * 2, refine: 'REPLACE',
+            ...(transform ? { transform } : {}), children: unitTiles },
     // centroids mode emits plain glTF POINTS tiles → no splat-extension advertisement.
     ...(opts.centroidsOnly ? {} : {
       extensionsUsed: ['3DTILES_content_gltf'],

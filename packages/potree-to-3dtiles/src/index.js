@@ -10,8 +10,9 @@
  *
  * Octree → 3D Tiles tree (node 'r' + octant children); refine **ADD** (Potree children add
  * denser detail in sub-octants, like COPC); geometricError = point spacing per depth.
- * Points are emitted relative to the dataset centre (float32-safe); the output sits at the
- * local origin — NOT geo-referenced (add a root transform / ENU placement downstream).
+ * Points are emitted relative to the dataset centre (float32-safe); the root `transform` then places
+ * that local frame on the globe from the cloud's CRS (cloud.js `projection` / metadata WKT) — same
+ * origin + georefFromCrs() as the live /potree adapter, so prebuilt == live. Local origin if no CRS.
  *
  * Status: 2.0 decode is authoritative (PotreeConverter / potree23dtiles); 1.x is best-effort.
  * Both UNTESTED here (no sample in repo) — validate against a real dataset.
@@ -21,7 +22,7 @@ import path from 'path';
 import { fileURLToPath } from 'node:url';
 import { loadPotree2 } from './potree2.js';
 import { loadPotree1 } from './potree1.js';
-import { buildPointsGlb, parallelMap, defaultConcurrency,
+import { buildPointsGlb, parallelMap, defaultConcurrency, georefFromCrs,
          coordsToKey, octreeSubCube, cubeToBox, buildSubtreeBuffer, subtreeRootKeys } from '../../core/index.js';
 
 const SUBTREE_LEVELS = 3;
@@ -56,6 +57,11 @@ export async function convert(inDir, outDir, opts = {}) {
 
   const gc = [0,1,2].map(k => (src.rootBox.min[k] + src.rootBox.max[k]) / 2); // global centre
   const rootSpacing = src.spacing || (src.rootBox.max[0] - src.rootBox.min[0]) / 128;
+  // Georef the local frame: points + boxes are emitted relative to `gc` (projected coords), so place
+  // that frame on the globe via the cloud's CRS (cloud.js `projection` / metadata WKT) — same origin
+  // and same georefFromCrs() the live /potree adapter uses, so prebuilt == live placement. null when
+  // the cloud carries no CRS (stays at local origin, as before).
+  const transform = georefFromCrs(gc, src.crs, 'potree-offline');
 
   // Z-up box (dataset is Z-up) relative to global centre.
   const boxOf = (b) => {
@@ -158,6 +164,7 @@ export async function convert(inDir, outDir, opts = {}) {
       geometricError: rootSpacing,
       root: {
         boundingVolume: { box: boxOf(src.rootBox) }, refine: 'ADD', geometricError: rootSpacing,
+        ...(transform ? { transform } : {}),
         implicitTiling: { subdivisionScheme: 'OCTREE', availableLevels: maxLevel + 1, subtreeLevels: SUBTREE_LEVELS, subtrees: { uri: 'subtrees/{level}/{x}/{y}/{z}.subtree' } },
         content: { uri: 'tiles/{level}/{x}/{y}/{z}.glb' },
       },
@@ -173,6 +180,7 @@ export async function convert(inDir, outDir, opts = {}) {
       return tile;
     };
     const root = buildTile('r');
+    if (transform) root.transform = transform;
     await src.close();
     tileset = { asset: { version: '1.1' }, geometricError: rootSpacing, root };
   }
@@ -180,7 +188,7 @@ export async function convert(inDir, outDir, opts = {}) {
   await fs.writeFile(path.join(outDir, 'tileset.json'), JSON.stringify(tileset, null, 2));
   const el = (Date.now() - t0) / 1000;
   console.log(`Done → ${outDir}/tileset.json  (${written} POINTS tiles, Potree ${src.version}, ${tiling} tiling)`);
-  console.log(`  Actual time: ${el < 60 ? el.toFixed(1)+'s' : (el/60).toFixed(1)+' min'}  (NOT geo-referenced — local origin)`);
+  console.log(`  Actual time: ${el < 60 ? el.toFixed(1)+'s' : (el/60).toFixed(1)+' min'}  (georef=${!!transform}${src.crs ? '' : ' — no CRS, local origin'})`);
   return { format: 'potree', outDir, tiles: written };
 }
 
