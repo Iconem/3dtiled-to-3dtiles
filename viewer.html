@@ -442,6 +442,13 @@
     <label class="sb-check" title="Draw tile bounding volumes, colour tiles by octree depth">
       <input type="checkbox" id="debug-toggle" onchange="toggleDebug(this.checked)" /> Debug tiles (bounds + depth)
     </label>
+    <label class="sb-check" title="Unlit/shadeless rendering — photogrammetry (Bing/3MX) bakes lighting into the textures, so disabling Cesium's sun lighting avoids dark/over-shaded results.">
+      <input type="checkbox" id="shadeless-toggle" checked onchange="applyShading()" /> Shadeless (unlit)
+    </label>
+    <div class="sb-row" title="Brightness multiplier on the tile colour (use with Shadeless to brighten dark photogrammetry).">
+      <label for="brightness-input">Brightness</label>
+      <input type="number" id="brightness-input" min="0.5" max="4" step="0.1" value="1.6" onchange="applyShading()" />
+    </div>
     <div class="sb-row" title="Vertical field of view (degrees) — same camera drives rendering, controls and tile SSE.">
       <label for="fov-input">FOV (°)</label>
       <input type="number" id="fov-input" min="10" max="120" step="1" value="60" onchange="setFov(this.value)" />
@@ -1028,6 +1035,7 @@ async function loadTileset() {
     viewer.scene.primitives.add(tileset);
     currentTileset = tileset;
     if (_cesiumDebug) { tileset.debugShowBoundingVolume = true; tileset.debugColorizeTiles = true; }
+    applyShading();   // unlit/brightness for baked-lighting photogrammetry (Bing/3MX)
 
     // Point cloud shading: EDL approximation + screen-space attenuation
     if (!isSplat && tileset.pointCloudShading) {
@@ -1292,6 +1300,21 @@ function toggleDebug(on) {
     currentTileset.debugShowBoundingVolume = on;
     currentTileset.debugColorizeTiles = on;
   }
+}
+
+// Shadeless (unlit) + brightness via a Cesium CustomShader. Photogrammetry (Bing/3MX) bakes lighting
+// into the textures, so UNLIT avoids dark/over-shaded results; brightness multiplies the tile colour.
+function applyShading() {
+  if (_3dtMode || !currentTileset || !window.Cesium) return;
+  const unlit = document.getElementById('shadeless-toggle')?.checked;
+  const b = parseFloat(document.getElementById('brightness-input')?.value) || 1;
+  try {
+    if (!unlit && b === 1) { currentTileset.customShader = undefined; return; }
+    currentTileset.customShader = new Cesium.CustomShader({
+      lightingModel: unlit ? Cesium.LightingModel.UNLIT : undefined,
+      fragmentShaderText: `void fragmentMain(FragmentInput fsInput, inout czm_modelMaterial material){ material.diffuse *= ${b.toFixed(2)}; }`,
+    });
+  } catch (e) { console.warn('[shading]', e.message); }
 }
 
 // Screen-space error override (px). null = per-type auto default. Lower = more detail.
