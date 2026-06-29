@@ -910,7 +910,9 @@ Composability goal: `source → convert → [centroids] → [gltf: draco/ktx2 de
   faces = quadrants; lon linear; lat = atan(sinh(mercator-y))), flipping `y→reverseY` to fetch
   `mtx`/`st` from Bing. This replaces both the old `mtx<quadkey>` probe (couldn't find Bing's deep-only
   tiles) and a naive implicit passthrough (Cesium can't do `MICROSOFT_webmercator_subdivision`, so it
-  culled deep tiles). No API key needed. Verified content reaches Rome at 12.57°E/41.90°N.
+  culled deep tiles). No API key needed. Verified content reaches Rome at 12.57°E/41.90°N. Related:
+  [s1dny/bing-maps-tile-downloader](https://github.com/s1dny/bing-maps-tile-downloader/) — offline
+  downloader for the same Bing `tf=3dv4` tiles (vs. our live `td1` → 3D Tiles proxy).
 - **Browser-native bbox crop / subsample extract** — pull a cropped/decimated copy of a tiled asset
   (point cloud, mesh, or splat) by an OBB defined in the viewer — BLOSM-style but JS/browser-native.
   See [[dump-tiles-feature-idea]] (memory). **Refinement-aware traversal**: for **ADD** octrees (COPC/Potree)

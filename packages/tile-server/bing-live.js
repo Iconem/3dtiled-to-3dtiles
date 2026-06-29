@@ -22,6 +22,8 @@
  *   GET /bing/tile/<face>-<level>-<x>-<y>.glb?g=<genid>[&decompress=1]
  *
  * User holds the Bing licensing; this is purely the technical format path.
+ * Related: s1dny/bing-maps-tile-downloader (https://github.com/s1dny/bing-maps-tile-downloader/) — a
+ * downloader for the same Bing `tf=3dv4` tiles (offline grab vs. our live `td1` → 3D Tiles proxy).
  */
 import { decompressGlb, sendJson, sendGlb, sendErr, CORS } from '../core/index.js';
 
