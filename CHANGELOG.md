@@ -15,9 +15,14 @@ Format loosely follows [Keep a Changelog](https://keepachangelog.com/).
   (MS exts stripped, templates routed), subtrees proxy with real availability, and a known-good tile
   (`/bing/tile/1-14-1141-4206.glb` → reverseY 12177) returns the real 203 KB glTF. **No API key needed.**
   Viewer: one "Bing 3D — world (td1)" pill (navigate/zoom to any city) replacing the root-quadkey pills.
-  Caveat: `MICROSOFT_webmercator_subdivision` is dropped, so Cesium subdivides bounding regions
-  cartographically (not mercator) — geometry is ECEF-baked so it renders correctly, but culling/LOD near
-  the poles may be approximate; needs a live-viewer check.
+- **Bing webmercator fix — convert implicit→explicit lazy fragments with correct regions.** Passing Bing's
+  implicit tiling through made Cesium subdivide each face's latitude *linearly* (it can't do
+  `MICROSOFT_webmercator_subdivision`), so deep regions were wrong and tiles were culled ("zoom to Rome
+  shows nothing"). Now `/bing` walks Bing's `st` subtree availability itself and emits **explicit** tiles
+  whose `region` is computed with proper web-mercator math (4 faces = quadrants; lon linear; lat =
+  atan(sinh(mercator-y))), as lazy `/bing/fragment` tilesets (a few levels each, external-ref deeper).
+  **Verified**: root = 4 faces; a level-12 fragment near Rome yields 85 content tiles, one at
+  **12.566°E / 41.900°N** (Rome), fetching a real 203 KB glTF.
 
 ### Added / Changed / Fixed — 2026-06-29 (`stream-cache` cont.: 3MX georef/orientation, Z-offset, diagnostics)
 - **Fix 3MX orientation** — node GLBs stored SRS Z-up `(E,N,U)` verbatim, so Cesium's glTF Y-up→Z-up

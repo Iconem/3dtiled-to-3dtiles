@@ -906,12 +906,12 @@ Composability goal: `source → convert → [centroids] → [gltf: draco/ktx2 de
   Plus `simplify` / `weld` / `quantize`, and exposing encode on the `/gltf` proxy (not just `/stream`).
 - **`rtc_center` / decompress for ingestion** — apply per-tile to *existing remote 3D Tiles* so consumers
   that can't read Draco/KTX2/`CESIUM_RTC` (e.g. blender **BLOSM**) can load them.
-- **Bing `td1` implicit manifest — DONE** — `/bing` now proxies the `td1` implicit-tiling root (QUADTREE,
-  per-face children, tiles `mtx{face}-{level}-{x}-{reverseY}`, subtrees `st{face}-…`), stripping the
-  `MICROSOFT_*` extensions and flipping `y→reverseY`. Replaced the old `mtx<quadkey>` probe (couldn't find
-  Bing's deep-only tiles). No API key needed. *Remaining*: `MICROSOFT_webmercator_subdivision` is dropped,
-  so Cesium subdivides regions cartographically — geometry (ECEF-baked) renders right, but culling/LOD may
-  be approximate near the poles (revisit if visible).
+- **Bing `td1` → explicit lazy fragments — DONE** — `/bing` reads Bing's `td1` implicit manifest + `st`
+  subtree availability and emits **explicit** 3D Tiles fragments with web-mercator-correct `region`s (4
+  faces = quadrants; lon linear; lat = atan(sinh(mercator-y))), flipping `y→reverseY` to fetch
+  `mtx`/`st` from Bing. This replaces both the old `mtx<quadkey>` probe (couldn't find Bing's deep-only
+  tiles) and a naive implicit passthrough (Cesium can't do `MICROSOFT_webmercator_subdivision`, so it
+  culled deep tiles). No API key needed. Verified content reaches Rome at 12.57°E/41.90°N.
 - **Browser-native bbox crop / subsample extract** — pull a cropped/decimated copy of a tiled asset
   (point cloud, mesh, or splat) by an OBB defined in the viewer — BLOSM-style but JS/browser-native.
   See [[dump-tiles-feature-idea]] (memory). **Refinement-aware traversal**: for **ADD** octrees (COPC/Potree)
