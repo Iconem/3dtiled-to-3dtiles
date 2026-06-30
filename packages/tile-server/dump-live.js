@@ -22,7 +22,7 @@ import { join } from 'node:path';
 import { spawn } from 'node:child_process';
 import { Document, NodeIO } from '@gltf-transform/core';
 import { ALL_EXTENSIONS } from '@gltf-transform/extensions';
-import { decompressGlb, LasWriter, ecefToLlh, llhToEcef, CORS } from '../core/index.js';
+import { decompressGlb, LasWriter, lasHeaderBuffer, lasRecordBuffer, ecefToLlh, llhToEcef, CORS } from '../core/index.js';
 
 const IDENT = [1,0,0,0, 0,1,0,0, 0,0,1,0, 0,0,0,1];
 // 3D Tiles glTF content is Y-up; Cesium applies RX(+90): (x,y,z)→(x,−z,y). Bake it so our ECEF matches.
@@ -135,6 +135,32 @@ async function traverse(tilesetUrl, bb, maxGE, maxDepth, onContent) {
 
 const io = new NodeIO().registerExtensions(ALL_EXTENSIONS);
 
+// Iterate every in-bbox point (any POSITION accessor) of the cropped region, calling async cb(X,Y,Z,r,g,b)
+// in ECEF. Used by the disk-free 2-pass LAS stream (pass 1 counts, pass 2 streams) — fully out-of-core.
+async function forEachPoint(url, bb, maxGE, maxDepth, cb) {
+  await traverse(url, bb, maxGE, maxDepth, async (glbUrl, worldM) => {
+    let glb; try { glb = (await decompressGlb(await fetchBuf(glbUrl), {})).glb; } catch { return; }
+    let doc; try { doc = await io.readBinary(new Uint8Array(glb)); } catch { return; }
+    for (const mesh of doc.getRoot().listMeshes()) {
+      const node = doc.getRoot().listNodes().find(nd => nd.getMesh() === mesh);
+      const M = matMul(matMul(worldM, YUP_ZUP), node ? node.getWorldMatrix() : IDENT);
+      for (const prim of mesh.listPrimitives()) {
+        const pos = prim.getAttribute('POSITION'); if (!pos) continue;
+        const col = prim.getAttribute('COLOR_0'), n = pos.getCount();
+        for (let i = 0; i < n; i++) {
+          const p = pos.getElement(i, [0, 0, 0]); const [X, Y, Z] = xform(M, p[0], p[1], p[2]);
+          const [lon, lat, h] = ecefToLlh(X, Y, Z); if (!inBbox(lon, lat, h, bb)) continue;
+          let r = 0, g = 0, b = 0;
+          if (col) { const c = col.getElement(i, [0, 0, 0, 1]), s = col.getNormalized() ? 65535 : 257; r = (c[0]*s)|0; g = (c[1]*s)|0; b = (c[2]*s)|0; }
+          await cb(X, Y, Z, r, g, b);
+        }
+      }
+    }
+  });
+}
+// write a chunk respecting backpressure (so the response buffer can't grow unbounded → stays out-of-core)
+const writeChunk = (res, buf) => res.write(buf) ? Promise.resolve() : new Promise(r => res.once('drain', r));
+
 export async function handleDump(req, res, u) {
   if (!u.pathname.startsWith('/dump/')) return false;
   const kind = { '/dump/las': 'las', '/dump/glb': 'glb', '/dump/copc': 'copc', '/dump/tileset': 'tileset' }[u.pathname] || null;
@@ -163,6 +189,26 @@ export async function handleDump(req, res, u) {
         'X-Dump-Tiles': String(children.length), 'Access-Control-Expose-Headers': 'X-Dump-Tiles', ...CORS });
       return void res.end(JSON.stringify(ts));
     } catch (e) { console.error('[dump-live]', e.message); res.writeHead(500, CORS); return void res.end(e.message); }
+  }
+
+  // Disk-free out-of-core LAS: 2-pass (pass 1 counts + bbox for the header, pass 2 streams records).
+  // No temp file, O(1) RAM — at the cost of traversing/decoding tiles twice. (?stream=1 on /dump/las)
+  if (kind === 'las' && (u.searchParams.get('stream') === '1' || u.searchParams.get('stream') === 'true')) {
+    try {
+      const scale = [0.001, 0.001, 0.001], offset = llhToEcef((bb[0]+bb[3])/2, (bb[1]+bb[4])/2, (bb[2]+bb[5])/2);
+      let count = 0; const mn = [Infinity,Infinity,Infinity], mx = [-Infinity,-Infinity,-Infinity];
+      await forEachPoint(url, bb, maxGE, maxDepth, (X, Y, Z) => { count++; if(X<mn[0])mn[0]=X; if(Y<mn[1])mn[1]=Y; if(Z<mn[2])mn[2]=Z; if(X>mx[0])mx[0]=X; if(Y>mx[1])mx[1]=Y; if(Z>mx[2])mx[2]=Z; });
+      res.writeHead(200, { 'Content-Type': 'application/octet-stream', 'Content-Disposition': 'attachment; filename="crop.las"',
+        'X-Dump-Points': String(count), 'Access-Control-Expose-Headers': 'X-Dump-Points', ...CORS });
+      res.write(lasHeaderBuffer({ scale, offset, count, bbox: count ? { min: mn, max: mx } : null }));
+      let chunk = [];                                     // batch ~8k records per write
+      await forEachPoint(url, bb, maxGE, maxDepth, async (X, Y, Z, r, g, b) => {
+        chunk.push(lasRecordBuffer(X, Y, Z, { r, g, b }, scale, offset));
+        if (chunk.length >= 8192) { await writeChunk(res, Buffer.concat(chunk)); chunk = []; }
+      });
+      if (chunk.length) await writeChunk(res, Buffer.concat(chunk));
+      return void res.end();
+    } catch (e) { console.error('[dump-live]', e.message); if (!res.headersSent) { res.writeHead(500, CORS); res.end(e.message); } else res.end(); return true; }
   }
 
   try {

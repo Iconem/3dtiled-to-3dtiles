@@ -477,6 +477,9 @@
     <div class="sb-row" title="Geometric error floor (m). 0 = finest available. Larger = coarser/fewer tiles.">
       <label for="crop-ge">max GE (m)</label><input type="number" id="crop-ge" min="0" step="1" value="0" />
     </div>
+    <label class="sb-check" title="LAS: disk-free out-of-core streaming (2-pass — count, then stream; O(1) RAM, no temp file, ~2× traversal).">
+      <input type="checkbox" id="crop-stream" checked /> LAS disk-free stream (2-pass)
+    </label>
     <div class="sb-row" style="gap:6px">
       <button class="sb-btn" onclick="dumpCrop('las')" title="Point clouds → out-of-core LAS">⬇ LAS</button>
       <button class="sb-btn" onclick="dumpCrop('copc')" title="Point clouds → COPC (needs PDAL on the server)">⬇ COPC</button>
@@ -1410,7 +1413,8 @@ function dumpCrop(kind) {
   const bb = _cropBbox();
   if (bb.some(Number.isNaN)) { setStatus('Set the crop box first (⬚ Set box to view).'); return; }
   const ge = parseFloat(document.getElementById('crop-ge').value) || 0;
-  const url = `${MW}/dump/${kind}?url=${encodeURIComponent(src)}&bbox=${bb.join(',')}&maxGE=${ge}`;
+  const stream = (kind === 'las' && document.getElementById('crop-stream')?.checked) ? '&stream=1' : '';
+  const url = `${MW}/dump/${kind}?url=${encodeURIComponent(src)}&bbox=${bb.join(',')}&maxGE=${ge}${stream}`;
   tlog(`⬇ dump ${kind} (GE ${ge}) — download starting…`);
   window.open(url, '_blank');
 }
