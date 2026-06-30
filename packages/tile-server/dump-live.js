@@ -260,12 +260,24 @@ export async function handleDump(req, res, u) {
   if (kind === 'splat') {
     try {
       const fmt = ['sog', 'glb', 'ply'].includes(u.searchParams.get('format')) ? u.searchParams.get('format') : 'spz';
+      const clip = u.searchParams.get('clip') === '1' || u.searchParams.get('clip') === 'true';   // per-splat-centroid clip
       const dts = [];
-      await traverse(url, bb, maxGE, maxDepth, async (glbUrl) => {
+      await traverse(url, bb, maxGE, maxDepth, async (glbUrl, worldM) => {
         let glb; try { glb = await fetchBuf(glbUrl); } catch { return; }
         const spz = extractSpz(glb); if (!spz) return;
         const rfs = new MemoryReadFileSystem(); rfs.set('t.spz', new Uint8Array(spz));
-        try { dts.push(await readSpz(await rfs.createSource('t.spz'))); } catch (e) { console.warn('[dump-live] readSpz:', e.message); }
+        let dt; try { dt = await readSpz(await rfs.createSource('t.spz')); } catch (e) { return void console.warn('[dump-live] readSpz:', e.message); }
+        if (clip) {                                       // drop splats whose centroid is outside the bbox
+          // EXPERIMENTAL: readSpz returns a per-tile dt.transform that this does NOT yet compose, so the
+          // placement is off and it under-clips. Opt-in (&clip=1, default off) until the frame is validated.
+          const xs = dt.getColumnByName('x')?.data, ys = dt.getColumnByName('y')?.data, zs = dt.getColumnByName('z')?.data;
+          if (xs && ys && zs) {
+            const keep = [];
+            for (let i = 0; i < dt.numRows; i++) { const [X, Y, Z] = xform(worldM, xs[i], ys[i], zs[i]); const [lon, lat, h] = ecefToLlh(X, Y, Z); if (inBbox(lon, lat, h, bb)) keep.push(i); }
+            dt = dt.clone({ rows: keep });
+          }
+        }
+        dts.push(dt);
       });
       if (!dts.length) { res.writeHead(404, CORS); res.end('no splat tiles in bbox (is this a splat source?)'); return true; }
       const merged = combine(dts);
