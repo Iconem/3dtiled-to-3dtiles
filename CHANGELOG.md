@@ -5,6 +5,38 @@ Format loosely follows [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+### Fixed — 2026-06-30 (`stream-cache` cont.: splat-dump output corruption + dump/viewer feedback)
+- **`/dump/splat` produced corrupt SPZ/SOG/PLY** — three independent `@playcanvas/splat-transform` bugs,
+  all now fixed + verified end-to-end with a standalone DataTable harness (see
+  `memory/splat-transform-output-gotchas.md`):
+  - **Buffer over-read (all 3 formats):** `mfs.results.get(name)` is a `Uint8Array` *view* into a 5 MB
+    scratch buffer (`MemoryWriter.close` → `new Uint8Array(buffer.buffer, 0, cursor)`). `Buffer.from(out.buffer)`
+    wrapped the whole 5 MB → trailing garbage. → SPZ NaN positions (SuperSplat `translate(NaN)`), SOG EOCD
+    buried 5 MB from the end ("End of central directory not found"), bloated PLY. Now emits
+    `Buffer.from(u8.buffer, u8.byteOffset, u8.byteLength)`.
+  - **SOG was not a bundle:** `writeSog` needs `bundle: true` to emit a single self-contained `.sog` zip;
+    without it, loose `.webp`+meta files were written and `crop.sog` wasn't a zip.
+  - **PLY wrote SPZ bytes:** the `else` branch routed `ply` → `writeSpz` into a `.ply` ("invalid file header").
+    Now uses `writePly({ plyData: { elements: [{ name: 'vertex', dataTable }] } })`.
+- **Dump now honours the viewer's extra modelMatrix** (`&matrix=<16 col-major>`): a Z-offset nudge
+  (e.g. Geghard −1800 m) or local-frame ENU placement applied in the viewer is no longer invisible to the
+  dumper — `traverse`/`forEachPoint` seed the world chain with it, so the crop matches the on-screen position.
+  Cesium reads `tileset.modelMatrix`; 3DTRJS reports the globe-mode Z-offset (translate along ECEF up).
+- **3DTRJS "⬚ Set box to view"** now works in 3DTRJS mode (was a Cesium-only no-op): raycasts the inner-80%
+  canvas corners against the loaded tiles (fallback: globe surface), ECEF→carto → geographic crop bbox.
+- **3DTRJS globe zoom no longer resets** as nested external tilesets stream in: framing is now one-shot per
+  load (external `*.json` children also re-emit `load-tileset`); the ↗ Fly-to button re-frames on demand.
+
+### Added — 2026-06-30 (`stream-cache` cont.: 3DTRJS point size + Bing city pills)
+- **3DTRJS point-size slider** (Crop & Dump-adjacent control, 3DTRJS mode): sets the PointsMaterial `size`
+  (screen px, sizeAttenuation off) on POINTS tiles — applied to loaded tiles and each as it streams in.
+- **Bing 3D city pills** — Roma / Washington / Berlin load the same world tileset and fly the camera to the
+  city (re-clicking a city when the world tileset is already loaded just flies, no reload). Works in both renderers.
+- *Note on mesh GLB streaming:* a single merged-GLB 2-pass stream stays deferred — the GLB JSON chunk must
+  declare every accessor's byte layout up front (needs all geometry **and** texture sizes, i.e. fetching
+  textures, before any bytes are written; gltf-transform has no stream-writer). `/dump/zip` already streams
+  meshes out-of-core (one tile in RAM at a time).
+
 ### Added — 2026-06-30 (`stream-cache` cont.: splat per-splat clip + PDAL via pixi + PivotControls)
 - **`/dump/splat` per-splat clip** finished and **default ON** (`&clip=0` to disable): drops individual
   splats whose centroid falls outside the box. The earlier version under-clipped because it ignored the

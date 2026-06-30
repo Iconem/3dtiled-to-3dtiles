@@ -23,7 +23,7 @@ import { spawn } from 'node:child_process';
 import { crc32 } from 'node:zlib';
 import { Document, NodeIO } from '@gltf-transform/core';
 import { ALL_EXTENSIONS } from '@gltf-transform/extensions';
-import { readSpz, combine, writeSpz, writeSog, writeGlb, MemoryReadFileSystem, MemoryFileSystem } from '@playcanvas/splat-transform';
+import { readSpz, combine, writeSpz, writeSog, writeGlb, writePly, MemoryReadFileSystem, MemoryFileSystem } from '@playcanvas/splat-transform';
 import { decompressGlb, LasWriter, lasHeaderBuffer, lasRecordBuffer, ecefToLlh, llhToEcef, enuFrame, CORS } from '../core/index.js';
 
 // Resolve the PDAL binary for /dump/copc. Prefer $PDAL_BIN, then the pixi-global shim (`pixi global
@@ -165,7 +165,9 @@ async function expandImplicit(node, worldM, base, bb, maxGE, maxDepth, onContent
 }
 
 // Walk a tileset tree; call onContent(absoluteGlbUrl, worldMatrix) for each content tile to harvest.
-async function traverse(tilesetUrl, bb, maxGE, maxDepth, onContent) {
+// `initM` (col-major 4×4) seeds the world chain — pass the viewer's extra modelMatrix (Z-offset nudge /
+// local-frame ENU placement) so the dump reproduces the on-screen position; defaults to identity.
+async function traverse(tilesetUrl, bb, maxGE, maxDepth, onContent, initM = IDENT) {
   const ts = JSON.parse((await fetchBuf(tilesetUrl)).toString('utf8'));
   const root = ts.root; if (!root) return;
   const recur = async (node, parentM, base, depth) => {
@@ -192,14 +194,14 @@ async function traverse(tilesetUrl, bb, maxGE, maxDepth, onContent) {
     }
     for (const c of node.children || []) await recur(c, m, base, depth + 1);
   };
-  await recur(root, IDENT, tilesetUrl, 0);
+  await recur(root, initM, tilesetUrl, 0);
 }
 
 const io = new NodeIO().registerExtensions(ALL_EXTENSIONS);
 
 // Iterate every in-bbox point (any POSITION accessor) of the cropped region, calling async cb(X,Y,Z,r,g,b)
 // in ECEF. Used by the disk-free 2-pass LAS stream (pass 1 counts, pass 2 streams) — fully out-of-core.
-async function forEachPoint(url, bb, maxGE, maxDepth, cb) {
+async function forEachPoint(url, bb, maxGE, maxDepth, cb, initM = IDENT) {
   await traverse(url, bb, maxGE, maxDepth, async (glbUrl, worldM) => {
     let glb; try { glb = (await decompressGlb(await fetchBuf(glbUrl), {})).glb; } catch { return; }
     let doc; try { doc = await io.readBinary(new Uint8Array(glb)); } catch { return; }
@@ -218,7 +220,7 @@ async function forEachPoint(url, bb, maxGE, maxDepth, cb) {
         }
       }
     }
-  });
+  }, initM);
 }
 // write a chunk respecting backpressure (so the response buffer can't grow unbounded → stays out-of-core)
 const writeChunk = (res, buf) => res.write(buf) ? Promise.resolve() : new Promise(r => res.once('drain', r));
@@ -269,6 +271,11 @@ export async function handleDump(req, res, u) {
   }
   const bb = bboxStr.split(',').map(Number);
   if (bb.length !== 6 || bb.some(Number.isNaN)) { res.writeHead(400, CORS); res.end('bbox needs 6 numbers (deg,deg,m,deg,deg,m)'); return true; }
+  // Optional viewer-applied extra modelMatrix (col-major 16): Z-offset nudge / local-frame ENU placement.
+  // Seeds the traversal world chain so the dump matches the on-screen (shifted) position. Identity if absent/bad.
+  let initM = IDENT;
+  const mStr = u.searchParams.get('matrix');
+  if (mStr) { const m = mStr.split(',').map(Number); if (m.length === 16 && !m.some(Number.isNaN)) initM = m; }
 
   // tileset mode: no decode/merge — emit a filtered 3D Tiles tileset referencing only the in-bbox tiles
   // (each leaf keeps its world transform + points at the original tile GLB). Works for splats too.
@@ -278,7 +285,7 @@ export async function handleDump(req, res, u) {
       await traverse(url, bb, maxGE, maxDepth, async (glbUrl, worldM, node) => {
         const box = node?.boundingVolume?.box || [0,0,0, 1,0,0, 0,1,0, 0,0,1];
         children.push({ transform: Array.from(worldM), boundingVolume: { box }, geometricError: 0, refine: 'ADD', content: { uri: glbUrl } });
-      });
+      }, initM);
       const ts = { asset: { version: '1.1' }, geometricError: 1e7,
         root: { boundingVolume: { region: [bb[0]/R2D, bb[1]/R2D, bb[3]/R2D, bb[4]/R2D, bb[2], bb[5]] }, geometricError: 1e7, refine: 'ADD', children } };
       res.writeHead(200, { 'Content-Type': 'application/json', 'Content-Disposition': 'attachment; filename="crop-tileset.json"',
@@ -316,18 +323,24 @@ export async function handleDump(req, res, u) {
         }
         totIn += dt.numRows;
         if (dt.numRows) dts.push(dt);
-      });
+      }, initM);
       if (!dts.length) { res.writeHead(404, CORS); res.end('no splat tiles in bbox (is this a splat source?)'); return true; }
       const merged = combine(dts);
-      const mfs = new MemoryFileSystem(), name = `crop.${fmt === 'glb' ? 'glb' : fmt}`;
-      if (fmt === 'sog') await writeSog({ filename: name, dataTable: merged }, mfs);
+      const mfs = new MemoryFileSystem(), name = `crop.${fmt}`;
+      if (fmt === 'sog') await writeSog({ filename: name, dataTable: merged, bundle: true }, mfs);   // bundle:true → single self-contained .sog zip (else loose .webp+meta → "EOCD not found")
       else if (fmt === 'glb') await writeGlb({ filename: name, dataTable: merged }, mfs);   // KHR_gaussian_splatting GLB
+      else if (fmt === 'ply') await writePly({ filename: name, plyData: { comments: [], elements: [{ name: 'vertex', dataTable: merged }] } }, mfs);   // uncompressed PLY (was wrongly SPZ bytes in a .ply)
       else await writeSpz({ filename: name, dataTable: merged }, mfs);
       const out = mfs.results.get(name);
+      // out is a Uint8Array VIEW into splat-transform's 5 MB scratch buffer (MemoryWriter.close →
+      // `new Uint8Array(buffer.buffer, 0, cursor)`): byteLength is the real size but .buffer is the full
+      // 5 MB. Buffer.from(out.buffer) would wrap all 5 MB (trailing garbage → corrupt SPZ/SOG/PLY).
+      // Honour byteOffset+byteLength so we emit exactly the written bytes.
+      const u8 = out instanceof Uint8Array ? out : new Uint8Array(out);
       res.writeHead(200, { 'Content-Type': 'application/octet-stream', 'Content-Disposition': `attachment; filename="${name}"`,
         'X-Dump-Tiles': String(dts.length), 'X-Dump-Splats': String(merged.numRows), 'X-Dump-Splats-Raw': String(totRaw), 'X-Dump-Clipped': String(clip ? totRaw - totIn : 0),
         'Access-Control-Expose-Headers': 'X-Dump-Tiles,X-Dump-Splats,X-Dump-Splats-Raw,X-Dump-Clipped', ...CORS });
-      res.end(Buffer.from(out.buffer || out)); return true;
+      res.end(Buffer.from(u8.buffer, u8.byteOffset, u8.byteLength)); return true;
     } catch (e) { console.error('[dump-live]', e.message); if (!res.headersSent) { res.writeHead(500, CORS); res.end(e.message); } else res.end(); return true; }
   }
 
@@ -341,7 +354,7 @@ export async function handleDump(req, res, u) {
         const name = `tiles/tile_${i++}.glb`;
         try { await zip.add(name, await fetchBuf(glbUrl)); } catch { return; }   // one tile in RAM at a time
         children.push({ transform: Array.from(worldM), boundingVolume: { box: node?.boundingVolume?.box || [0,0,0, 1,0,0, 0,1,0, 0,0,1] }, geometricError: 0, refine: 'ADD', content: { uri: name } });
-      });
+      }, initM);
       const ts = { asset: { version: '1.1' }, geometricError: 1e7,
         root: { boundingVolume: { region: [bb[0]/R2D, bb[1]/R2D, bb[3]/R2D, bb[4]/R2D, bb[2], bb[5]] }, geometricError: 1e7, refine: 'ADD', children } };
       await zip.add('tileset.json', Buffer.from(JSON.stringify(ts)));
@@ -356,7 +369,7 @@ export async function handleDump(req, res, u) {
     try {
       const scale = [0.001, 0.001, 0.001], { proj, offset } = makeProject(bb, u.searchParams.has('enu'));
       let count = 0; const mn = [Infinity,Infinity,Infinity], mx = [-Infinity,-Infinity,-Infinity];
-      await forEachPoint(url, bb, maxGE, maxDepth, (X, Y, Z) => { const [px,py,pz]=proj(X,Y,Z); count++; if(px<mn[0])mn[0]=px; if(py<mn[1])mn[1]=py; if(pz<mn[2])mn[2]=pz; if(px>mx[0])mx[0]=px; if(py>mx[1])mx[1]=py; if(pz>mx[2])mx[2]=pz; });
+      await forEachPoint(url, bb, maxGE, maxDepth, (X, Y, Z) => { const [px,py,pz]=proj(X,Y,Z); count++; if(px<mn[0])mn[0]=px; if(py<mn[1])mn[1]=py; if(pz<mn[2])mn[2]=pz; if(px>mx[0])mx[0]=px; if(py>mx[1])mx[1]=py; if(pz>mx[2])mx[2]=pz; }, initM);
       res.writeHead(200, { 'Content-Type': 'application/octet-stream', 'Content-Disposition': 'attachment; filename="crop.las"',
         'X-Dump-Points': String(count), 'Access-Control-Expose-Headers': 'X-Dump-Points', ...CORS });
       res.write(lasHeaderBuffer({ scale, offset, count, bbox: count ? { min: mn, max: mx } : null }));
@@ -364,7 +377,7 @@ export async function handleDump(req, res, u) {
       await forEachPoint(url, bb, maxGE, maxDepth, async (X, Y, Z, r, g, b) => {
         chunk.push(lasRecordBuffer(...proj(X, Y, Z), { r, g, b }, scale, offset));
         if (chunk.length >= 8192) { await writeChunk(res, Buffer.concat(chunk)); chunk = []; }
-      });
+      }, initM);
       if (chunk.length) await writeChunk(res, Buffer.concat(chunk));
       res.end(); return true;
     } catch (e) { console.error('[dump-live]', e.message); if (!res.headersSent) { res.writeHead(500, CORS); res.end(e.message); } else res.end(); return true; }
@@ -436,7 +449,7 @@ export async function handleDump(req, res, u) {
           }
         }
       }
-    });
+    }, initM);
 
     if (wantLas) {
       await lasw.close();                                  // back-patch header (count + bbox)

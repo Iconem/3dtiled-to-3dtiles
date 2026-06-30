@@ -465,6 +465,12 @@
       <label for="zoffset-input">Z offset (m)</label>
       <input type="number" id="zoffset-input" value="0" step="1" onchange="window.__3dtrjs && window.__3dtrjs.setZOffset(this.value)" />
     </div>
+    <div class="sb-row hidden" id="pointsize-wrap" title="3DTRJS: point-cloud tile point size (screen pixels). Affects COPC/Potree/LAS POINTS tiles.">
+      <label for="pointsize-input">Point size</label>
+      <input type="range" id="pointsize-input" min="0.5" max="10" step="0.5" value="2" style="flex:1"
+             oninput="window.__3dtrjs && window.__3dtrjs.setPointSize(this.value); document.getElementById('pointsize-val').textContent = this.value + ' px';" />
+      <span id="pointsize-val" style="min-width:34px;text-align:right;font-size:10px;opacity:.8">2 px</span>
+    </div>
   </div>
 
   <!-- Crop & Dump (bbox subsample extract → LAS/GLB) -->
@@ -720,10 +726,18 @@ function currentPresets() {
     url: `${MW}/stream/tileset.json?format=${a.pkg.toLowerCase().endsWith('.3tz') ? '3tz' : '3dtiles-pkg'}&url=${encodeURIComponent(a.pkg)}`,
   }));
   // Bing Maps 3D (tf=3dv4 GLB → quadtree) — dedicated /bing endpoint; root quadkey + genid.
-  if (selectedFormat === 'bing') return [
+  if (selectedFormat === 'bing') {
     // One world tileset (the td1 implicit manifest); navigate/zoom to any city. genid drifts — override &g=.
-    { id: 'bing-world', label: '🗺 Bing 3D — world (td1)', type: 'mesh', url: `${MW}/bing/tileset.json?g=15530` },
-  ];
+    const bingUrl = `${MW}/bing/tileset.json?g=15530`;
+    // City pills load the SAME world tileset, then fly the camera to that city (height = camera altitude, m).
+    // Re-clicking a city when the world tileset is already loaded just flies (no reload).
+    return [
+      { id: 'bing-world', label: '🗺 Bing 3D — world (td1)', type: 'mesh', url: bingUrl },
+      { id: 'bing-roma',  label: '🗺 Bing 3D — Roma',       type: 'mesh', url: bingUrl, flyTo: { lon: 12.4924, lat: 41.8902, height: 1200 } }, // Colosseum
+      { id: 'bing-washington', label: '🗺 Bing 3D — Washington', type: 'mesh', url: bingUrl, flyTo: { lon: -77.0353, lat: 38.8895, height: 1600 } }, // Washington Monument / Mall
+      { id: 'bing-berlin', label: '🗺 Bing 3D — Berlin',    type: 'mesh', url: bingUrl, flyTo: { lon: 13.3777, lat: 52.5163, height: 1200 } }, // Brandenburg Gate
+    ];
+  }
   // Bentley 3MX (.3mx/.3mxb → lazy fragments) — dedicated /threemx endpoint; url = master .3mx or root .3mxb.
   if (selectedFormat === 'threemx') return [
     { id: '3mx-tende',  label: '🏛 Tende village (dept06, colormap)', type: 'mesh', url: `${MW}/threemx/tileset.json?url=${encodeURIComponent('https://3d.departement06.fr/3mx/2019_07_Village_Tende_Resolution/Scene/2019_07_Village_Tende_Resolution.3mx')}` },
@@ -976,9 +990,20 @@ function buildPresetBar() {
 }
 
 function selectPreset(p) {
+  // City pills (Bing) share the world tileset's URL + carry a flyTo target. If that dataset is already
+  // loaded, just fly there (no reload); otherwise load it and fly once it's ready.
+  const sameDatasetLoaded = !p.custom && currentPresetObj && currentPresetObj.url === p.url;
+  _pendingCityFly = p.flyTo || null;
   currentPresetId = p.id;
   currentPresetObj = p;
   currentType = p.type;
+  if (sameDatasetLoaded && p.flyTo) {
+    document.querySelectorAll('.preset:not(.mode):not(.tiling):not(.fmt)').forEach(b => b.classList.remove('active'));
+    document.getElementById('preset-' + p.id)?.classList.add('active');
+    flyToCity(p.flyTo); _pendingCityFly = null;
+    setStatus(`Flying to ${p.label}.`);
+    return;
+  }
   document.querySelectorAll('.preset:not(.mode):not(.tiling):not(.fmt)').forEach(b => b.classList.remove('active'));
   document.getElementById('preset-' + p.id)?.classList.add('active');
 
@@ -1004,7 +1029,11 @@ function selectPreset(p) {
   document.getElementById('tileset-url').value = field;
   const loadUrl = (rawUrlMode && p.rawSrc) ? buildMiddlewareUrl(p.rawSrc) : p.url;
   if (_3dtMode) {
-    if (window.__3dtrjs) window.__3dtrjs.load(loadUrl, p.type === 'splat');
+    if (window.__3dtrjs) {
+      window.__3dtrjs.load(loadUrl, p.type === 'splat');     // resets the module's pending fly
+      if (p.flyTo) window.__3dtrjs.flyToCarto(p.flyTo.lon, p.flyTo.lat, p.flyTo.height);  // deferred until framed
+    }
+    _pendingCityFly = null;                                  // 3DTRJS path owns the fly via the module
     setStatus('3DTilesRendererJS — ' + p.label);
   } else {
     loadTileset();
@@ -1098,6 +1127,10 @@ async function loadTileset() {
       document.getElementById('lf-range').value = Math.max(5, Math.round(bs.radius * 3));
       applyLocalFrame();
       setStatus((isSplat ? 'Splat' : 'Local tileset') + ' placed at local frame origin.\nAdjust ⊕ Local Frame if needed.');
+    } else if (_pendingCityFly) {
+      // City pill: fly to the city instead of the (whole-world) tileset bounding sphere.
+      flyToCity(_pendingCityFly); _pendingCityFly = null;
+      setStatus('Loaded: ' + url);
     } else {
       try {
         // Use the actual bounding sphere radius for a sensible camera distance.
@@ -1365,6 +1398,11 @@ function _autoGE() {
   document.getElementById('crop-ge').value = Math.pow(10, Math.round(Math.log10(spanM / 100)));
 }
 function setCropToView() {
+  if (_3dtMode) {                                             // 3DTRJS has no Cesium viewer — raycast the three.js scene
+    const ok = window.__3dtrjs?.setCropToView();
+    setStatus(ok ? 'Crop box set from 3DTRJS view.' : 'Point the 3DTRJS camera at the tileset/globe, then retry.');
+    return;
+  }
   if (!viewer) { setStatus('Cesium not ready.'); return; }
   // Pick the 4 corners of the inner 80% of the canvas onto the ellipsoid → robust geographic bbox
   // (computeViewRectangle is unreliable — often returns the whole globe).
@@ -1451,9 +1489,24 @@ function dumpCrop(kind) {
   if ((kind === 'las' || kind === 'copc') && document.getElementById('crop-enu')?.checked) extra += '&enu=1';
   if (kind === 'splat') { extra += `&format=${document.getElementById('crop-splatfmt')?.value || 'spz'}`;
     if (!document.getElementById('crop-splatclip')?.checked) extra += '&clip=0'; }
+  // Viewer-applied extra modelMatrix (Z-offset nudge / local-frame ENU placement) — the source tileset on
+  // the server has none of it, so without this the dump bbox misses shifted/placed data (e.g. Geghard -1800m).
+  const mm = _dumpModelMatrix();
+  if (mm) extra += `&matrix=${mm.join(',')}`;
   const url = `${MW}/dump/${kind}?url=${encodeURIComponent(src)}&bbox=${bb.join(',')}&maxGE=${ge}${extra}`;
   tlog(`⬇ dump ${kind} (GE ${ge}) — download starting…`);
   window.open(url, '_blank');
+}
+
+// The extra ECEF modelMatrix the viewer applied on top of the source tileset (Z-offset / local frame),
+// as a column-major 16-array, or null if none. The dumper seeds traversal with it so the crop reproduces
+// the on-screen position. Cesium: tileset.modelMatrix. 3DTRJS: the zOffset translation along ECEF up.
+function _dumpModelMatrix() {
+  if (_3dtMode) { const m = window.__3dtrjs?.getDumpMatrix?.(); return (m && m.length === 16) ? m : null; }
+  if (!currentTileset || !window.Cesium) return null;
+  const mm = currentTileset.modelMatrix;
+  if (!mm || Cesium.Matrix4.equalsEpsilon(mm, Cesium.Matrix4.IDENTITY, 1e-9)) return null;
+  return Cesium.Matrix4.toArray(mm);                          // column-major
 }
 
 // 3DTRJS-only: toggle the in-scene PivotControls-style bbox gizmo (translate arrows + face handles).
@@ -1477,6 +1530,20 @@ function setMaxSSE(v) {
   sseOverride = (isFinite(n) && n > 0) ? n : null;
   if (currentTileset) currentTileset.maximumScreenSpaceError = sseOverride ?? currentTileset.maximumScreenSpaceError;
   window.__3dtrjs?.setErrorTarget(sseOverride);
+}
+
+// City fly-to (Bing city pills): a {lon,lat,height} target the renderer should fly to once a tileset is
+// loaded. Set by selectPreset; consumed by loadTileset (Cesium) / __3dtrjs framing (3DTRJS).
+let _pendingCityFly = null;
+function flyToCity(t) {
+  if (!t) return;
+  if (_3dtMode) { window.__3dtrjs?.flyToCarto(t.lon, t.lat, t.height); return; }
+  if (!viewer) return;
+  viewer.camera.flyTo({
+    destination: Cesium.Cartesian3.fromDegrees(t.lon, t.lat, t.height),
+    orientation: { heading: 0, pitch: Cesium.Math.toRadians(-45), roll: 0 },
+    duration: 2,
+  });
 }
 
 function flyToOrigin() {
@@ -1621,6 +1688,7 @@ function toggle3DT() {
 
   document.getElementById('controls-toggle-wrap').classList.toggle('hidden', !_3dtMode);
   document.getElementById('zoffset-wrap').classList.toggle('hidden', !_3dtMode);
+  document.getElementById('pointsize-wrap').classList.toggle('hidden', !_3dtMode);
 
   if (_3dtMode) {
     document.getElementById('cesium-container').style.display = 'none';
@@ -1740,6 +1808,7 @@ let debugPlugin = null;             // DebugTilesPlugin on the current tileset
 let debugOn = false;                // show bounding boxes + per-tile random colour
 const DEBUG_COLOR_RANDOM = 7;       // DebugTilesPlugin ColorModes.RANDOM_COLOR (per-tile, like Cesium)
 let needsFraming = false;           // fly-to once the root bounding sphere is ready
+let hasFramed = false;              // one-shot: external-tileset children also fire load-tileset; frame only the first
 let framingForceEcef;               // forceEcef arg captured for the deferred framing
 let lastCenter = new Vector3();     // last tileset bounds centre (for mode switches / fly-to)
 let lastRadius = 1;
@@ -1872,8 +1941,33 @@ function setControlMode(mode) {
   else                       useEnvControls(lastCenter, lastRadius);
 }
 
-// Re-frame the camera on the current tileset (3DTRJS "Fly to origin").
-function frameTileset() { if (tiles) needsFraming = true; }
+// Re-frame the camera on the current tileset (3DTRJS "Fly to origin"). Bypasses the one-shot
+// hasFramed guard so the user can always re-centre on demand.
+function frameTileset() { if (tiles) { hasFramed = false; needsFraming = true; } }
+
+// Fly the globe camera to a geographic point (Bing city pills). `height` = camera altitude (m), with a
+// slight southward tilt for a ~45° look-down. If tiles aren't framed yet, the target is remembered so the
+// one-shot framing fly (_tryFraming) doesn't override it.
+let _pendingFly = null;
+function _flyGlobeTo(lon, lat, height) {
+  if (!camera || !globe || !ecefRoot) return;
+  if (controlMode !== 'globe') useGlobeControls(false);              // city view needs the globe controller
+  const M = globe.ellipsoid.getEastNorthUpFrame(lat * D2R, lon * D2R, 0, new Matrix4());
+  const ground = new Vector3().setFromMatrixPosition(M).applyMatrix4(ecefRoot.matrixWorld);
+  const up    = new Vector3(M.elements[8], M.elements[9], M.elements[10]).transformDirection(ecefRoot.matrixWorld).normalize();
+  const north = new Vector3(M.elements[4], M.elements[5], M.elements[6]).transformDirection(ecefRoot.matrixWorld).normalize();
+  const dist = Math.max(200, height);
+  camera.near = Math.max(1, dist * 0.001); camera.far = dist * 1000 + 1e7; camera.updateProjectionMatrix();
+  camera.position.copy(ground).addScaledVector(up, dist).addScaledVector(north, -dist * 0.6);
+  camera.up.copy(up); camera.lookAt(ground);
+  if (controls && controls.target) controls.target.copy(ground);
+  controls?.update();
+}
+function flyToCarto(lon, lat, height) {
+  _pendingFly = { lon, lat, height };
+  _flyGlobeTo(lon, lat, height);
+  if (hasFramed) _pendingFly = null;                                 // already framed → no deferred re-fly will run
+}
 
 // ── Init ──────────────────────────────────────────────────────────────────────
 
@@ -1982,6 +2076,8 @@ function _makeTiles(url, isSplat, fetchOptions) {
   // (_tryFraming reparents once the bounds reveal whether the tileset is ECEF.)
   (controlMode === 'globe' ? ecefRoot : scene).add(t.group);
   t.addEventListener('load-error', ev => console.error('[3DTRJS] Tile error:', ev?.url ?? ev));
+  // Apply the current point size to each POINTS tile as it streams in (size persists across tiles).
+  t.addEventListener('load-model', ev => _applyPointSizeTo(ev?.scene));
   return t;
 }
 
@@ -1999,6 +2095,16 @@ function setZOffset(v) {
   _applyZOffset();
 }
 
+// The extra raw-ECEF modelMatrix the viewer applied on top of the source tileset, as a column-major
+// 16-array (or null). Only the geo-meaningful globe-mode Z-offset (translate along raw-ECEF up) is
+// reported — the dumper seeds traversal with it so a vertically-nudged tileset (e.g. Geghard −1800 m)
+// still crops correctly. Non-georef (orbit/env) data has no geographic bbox, so → null there.
+function getDumpMatrix() {
+  if (controlMode !== 'globe' || !tilesIsEcef || !zOffset) return null;
+  const t = tilesUp.clone().multiplyScalar(zOffset);         // raw-ECEF translation (same as _applyZOffset)
+  return [1,0,0,0, 0,1,0,0, 0,0,1,0, t.x, t.y, t.z, 1];
+}
+
 function setDebug(on) {
   debugOn = !!on;
   if (debugPlugin) {
@@ -2013,6 +2119,19 @@ function setErrorTarget(v) {
   if (tiles) tiles.errorTarget = errorTargetOverride ?? tiles.errorTarget;
 }
 
+// ── Point size (point-cloud tiles) ──────────────────────────────────────────────
+// glTF POINTS tiles (COPC/Potree/LAS) load as THREE.Points with a PointsMaterial. Expose its `size`
+// (screen pixels, sizeAttenuation off → predictable regardless of dataset units) via a sidebar slider.
+// Applied to already-loaded tiles AND to each tile as it streams in (load-model).
+let pointSize = 2;
+function _applyPointSizeTo(obj) {
+  obj?.traverse(o => {
+    if (o.isPoints && o.material) { o.material.size = pointSize; o.material.sizeAttenuation = false; o.material.needsUpdate = true; }
+  });
+}
+function setPointSize(v) { const n = Number(v); if (n > 0) pointSize = n; if (tiles) _applyPointSizeTo(tiles.group); }
+function getPointSize() { return pointSize; }
+
 function _detachTiles() {
   needsFraming = false;
   debugPlugin = null;
@@ -2026,6 +2145,11 @@ function _onTilesetLoaded(forceEcef) {
   // The root bounding volume (esp. a "region") may not be resolvable to a sphere
   // at the instant the tileset JSON loads. Defer framing to the render loop,
   // which retries until getBoundingSphere succeeds.
+  // Frame ONCE per load: nested external tilesets (content.uri → *.json) each re-emit
+  // "load-tileset" as they stream in, and re-framing on every one yanks the camera back
+  // (the "zoom resets every once in a while" in globe mode). The ↗ Fly-to button uses
+  // frameTileset() to re-frame on demand.
+  if (hasFramed) return;
   framingForceEcef = forceEcef;
   needsFraming = true;
 }
@@ -2034,6 +2158,7 @@ function _tryFraming() {
   const sphere = new Sphere();
   if (!tiles || !tiles.getBoundingSphere(sphere)) return;
   needsFraming = false;
+  hasFramed = true;
   const forceEcef = framingForceEcef;
   const { center, radius } = sphere;
   console.log('[3DTRJS] Bounds: center', center.toArray().map(v => v.toFixed(2)), 'radius', radius.toFixed(2));
@@ -2067,6 +2192,8 @@ function _tryFraming() {
     // Default non-georeferenced splats to free OrbitControls (no env "fight").
     useOrbitControls(center, radius);
   }
+  // City pill: override the bounds fly with the requested geographic target (now that tiles are framed).
+  if (_pendingFly) { const f = _pendingFly; _pendingFly = null; _flyGlobeTo(f.lon, f.lat, f.height); }
   syncControlSelect();
 }
 
@@ -2082,6 +2209,8 @@ function _reparentTiles(parent) {
 function load(url, isSplat, fetchOptions) {
   if (!animId) animate();
   _detachTiles();
+  hasFramed = false;
+  _pendingFly = null;
   lastLoad = { url, isSplat, fetchOptions };
   zOffset = 0;
   const zEl = document.getElementById('zoffset-input');
@@ -2098,6 +2227,7 @@ function load(url, isSplat, fetchOptions) {
 function loadIon(assetId, token, isSplat) {
   if (!animId) animate();
   _detachTiles();
+  hasFramed = false;
   lastLoad = { ion: { assetId, token, isSplat } };
   zOffset = 0;
   const ionUrl = `https://api.cesium.com/v1/assets/${assetId}/endpoint`;
@@ -2342,6 +2472,36 @@ function _onCropPointerMove(ev) {
 }
 function _onCropPointerUp() { if (!_cropGizmoDrag) return; _cropGizmoDrag = null; if (controls) controls.enabled = true; }
 
+// 3DTRJS "Set box to view": raycast the inner-80% canvas corners against the loaded tiles (falling back
+// to the globe surface), convert each hit ECEF→carto, and build the geographic crop bbox from the spread.
+// Cesium's setCropToView uses pickEllipsoid; the 3DTRJS scene has no Cesium viewer, so we raycast here.
+function cropToView3D() {
+  if (!camera || !globe) return false;
+  const el = renderer.domElement, rect = el.getBoundingClientRect();
+  const targets = [];
+  if (tiles && tiles.group.visible !== false) targets.push(tiles.group);
+  if (globe && globe.group.visible) targets.push(globe.group);
+  if (!targets.length) return false;
+  const lons = [], lats = [], hs = [];
+  for (const [fx, fy] of [[0.1,0.1],[0.9,0.1],[0.1,0.9],[0.9,0.9],[0.5,0.5]]) {
+    ndc.set(fx*2-1, -(fy*2-1));
+    raycaster.setFromCamera(ndc, camera); raycaster.far = camera.far;
+    const hit = raycaster.intersectObjects(targets, true)[0];
+    if (!hit) continue;
+    const c = _worldToCarto(hit.point);
+    if ([c.lon,c.lat,c.height].some(Number.isNaN)) continue;
+    lons.push(c.lon); lats.push(c.lat); hs.push(c.height);
+  }
+  if (lons.length < 2) return false;
+  const w = Math.min(...lons), e = Math.max(...lons), s = Math.min(...lats), n = Math.max(...lats);
+  const cLat = (s+n)/2, spanM = Math.max((e-w)*111320*Math.cos(cLat*D2R), (n-s)*111320, 10);
+  const pad = spanM * 0.25;                                   // vertical padding so tiles above/below the hits are kept
+  const minh = Math.min(...hs) - pad, maxh = Math.max(...hs) + pad;
+  _writeCropDom({ w, s, e, n, minh, maxh });                  // also runs _autoGE + updateCropBox
+  if (cropGizmo && cropGizmo.visible) _syncCropGizmo();
+  return true;
+}
+
 function showCropGizmo() {
   if (!scene || !ecefRoot || !globe) return false;
   const b = _readCropDom();
@@ -2391,7 +2551,7 @@ function _cropGizmoInfo(testDragBoundId, meters) {
   return info;
 }
 
-window.__3dtrjs = { init, load, loadIon, pause, setControlMode, setZOffset, setBasemap, setDebug, setErrorTarget, setFov, frameTileset, showCropGizmo, hideCropGizmo, syncCropGizmo: _syncCropGizmo, _cropGizmoInfo, _debug, _pump };
+window.__3dtrjs = { init, load, loadIon, pause, setControlMode, setZOffset, getDumpMatrix, setBasemap, setDebug, setErrorTarget, setPointSize, getPointSize, setFov, frameTileset, flyToCarto, setCropToView: cropToView3D, showCropGizmo, hideCropGizmo, syncCropGizmo: _syncCropGizmo, _cropGizmoInfo, _debug, _pump };
 console.log('[3DTRJS] module ready — GaussianSplatPlugin:', GaussianSplatPlugin ? 'loaded' : 'unavailable');
 </script>
 </body>
