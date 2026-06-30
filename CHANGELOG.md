@@ -5,6 +5,18 @@ Format loosely follows [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+### Added — 2026-06-30 (`stream-cache` cont.: splat per-splat clip + PDAL via pixi + PivotControls)
+- **`/dump/splat` per-splat clip** finished and **default ON** (`&clip=0` to disable): drops individual
+  splats whose centroid falls outside the box. The earlier version under-clipped because it ignored the
+  splat GLB's **node matrix**; SPZ positions are node-local, so they're now placed in ECEF via the same
+  chain meshes use — `M = worldM · YUP_ZUP · nodeM` (nodeM = Rx180 spz→glTF axis fix + per-tile
+  translation). Verified: SPZ centroids land inside their tile box only with this matrix (82.8% vs 0%);
+  a georeferenced E2E run keeps 100% under a wide bbox, a central 60.9% under a tight one. New
+  `X-Dump-Splats-Raw` / `X-Dump-Clipped` headers + a viewer "clip splats outside box" checkbox.
+- **PDAL for `/dump/copc` via pixi** (not conda): `pixi global install pdal` (2.10.2) → `~/.pixi/bin/pdal`.
+  The server resolves it as `$PDAL_BIN` → pixi-global shim → `pdal` on PATH. pixi is the right installer —
+  PDAL is a conda-forge native binary, not a pip package (uv is Python-only, so it can't supply it).
+
 ### Added — 2026-06-30 (`stream-cache` cont.: dumper out-of-core outputs + splat merge)
 - **Disk-free out-of-core LAS** (`/dump/las?...&stream=1`): 2-pass (count+bbox, then stream 8k-record
   chunks with backpressure) — O(1) RAM, no temp file. Byte-identical to the disk path (verified 498 868 pts).

@@ -15,9 +15,9 @@
  * bbox (ECEF→geodetic per vertex). LAS via core las-writer; hand to `pdal writers.copc`/`untwine` for
  * LAZ/COPC. (Implicit-subtree expansion + the in-viewer draw-bbox UI are the next increments.)
  */
-import { createReadStream } from 'node:fs';
+import { createReadStream, existsSync } from 'node:fs';
 import { unlink } from 'node:fs/promises';
-import { tmpdir } from 'node:os';
+import { tmpdir, homedir } from 'node:os';
 import { join } from 'node:path';
 import { spawn } from 'node:child_process';
 import { crc32 } from 'node:zlib';
@@ -25,6 +25,18 @@ import { Document, NodeIO } from '@gltf-transform/core';
 import { ALL_EXTENSIONS } from '@gltf-transform/extensions';
 import { readSpz, combine, writeSpz, writeSog, writeGlb, MemoryReadFileSystem, MemoryFileSystem } from '@playcanvas/splat-transform';
 import { decompressGlb, LasWriter, lasHeaderBuffer, lasRecordBuffer, ecefToLlh, llhToEcef, enuFrame, CORS } from '../core/index.js';
+
+// Resolve the PDAL binary for /dump/copc. Prefer $PDAL_BIN, then the pixi-global shim (`pixi global
+// install pdal` → ~/.pixi/bin/pdal[.exe]), then `pdal` on PATH. pixi is the right installer here — PDAL
+// is a conda-forge native binary, not a pip package (uv is Python-only).
+function resolvePdal() {
+  if (process.env.PDAL_BIN) return process.env.PDAL_BIN;
+  const ext = process.platform === 'win32' ? '.exe' : '';
+  const pixi = join(homedir(), '.pixi', 'bin', `pdal${ext}`);
+  if (existsSync(pixi)) return pixi;
+  return 'pdal';                                             // fall back to PATH
+}
+const PDAL_BIN = resolvePdal();
 
 // Optional ECEF→local-ENU projection (East/North/Up metres at the bbox centre). The default LAS is ECEF
 // (EPSG:4978); &enu=1 gives a usable local metric frame instead of a global geocentric one.
@@ -437,10 +449,10 @@ export async function handleDump(req, res, u) {
       // copc: shell out to pdal (needs the LAS on disk anyway) → COPC LAZ, then stream it.
       const copc = tmp.replace(/\.las$/, '.copc.laz');
       const cleanup = () => { unlink(tmp).catch(() => {}); unlink(copc).catch(() => {}); };
-      const p = spawn(process.env.PDAL_BIN || 'pdal', ['translate', tmp, copc], { stdio: ['ignore', 'ignore', 'pipe'] });
+      const p = spawn(PDAL_BIN, ['translate', tmp, copc], { stdio: ['ignore', 'ignore', 'pipe'] });
       let perr = '';
       p.stderr.on('data', d => { perr += d; });
-      p.on('error', () => { cleanup(); if (!res.headersSent) { res.writeHead(501, CORS); res.end('pdal not installed — /dump/copc needs PDAL on PATH. Use /dump/las and convert with `pdal translate crop.las out.copc.laz`.'); } });
+      p.on('error', () => { cleanup(); if (!res.headersSent) { res.writeHead(501, CORS); res.end('pdal not installed — /dump/copc needs PDAL. Install with `pixi global install pdal` (or set PDAL_BIN). Or use /dump/las and convert with `pdal translate crop.las out.copc.laz`.'); } });
       p.on('close', (code) => {
         if (code !== 0) { cleanup(); if (!res.headersSent) { res.writeHead(500, CORS); res.end('pdal failed: ' + perr.slice(0, 300)); } return; }
         res.writeHead(200, { 'Content-Type': 'application/octet-stream', 'Content-Disposition': 'attachment; filename="crop.copc.laz"', ...hdr });
