@@ -5,6 +5,94 @@ Format loosely follows [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+### Fixed — 2026-06-30 (`stream-cache` cont.: splat-dump output corruption + dump/viewer feedback)
+- **`/dump/splat` produced corrupt SPZ/SOG/PLY** — three independent `@playcanvas/splat-transform` bugs,
+  all now fixed + verified end-to-end with a standalone DataTable harness (see
+  `memory/splat-transform-output-gotchas.md`):
+  - **Buffer over-read (all 3 formats):** `mfs.results.get(name)` is a `Uint8Array` *view* into a 5 MB
+    scratch buffer (`MemoryWriter.close` → `new Uint8Array(buffer.buffer, 0, cursor)`). `Buffer.from(out.buffer)`
+    wrapped the whole 5 MB → trailing garbage. → SPZ NaN positions (SuperSplat `translate(NaN)`), SOG EOCD
+    buried 5 MB from the end ("End of central directory not found"), bloated PLY. Now emits
+    `Buffer.from(u8.buffer, u8.byteOffset, u8.byteLength)`.
+  - **SOG was not a bundle:** `writeSog` needs `bundle: true` to emit a single self-contained `.sog` zip;
+    without it, loose `.webp`+meta files were written and `crop.sog` wasn't a zip.
+  - **PLY wrote SPZ bytes:** the `else` branch routed `ply` → `writeSpz` into a `.ply` ("invalid file header").
+    Now uses `writePly({ plyData: { elements: [{ name: 'vertex', dataTable }] } })`.
+- **Dump now honours the viewer's extra modelMatrix** (`&matrix=<16 col-major>`): a Z-offset nudge
+  (e.g. Geghard −1800 m) or local-frame ENU placement applied in the viewer is no longer invisible to the
+  dumper — `traverse`/`forEachPoint` seed the world chain with it, so the crop matches the on-screen position.
+  Cesium reads `tileset.modelMatrix`; 3DTRJS reports the globe-mode Z-offset (translate along ECEF up).
+- **3DTRJS "⬚ Set box to view"** now works in 3DTRJS mode (was a Cesium-only no-op): raycasts the inner-80%
+  canvas corners against the loaded tiles (fallback: globe surface), ECEF→carto → geographic crop bbox.
+- **3DTRJS globe zoom no longer resets** as nested external tilesets stream in: framing is now one-shot per
+  load (external `*.json` children also re-emit `load-tileset`); the ↗ Fly-to button re-frames on demand.
+
+### Added — 2026-06-30 (`stream-cache` cont.: 3DTRJS point size + Bing city pills)
+- **3DTRJS point-size slider** (Crop & Dump-adjacent control, 3DTRJS mode): sets the PointsMaterial `size`
+  (screen px, sizeAttenuation off) on POINTS tiles — applied to loaded tiles and each as it streams in.
+- **Bing 3D city pills** — Roma / Washington / Berlin load the same world tileset and fly the camera to the
+  city (re-clicking a city when the world tileset is already loaded just flies, no reload). Works in both renderers.
+- *Note on mesh GLB streaming:* a single merged-GLB 2-pass stream stays deferred — the GLB JSON chunk must
+  declare every accessor's byte layout up front (needs all geometry **and** texture sizes, i.e. fetching
+  textures, before any bytes are written; gltf-transform has no stream-writer). `/dump/zip` already streams
+  meshes out-of-core (one tile in RAM at a time).
+
+### Added — 2026-06-30 (`stream-cache` cont.: splat per-splat clip + PDAL via pixi + PivotControls)
+- **`/dump/splat` per-splat clip** finished and **default ON** (`&clip=0` to disable): drops individual
+  splats whose centroid falls outside the box. The earlier version under-clipped because it ignored the
+  splat GLB's **node matrix**; SPZ positions are node-local, so they're now placed in ECEF via the same
+  chain meshes use — `M = worldM · YUP_ZUP · nodeM` (nodeM = Rx180 spz→glTF axis fix + per-tile
+  translation). Verified: SPZ centroids land inside their tile box only with this matrix (82.8% vs 0%);
+  a georeferenced E2E run keeps 100% under a wide bbox, a central 60.9% under a tight one. New
+  `X-Dump-Splats-Raw` / `X-Dump-Clipped` headers + a viewer "clip splats outside box" checkbox.
+- **PDAL for `/dump/copc` via pixi** (not conda): `pixi global install pdal` (2.10.2) → `~/.pixi/bin/pdal`.
+  The server resolves it as `$PDAL_BIN` → pixi-global shim → `pdal` on PATH. pixi is the right installer —
+  PDAL is a conda-forge native binary, not a pip package (uv is Python-only, so it can't supply it).
+- **3DTilesRendererJS bbox PivotControls gizmo** (`⬚ 3D box gizmo` in Crop & Dump, 3DTRJS mode): a
+  vanilla-three port of the drei/threepipe PivotControls idea, purpose-built for the crop box — a
+  translucent box with **3 ENU translate arrows** (move the whole box) + **6 face handles** (drag a face
+  to resize that geographic bound; the requested face-gizmo bonus). Placed via the globe ellipsoid's
+  `getEastNorthUpFrame` under `ecefRoot`, so it aligns with the tiles; bounds are re-derived exactly from
+  each dragged handle's position (`getPositionToCartographic`). Shares the same DOM bbox the Cesium box
+  and the dumper read. Verified in-browser: correct ECEF placement (centre at Earth radius), 12 handles,
+  drag of the east face +100 m → +0.001352° lon (matches `100/(111320·cosφ)`), only that bound changes.
+
+### Added — 2026-06-30 (`stream-cache` cont.: dumper out-of-core outputs + splat merge)
+- **Disk-free out-of-core LAS** (`/dump/las?...&stream=1`): 2-pass (count+bbox, then stream 8k-record
+  chunks with backpressure) — O(1) RAM, no temp file. Byte-identical to the disk path (verified 498 868 pts).
+- **`/dump/copc`**: reuse the LAS temp file, `pdal translate … crop.copc.laz`, stream it; graceful 501 if no PDAL.
+- **`/dump/tileset`**: no-decode filtered tileset (in-bbox tiles + transforms, original GLB URIs).
+- **`/dump/zip`**: out-of-core streamed STORE-mode ZIP (one tile in RAM at a time) → tileset.json + tiles —
+  the answer to "is the crop zipped?" + mesh-out-of-core single download. Works for mesh/splat/points.
+- **`/dump/splat`**: merge in-bbox **splat** tiles → one supersplat-ingestable **SPZ/SOG** via
+  `@playcanvas/splat-transform` (embeds the Niantic SPZ decoder). Extract each tile's SPZ blob straight
+  from the GLB (gltf-transform can't read the required spz extension), `readSpz`→`combine`→`writeSpz`.
+  Verified: LCC Guan_Temple → 41 tiles → 6 414 134 splats → 102 MB valid SPZ.
+- Viewer Crop & Dump: LAS / COPC / GLB / Tileset / Splat(SPZ) / ZIP buttons + "disk-free stream" toggle.
+- *Remaining*: single-file mesh merge out-of-core (streaming GLB needs 2-pass byte layout); zip64 for >4 GB.
+
+### Added — 2026-06-30 (`stream-cache` cont.: dumper out-of-core + implicit + crop UI handles)
+- **Generic 3D Tiles bbox dumper** matured: ingests any tileset (our /stream outputs, /bing, /threemx,
+  external) and branches points→LAS / mesh→merged-GLB.
+  - **Out-of-core LAS**: streams points to a temp file via the O(1)-RAM `LasWriter` (header back-patched
+    on close) then pipes it to the response — constant RAM regardless of cloud size. (Mesh merge is still
+    in-memory; huge-mesh out-of-core → USD streaming is future.)
+  - **Implicit-subtree traversal**: walks OCTREE/QUADTREE `.subtree` availability (morton index, cell-box
+    subdivision, template substitution) — so COPC/Potree/implicit tilesets dump directly. Verified on the
+    implicit georeferenced vol_total: full 498 868 pts / 42 tiles / 18 MB valid LAS; half-bbox → 230 356.
+  - **Viewer Crop & Dump UI**: "Set box to view (80%)", a translucent box on the globe, editable W/E/S/N
+    + minH/maxH, max-GE, ⬇ LAS / ⬇ GLB. **Cesium drag handles** (yellow W/E/S/N face points dragged on the
+    ellipsoid resize the box live).
+  - **`/dump/copc`**: shells out to `pdal translate crop.las crop.copc.laz` (reuses the out-of-core LAS
+    temp file), streams the COPC; graceful 501 when PDAL isn't on PATH.
+  - **`/dump/tileset`**: no-decode crop — emits a filtered 3D Tiles tileset referencing only the in-bbox
+    tiles (each leaf keeps its world transform + the original tile GLB URI). The clean **splat** crop
+    (gltf-transform can't even read the SPZ-compressed splat GLBs — required extension fails validation),
+    and works for points/mesh too. Verified: georeferenced LCC splat → 41 in-bbox tiles.
+  - *Remaining*: single-file splat merge (raw container-level GLB concat preserving the SPZ extension, since
+    gltf-transform refuses it), mesh out-of-core (USD streaming), NASA-3DTRJS/R3F TransformControls box
+    (drei-style PivotControls, cf. repalash/threepipe), and LAS streaming-to-client without disk (two-pass).
+
 ### Added — 2026-06-29 (`stream-cache` cont.: bbox crop engine + shadeless rendering)
 - **bbox crop / subsample extract — engine (point clouds → LAS)**. New `/dump/las?url=<potree>&bbox=
   minx,miny,minz,maxx,maxy,maxz[&maxLevel=N]` traverses the octree (ADD: accumulate every point inside the

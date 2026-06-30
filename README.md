@@ -52,6 +52,7 @@ Each source format's authoritative spec, with a distilled local copy under [`doc
 | **SPZ / glTF splat exts** | [SPZ](https://github.com/nianticlabs/spz) · [KHR_gaussian_splatting](https://github.com/CesiumGS/glTF/tree/proposal-KHR_gaussian_splatting) | [`spz-format.md`](docs-references/spz-format.md) · [`KHR_gaussian_splatting.md`](docs-references/KHR_gaussian_splatting.md) |
 | **3D Tiles packages** | [`.3tz` spec](https://github.com/erikdahlstrom/3tz-specification) · [`.3dtiles` proposal (#727)](https://github.com/CesiumGS/3d-tiles/issues/727) | [`3tz-3dtiles-packages.md`](docs-references/3tz-3dtiles-packages.md) |
 | **USD splats (ParticleField)** | [OpenUSD v26.03](https://aousd.org/blog/openusd-v26-03/) · [ParticleField3DGaussianSplat](https://openusd.org/release/user_guides/schemas/usdVol/ParticleField3DGaussianSplat.html) | [`usd-gaussian-splats.md`](docs-references/usd-gaussian-splats.md) |
+| **glTF 2.1 (complex scenes)** | [Khronos blog](https://www.khronos.org/blog/introducing-gltf-2.1-with-complex-scenes) · [64-bit GLB / indices #2594](https://github.com/KhronosGroup/glTF/issues/2594) | [`gltf-2.1-complex-scenes.md`](docs-references/gltf-2.1-complex-scenes.md) |
 
 **Producing the tiled inputs (offline tilers):** point-cloud tilers (PotreeConverter, py3dtiles,
 gocesiumtiler, PDAL→COPC), splat LoD builders (SparkJS `build-lod`, PlayCanvas `splat-transform`,

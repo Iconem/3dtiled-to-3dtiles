@@ -9,11 +9,11 @@ export { parallelMap, WorkerPool, defaultConcurrency } from './parallel.js';
 export { detectFormat, detectFormatByName } from './detect.js';
 export { keyToCoords, coordsToKey, octreeChildKeys, octreeSubCube, cubeToBox,
          buildExplicitTree, buildSubtreeBuffer, subtreeRootKeys } from './tiling.js';
-export { DEG, llhToEcef, enuFrame, enuMatrix, georefFromCrs, cgcs2000Lon0, lccGeoref } from './geo.js';
+export { DEG, llhToEcef, ecefToLlh, enuFrame, enuMatrix, georefFromCrs, cgcs2000Lon0, lccGeoref } from './geo.js';
 export { Source } from './source.js';
 export { CORS, sendJson, sendGlb, sendBin, sendErr } from './http.js';
 export { buildImplicitTileset } from './octree.js';
 export { decompressGlb } from './gltf-decompress.js';
 export { compressGlb } from './gltf-compress.js';
 export { progressStart, progressTick, progressDone, progressGet } from './progress.js';
-export { LasWriter, writeLasBuffer } from './las-writer.js';
+export { LasWriter, writeLasBuffer, lasHeaderBuffer, lasRecordBuffer, LAS_RECORD_LEN } from './las-writer.js';

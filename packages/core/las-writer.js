@@ -55,6 +55,18 @@ function writeRecord(buf, o, ix, iy, iz, intensity, r, g, b) {
   buf.writeUInt16LE(r & 0xffff, o + 30); buf.writeUInt16LE(g & 0xffff, o + 32); buf.writeUInt16LE(b & 0xffff, o + 34);
 }
 
+// ── disk-free streaming helpers (2-pass: count in pass 1, write header, stream records in pass 2) ──
+export const LAS_RECORD_LEN = RECORD_LEN;
+/** 375-byte LAS 1.4 header (count + bbox known upfront). */
+export const lasHeaderBuffer = (opts) => buildHeader(opts);
+/** One PDRF-7 record → a fresh 36-byte Buffer (world coords; quantized against scale/offset). */
+export function lasRecordBuffer(x, y, z, attrs, scale, offset) {
+  const buf = Buffer.allocUnsafe(RECORD_LEN);
+  writeRecord(buf, 0, Math.round((x - offset[0]) / scale[0]), Math.round((y - offset[1]) / scale[1]), Math.round((z - offset[2]) / scale[2]),
+    attrs?.intensity || 0, attrs?.r || 0, attrs?.g || 0, attrs?.b || 0);
+  return buf;
+}
+
 /** Streaming Node writer — constant memory; back-patches count + bbox on close(). */
 export class LasWriter {
   constructor(path, { scale = [0.001, 0.001, 0.001], offset = [0, 0, 0], bufferBytes = 1 << 20 } = {}) {

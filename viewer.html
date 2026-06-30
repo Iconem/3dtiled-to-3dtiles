@@ -465,6 +465,46 @@
       <label for="zoffset-input">Z offset (m)</label>
       <input type="number" id="zoffset-input" value="0" step="1" onchange="window.__3dtrjs && window.__3dtrjs.setZOffset(this.value)" />
     </div>
+    <div class="sb-row hidden" id="pointsize-wrap" title="3DTRJS: point-cloud tile point size (screen pixels). Affects COPC/Potree/LAS POINTS tiles.">
+      <label for="pointsize-input">Point size</label>
+      <input type="range" id="pointsize-input" min="0.5" max="10" step="0.5" value="2" style="flex:1"
+             oninput="window.__3dtrjs && window.__3dtrjs.setPointSize(this.value); document.getElementById('pointsize-val').textContent = this.value + ' px';" />
+      <span id="pointsize-val" style="min-width:34px;text-align:right;font-size:10px;opacity:.8">2 px</span>
+    </div>
+  </div>
+
+  <!-- Crop & Dump (bbox subsample extract → LAS/GLB) -->
+  <div class="sb-section">
+    <h4>Crop &amp; Dump</h4>
+    <button class="sb-btn" id="crop-tobbox" onclick="setCropToView()" title="Set the crop box to ~80% of the current view, on the globe">⬚ Set box to view (80%)</button>
+    <div class="sb-row"><label>W / E (°)</label><input type="number" id="crop-w" step="0.0005" onchange="updateCropBox()" /><input type="number" id="crop-e" step="0.0005" onchange="updateCropBox()" /></div>
+    <div class="sb-row"><label>S / N (°)</label><input type="number" id="crop-s" step="0.0005" onchange="updateCropBox()" /><input type="number" id="crop-n" step="0.0005" onchange="updateCropBox()" /></div>
+    <div class="sb-row"><label>minH / maxH (m)</label><input type="number" id="crop-minh" step="10" value="-50" onchange="updateCropBox()" /><input type="number" id="crop-maxh" step="10" value="800" onchange="updateCropBox()" /></div>
+    <div class="sb-row" title="Geometric error floor (m). 0 = finest available. Larger = coarser/fewer tiles.">
+      <label for="crop-ge">max GE (m)</label><input type="number" id="crop-ge" min="0" step="1" value="0" />
+    </div>
+    <label class="sb-check" title="LAS: disk-free out-of-core streaming (2-pass — count, then stream; O(1) RAM, no temp file, ~2× traversal).">
+      <input type="checkbox" id="crop-stream" checked /> LAS disk-free stream (2-pass)
+    </label>
+    <label class="sb-check" title="LAS: output a local East/North/Up metric frame at the box centre instead of geocentric ECEF (EPSG:4978).">
+      <input type="checkbox" id="crop-enu" checked /> LAS local ENU frame (else ECEF)
+    </label>
+    <div class="sb-row" style="gap:6px">
+      <button class="sb-btn" onclick="dumpCrop('las')" title="Point clouds → out-of-core LAS">⬇ LAS</button>
+      <button class="sb-btn" onclick="dumpCrop('copc')" title="Point clouds → COPC (needs PDAL on the server)">⬇ COPC</button>
+      <button class="sb-btn" onclick="dumpCrop('glb')" title="Meshes → single merged GLB (gltf-transform, in-memory)">⬇ GLB</button>
+    </div>
+    <div class="sb-row" style="gap:6px">
+      <label for="crop-splatfmt" title="Splat output format">Splat</label>
+      <select id="crop-splatfmt"><option value="spz">SPZ</option><option value="glb">GLB</option><option value="sog">SOG</option><option value="ply">PLY</option></select>
+      <button class="sb-btn" onclick="dumpCrop('splat')" title="Splats → merged single file (splat-transform; supersplat-ingestable)">⬇ Splat</button>
+      <button class="sb-btn" onclick="dumpCrop('zip')" title="Any (mesh/splat/points) → streamed ZIP bundle (out-of-core, single download)">⬇ ZIP</button>
+    </div>
+    <label class="sb-check" title="Splat dump: drop individual splats whose centroid falls outside the box (per-splat clip via worldM·YUP_ZUP·nodeM). Off = keep every splat of each intersecting tile.">
+      <input type="checkbox" id="crop-splatclip" checked /> Splat: clip splats outside box
+    </label>
+    <button class="sb-btn" id="crop-gizmo-btn" onclick="toggleCropGizmo3D()" title="3DTilesRendererJS only: edit the box in 3D with a PivotControls-style gizmo — 3 ENU translate arrows (move the box) + 6 face handles (resize each side). Drives the same bbox the dump uses.">⬚ 3D box gizmo (3DTRJS)</button>
+    <div class="sb-note" style="font-size:10px;opacity:.7">Dumps the loaded tileset within the box. Octree sources are fetched as explicit tiling.</div>
   </div>
 
   <!-- Navigation -->
@@ -614,6 +654,7 @@ const DIRECT = [
   { id: 'cgs-implicit', icon: '◈', label: '3DT · CesiumGS implicit (1.1)', type: 'mesh', url: 'https://raw.githubusercontent.com/CesiumGS/3d-tiles-samples/main/1.1/SparseImplicitQuadtree/tileset.json' },
   { id: 'cgs-lod',      icon: '◈', label: '3DT · CesiumGS discrete-LOD',   type: 'mesh', url: 'https://raw.githubusercontent.com/CesiumGS/3d-tiles-samples/main/1.0/TilesetWithDiscreteLOD/tileset.json' },
   { id: 'marseille',    icon: '🏙', label: '3DT · Marseille (root.json)',   type: 'mesh', url: 'https://d3h9zulrmcj1j6.cloudfront.net/Marseille_Cesium/root.json' },
+  { id: 'jastrebia',    icon: '✦', label: '3DT · Jastrzębia Góra (splat)', type: 'splat', url: 'https://ugfld3ibxevvegyw.private.blob.vercel-storage.com/JastrebiaGora/tileset.json?vercel-blob-valid-until=1782816064570&vercel-blob-delegation=eyJzdG9yZUlkIjoic3RvcmVfdWdGbGQzSUJ4RVZ2ZUd5dyIsIm93bmVySWQiOiJ0ZWFtX2pBeXZWbEloS09HSGtCaHhEdGdUaVFOUCIsInBhdGhuYW1lIjoiKiIsIm9wZXJhdGlvbnMiOlsiZ2V0IiwiaGVhZCJdLCJ2YWxpZFVudGlsIjoxNzgyODE4NzY0MzgzLCJpYXQiOjE3ODI4MTU0NjQ0NTR9.4H_KtLWVCwAapby1v5fGyNpFINDdTQD5w5t472dunHU&vercel-blob-signature=EilSXkhEeB5PM4ZDE7s8QsRoPwf0zPn6A3c6F_Z3czo' },
   // Live KTX2+Draco decompress (→ JPG) via /gltf over a tileset that HAS them (Bing 3dv4). For any
   // KTX/Draco tileset, point /gltf at its tileset.json: /gltf/tileset.json?ops=decompress&url=<tileset>.
   { id: 'gltf-ktx', icon: '◈', label: '3DT · KTX→decode (Bing via /gltf)', type: 'mesh', url: `${MW}/gltf/tileset.json?ops=decompress&tex=jpg&url=${encodeURIComponent(`${MW}/bing/tileset.json?g=15530`)}` },
@@ -685,10 +726,18 @@ function currentPresets() {
     url: `${MW}/stream/tileset.json?format=${a.pkg.toLowerCase().endsWith('.3tz') ? '3tz' : '3dtiles-pkg'}&url=${encodeURIComponent(a.pkg)}`,
   }));
   // Bing Maps 3D (tf=3dv4 GLB → quadtree) — dedicated /bing endpoint; root quadkey + genid.
-  if (selectedFormat === 'bing') return [
+  if (selectedFormat === 'bing') {
     // One world tileset (the td1 implicit manifest); navigate/zoom to any city. genid drifts — override &g=.
-    { id: 'bing-world', label: '🗺 Bing 3D — world (td1)', type: 'mesh', url: `${MW}/bing/tileset.json?g=15530` },
-  ];
+    const bingUrl = `${MW}/bing/tileset.json?g=15530`;
+    // City pills load the SAME world tileset, then fly the camera to that city (height = camera altitude, m).
+    // Re-clicking a city when the world tileset is already loaded just flies (no reload).
+    return [
+      { id: 'bing-world', label: '🗺 Bing 3D — world (td1)', type: 'mesh', url: bingUrl },
+      { id: 'bing-roma',  label: '🗺 Bing 3D — Roma',       type: 'mesh', url: bingUrl, flyTo: { lon: 12.4924, lat: 41.8902, height: 1200 } }, // Colosseum
+      { id: 'bing-washington', label: '🗺 Bing 3D — Washington', type: 'mesh', url: bingUrl, flyTo: { lon: -77.0353, lat: 38.8895, height: 1600 } }, // Washington Monument / Mall
+      { id: 'bing-berlin', label: '🗺 Bing 3D — Berlin',    type: 'mesh', url: bingUrl, flyTo: { lon: 13.3777, lat: 52.5163, height: 1200 } }, // Brandenburg Gate
+    ];
+  }
   // Bentley 3MX (.3mx/.3mxb → lazy fragments) — dedicated /threemx endpoint; url = master .3mx or root .3mxb.
   if (selectedFormat === 'threemx') return [
     { id: '3mx-tende',  label: '🏛 Tende village (dept06, colormap)', type: 'mesh', url: `${MW}/threemx/tileset.json?url=${encodeURIComponent('https://3d.departement06.fr/3mx/2019_07_Village_Tende_Resolution/Scene/2019_07_Village_Tende_Resolution.3mx')}` },
@@ -941,9 +990,20 @@ function buildPresetBar() {
 }
 
 function selectPreset(p) {
+  // City pills (Bing) share the world tileset's URL + carry a flyTo target. If that dataset is already
+  // loaded, just fly there (no reload); otherwise load it and fly once it's ready.
+  const sameDatasetLoaded = !p.custom && currentPresetObj && currentPresetObj.url === p.url;
+  _pendingCityFly = p.flyTo || null;
   currentPresetId = p.id;
   currentPresetObj = p;
   currentType = p.type;
+  if (sameDatasetLoaded && p.flyTo) {
+    document.querySelectorAll('.preset:not(.mode):not(.tiling):not(.fmt)').forEach(b => b.classList.remove('active'));
+    document.getElementById('preset-' + p.id)?.classList.add('active');
+    flyToCity(p.flyTo); _pendingCityFly = null;
+    setStatus(`Flying to ${p.label}.`);
+    return;
+  }
   document.querySelectorAll('.preset:not(.mode):not(.tiling):not(.fmt)').forEach(b => b.classList.remove('active'));
   document.getElementById('preset-' + p.id)?.classList.add('active');
 
@@ -969,7 +1029,11 @@ function selectPreset(p) {
   document.getElementById('tileset-url').value = field;
   const loadUrl = (rawUrlMode && p.rawSrc) ? buildMiddlewareUrl(p.rawSrc) : p.url;
   if (_3dtMode) {
-    if (window.__3dtrjs) window.__3dtrjs.load(loadUrl, p.type === 'splat');
+    if (window.__3dtrjs) {
+      window.__3dtrjs.load(loadUrl, p.type === 'splat');     // resets the module's pending fly
+      if (p.flyTo) window.__3dtrjs.flyToCarto(p.flyTo.lon, p.flyTo.lat, p.flyTo.height);  // deferred until framed
+    }
+    _pendingCityFly = null;                                  // 3DTRJS path owns the fly via the module
     setStatus('3DTilesRendererJS — ' + p.label);
   } else {
     loadTileset();
@@ -1063,6 +1127,10 @@ async function loadTileset() {
       document.getElementById('lf-range').value = Math.max(5, Math.round(bs.radius * 3));
       applyLocalFrame();
       setStatus((isSplat ? 'Splat' : 'Local tileset') + ' placed at local frame origin.\nAdjust ⊕ Local Frame if needed.');
+    } else if (_pendingCityFly) {
+      // City pill: fly to the city instead of the (whole-world) tileset bounding sphere.
+      flyToCity(_pendingCityFly); _pendingCityFly = null;
+      setStatus('Loaded: ' + url);
     } else {
       try {
         // Use the actual bounding sphere radius for a sensible camera distance.
@@ -1317,6 +1385,143 @@ function applyShading() {
   } catch (e) { console.warn('[shading]', e.message); }
 }
 
+// ── Crop & Dump: a geographic bbox box on the globe → /dump/{las|glb} ────────────────
+let _cropEntity = null;
+const _cropBbox = () => ['crop-w','crop-s','crop-minh','crop-e','crop-n','crop-maxh'].map(id => parseFloat(document.getElementById(id).value));
+// normalized [minLon,minLat,minH,maxLon,maxLat,maxH] (handles can drag a bound past its opposite).
+function _cropBboxNorm() { const [w,s,mn,e,n,mx] = _cropBbox(); return [Math.min(w,e),Math.min(s,n),Math.min(mn,mx),Math.max(w,e),Math.max(s,n),Math.max(mn,mx)]; }
+// GE ≈ closest power of 10 to the bbox span / 100 (so ~100 tiles across the larger horizontal extent).
+function _autoGE() {
+  const [w,s,,e,n] = _cropBboxNorm(); const cLat = (s+n)*Math.PI/360;
+  const spanM = Math.max((e-w)*111320*Math.cos(cLat), (n-s)*111320);
+  if (!(spanM > 0)) return;
+  document.getElementById('crop-ge').value = Math.pow(10, Math.round(Math.log10(spanM / 100)));
+}
+function setCropToView() {
+  if (_3dtMode) {                                             // 3DTRJS has no Cesium viewer — raycast the three.js scene
+    const ok = window.__3dtrjs?.setCropToView();
+    setStatus(ok ? 'Crop box set from 3DTRJS view.' : 'Point the 3DTRJS camera at the tileset/globe, then retry.');
+    return;
+  }
+  if (!viewer) { setStatus('Cesium not ready.'); return; }
+  // Pick the 4 corners of the inner 80% of the canvas onto the ellipsoid → robust geographic bbox
+  // (computeViewRectangle is unreliable — often returns the whole globe).
+  const cv = viewer.scene.canvas, W = cv.clientWidth || cv.width, H = cv.clientHeight || cv.height, ell = viewer.scene.globe.ellipsoid, D = Cesium.Math.toDegrees;
+  const lons = [], lats = [];
+  if (W && H) for (const [fx, fy] of [[0.1, 0.1], [0.9, 0.1], [0.1, 0.9], [0.9, 0.9], [0.5, 0.5]]) {
+    const c = viewer.camera.pickEllipsoid(new Cesium.Cartesian2(fx * W, fy * H), ell);
+    if (c) { const g = Cesium.Cartographic.fromCartesian(c); lons.push(D(g.longitude)); lats.push(D(g.latitude)); }
+  }
+  let w, s, e, n;
+  if (lons.length >= 2) { w = Math.min(...lons); e = Math.max(...lons); s = Math.min(...lats); n = Math.max(...lats); }
+  else {                                                    // fallback: camera lon/lat ± height·tan(fov/2)·0.8
+    const carto = viewer.camera.positionCartographic; if (!carto) { setStatus('Point the camera at the ground.'); return; }
+    const lat = D(carto.latitude), lon = D(carto.longitude);
+    const half = 0.8 * carto.height * Math.tan((viewer.camera.frustum.fovy || viewer.camera.frustum.fov || 1.047) / 2);
+    const dLat = half / 111320, dLon = half / (111320 * Math.cos(carto.latitude));
+    w = lon - dLon; e = lon + dLon; s = lat - dLat; n = lat + dLat;
+  }
+  document.getElementById('crop-w').value = w.toFixed(5); document.getElementById('crop-e').value = e.toFixed(5);
+  document.getElementById('crop-s').value = s.toFixed(5); document.getElementById('crop-n').value = n.toFixed(5);
+  _autoGE();
+  updateCropBox();
+}
+let _cropHandles = [], _cropDrag = null, _cropDragHandler = null;
+function updateCropBox() {
+  if (!viewer) return;
+  const [w, s, minh, e, n, maxh] = _cropBboxNorm();             // normalized → no north<south crash
+  if ([w, s, minh, e, n, maxh].some(Number.isNaN) || e - w < 1e-9 || n - s < 1e-9) return;
+  if (_cropEntity) viewer.entities.remove(_cropEntity);
+  _cropEntity = viewer.entities.add({ rectangle: {
+    coordinates: Cesium.Rectangle.fromDegrees(w, s, e, n), material: Cesium.Color.CYAN.withAlpha(0.12),
+    height: minh, extrudedHeight: maxh, outline: true, outlineColor: Cesium.Color.CYAN } });
+  _cropHandles.forEach(h => viewer.entities.remove(h)); _cropHandles = [];
+  const midLon = (w + e) / 2, midLat = (s + n) / 2, midH = (minh + maxh) / 2;
+  // W/E/S/N face handles (drag on the ellipsoid) + top/bottom handles (drag a vertical plane → height).
+  const defs = [['crop-w','lon',w,midLat,midH], ['crop-e','lon',e,midLat,midH], ['crop-s','lat',midLon,s,midH], ['crop-n','lat',midLon,n,midH],
+                ['crop-maxh','height',midLon,midLat,maxh], ['crop-minh','height',midLon,midLat,minh]];
+  for (const [id, axis, lon, lat, h] of defs) {
+    const ent = viewer.entities.add({ position: Cesium.Cartesian3.fromDegrees(lon, lat, h),
+      point: { pixelSize: 13, color: axis === 'height' ? Cesium.Color.ORANGE : Cesium.Color.YELLOW, outlineColor: Cesium.Color.BLACK, outlineWidth: 2, disableDepthTestDistance: Number.POSITIVE_INFINITY } });
+    ent._cropBound = { id, axis }; _cropHandles.push(ent);
+  }
+  _setupCropDrag();
+}
+function _setupCropDrag() {
+  if (_cropDragHandler || !viewer) return;
+  _cropDragHandler = new Cesium.ScreenSpaceEventHandler(viewer.scene.canvas);
+  _cropDragHandler.setInputAction((m) => {
+    const picked = viewer.scene.pick(m.position);
+    if (picked && picked.id && picked.id._cropBound) { _cropDrag = picked.id._cropBound; viewer.scene.screenSpaceCameraController.enableInputs = false; }
+  }, Cesium.ScreenSpaceEventType.LEFT_DOWN);
+  _cropDragHandler.setInputAction((m) => {
+    if (!_cropDrag) return;
+    if (_cropDrag.axis === 'height') {                          // intersect a vertical plane at the box centre
+      const [w, s, , e, n] = _cropBboxNorm(); const center = Cesium.Cartesian3.fromDegrees((w+e)/2, (s+n)/2, 0);
+      const ray = viewer.camera.getPickRay(m.endPosition); if (!ray) return;
+      const up = Cesium.Cartesian3.normalize(center, new Cesium.Cartesian3());
+      const toCam = Cesium.Cartesian3.subtract(viewer.camera.positionWC, center, new Cesium.Cartesian3());
+      Cesium.Cartesian3.subtract(toCam, Cesium.Cartesian3.multiplyByScalar(up, Cesium.Cartesian3.dot(toCam, up), new Cesium.Cartesian3()), toCam);
+      const hit = Cesium.IntersectionTests.rayPlane(ray, Cesium.Plane.fromPointNormal(center, Cesium.Cartesian3.normalize(toCam, new Cesium.Cartesian3())));
+      if (hit) document.getElementById(_cropDrag.id).value = Cesium.Cartographic.fromCartesian(hit).height.toFixed(1);
+    } else {
+      const c = viewer.camera.pickEllipsoid(m.endPosition, viewer.scene.globe.ellipsoid); if (!c) return;
+      const g = Cesium.Cartographic.fromCartesian(c);
+      document.getElementById(_cropDrag.id).value = (_cropDrag.axis === 'lon' ? Cesium.Math.toDegrees(g.longitude) : Cesium.Math.toDegrees(g.latitude)).toFixed(5);
+    }
+    updateCropBox();
+  }, Cesium.ScreenSpaceEventType.MOUSE_MOVE);
+  _cropDragHandler.setInputAction(() => { _cropDrag = null; viewer.scene.screenSpaceCameraController.enableInputs = true; }, Cesium.ScreenSpaceEventType.LEFT_UP);
+}
+function dumpCrop(kind) {
+  const field = document.getElementById('tileset-url').value.trim();
+  if (!field) { setStatus('Load a tileset first.'); return; }
+  let src = (rawUrlMode && !field.startsWith(MW)) ? buildMiddlewareUrl(field) : field;   // need a tileset.json
+  if (/\/stream\/tileset\.json/.test(src)) {                 // octree sources must be explicit for the dumper
+    src = /tiling=implicit/.test(src) ? src.replace('tiling=implicit', 'tiling=explicit') : (/tiling=/.test(src) ? src : src + '&tiling=explicit');
+    if (!/hierarchy=/.test(src)) src += '&hierarchy=eager';
+  }
+  const bb = _cropBboxNorm();
+  if (bb.some(Number.isNaN)) { setStatus('Set the crop box first (⬚ Set box to view).'); return; }
+  const ge = parseFloat(document.getElementById('crop-ge').value) || 0;
+  let extra = '';
+  if (kind === 'las' && document.getElementById('crop-stream')?.checked) extra += '&stream=1';
+  if ((kind === 'las' || kind === 'copc') && document.getElementById('crop-enu')?.checked) extra += '&enu=1';
+  if (kind === 'splat') { extra += `&format=${document.getElementById('crop-splatfmt')?.value || 'spz'}`;
+    if (!document.getElementById('crop-splatclip')?.checked) extra += '&clip=0'; }
+  // Viewer-applied extra modelMatrix (Z-offset nudge / local-frame ENU placement) — the source tileset on
+  // the server has none of it, so without this the dump bbox misses shifted/placed data (e.g. Geghard -1800m).
+  const mm = _dumpModelMatrix();
+  if (mm) extra += `&matrix=${mm.join(',')}`;
+  const url = `${MW}/dump/${kind}?url=${encodeURIComponent(src)}&bbox=${bb.join(',')}&maxGE=${ge}${extra}`;
+  tlog(`⬇ dump ${kind} (GE ${ge}) — download starting…`);
+  window.open(url, '_blank');
+}
+
+// The extra ECEF modelMatrix the viewer applied on top of the source tileset (Z-offset / local frame),
+// as a column-major 16-array, or null if none. The dumper seeds traversal with it so the crop reproduces
+// the on-screen position. Cesium: tileset.modelMatrix. 3DTRJS: the zOffset translation along ECEF up.
+function _dumpModelMatrix() {
+  if (_3dtMode) { const m = window.__3dtrjs?.getDumpMatrix?.(); return (m && m.length === 16) ? m : null; }
+  if (!currentTileset || !window.Cesium) return null;
+  const mm = currentTileset.modelMatrix;
+  if (!mm || Cesium.Matrix4.equalsEpsilon(mm, Cesium.Matrix4.IDENTITY, 1e-9)) return null;
+  return Cesium.Matrix4.toArray(mm);                          // column-major
+}
+
+// 3DTRJS-only: toggle the in-scene PivotControls-style bbox gizmo (translate arrows + face handles).
+let _cropGizmo3DOn = false;
+function toggleCropGizmo3D() {
+  const btn = document.getElementById('crop-gizmo-btn');
+  if (!_3dtMode) { setStatus('Switch to 3DTilesRendererJS (◈) to use the 3D box gizmo.'); return; }
+  if (_cropBbox().some(Number.isNaN)) { setStatus('Set the crop box first (⬚ Set box to view, or type bounds).'); return; }
+  _cropGizmo3DOn = !_cropGizmo3DOn;
+  if (_cropGizmo3DOn) { const ok = window.__3dtrjs?.showCropGizmo(); _cropGizmo3DOn = !!ok; }
+  else window.__3dtrjs?.hideCropGizmo();
+  btn?.classList.toggle('active', _cropGizmo3DOn);
+  setStatus(_cropGizmo3DOn ? '3D box gizmo on — drag arrows to move, face handles to resize.' : '3D box gizmo off.');
+}
+
 // Screen-space error override (px). null = per-type auto default. Lower = more detail.
 // CesiumJS: tileset.maximumScreenSpaceError; 3DTRJS: tiles.errorTarget.
 let sseOverride = null;
@@ -1325,6 +1530,20 @@ function setMaxSSE(v) {
   sseOverride = (isFinite(n) && n > 0) ? n : null;
   if (currentTileset) currentTileset.maximumScreenSpaceError = sseOverride ?? currentTileset.maximumScreenSpaceError;
   window.__3dtrjs?.setErrorTarget(sseOverride);
+}
+
+// City fly-to (Bing city pills): a {lon,lat,height} target the renderer should fly to once a tileset is
+// loaded. Set by selectPreset; consumed by loadTileset (Cesium) / __3dtrjs framing (3DTRJS).
+let _pendingCityFly = null;
+function flyToCity(t) {
+  if (!t) return;
+  if (_3dtMode) { window.__3dtrjs?.flyToCarto(t.lon, t.lat, t.height); return; }
+  if (!viewer) return;
+  viewer.camera.flyTo({
+    destination: Cesium.Cartesian3.fromDegrees(t.lon, t.lat, t.height),
+    orientation: { heading: 0, pitch: Cesium.Math.toRadians(-45), roll: 0 },
+    duration: 2,
+  });
 }
 
 function flyToOrigin() {
@@ -1469,6 +1688,7 @@ function toggle3DT() {
 
   document.getElementById('controls-toggle-wrap').classList.toggle('hidden', !_3dtMode);
   document.getElementById('zoffset-wrap').classList.toggle('hidden', !_3dtMode);
+  document.getElementById('pointsize-wrap').classList.toggle('hidden', !_3dtMode);
 
   if (_3dtMode) {
     document.getElementById('cesium-container').style.display = 'none';
@@ -1500,6 +1720,7 @@ function toggle3DT() {
   } else {
     document.getElementById('three-container').style.display = 'none';
     document.getElementById('cesium-container').style.display = 'block';
+    if (_cropGizmo3DOn) { window.__3dtrjs?.hideCropGizmo(); _cropGizmo3DOn = false; document.getElementById('crop-gizmo-btn')?.classList.remove('active'); }
     window.__3dtrjs?.pause();
     // Load the currently-selected dataset into Cesium (switching renderers should keep the dataset).
     const url = document.getElementById('tileset-url').value.trim();
@@ -1521,6 +1742,8 @@ else window.addEventListener('cesium-ready', () => initCesium(), { once: true })
 import {
   Scene, PerspectiveCamera, WebGLRenderer, Sphere, Vector2, Vector3, Group, Matrix4, Box3,
   AmbientLight, DirectionalLight, Raycaster,
+  Mesh, MeshBasicMaterial, BoxGeometry, EdgesGeometry, LineSegments, LineBasicMaterial,
+  SphereGeometry, ConeGeometry, CylinderGeometry, Quaternion, Color, DoubleSide,
 } from 'three';
 import { TilesRenderer, GlobeControls, EnvironmentControls } from '3d-tiles-renderer';
 import {
@@ -1585,6 +1808,7 @@ let debugPlugin = null;             // DebugTilesPlugin on the current tileset
 let debugOn = false;                // show bounding boxes + per-tile random colour
 const DEBUG_COLOR_RANDOM = 7;       // DebugTilesPlugin ColorModes.RANDOM_COLOR (per-tile, like Cesium)
 let needsFraming = false;           // fly-to once the root bounding sphere is ready
+let hasFramed = false;              // one-shot: external-tileset children also fire load-tileset; frame only the first
 let framingForceEcef;               // forceEcef arg captured for the deferred framing
 let lastCenter = new Vector3();     // last tileset bounds centre (for mode switches / fly-to)
 let lastRadius = 1;
@@ -1717,8 +1941,33 @@ function setControlMode(mode) {
   else                       useEnvControls(lastCenter, lastRadius);
 }
 
-// Re-frame the camera on the current tileset (3DTRJS "Fly to origin").
-function frameTileset() { if (tiles) needsFraming = true; }
+// Re-frame the camera on the current tileset (3DTRJS "Fly to origin"). Bypasses the one-shot
+// hasFramed guard so the user can always re-centre on demand.
+function frameTileset() { if (tiles) { hasFramed = false; needsFraming = true; } }
+
+// Fly the globe camera to a geographic point (Bing city pills). `height` = camera altitude (m), with a
+// slight southward tilt for a ~45° look-down. If tiles aren't framed yet, the target is remembered so the
+// one-shot framing fly (_tryFraming) doesn't override it.
+let _pendingFly = null;
+function _flyGlobeTo(lon, lat, height) {
+  if (!camera || !globe || !ecefRoot) return;
+  if (controlMode !== 'globe') useGlobeControls(false);              // city view needs the globe controller
+  const M = globe.ellipsoid.getEastNorthUpFrame(lat * D2R, lon * D2R, 0, new Matrix4());
+  const ground = new Vector3().setFromMatrixPosition(M).applyMatrix4(ecefRoot.matrixWorld);
+  const up    = new Vector3(M.elements[8], M.elements[9], M.elements[10]).transformDirection(ecefRoot.matrixWorld).normalize();
+  const north = new Vector3(M.elements[4], M.elements[5], M.elements[6]).transformDirection(ecefRoot.matrixWorld).normalize();
+  const dist = Math.max(200, height);
+  camera.near = Math.max(1, dist * 0.001); camera.far = dist * 1000 + 1e7; camera.updateProjectionMatrix();
+  camera.position.copy(ground).addScaledVector(up, dist).addScaledVector(north, -dist * 0.6);
+  camera.up.copy(up); camera.lookAt(ground);
+  if (controls && controls.target) controls.target.copy(ground);
+  controls?.update();
+}
+function flyToCarto(lon, lat, height) {
+  _pendingFly = { lon, lat, height };
+  _flyGlobeTo(lon, lat, height);
+  if (hasFramed) _pendingFly = null;                                 // already framed → no deferred re-fly will run
+}
 
 // ── Init ──────────────────────────────────────────────────────────────────────
 
@@ -1827,6 +2076,8 @@ function _makeTiles(url, isSplat, fetchOptions) {
   // (_tryFraming reparents once the bounds reveal whether the tileset is ECEF.)
   (controlMode === 'globe' ? ecefRoot : scene).add(t.group);
   t.addEventListener('load-error', ev => console.error('[3DTRJS] Tile error:', ev?.url ?? ev));
+  // Apply the current point size to each POINTS tile as it streams in (size persists across tiles).
+  t.addEventListener('load-model', ev => _applyPointSizeTo(ev?.scene));
   return t;
 }
 
@@ -1844,6 +2095,16 @@ function setZOffset(v) {
   _applyZOffset();
 }
 
+// The extra raw-ECEF modelMatrix the viewer applied on top of the source tileset, as a column-major
+// 16-array (or null). Only the geo-meaningful globe-mode Z-offset (translate along raw-ECEF up) is
+// reported — the dumper seeds traversal with it so a vertically-nudged tileset (e.g. Geghard −1800 m)
+// still crops correctly. Non-georef (orbit/env) data has no geographic bbox, so → null there.
+function getDumpMatrix() {
+  if (controlMode !== 'globe' || !tilesIsEcef || !zOffset) return null;
+  const t = tilesUp.clone().multiplyScalar(zOffset);         // raw-ECEF translation (same as _applyZOffset)
+  return [1,0,0,0, 0,1,0,0, 0,0,1,0, t.x, t.y, t.z, 1];
+}
+
 function setDebug(on) {
   debugOn = !!on;
   if (debugPlugin) {
@@ -1858,6 +2119,19 @@ function setErrorTarget(v) {
   if (tiles) tiles.errorTarget = errorTargetOverride ?? tiles.errorTarget;
 }
 
+// ── Point size (point-cloud tiles) ──────────────────────────────────────────────
+// glTF POINTS tiles (COPC/Potree/LAS) load as THREE.Points with a PointsMaterial. Expose its `size`
+// (screen pixels, sizeAttenuation off → predictable regardless of dataset units) via a sidebar slider.
+// Applied to already-loaded tiles AND to each tile as it streams in (load-model).
+let pointSize = 2;
+function _applyPointSizeTo(obj) {
+  obj?.traverse(o => {
+    if (o.isPoints && o.material) { o.material.size = pointSize; o.material.sizeAttenuation = false; o.material.needsUpdate = true; }
+  });
+}
+function setPointSize(v) { const n = Number(v); if (n > 0) pointSize = n; if (tiles) _applyPointSizeTo(tiles.group); }
+function getPointSize() { return pointSize; }
+
 function _detachTiles() {
   needsFraming = false;
   debugPlugin = null;
@@ -1871,6 +2145,11 @@ function _onTilesetLoaded(forceEcef) {
   // The root bounding volume (esp. a "region") may not be resolvable to a sphere
   // at the instant the tileset JSON loads. Defer framing to the render loop,
   // which retries until getBoundingSphere succeeds.
+  // Frame ONCE per load: nested external tilesets (content.uri → *.json) each re-emit
+  // "load-tileset" as they stream in, and re-framing on every one yanks the camera back
+  // (the "zoom resets every once in a while" in globe mode). The ↗ Fly-to button uses
+  // frameTileset() to re-frame on demand.
+  if (hasFramed) return;
   framingForceEcef = forceEcef;
   needsFraming = true;
 }
@@ -1879,6 +2158,7 @@ function _tryFraming() {
   const sphere = new Sphere();
   if (!tiles || !tiles.getBoundingSphere(sphere)) return;
   needsFraming = false;
+  hasFramed = true;
   const forceEcef = framingForceEcef;
   const { center, radius } = sphere;
   console.log('[3DTRJS] Bounds: center', center.toArray().map(v => v.toFixed(2)), 'radius', radius.toFixed(2));
@@ -1912,6 +2192,8 @@ function _tryFraming() {
     // Default non-georeferenced splats to free OrbitControls (no env "fight").
     useOrbitControls(center, radius);
   }
+  // City pill: override the bounds fly with the requested geographic target (now that tiles are framed).
+  if (_pendingFly) { const f = _pendingFly; _pendingFly = null; _flyGlobeTo(f.lon, f.lat, f.height); }
   syncControlSelect();
 }
 
@@ -1927,6 +2209,8 @@ function _reparentTiles(parent) {
 function load(url, isSplat, fetchOptions) {
   if (!animId) animate();
   _detachTiles();
+  hasFramed = false;
+  _pendingFly = null;
   lastLoad = { url, isSplat, fetchOptions };
   zOffset = 0;
   const zEl = document.getElementById('zoffset-input');
@@ -1943,6 +2227,7 @@ function load(url, isSplat, fetchOptions) {
 function loadIon(assetId, token, isSplat) {
   if (!animId) animate();
   _detachTiles();
+  hasFramed = false;
   lastLoad = { ion: { assetId, token, isSplat } };
   zOffset = 0;
   const ionUrl = `https://api.cesium.com/v1/assets/${assetId}/endpoint`;
@@ -2058,7 +2343,215 @@ function _pump() {
   renderer.render(scene, camera);
 }
 
-window.__3dtrjs = { init, load, loadIon, pause, setControlMode, setZOffset, setBasemap, setDebug, setErrorTarget, setFov, frameTileset, _debug, _pump };
+// ── Crop-bbox PivotControls gizmo ───────────────────────────────────────────────
+// A vanilla-three port of the drei/threepipe PivotControls idea, purpose-built for the dumper's
+// geographic crop box: a translucent box at the bbox, **3 ENU translate arrows** (the pivot — moves
+// the whole box along East/North/Up) + **6 face handles** (the bonus — drag a face to resize that
+// geographic bound). Shares the SAME DOM state (crop-w/s/e/n/minh/maxh) the Cesium box and the
+// dumper read, so edits here drive /dump exactly like the Cesium handles do. ENU↔ECEF via the
+// globe ellipsoid; bounds are re-derived exactly from each handle's dragged position (getPositionTo
+// Cartographic), so the small-area box drawing being approximate never corrupts the saved bbox.
+const D2R = Math.PI / 180, R2Dg = 180 / Math.PI;
+let cropGizmo = null, _cropGizmoHandles = [], _cropGizmoDrag = null, _cropGizmoOnDom = null;
+const _ax = (m, i) => new Vector3(m.elements[i*4], m.elements[i*4+1], m.elements[i*4+2]).normalize(); // world axis col i
+
+function _readCropDom() {
+  const g = id => parseFloat(document.getElementById(id).value);
+  let w = g('crop-w'), s = g('crop-s'), e = g('crop-e'), n = g('crop-n'), minh = g('crop-minh'), maxh = g('crop-maxh');
+  return { w: Math.min(w,e), s: Math.min(s,n), e: Math.max(w,e), n: Math.max(s,n), minh: Math.min(minh,maxh), maxh: Math.max(minh,maxh) };
+}
+function _writeCropDom(b) {
+  document.getElementById('crop-w').value = b.w.toFixed(6); document.getElementById('crop-e').value = b.e.toFixed(6);
+  document.getElementById('crop-s').value = b.s.toFixed(6); document.getElementById('crop-n').value = b.n.toFixed(6);
+  document.getElementById('crop-minh').value = b.minh.toFixed(1); document.getElementById('crop-maxh').value = b.maxh.toFixed(1);
+  try { window._autoGE?.(); window.updateCropBox?.(); } catch {}   // keep GE + the (inactive) Cesium box in sync
+}
+
+// (re)build the gizmo geometry/placement from the current DOM bbox.
+function _syncCropGizmo() {
+  if (!cropGizmo || !globe) return;
+  const b = _readCropDom();
+  if ([b.w,b.s,b.e,b.n,b.minh,b.maxh].some(Number.isNaN)) return;
+  const cLon = (b.w+b.e)/2, cLat = (b.s+b.n)/2, cAlt = (b.minh+b.maxh)/2;
+  const halfE = Math.max(0.5, (b.e-b.w)*111320*Math.cos(cLat*D2R)/2);
+  const halfN = Math.max(0.5, (b.n-b.s)*111320/2);
+  const halfU = Math.max(0.5, (b.maxh-b.minh)/2);
+  // ENU→ECEF frame at the box centre; gizmo is a child of ecefRoot so it aligns with the tiles.
+  const M = globe.ellipsoid.getEastNorthUpFrame(cLat*D2R, cLon*D2R, cAlt, new Matrix4());
+  cropGizmo.matrixAutoUpdate = false; cropGizmo.matrix.copy(M); cropGizmo.matrixWorldNeedsUpdate = true;
+  cropGizmo.updateMatrixWorld(true);
+  // rebuild children sized to (halfE,halfN,halfU). Local frame: X=East, Y=North, Z=Up.
+  while (cropGizmo.children.length) cropGizmo.remove(cropGizmo.children[0]);
+  _cropGizmoHandles = [];
+  const box = new Mesh(new BoxGeometry(2*halfE, 2*halfN, 2*halfU),
+    new MeshBasicMaterial({ color: 0x00e5ff, transparent: true, opacity: 0.10, depthWrite: false, side: DoubleSide }));
+  cropGizmo.add(box);
+  const edges = new LineSegments(new EdgesGeometry(box.geometry), new LineBasicMaterial({ color: 0x00e5ff, depthTest: false }));
+  edges.renderOrder = 999; cropGizmo.add(edges);
+  const hs = Math.max(halfE, halfN, halfU) * 0.06;             // handle size
+  const COL = [0xff5252, 0x69f069, 0x4f9dff];                  // E/N/U → red/green/blue
+  // 6 face handles (resize). axisIndex 0=E(lon) 1=N(lat) 2=U(height).
+  const faces = [
+    { id: 'crop-e', axis: 0, p: [ halfE,0,0] }, { id: 'crop-w', axis: 0, p: [-halfE,0,0] },
+    { id: 'crop-n', axis: 1, p: [0, halfN,0] }, { id: 'crop-s', axis: 1, p: [0,-halfN,0] },
+    { id: 'crop-maxh', axis: 2, p: [0,0, halfU] }, { id: 'crop-minh', axis: 2, p: [0,0,-halfU] },
+  ];
+  for (const f of faces) {
+    const m = new Mesh(new BoxGeometry(hs*2, hs*2, hs*2), new MeshBasicMaterial({ color: COL[f.axis], depthTest: false }));
+    m.position.set(...f.p); m.renderOrder = 1000; m.userData.crop = { kind: 'face', boundId: f.id, axis: f.axis };
+    cropGizmo.add(m); _cropGizmoHandles.push(m);
+  }
+  // 3 translate arrows (the pivot): cone tips along +E/+N/+U; dragging moves the whole box on that axis.
+  const arms = [{ axis: 0, dir: [1,0,0], len: halfE }, { axis: 1, dir: [0,1,0], len: halfN }, { axis: 2, dir: [0,0,1], len: halfU }];
+  for (const a of arms) {
+    const L = a.len * 1.6 + hs * 6, dir = new Vector3(...a.dir);
+    const shaft = new Mesh(new CylinderGeometry(hs*0.25, hs*0.25, L, 8), new MeshBasicMaterial({ color: COL[a.axis], depthTest: false }));
+    const cone = new Mesh(new ConeGeometry(hs*0.9, hs*2.4, 12), new MeshBasicMaterial({ color: COL[a.axis], depthTest: false }));
+    // orient +Y (cylinder/cone default) onto the axis dir
+    const q = new Quaternion().setFromUnitVectors(new Vector3(0,1,0), dir);
+    shaft.quaternion.copy(q); shaft.position.copy(dir.clone().multiplyScalar(L/2));
+    cone.quaternion.copy(q);  cone.position.copy(dir.clone().multiplyScalar(L + hs*1.2));
+    shaft.renderOrder = cone.renderOrder = 1000;
+    const ud = { kind: 'translate', axis: a.axis }; shaft.userData.crop = ud; cone.userData.crop = ud;
+    cropGizmo.add(shaft); cropGizmo.add(cone); _cropGizmoHandles.push(shaft, cone);
+  }
+  cropGizmo.updateMatrixWorld(true);
+}
+
+// closest point on the infinite line (P, unit dir A) to the camera ray through the mouse → world Vector3.
+function _closestOnAxis(P, A, mouseNdc) {
+  raycaster.setFromCamera(mouseNdc, camera);
+  const o = raycaster.ray.origin, d = raycaster.ray.direction;       // d is unit
+  const r = P.clone().sub(o); const b = A.dot(d), e = d.dot(r), f = A.dot(r);
+  const denom = 1 - b*b; if (Math.abs(denom) < 1e-6) return P.clone();
+  const sLine = (f - b*e) / denom;                                   // along A
+  return P.clone().add(A.clone().multiplyScalar(sLine));
+}
+// world ECEF point → {lon,lat,height} degrees/m (undo ecefRoot's display rotation first).
+const _ecefRootInv = new Matrix4();
+function _worldToCarto(world) {
+  _ecefRootInv.copy(ecefRoot.matrixWorld).invert();
+  const ecef = world.clone().applyMatrix4(_ecefRootInv);
+  const c = globe.ellipsoid.getPositionToCartographic(ecef, {});
+  return { lon: c.lon * R2Dg, lat: c.lat * R2Dg, height: c.height };
+}
+function _ndcFromEvent(ev) {
+  const rect = renderer.domElement.getBoundingClientRect();
+  return new Vector2(((ev.clientX-rect.left)/rect.width)*2-1, -((ev.clientY-rect.top)/rect.height)*2+1);
+}
+function _onCropPointerDown(ev) {
+  if (!cropGizmo || !_cropGizmoHandles.length) return;
+  raycaster.setFromCamera(_ndcFromEvent(ev), camera); raycaster.far = camera.far;
+  const hit = raycaster.intersectObjects(_cropGizmoHandles, false)[0];
+  if (!hit) return;
+  const ud = hit.object.userData.crop; const A = _ax(cropGizmo.matrixWorld, ud.axis);
+  _cropGizmoDrag = { ud, A, before: _readCropDom() };
+  if (controls) controls.enabled = false;
+  ev.preventDefault(); ev.stopPropagation();
+}
+function _onCropPointerMove(ev) {
+  if (!_cropGizmoDrag) return;
+  const { ud, A } = _cropGizmoDrag; const ndc = _ndcFromEvent(ev);
+  const origin = new Vector3().setFromMatrixPosition(cropGizmo.matrixWorld);
+  const b = _readCropDom();
+  if (ud.kind === 'face') {
+    const half = ud.axis === 0 ? (b.e-b.w)*111320*Math.cos((b.s+b.n)/2*D2R)/2 : ud.axis === 1 ? (b.n-b.s)*111320/2 : (b.maxh-b.minh)/2;
+    const sign = (ud.boundId === 'crop-e' || ud.boundId === 'crop-n' || ud.boundId === 'crop-maxh') ? 1 : -1;
+    const Phandle = origin.clone().add(A.clone().multiplyScalar(sign*half));
+    const cart = _worldToCarto(_closestOnAxis(Phandle, A, ndc));
+    const v = ud.axis === 0 ? cart.lon : ud.axis === 1 ? cart.lat : cart.height;
+    document.getElementById(ud.boundId).value = (ud.axis === 2 ? v.toFixed(1) : v.toFixed(6));
+  } else {                                                          // translate: rigid move along the axis
+    const cart = _worldToCarto(_closestOnAxis(origin, A, ndc));
+    if (ud.axis === 0) { const h=(b.e-b.w)/2; b.w=cart.lon-h; b.e=cart.lon+h; }
+    else if (ud.axis === 1) { const h=(b.n-b.s)/2; b.s=cart.lat-h; b.n=cart.lat+h; }
+    else { const h=(b.maxh-b.minh)/2; b.minh=cart.height-h; b.maxh=cart.height+h; }
+    _writeCropDom(b); _syncCropGizmo(); return;
+  }
+  _writeCropDom(_readCropDom()); _syncCropGizmo();
+}
+function _onCropPointerUp() { if (!_cropGizmoDrag) return; _cropGizmoDrag = null; if (controls) controls.enabled = true; }
+
+// 3DTRJS "Set box to view": raycast the inner-80% canvas corners against the loaded tiles (falling back
+// to the globe surface), convert each hit ECEF→carto, and build the geographic crop bbox from the spread.
+// Cesium's setCropToView uses pickEllipsoid; the 3DTRJS scene has no Cesium viewer, so we raycast here.
+function cropToView3D() {
+  if (!camera || !globe) return false;
+  const el = renderer.domElement, rect = el.getBoundingClientRect();
+  const targets = [];
+  if (tiles && tiles.group.visible !== false) targets.push(tiles.group);
+  if (globe && globe.group.visible) targets.push(globe.group);
+  if (!targets.length) return false;
+  const lons = [], lats = [], hs = [];
+  for (const [fx, fy] of [[0.1,0.1],[0.9,0.1],[0.1,0.9],[0.9,0.9],[0.5,0.5]]) {
+    ndc.set(fx*2-1, -(fy*2-1));
+    raycaster.setFromCamera(ndc, camera); raycaster.far = camera.far;
+    const hit = raycaster.intersectObjects(targets, true)[0];
+    if (!hit) continue;
+    const c = _worldToCarto(hit.point);
+    if ([c.lon,c.lat,c.height].some(Number.isNaN)) continue;
+    lons.push(c.lon); lats.push(c.lat); hs.push(c.height);
+  }
+  if (lons.length < 2) return false;
+  const w = Math.min(...lons), e = Math.max(...lons), s = Math.min(...lats), n = Math.max(...lats);
+  const cLat = (s+n)/2, spanM = Math.max((e-w)*111320*Math.cos(cLat*D2R), (n-s)*111320, 10);
+  const pad = spanM * 0.25;                                   // vertical padding so tiles above/below the hits are kept
+  const minh = Math.min(...hs) - pad, maxh = Math.max(...hs) + pad;
+  _writeCropDom({ w, s, e, n, minh, maxh });                  // also runs _autoGE + updateCropBox
+  if (cropGizmo && cropGizmo.visible) _syncCropGizmo();
+  return true;
+}
+
+function showCropGizmo() {
+  if (!scene || !ecefRoot || !globe) return false;
+  const b = _readCropDom();
+  if ([b.w,b.s,b.e,b.n].some(Number.isNaN) || b.e-b.w < 1e-9 || b.n-b.s < 1e-9) return false;
+  if (!cropGizmo) {
+    cropGizmo = new Group(); ecefRoot.add(cropGizmo);
+    const el = renderer.domElement;
+    el.addEventListener('pointerdown', _onCropPointerDown, true);
+    el.addEventListener('pointermove', _onCropPointerMove);
+    window.addEventListener('pointerup', _onCropPointerUp);
+  }
+  cropGizmo.visible = true; _syncCropGizmo();
+  // frame the box (best effort — OrbitControls-style target + pull back)
+  try {
+    const c = new Vector3().setFromMatrixPosition(cropGizmo.matrixWorld);
+    const up = _ax(cropGizmo.matrixWorld, 2), north = _ax(cropGizmo.matrixWorld, 1);
+    const r = Math.max(50, (b.e-b.w)*111320, (b.n-b.s)*111320);
+    if (controls && controls.target) { controls.target.copy(c); camera.position.copy(c.clone().add(up.multiplyScalar(r*1.5)).add(north.multiplyScalar(-r*1.5))); controls.update(); }
+  } catch {}
+  return true;
+}
+function hideCropGizmo() { if (cropGizmo) cropGizmo.visible = false; }
+
+// Introspection / self-test aid (used by the preview harness): report the built gizmo + simulate a
+// face-handle drag of `meters` along its world axis, returning the bbox before/after so the
+// closest-point + carto write-back math can be checked without synthetic pointer events.
+function _cropGizmoInfo(testDragBoundId, meters) {
+  if (!cropGizmo) return { built: false };
+  const handles = _cropGizmoHandles.map(h => h.userData.crop);
+  const info = { built: true, visible: cropGizmo.visible, handleCount: _cropGizmoHandles.length,
+    faces: handles.filter(h=>h.kind==='face').map(h=>h.boundId), translates: handles.filter(h=>h.kind==='translate').length,
+    center: new Vector3().setFromMatrixPosition(cropGizmo.matrixWorld).toArray().map(v=>+v.toFixed(1)) };
+  if (testDragBoundId) {                                       // move that handle `meters` along +its axis, write back
+    const ud = _cropGizmoHandles.map(h=>h.userData.crop).find(h=>h.boundId===testDragBoundId);
+    const A = _ax(cropGizmo.matrixWorld, ud.axis), origin = new Vector3().setFromMatrixPosition(cropGizmo.matrixWorld);
+    const b = _readCropDom();
+    const half = ud.axis===0 ? (b.e-b.w)*111320*Math.cos((b.s+b.n)/2*D2R)/2 : ud.axis===1 ? (b.n-b.s)*111320/2 : (b.maxh-b.minh)/2;
+    const sign = (ud.boundId==='crop-e'||ud.boundId==='crop-n'||ud.boundId==='crop-maxh')?1:-1;
+    const Phandle = origin.clone().add(A.clone().multiplyScalar(sign*half + meters));   // displaced position
+    const cart = _worldToCarto(Phandle);
+    const before = _readCropDom();
+    const v = ud.axis===0?cart.lon:ud.axis===1?cart.lat:cart.height;
+    document.getElementById(ud.boundId).value = (ud.axis===2?v.toFixed(1):v.toFixed(6));
+    _writeCropDom(_readCropDom()); _syncCropGizmo();
+    info.dragTest = { boundId: testDragBoundId, before, after: _readCropDom() };
+  }
+  return info;
+}
+
+window.__3dtrjs = { init, load, loadIon, pause, setControlMode, setZOffset, getDumpMatrix, setBasemap, setDebug, setErrorTarget, setPointSize, getPointSize, setFov, frameTileset, flyToCarto, setCropToView: cropToView3D, showCropGizmo, hideCropGizmo, syncCropGizmo: _syncCropGizmo, _cropGizmoInfo, _debug, _pump };
 console.log('[3DTRJS] module ready — GaussianSplatPlugin:', GaussianSplatPlugin ? 'loaded' : 'unavailable');
 </script>
 </body>
