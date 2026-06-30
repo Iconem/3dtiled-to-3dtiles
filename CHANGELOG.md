@@ -5,6 +5,22 @@ Format loosely follows [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+### Added — 2026-06-30 (`stream-cache` cont.: dumper out-of-core outputs + splat merge)
+- **Disk-free out-of-core LAS** (`/dump/las?...&stream=1`): 2-pass (count+bbox, then stream 8k-record
+  chunks with backpressure) — O(1) RAM, no temp file. Byte-identical to the disk path (verified 498 868 pts).
+- **`/dump/copc`**: reuse the LAS temp file, `pdal translate … crop.copc.laz`, stream it; graceful 501 if no PDAL.
+- **`/dump/tileset`**: no-decode filtered tileset (in-bbox tiles + transforms, original GLB URIs).
+- **`/dump/zip`**: out-of-core streamed STORE-mode ZIP (one tile in RAM at a time) → tileset.json + tiles —
+  the answer to "is the crop zipped?" + mesh-out-of-core single download. Works for mesh/splat/points.
+- **`/dump/splat`**: merge in-bbox **splat** tiles → one supersplat-ingestable **SPZ/SOG** via
+  `@playcanvas/splat-transform` (embeds the Niantic SPZ decoder). Extract each tile's SPZ blob straight
+  from the GLB (gltf-transform can't read the required spz extension), `readSpz`→`combine`→`writeSpz`.
+  Verified: LCC Guan_Temple → 41 tiles → 6 414 134 splats → 102 MB valid SPZ.
+- Viewer Crop & Dump: LAS / COPC / GLB / Tileset / Splat(SPZ) / ZIP buttons + "disk-free stream" toggle.
+- *Remaining*: 3DTRJS/R3F **PivotControls** bbox gizmo (drei pivot ported to vanilla three by
+  repalash/threepipe — vendor it + expose the 3DTRJS scene; face-gizmo bonus); single-file mesh merge
+  out-of-core (streaming GLB needs 2-pass byte layout); zip64 for >4 GB.
+
 ### Added — 2026-06-30 (`stream-cache` cont.: dumper out-of-core + implicit + crop UI handles)
 - **Generic 3D Tiles bbox dumper** matured: ingests any tileset (our /stream outputs, /bing, /threemx,
   external) and branches points→LAS / mesh→merged-GLB.
