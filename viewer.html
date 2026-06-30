@@ -999,6 +999,9 @@ function buildPresetBar() {
 }
 
 function selectPreset(p) {
+  // GeoSplats tiles are KHR_gaussian_splatting GLBs — render them via 3DTRJS (GaussianSplatPlugin).
+  // Cesium's points+unlit shader path crashes on them, so force the Three.js renderer first.
+  if (!_3dtMode && /\/geosplats\//.test(p.url || '')) { setRenderer('3dtrjs'); }
   // City pills (Bing) share the world tileset's URL + carry a flyTo target. If that dataset is already
   // loaded, just fly there (no reload); otherwise load it and fly once it's ready.
   const sameDatasetLoaded = !p.custom && currentPresetObj && currentPresetObj.url === p.url;
