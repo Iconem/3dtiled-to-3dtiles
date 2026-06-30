@@ -1360,6 +1360,7 @@ function setCropToView() {
   document.getElementById('crop-s').value = s.toFixed(5); document.getElementById('crop-n').value = n.toFixed(5);
   updateCropBox();
 }
+let _cropHandles = [], _cropDrag = null, _cropDragHandler = null;
 function updateCropBox() {
   if (!viewer) return;
   const [w, s, minh, e, n, maxh] = _cropBbox();
@@ -1368,6 +1369,31 @@ function updateCropBox() {
   _cropEntity = viewer.entities.add({ rectangle: {
     coordinates: Cesium.Rectangle.fromDegrees(w, s, e, n), material: Cesium.Color.CYAN.withAlpha(0.12),
     height: minh, extrudedHeight: maxh, outline: true, outlineColor: Cesium.Color.CYAN } });
+  // draggable W/E/S/N face handles at mid-height (drag on the ellipsoid → moves that bound).
+  _cropHandles.forEach(h => viewer.entities.remove(h)); _cropHandles = [];
+  const midLon = (w + e) / 2, midLat = (s + n) / 2, midH = (minh + maxh) / 2;
+  for (const [id, axis, lon, lat] of [['crop-w','lon',w,midLat], ['crop-e','lon',e,midLat], ['crop-s','lat',midLon,s], ['crop-n','lat',midLon,n]]) {
+    const h = viewer.entities.add({ position: Cesium.Cartesian3.fromDegrees(lon, lat, midH),
+      point: { pixelSize: 13, color: Cesium.Color.YELLOW, outlineColor: Cesium.Color.BLACK, outlineWidth: 2, disableDepthTestDistance: Number.POSITIVE_INFINITY } });
+    h._cropBound = { id, axis }; _cropHandles.push(h);
+  }
+  _setupCropDrag();
+}
+function _setupCropDrag() {
+  if (_cropDragHandler || !viewer) return;
+  _cropDragHandler = new Cesium.ScreenSpaceEventHandler(viewer.scene.canvas);
+  _cropDragHandler.setInputAction((m) => {
+    const picked = viewer.scene.pick(m.position);
+    if (picked && picked.id && picked.id._cropBound) { _cropDrag = picked.id._cropBound; viewer.scene.screenSpaceCameraController.enableInputs = false; }
+  }, Cesium.ScreenSpaceEventType.LEFT_DOWN);
+  _cropDragHandler.setInputAction((m) => {
+    if (!_cropDrag) return;
+    const c = viewer.camera.pickEllipsoid(m.endPosition, viewer.scene.globe.ellipsoid); if (!c) return;
+    const g = Cesium.Cartographic.fromCartesian(c);
+    document.getElementById(_cropDrag.id).value = (_cropDrag.axis === 'lon' ? Cesium.Math.toDegrees(g.longitude) : Cesium.Math.toDegrees(g.latitude)).toFixed(5);
+    updateCropBox();
+  }, Cesium.ScreenSpaceEventType.MOUSE_MOVE);
+  _cropDragHandler.setInputAction(() => { _cropDrag = null; viewer.scene.screenSpaceCameraController.enableInputs = true; }, Cesium.ScreenSpaceEventType.LEFT_UP);
 }
 function dumpCrop(kind) {
   const field = document.getElementById('tileset-url').value.trim();

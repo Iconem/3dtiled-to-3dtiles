@@ -5,6 +5,22 @@ Format loosely follows [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+### Added — 2026-06-30 (`stream-cache` cont.: dumper out-of-core + implicit + crop UI handles)
+- **Generic 3D Tiles bbox dumper** matured: ingests any tileset (our /stream outputs, /bing, /threemx,
+  external) and branches points→LAS / mesh→merged-GLB.
+  - **Out-of-core LAS**: streams points to a temp file via the O(1)-RAM `LasWriter` (header back-patched
+    on close) then pipes it to the response — constant RAM regardless of cloud size. (Mesh merge is still
+    in-memory; huge-mesh out-of-core → USD streaming is future.)
+  - **Implicit-subtree traversal**: walks OCTREE/QUADTREE `.subtree` availability (morton index, cell-box
+    subdivision, template substitution) — so COPC/Potree/implicit tilesets dump directly. Verified on the
+    implicit georeferenced vol_total: full 498 868 pts / 42 tiles / 18 MB valid LAS; half-bbox → 230 356.
+  - **Viewer Crop & Dump UI**: "Set box to view (80%)", a translucent box on the globe, editable W/E/S/N
+    + minH/maxH, max-GE, ⬇ LAS / ⬇ GLB. **Cesium drag handles** (yellow W/E/S/N face points dragged on the
+    ellipsoid resize the box live).
+  - *Remaining*: true splat→splat crop (KHR_gaussian_splatting output needs an SPZ **decoder** round-trip —
+    we only have the encoder; splat sources crop to LAS via `centroids` today), NASA-3DTRJS/R3F
+    TransformControls box, and shelling `pdal writers.copc`/`untwine` for LAZ/COPC.
+
 ### Added — 2026-06-29 (`stream-cache` cont.: bbox crop engine + shadeless rendering)
 - **bbox crop / subsample extract — engine (point clouds → LAS)**. New `/dump/las?url=<potree>&bbox=
   minx,miny,minz,maxx,maxy,maxz[&maxLevel=N]` traverses the octree (ADD: accumulate every point inside the
