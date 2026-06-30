@@ -23,8 +23,18 @@ import { spawn } from 'node:child_process';
 import { crc32 } from 'node:zlib';
 import { Document, NodeIO } from '@gltf-transform/core';
 import { ALL_EXTENSIONS } from '@gltf-transform/extensions';
-import { readSpz, combine, writeSpz, writeSog, MemoryReadFileSystem, MemoryFileSystem } from '@playcanvas/splat-transform';
-import { decompressGlb, LasWriter, lasHeaderBuffer, lasRecordBuffer, ecefToLlh, llhToEcef, CORS } from '../core/index.js';
+import { readSpz, combine, writeSpz, writeSog, writeGlb, MemoryReadFileSystem, MemoryFileSystem } from '@playcanvas/splat-transform';
+import { decompressGlb, LasWriter, lasHeaderBuffer, lasRecordBuffer, ecefToLlh, llhToEcef, enuFrame, CORS } from '../core/index.js';
+
+// Optional ECEF→local-ENU projection (East/North/Up metres at the bbox centre). The default LAS is ECEF
+// (EPSG:4978); &enu=1 gives a usable local metric frame instead of a global geocentric one.
+function makeProject(bb, enu) {
+  if (!enu) return { proj: (X, Y, Z) => [X, Y, Z], offset: llhToEcef((bb[0]+bb[3])/2, (bb[1]+bb[4])/2, (bb[2]+bb[5])/2) };
+  const cLon = (bb[0]+bb[3])/2, cLat = (bb[1]+bb[4])/2, c = llhToEcef(cLon, cLat, (bb[2]+bb[5])/2);
+  const { EAST: E, NORTH: N, UP: U } = enuFrame(cLon, cLat);
+  return { proj: (X, Y, Z) => { const dx = X-c[0], dy = Y-c[1], dz = Z-c[2];
+    return [dx*E[0]+dy*E[1]+dz*E[2], dx*N[0]+dy*N[1]+dz*N[2], dx*U[0]+dy*U[1]+dz*U[2]]; }, offset: [0, 0, 0] };
+}
 
 // Extract the raw SPZ blob from a splat tile GLB WITHOUT decoding it via gltf-transform (which can't
 // read the required KHR_gaussian_splatting_compression_spz_2 extension). Manual GLB parse: JSON chunk →
@@ -249,7 +259,7 @@ export async function handleDump(req, res, u) {
   // combine, writeSpz/writeSog. Tile-level crop (tiles share the dataset frame, so no per-splat transform).
   if (kind === 'splat') {
     try {
-      const fmt = u.searchParams.get('format') === 'sog' ? 'sog' : 'spz';
+      const fmt = ['sog', 'glb', 'ply'].includes(u.searchParams.get('format')) ? u.searchParams.get('format') : 'spz';
       const dts = [];
       await traverse(url, bb, maxGE, maxDepth, async (glbUrl) => {
         let glb; try { glb = await fetchBuf(glbUrl); } catch { return; }
@@ -259,8 +269,9 @@ export async function handleDump(req, res, u) {
       });
       if (!dts.length) { res.writeHead(404, CORS); res.end('no splat tiles in bbox (is this a splat source?)'); return true; }
       const merged = combine(dts);
-      const mfs = new MemoryFileSystem(), name = `crop.${fmt}`;
+      const mfs = new MemoryFileSystem(), name = `crop.${fmt === 'glb' ? 'glb' : fmt}`;
       if (fmt === 'sog') await writeSog({ filename: name, dataTable: merged }, mfs);
+      else if (fmt === 'glb') await writeGlb({ filename: name, dataTable: merged }, mfs);   // KHR_gaussian_splatting GLB
       else await writeSpz({ filename: name, dataTable: merged }, mfs);
       const out = mfs.results.get(name);
       res.writeHead(200, { 'Content-Type': 'application/octet-stream', 'Content-Disposition': `attachment; filename="${name}"`,
@@ -292,15 +303,15 @@ export async function handleDump(req, res, u) {
   // No temp file, O(1) RAM — at the cost of traversing/decoding tiles twice. (?stream=1 on /dump/las)
   if (kind === 'las' && (u.searchParams.get('stream') === '1' || u.searchParams.get('stream') === 'true')) {
     try {
-      const scale = [0.001, 0.001, 0.001], offset = llhToEcef((bb[0]+bb[3])/2, (bb[1]+bb[4])/2, (bb[2]+bb[5])/2);
+      const scale = [0.001, 0.001, 0.001], { proj, offset } = makeProject(bb, u.searchParams.has('enu'));
       let count = 0; const mn = [Infinity,Infinity,Infinity], mx = [-Infinity,-Infinity,-Infinity];
-      await forEachPoint(url, bb, maxGE, maxDepth, (X, Y, Z) => { count++; if(X<mn[0])mn[0]=X; if(Y<mn[1])mn[1]=Y; if(Z<mn[2])mn[2]=Z; if(X>mx[0])mx[0]=X; if(Y>mx[1])mx[1]=Y; if(Z>mx[2])mx[2]=Z; });
+      await forEachPoint(url, bb, maxGE, maxDepth, (X, Y, Z) => { const [px,py,pz]=proj(X,Y,Z); count++; if(px<mn[0])mn[0]=px; if(py<mn[1])mn[1]=py; if(pz<mn[2])mn[2]=pz; if(px>mx[0])mx[0]=px; if(py>mx[1])mx[1]=py; if(pz>mx[2])mx[2]=pz; });
       res.writeHead(200, { 'Content-Type': 'application/octet-stream', 'Content-Disposition': 'attachment; filename="crop.las"',
         'X-Dump-Points': String(count), 'Access-Control-Expose-Headers': 'X-Dump-Points', ...CORS });
       res.write(lasHeaderBuffer({ scale, offset, count, bbox: count ? { min: mn, max: mx } : null }));
       let chunk = [];                                     // batch ~8k records per write
       await forEachPoint(url, bb, maxGE, maxDepth, async (X, Y, Z, r, g, b) => {
-        chunk.push(lasRecordBuffer(X, Y, Z, { r, g, b }, scale, offset));
+        chunk.push(lasRecordBuffer(...proj(X, Y, Z), { r, g, b }, scale, offset));
         if (chunk.length >= 8192) { await writeChunk(res, Buffer.concat(chunk)); chunk = []; }
       });
       if (chunk.length) await writeChunk(res, Buffer.concat(chunk));
@@ -317,11 +328,11 @@ export async function handleDump(req, res, u) {
     // ── OUT-OF-CORE LAS: stream points to a temp file via LasWriter (O(1) RAM — header back-patched on
     // close, never holds all points). ECEF offset = bbox centre so quantized int32 stays in range.
     const wantLas = kind === 'las' || kind === 'copc';
+    const { proj, offset: lasOffset } = makeProject(bb, u.searchParams.has('enu'));
     let lasw = null, tmp = null;
     if (wantLas) {
-      const cE = llhToEcef((bb[0] + bb[3]) / 2, (bb[1] + bb[4]) / 2, (bb[2] + bb[5]) / 2);
       tmp = join(tmpdir(), `dump-${Date.now()}-${Math.floor(performance.now())}.las`);
-      lasw = new LasWriter(tmp, { scale: [0.001, 0.001, 0.001], offset: cE });
+      lasw = new LasWriter(tmp, { scale: [0.001, 0.001, 0.001], offset: lasOffset });
       await lasw.open();
     }
 
@@ -347,7 +358,7 @@ export async function handleDump(req, res, u) {
               if (!inBbox(lon, lat, h, bb)) continue;
               let r = 0, g = 0, b = 0;
               if (col) { const c = col.getElement(i, [0,0,0,1]); const s = col.getNormalized() ? 65535 : 257; r = (c[0]*s)|0; g = (c[1]*s)|0; b = (c[2]*s)|0; }
-              await lasw.writePoint(X, Y, Z, { r, g, b });  // streamed to disk (ECEF; offset applied internally)
+              await lasw.writePoint(...proj(X, Y, Z), { r, g, b });  // ECEF or ENU (proj); offset applied internally
               points++;
             }
             prims++;

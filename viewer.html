@@ -480,16 +480,19 @@
     <label class="sb-check" title="LAS: disk-free out-of-core streaming (2-pass — count, then stream; O(1) RAM, no temp file, ~2× traversal).">
       <input type="checkbox" id="crop-stream" checked /> LAS disk-free stream (2-pass)
     </label>
+    <label class="sb-check" title="LAS: output a local East/North/Up metric frame at the box centre instead of geocentric ECEF (EPSG:4978).">
+      <input type="checkbox" id="crop-enu" checked /> LAS local ENU frame (else ECEF)
+    </label>
     <div class="sb-row" style="gap:6px">
       <button class="sb-btn" onclick="dumpCrop('las')" title="Point clouds → out-of-core LAS">⬇ LAS</button>
       <button class="sb-btn" onclick="dumpCrop('copc')" title="Point clouds → COPC (needs PDAL on the server)">⬇ COPC</button>
+      <button class="sb-btn" onclick="dumpCrop('glb')" title="Meshes → single merged GLB (gltf-transform, in-memory)">⬇ GLB</button>
     </div>
     <div class="sb-row" style="gap:6px">
-      <button class="sb-btn" onclick="dumpCrop('glb')" title="Meshes → single merged GLB (gltf-transform, in-memory)">⬇ GLB (mesh)</button>
-    </div>
-    <div class="sb-row" style="gap:6px">
-      <button class="sb-btn" onclick="dumpCrop('splat')" title="Splats → merged single SPZ file (via splat-transform; supersplat-ingestable)">⬇ Splat (SPZ)</button>
-      <button class="sb-btn" onclick="dumpCrop('zip')" title="Any (mesh/splat/points) → streamed ZIP bundle (tileset.json + tiles), out-of-core, single download">⬇ ZIP bundle</button>
+      <label for="crop-splatfmt" title="Splat output format">Splat</label>
+      <select id="crop-splatfmt"><option value="spz">SPZ</option><option value="glb">GLB</option><option value="sog">SOG</option><option value="ply">PLY</option></select>
+      <button class="sb-btn" onclick="dumpCrop('splat')" title="Splats → merged single file (splat-transform; supersplat-ingestable)">⬇ Splat</button>
+      <button class="sb-btn" onclick="dumpCrop('zip')" title="Any (mesh/splat/points) → streamed ZIP bundle (out-of-core, single download)">⬇ ZIP</button>
     </div>
     <div class="sb-note" style="font-size:10px;opacity:.7">Dumps the loaded tileset within the box. Octree sources are fetched as explicit tiling.</div>
   </div>
@@ -1439,8 +1442,11 @@ function dumpCrop(kind) {
   const bb = _cropBboxNorm();
   if (bb.some(Number.isNaN)) { setStatus('Set the crop box first (⬚ Set box to view).'); return; }
   const ge = parseFloat(document.getElementById('crop-ge').value) || 0;
-  const stream = (kind === 'las' && document.getElementById('crop-stream')?.checked) ? '&stream=1' : '';
-  const url = `${MW}/dump/${kind}?url=${encodeURIComponent(src)}&bbox=${bb.join(',')}&maxGE=${ge}${stream}`;
+  let extra = '';
+  if (kind === 'las' && document.getElementById('crop-stream')?.checked) extra += '&stream=1';
+  if ((kind === 'las' || kind === 'copc') && document.getElementById('crop-enu')?.checked) extra += '&enu=1';
+  if (kind === 'splat') extra += `&format=${document.getElementById('crop-splatfmt')?.value || 'spz'}`;
+  const url = `${MW}/dump/${kind}?url=${encodeURIComponent(src)}&bbox=${bb.join(',')}&maxGE=${ge}${extra}`;
   tlog(`⬇ dump ${kind} (GE ${ge}) — download starting…`);
   window.open(url, '_blank');
 }
