@@ -467,6 +467,23 @@
     </div>
   </div>
 
+  <!-- Crop & Dump (bbox subsample extract → LAS/GLB) -->
+  <div class="sb-section">
+    <h4>Crop &amp; Dump</h4>
+    <button class="sb-btn" id="crop-tobbox" onclick="setCropToView()" title="Set the crop box to ~80% of the current view, on the globe">⬚ Set box to view (80%)</button>
+    <div class="sb-row"><label>W / E (°)</label><input type="number" id="crop-w" step="0.0005" onchange="updateCropBox()" /><input type="number" id="crop-e" step="0.0005" onchange="updateCropBox()" /></div>
+    <div class="sb-row"><label>S / N (°)</label><input type="number" id="crop-s" step="0.0005" onchange="updateCropBox()" /><input type="number" id="crop-n" step="0.0005" onchange="updateCropBox()" /></div>
+    <div class="sb-row"><label>minH / maxH (m)</label><input type="number" id="crop-minh" step="10" value="-50" onchange="updateCropBox()" /><input type="number" id="crop-maxh" step="10" value="800" onchange="updateCropBox()" /></div>
+    <div class="sb-row" title="Geometric error floor (m). 0 = finest available. Larger = coarser/fewer tiles.">
+      <label for="crop-ge">max GE (m)</label><input type="number" id="crop-ge" min="0" step="1" value="0" />
+    </div>
+    <div class="sb-row" style="gap:6px">
+      <button class="sb-btn" onclick="dumpCrop('las')" title="Point clouds / splats → LAS">⬇ LAS (points)</button>
+      <button class="sb-btn" onclick="dumpCrop('glb')" title="Meshes → merged GLB">⬇ GLB (mesh)</button>
+    </div>
+    <div class="sb-note" style="font-size:10px;opacity:.7">Dumps the loaded tileset within the box. Octree sources are fetched as explicit tiling.</div>
+  </div>
+
   <!-- Navigation -->
   <div class="sb-section">
     <h4>Navigation</h4>
@@ -1315,6 +1332,57 @@ function applyShading() {
       fragmentShaderText: `void fragmentMain(FragmentInput fsInput, inout czm_modelMaterial material){ material.diffuse *= ${b.toFixed(2)}; }`,
     });
   } catch (e) { console.warn('[shading]', e.message); }
+}
+
+// ── Crop & Dump: a geographic bbox box on the globe → /dump/{las|glb} ────────────────
+let _cropEntity = null;
+const _cropBbox = () => ['crop-w','crop-s','crop-minh','crop-e','crop-n','crop-maxh'].map(id => parseFloat(document.getElementById(id).value));
+function setCropToView() {
+  if (!viewer) { setStatus('Cesium not ready.'); return; }
+  // Pick the 4 corners of the inner 80% of the canvas onto the ellipsoid → robust geographic bbox
+  // (computeViewRectangle is unreliable — often returns the whole globe).
+  const cv = viewer.scene.canvas, W = cv.clientWidth || cv.width, H = cv.clientHeight || cv.height, ell = viewer.scene.globe.ellipsoid, D = Cesium.Math.toDegrees;
+  const lons = [], lats = [];
+  if (W && H) for (const [fx, fy] of [[0.1, 0.1], [0.9, 0.1], [0.1, 0.9], [0.9, 0.9], [0.5, 0.5]]) {
+    const c = viewer.camera.pickEllipsoid(new Cesium.Cartesian2(fx * W, fy * H), ell);
+    if (c) { const g = Cesium.Cartographic.fromCartesian(c); lons.push(D(g.longitude)); lats.push(D(g.latitude)); }
+  }
+  let w, s, e, n;
+  if (lons.length >= 2) { w = Math.min(...lons); e = Math.max(...lons); s = Math.min(...lats); n = Math.max(...lats); }
+  else {                                                    // fallback: camera lon/lat ± height·tan(fov/2)·0.8
+    const carto = viewer.camera.positionCartographic; if (!carto) { setStatus('Point the camera at the ground.'); return; }
+    const lat = D(carto.latitude), lon = D(carto.longitude);
+    const half = 0.8 * carto.height * Math.tan((viewer.camera.frustum.fovy || viewer.camera.frustum.fov || 1.047) / 2);
+    const dLat = half / 111320, dLon = half / (111320 * Math.cos(carto.latitude));
+    w = lon - dLon; e = lon + dLon; s = lat - dLat; n = lat + dLat;
+  }
+  document.getElementById('crop-w').value = w.toFixed(5); document.getElementById('crop-e').value = e.toFixed(5);
+  document.getElementById('crop-s').value = s.toFixed(5); document.getElementById('crop-n').value = n.toFixed(5);
+  updateCropBox();
+}
+function updateCropBox() {
+  if (!viewer) return;
+  const [w, s, minh, e, n, maxh] = _cropBbox();
+  if ([w, s, minh, e, n, maxh].some(Number.isNaN)) return;
+  if (_cropEntity) viewer.entities.remove(_cropEntity);
+  _cropEntity = viewer.entities.add({ rectangle: {
+    coordinates: Cesium.Rectangle.fromDegrees(w, s, e, n), material: Cesium.Color.CYAN.withAlpha(0.12),
+    height: minh, extrudedHeight: maxh, outline: true, outlineColor: Cesium.Color.CYAN } });
+}
+function dumpCrop(kind) {
+  const field = document.getElementById('tileset-url').value.trim();
+  if (!field) { setStatus('Load a tileset first.'); return; }
+  let src = (rawUrlMode && !field.startsWith(MW)) ? buildMiddlewareUrl(field) : field;   // need a tileset.json
+  if (/\/stream\/tileset\.json/.test(src)) {                 // octree sources must be explicit for the dumper
+    src = /tiling=implicit/.test(src) ? src.replace('tiling=implicit', 'tiling=explicit') : (/tiling=/.test(src) ? src : src + '&tiling=explicit');
+    if (!/hierarchy=/.test(src)) src += '&hierarchy=eager';
+  }
+  const bb = _cropBbox();
+  if (bb.some(Number.isNaN)) { setStatus('Set the crop box first (⬚ Set box to view).'); return; }
+  const ge = parseFloat(document.getElementById('crop-ge').value) || 0;
+  const url = `${MW}/dump/${kind}?url=${encodeURIComponent(src)}&bbox=${bb.join(',')}&maxGE=${ge}`;
+  tlog(`⬇ dump ${kind} (GE ${ge}) — download starting…`);
+  window.open(url, '_blank');
 }
 
 // Screen-space error override (px). null = per-type auto default. Lower = more detail.

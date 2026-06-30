@@ -160,12 +160,12 @@ export async function handleDump(req, res, u) {
       for (const p of pts) { if (p.x < mn[0]) mn[0] = p.x; if (p.y < mn[1]) mn[1] = p.y; if (p.z < mn[2]) mn[2] = p.z; }
       const las = writeLasBuffer(pts, { scale: [0.001, 0.001, 0.001], offset: pts.length ? mn.map(Math.floor) : [0,0,0] });
       res.writeHead(200, { 'Content-Type': 'application/octet-stream', 'Content-Disposition': 'attachment; filename="crop.las"',
-        'X-Dump-Points': String(pts.length), 'X-Dump-Tiles': String(tiles), ...CORS });
+        'X-Dump-Points': String(pts.length), 'X-Dump-Tiles': String(tiles), 'Access-Control-Expose-Headers': 'X-Dump-Points,X-Dump-Tiles,X-Dump-Primitives', ...CORS });
       return void res.end(las);
     }
     const merged = Buffer.from(await io.writeBinary(out));
     res.writeHead(200, { 'Content-Type': 'model/gltf-binary', 'Content-Disposition': 'attachment; filename="crop.glb"',
-      'X-Dump-Primitives': String(prims), 'X-Dump-Tiles': String(tiles), ...CORS });
+      'X-Dump-Primitives': String(prims), 'X-Dump-Tiles': String(tiles), 'Access-Control-Expose-Headers': 'X-Dump-Points,X-Dump-Tiles,X-Dump-Primitives', ...CORS });
     res.end(merged);
   } catch (e) {
     console.error('[dump-live]', e.message);
