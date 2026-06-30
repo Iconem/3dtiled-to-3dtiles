@@ -20,6 +20,7 @@ import { unlink } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { spawn } from 'node:child_process';
+import { crc32 } from 'node:zlib';
 import { Document, NodeIO } from '@gltf-transform/core';
 import { ALL_EXTENSIONS } from '@gltf-transform/extensions';
 import { decompressGlb, LasWriter, lasHeaderBuffer, lasRecordBuffer, ecefToLlh, llhToEcef, CORS } from '../core/index.js';
@@ -161,9 +162,43 @@ async function forEachPoint(url, bb, maxGE, maxDepth, cb) {
 // write a chunk respecting backpressure (so the response buffer can't grow unbounded → stays out-of-core)
 const writeChunk = (res, buf) => res.write(buf) ? Promise.resolve() : new Promise(r => res.once('drain', r));
 
+// Minimal STORE-mode (no compression) streaming ZIP → response. Each entry's data is fully in hand
+// before add() (one tile at a time → out-of-core), so crc/size go in the local header (no descriptors).
+// 32-bit (zip32) — fine for crops; zip64 for >4 GB is future. GLBs are already compressed, so store is ideal.
+function zipStreamer(res) {
+  const entries = []; let offset = 0;
+  const w = async (buf) => { await writeChunk(res, buf); offset += buf.length; };
+  return {
+    async add(name, data) {
+      const nameBuf = Buffer.from(name, 'utf8'), crc = crc32(data) >>> 0, size = data.length, localOffset = offset;
+      const lh = Buffer.alloc(30);
+      lh.writeUInt32LE(0x04034b50, 0); lh.writeUInt16LE(20, 4); lh.writeUInt32LE(0, 6);     // sig, ver, flags+method(store)
+      lh.writeUInt32LE(0, 10); lh.writeUInt32LE(crc, 14); lh.writeUInt32LE(size, 18); lh.writeUInt32LE(size, 22);
+      lh.writeUInt16LE(nameBuf.length, 26); lh.writeUInt16LE(0, 28);
+      await w(lh); await w(nameBuf); await w(data);
+      entries.push({ nameBuf, crc, size, localOffset });
+    },
+    async end() {
+      const cdStart = offset;
+      for (const e of entries) {
+        const c = Buffer.alloc(46);
+        c.writeUInt32LE(0x02014b50, 0); c.writeUInt16LE(20, 4); c.writeUInt16LE(20, 6); c.writeUInt32LE(0, 8);
+        c.writeUInt32LE(0, 12); c.writeUInt32LE(e.crc, 16); c.writeUInt32LE(e.size, 20); c.writeUInt32LE(e.size, 24);
+        c.writeUInt16LE(e.nameBuf.length, 28); c.writeUInt32LE(0, 30); c.writeUInt32LE(0, 34); c.writeUInt32LE(0, 38); c.writeUInt32LE(e.localOffset, 42);
+        await w(c); await w(e.nameBuf);
+      }
+      const eocd = Buffer.alloc(22);
+      eocd.writeUInt32LE(0x06054b50, 0); eocd.writeUInt16LE(0, 4); eocd.writeUInt16LE(0, 6);
+      eocd.writeUInt16LE(entries.length, 8); eocd.writeUInt16LE(entries.length, 10);
+      eocd.writeUInt32LE(offset - cdStart, 12); eocd.writeUInt32LE(cdStart, 16); eocd.writeUInt16LE(0, 20);
+      await w(eocd); res.end();
+    },
+  };
+}
+
 export async function handleDump(req, res, u) {
   if (!u.pathname.startsWith('/dump/')) return false;
-  const kind = { '/dump/las': 'las', '/dump/glb': 'glb', '/dump/copc': 'copc', '/dump/tileset': 'tileset' }[u.pathname] || null;
+  const kind = { '/dump/las': 'las', '/dump/glb': 'glb', '/dump/copc': 'copc', '/dump/tileset': 'tileset', '/dump/zip': 'zip' }[u.pathname] || null;
   const url = u.searchParams.get('url');
   const bboxStr = u.searchParams.get('bbox');
   const maxGE = u.searchParams.has('maxGE') ? Number(u.searchParams.get('maxGE')) : 0;       // 0 = finest
@@ -189,6 +224,25 @@ export async function handleDump(req, res, u) {
         'X-Dump-Tiles': String(children.length), 'Access-Control-Expose-Headers': 'X-Dump-Tiles', ...CORS });
       return void res.end(JSON.stringify(ts));
     } catch (e) { console.error('[dump-live]', e.message); res.writeHead(500, CORS); return void res.end(e.message); }
+  }
+
+  // zip mode: out-of-core single-download bundle — stream each in-bbox tile GLB (one at a time) + a
+  // self-contained tileset.json into a STORE-mode zip. Works for mesh/splat/points; no decode/merge.
+  if (kind === 'zip') {
+    try {
+      res.writeHead(200, { 'Content-Type': 'application/zip', 'Content-Disposition': 'attachment; filename="crop.zip"', ...CORS });
+      const zip = zipStreamer(res); const children = []; let i = 0;
+      await traverse(url, bb, maxGE, maxDepth, async (glbUrl, worldM, node) => {
+        const name = `tiles/tile_${i++}.glb`;
+        try { await zip.add(name, await fetchBuf(glbUrl)); } catch { return; }   // one tile in RAM at a time
+        children.push({ transform: Array.from(worldM), boundingVolume: { box: node?.boundingVolume?.box || [0,0,0, 1,0,0, 0,1,0, 0,0,1] }, geometricError: 0, refine: 'ADD', content: { uri: name } });
+      });
+      const ts = { asset: { version: '1.1' }, geometricError: 1e7,
+        root: { boundingVolume: { region: [bb[0]/R2D, bb[1]/R2D, bb[3]/R2D, bb[4]/R2D, bb[2], bb[5]] }, geometricError: 1e7, refine: 'ADD', children } };
+      await zip.add('tileset.json', Buffer.from(JSON.stringify(ts)));
+      await zip.end();
+      return true;
+    } catch (e) { console.error('[dump-live]', e.message); if (!res.headersSent) { res.writeHead(500, CORS); res.end(e.message); } else res.end(); return true; }
   }
 
   // Disk-free out-of-core LAS: 2-pass (pass 1 counts + bbox for the header, pass 2 streams records).

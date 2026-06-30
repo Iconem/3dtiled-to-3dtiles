@@ -486,7 +486,10 @@
     </div>
     <div class="sb-row" style="gap:6px">
       <button class="sb-btn" onclick="dumpCrop('glb')" title="Meshes → merged GLB">⬇ GLB (mesh)</button>
-      <button class="sb-btn" onclick="dumpCrop('tileset')" title="Any (esp. splats) → filtered 3D Tiles tileset, no decode">⬇ Tileset (splat/any)</button>
+      <button class="sb-btn" onclick="dumpCrop('tileset')" title="Any (esp. splats) → filtered 3D Tiles tileset.json (references tiles), no decode">⬇ Tileset</button>
+    </div>
+    <div class="sb-row" style="gap:6px">
+      <button class="sb-btn" onclick="dumpCrop('zip')" title="Any (mesh/splat/points) → streamed ZIP bundle (tileset.json + tiles), out-of-core, single download">⬇ ZIP bundle (out-of-core)</button>
     </div>
     <div class="sb-note" style="font-size:10px;opacity:.7">Dumps the loaded tileset within the box. Octree sources are fetched as explicit tiling.</div>
   </div>
