@@ -15,9 +15,13 @@
  * bbox (ECEF→geodetic per vertex). LAS via core las-writer; hand to `pdal writers.copc`/`untwine` for
  * LAZ/COPC. (Implicit-subtree expansion + the in-viewer draw-bbox UI are the next increments.)
  */
+import { createReadStream } from 'node:fs';
+import { unlink } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { Document, NodeIO } from '@gltf-transform/core';
 import { ALL_EXTENSIONS } from '@gltf-transform/extensions';
-import { decompressGlb, writeLasBuffer, ecefToLlh, CORS } from '../core/index.js';
+import { decompressGlb, LasWriter, ecefToLlh, llhToEcef, CORS } from '../core/index.js';
 
 const IDENT = [1,0,0,0, 0,1,0,0, 0,0,1,0, 0,0,0,1];
 // 3D Tiles glTF content is Y-up; Cesium applies RX(+90): (x,y,z)→(x,−z,y). Bake it so our ECEF matches.
@@ -56,6 +60,50 @@ function tileIntersects(node, m, bb) {
   return true;
 }
 
+// ── implicit tiling (OCTREE/QUADTREE subtrees) expansion ─────────────────────────
+function parseSubtree(buf) {
+  if (buf.toString('latin1', 0, 4) !== 'subt') return null;
+  const jl = Number(buf.readBigUInt64LE(8));
+  const j = JSON.parse(buf.toString('utf8', 24, 24 + jl));
+  const bin = buf.subarray(24 + jl + ((8 - (jl % 8)) % 8)), bv = j.bufferViews || [];
+  const v = (i) => i == null ? null : bin.subarray(bv[i].byteOffset, bv[i].byteOffset + bv[i].byteLength);
+  return { tile: { b: v(j.tileAvailability?.bitstream), c: j.tileAvailability?.constant },
+           content: { b: v(j.contentAvailability?.[0]?.bitstream), c: j.contentAvailability?.[0]?.constant } };
+}
+const bit = (a, i) => a && a.b ? ((a.b[i >> 3] >> (i & 7)) & 1) : (a && a.c ? 1 : 0);
+const morton = (dims, co) => { let m = 0; for (let i = 0; i < 16; i++) for (let d = 0; d < dims; d++) m |= ((co[d] >> i) & 1) << (dims * i + d); return m; };
+const subst = (tpl, l, x, y, z) => tpl.replace(/\{level\}/g, l).replace(/\{x\}/g, x).replace(/\{y\}/g, y).replace(/\{z\}/g, z);
+// axis-aligned sub-box of `rootBox` at implicit coord (level,x,y[,z]).
+function cellBox(rootBox, level, x, y, z, dims) {
+  const n = 2 ** level, hx = rootBox[3], hy = rootBox[7], hz = rootBox[11];
+  const sx = 2*hx/n, sy = 2*hy/n, sz = 2*hz/n;
+  const ccx = rootBox[0]-hx + (x+0.5)*sx, ccy = rootBox[1]-hy + (y+0.5)*sy, ccz = dims === 3 ? rootBox[2]-hz + (z+0.5)*sz : rootBox[2];
+  return [ccx, ccy, ccz, sx/2,0,0, 0,sy/2,0, 0,0, dims === 3 ? sz/2 : hz];
+}
+async function expandImplicit(node, worldM, base, bb, maxGE, maxDepth, onContent) {
+  const it = node.implicitTiling, dims = it.subdivisionScheme === 'OCTREE' ? 3 : 2, SL = it.subtreeLevels;
+  const rootGE = node.geometricError ?? 0, rootBox = node.boundingVolume?.box, contentTpl = node.content?.uri, subTpl = it.subtrees?.uri;
+  if (!rootBox || !contentTpl || !subTpl) return;
+  const add = (node.refine || 'REPLACE').toUpperCase() === 'ADD', cells = (2 ** dims), cache = new Map();
+  const getSub = async (l, x, y, z) => { const k = `${l}-${x}-${y}-${z}`; if (cache.has(k)) return cache.get(k);
+    let s = null; try { s = parseSubtree(await fetchBuf(absUrl(subst(subTpl, l, x, y, z), base))); } catch {} cache.set(k, s); return s; };
+  const walk = async (level, x, y, z) => {
+    if (level > maxDepth) return;
+    const sroot = Math.floor(level / SL) * SL, d = level - sroot;
+    const sub = await getSub(sroot, x >> d, y >> d, dims === 3 ? z >> d : 0); if (!sub) return;
+    const lx = x & ((1 << d) - 1), ly = y & ((1 << d) - 1), lz = dims === 3 ? z & ((1 << d) - 1) : 0;
+    const tIdx = (cells ** d - 1) / (cells - 1) + morton(dims, dims === 3 ? [lx, ly, lz] : [lx, ly]);
+    if (!bit(sub.tile, tIdx)) return;
+    const box = cellBox(rootBox, level, x, y, z, dims);
+    if (!tileIntersects({ boundingVolume: { box } }, worldM, bb)) return;
+    const descend = rootGE / 2 ** level > maxGE && level < maxDepth;
+    if (bit(sub.content, tIdx) && (add || !descend)) await onContent(absUrl(subst(contentTpl, level, x, y, z), base), worldM);
+    if (!descend) return;
+    for (let i = 0; i < cells; i++) await walk(level + 1, x*2 + (i&1), y*2 + ((i>>1)&1), dims === 3 ? z*2 + ((i>>2)&1) : 0);
+  };
+  await walk(0, 0, 0, 0);
+}
+
 // Walk a tileset tree; call onContent(absoluteGlbUrl, worldMatrix) for each content tile to harvest.
 async function traverse(tilesetUrl, bb, maxGE, maxDepth, onContent) {
   const ts = JSON.parse((await fetchBuf(tilesetUrl)).toString('utf8'));
@@ -64,6 +112,7 @@ async function traverse(tilesetUrl, bb, maxGE, maxDepth, onContent) {
     if (!node || depth > maxDepth) return;
     const m = node.transform ? matMul(parentM, node.transform) : parentM;
     if (!tileIntersects(node, m, bb)) return;               // prune: skip subtrees outside the bbox
+    if (node.implicitTiling) return expandImplicit(node, m, base, bb, maxGE, maxDepth, onContent);   // implicit subtree walk
     const ge = node.geometricError ?? 0;
     const hasKids = (node.children && node.children.length) || (node.content && /\.json(\?|$)/i.test(node.content.uri || ''));
     const descend = ge > maxGE && hasKids;
@@ -99,11 +148,20 @@ export async function handleDump(req, res, u) {
   if (bb.length !== 6 || bb.some(Number.isNaN)) { res.writeHead(400, CORS); res.end('bbox needs 6 numbers (deg,deg,m,deg,deg,m)'); return true; }
 
   try {
-    const out = new Document();                          // for /dump/glb: merged mesh
+    const out = new Document();                          // for /dump/glb: merged mesh (in-memory)
     const outBuf = out.createBuffer();
     const outScene = out.createScene();
-    const pts = [];                                       // for /dump/las
-    let tiles = 0, prims = 0;
+    let tiles = 0, prims = 0, points = 0;
+
+    // ── OUT-OF-CORE LAS: stream points to a temp file via LasWriter (O(1) RAM — header back-patched on
+    // close, never holds all points). ECEF offset = bbox centre so quantized int32 stays in range.
+    let lasw = null, tmp = null;
+    if (kind === 'las') {
+      const cE = llhToEcef((bb[0] + bb[3]) / 2, (bb[1] + bb[4]) / 2, (bb[2] + bb[5]) / 2);
+      tmp = join(tmpdir(), `dump-${Date.now()}-${Math.floor(performance.now())}.las`);
+      lasw = new LasWriter(tmp, { scale: [0.001, 0.001, 0.001], offset: cE });
+      await lasw.open();
+    }
 
     await traverse(url, bb, maxGE, maxDepth, async (glbUrl, worldM) => {
       let glb; try { glb = (await decompressGlb(await fetchBuf(glbUrl), {})).glb; } catch { return; }
@@ -118,7 +176,7 @@ export async function handleDump(req, res, u) {
           const pos = prim.getAttribute('POSITION'); if (!pos) continue;
           const mode = prim.getMode();                    // 0=POINTS, 4=TRIANGLES
           const n = pos.getCount();
-          if (kind === 'las') {                           // POINTS (and splats/centres) → LAS
+          if (kind === 'las') {                           // POINTS (and splats/centres) → streamed LAS
             const col = prim.getAttribute('COLOR_0');
             for (let i = 0; i < n; i++) {
               const p = pos.getElement(i, [0,0,0]);
@@ -127,7 +185,8 @@ export async function handleDump(req, res, u) {
               if (!inBbox(lon, lat, h, bb)) continue;
               let r = 0, g = 0, b = 0;
               if (col) { const c = col.getElement(i, [0,0,0,1]); const s = col.getNormalized() ? 65535 : 257; r = (c[0]*s)|0; g = (c[1]*s)|0; b = (c[2]*s)|0; }
-              pts.push({ x: X, y: Y, z: Z, r, g, b });     // ECEF (offset applied at write)
+              await lasw.writePoint(X, Y, Z, { r, g, b });  // streamed to disk (ECEF; offset applied internally)
+              points++;
             }
             prims++;
           } else if (mode === 4 || mode === undefined) {  // TRIANGLES → merged GLB (keep in ECEF)
@@ -156,12 +215,13 @@ export async function handleDump(req, res, u) {
     });
 
     if (kind === 'las') {
-      const mn = [Infinity, Infinity, Infinity];
-      for (const p of pts) { if (p.x < mn[0]) mn[0] = p.x; if (p.y < mn[1]) mn[1] = p.y; if (p.z < mn[2]) mn[2] = p.z; }
-      const las = writeLasBuffer(pts, { scale: [0.001, 0.001, 0.001], offset: pts.length ? mn.map(Math.floor) : [0,0,0] });
+      await lasw.close();                                  // back-patch header (count + bbox)
       res.writeHead(200, { 'Content-Type': 'application/octet-stream', 'Content-Disposition': 'attachment; filename="crop.las"',
-        'X-Dump-Points': String(pts.length), 'X-Dump-Tiles': String(tiles), 'Access-Control-Expose-Headers': 'X-Dump-Points,X-Dump-Tiles,X-Dump-Primitives', ...CORS });
-      return void res.end(las);
+        'X-Dump-Points': String(points), 'X-Dump-Tiles': String(tiles), 'Access-Control-Expose-Headers': 'X-Dump-Points,X-Dump-Tiles,X-Dump-Primitives', ...CORS });
+      const stream = createReadStream(tmp);                // stream the temp file → response (O(1) RAM)
+      stream.pipe(res);
+      stream.on('close', () => unlink(tmp).catch(() => {}));
+      return true;
     }
     const merged = Buffer.from(await io.writeBinary(out));
     res.writeHead(200, { 'Content-Type': 'model/gltf-binary', 'Content-Disposition': 'attachment; filename="crop.glb"',
