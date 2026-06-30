@@ -485,8 +485,7 @@
       <button class="sb-btn" onclick="dumpCrop('copc')" title="Point clouds → COPC (needs PDAL on the server)">⬇ COPC</button>
     </div>
     <div class="sb-row" style="gap:6px">
-      <button class="sb-btn" onclick="dumpCrop('glb')" title="Meshes → merged GLB">⬇ GLB (mesh)</button>
-      <button class="sb-btn" onclick="dumpCrop('tileset')" title="Any (esp. splats) → filtered 3D Tiles tileset.json (references tiles), no decode">⬇ Tileset</button>
+      <button class="sb-btn" onclick="dumpCrop('glb')" title="Meshes → single merged GLB (gltf-transform, in-memory)">⬇ GLB (mesh)</button>
     </div>
     <div class="sb-row" style="gap:6px">
       <button class="sb-btn" onclick="dumpCrop('splat')" title="Splats → merged single SPZ file (via splat-transform; supersplat-ingestable)">⬇ Splat (SPZ)</button>
@@ -642,6 +641,7 @@ const DIRECT = [
   { id: 'cgs-implicit', icon: '◈', label: '3DT · CesiumGS implicit (1.1)', type: 'mesh', url: 'https://raw.githubusercontent.com/CesiumGS/3d-tiles-samples/main/1.1/SparseImplicitQuadtree/tileset.json' },
   { id: 'cgs-lod',      icon: '◈', label: '3DT · CesiumGS discrete-LOD',   type: 'mesh', url: 'https://raw.githubusercontent.com/CesiumGS/3d-tiles-samples/main/1.0/TilesetWithDiscreteLOD/tileset.json' },
   { id: 'marseille',    icon: '🏙', label: '3DT · Marseille (root.json)',   type: 'mesh', url: 'https://d3h9zulrmcj1j6.cloudfront.net/Marseille_Cesium/root.json' },
+  { id: 'jastrebia',    icon: '✦', label: '3DT · Jastrzębia Góra (splat)', type: 'splat', url: 'https://ugfld3ibxevvegyw.private.blob.vercel-storage.com/JastrebiaGora/tileset.json?vercel-blob-valid-until=1782816064570&vercel-blob-delegation=eyJzdG9yZUlkIjoic3RvcmVfdWdGbGQzSUJ4RVZ2ZUd5dyIsIm93bmVySWQiOiJ0ZWFtX2pBeXZWbEloS09HSGtCaHhEdGdUaVFOUCIsInBhdGhuYW1lIjoiKiIsIm9wZXJhdGlvbnMiOlsiZ2V0IiwiaGVhZCJdLCJ2YWxpZFVudGlsIjoxNzgyODE4NzY0MzgzLCJpYXQiOjE3ODI4MTU0NjQ0NTR9.4H_KtLWVCwAapby1v5fGyNpFINDdTQD5w5t472dunHU&vercel-blob-signature=EilSXkhEeB5PM4ZDE7s8QsRoPwf0zPn6A3c6F_Z3czo' },
   // Live KTX2+Draco decompress (→ JPG) via /gltf over a tileset that HAS them (Bing 3dv4). For any
   // KTX/Draco tileset, point /gltf at its tileset.json: /gltf/tileset.json?ops=decompress&url=<tileset>.
   { id: 'gltf-ktx', icon: '◈', label: '3DT · KTX→decode (Bing via /gltf)', type: 'mesh', url: `${MW}/gltf/tileset.json?ops=decompress&tex=jpg&url=${encodeURIComponent(`${MW}/bing/tileset.json?g=15530`)}` },
@@ -1348,6 +1348,15 @@ function applyShading() {
 // ── Crop & Dump: a geographic bbox box on the globe → /dump/{las|glb} ────────────────
 let _cropEntity = null;
 const _cropBbox = () => ['crop-w','crop-s','crop-minh','crop-e','crop-n','crop-maxh'].map(id => parseFloat(document.getElementById(id).value));
+// normalized [minLon,minLat,minH,maxLon,maxLat,maxH] (handles can drag a bound past its opposite).
+function _cropBboxNorm() { const [w,s,mn,e,n,mx] = _cropBbox(); return [Math.min(w,e),Math.min(s,n),Math.min(mn,mx),Math.max(w,e),Math.max(s,n),Math.max(mn,mx)]; }
+// GE ≈ closest power of 10 to the bbox span / 100 (so ~100 tiles across the larger horizontal extent).
+function _autoGE() {
+  const [w,s,,e,n] = _cropBboxNorm(); const cLat = (s+n)*Math.PI/360;
+  const spanM = Math.max((e-w)*111320*Math.cos(cLat), (n-s)*111320);
+  if (!(spanM > 0)) return;
+  document.getElementById('crop-ge').value = Math.pow(10, Math.round(Math.log10(spanM / 100)));
+}
 function setCropToView() {
   if (!viewer) { setStatus('Cesium not ready.'); return; }
   // Pick the 4 corners of the inner 80% of the canvas onto the ellipsoid → robust geographic bbox
@@ -1369,24 +1378,27 @@ function setCropToView() {
   }
   document.getElementById('crop-w').value = w.toFixed(5); document.getElementById('crop-e').value = e.toFixed(5);
   document.getElementById('crop-s').value = s.toFixed(5); document.getElementById('crop-n').value = n.toFixed(5);
+  _autoGE();
   updateCropBox();
 }
 let _cropHandles = [], _cropDrag = null, _cropDragHandler = null;
 function updateCropBox() {
   if (!viewer) return;
-  const [w, s, minh, e, n, maxh] = _cropBbox();
-  if ([w, s, minh, e, n, maxh].some(Number.isNaN)) return;
+  const [w, s, minh, e, n, maxh] = _cropBboxNorm();             // normalized → no north<south crash
+  if ([w, s, minh, e, n, maxh].some(Number.isNaN) || e - w < 1e-9 || n - s < 1e-9) return;
   if (_cropEntity) viewer.entities.remove(_cropEntity);
   _cropEntity = viewer.entities.add({ rectangle: {
     coordinates: Cesium.Rectangle.fromDegrees(w, s, e, n), material: Cesium.Color.CYAN.withAlpha(0.12),
     height: minh, extrudedHeight: maxh, outline: true, outlineColor: Cesium.Color.CYAN } });
-  // draggable W/E/S/N face handles at mid-height (drag on the ellipsoid → moves that bound).
   _cropHandles.forEach(h => viewer.entities.remove(h)); _cropHandles = [];
   const midLon = (w + e) / 2, midLat = (s + n) / 2, midH = (minh + maxh) / 2;
-  for (const [id, axis, lon, lat] of [['crop-w','lon',w,midLat], ['crop-e','lon',e,midLat], ['crop-s','lat',midLon,s], ['crop-n','lat',midLon,n]]) {
-    const h = viewer.entities.add({ position: Cesium.Cartesian3.fromDegrees(lon, lat, midH),
-      point: { pixelSize: 13, color: Cesium.Color.YELLOW, outlineColor: Cesium.Color.BLACK, outlineWidth: 2, disableDepthTestDistance: Number.POSITIVE_INFINITY } });
-    h._cropBound = { id, axis }; _cropHandles.push(h);
+  // W/E/S/N face handles (drag on the ellipsoid) + top/bottom handles (drag a vertical plane → height).
+  const defs = [['crop-w','lon',w,midLat,midH], ['crop-e','lon',e,midLat,midH], ['crop-s','lat',midLon,s,midH], ['crop-n','lat',midLon,n,midH],
+                ['crop-maxh','height',midLon,midLat,maxh], ['crop-minh','height',midLon,midLat,minh]];
+  for (const [id, axis, lon, lat, h] of defs) {
+    const ent = viewer.entities.add({ position: Cesium.Cartesian3.fromDegrees(lon, lat, h),
+      point: { pixelSize: 13, color: axis === 'height' ? Cesium.Color.ORANGE : Cesium.Color.YELLOW, outlineColor: Cesium.Color.BLACK, outlineWidth: 2, disableDepthTestDistance: Number.POSITIVE_INFINITY } });
+    ent._cropBound = { id, axis }; _cropHandles.push(ent);
   }
   _setupCropDrag();
 }
@@ -1399,9 +1411,19 @@ function _setupCropDrag() {
   }, Cesium.ScreenSpaceEventType.LEFT_DOWN);
   _cropDragHandler.setInputAction((m) => {
     if (!_cropDrag) return;
-    const c = viewer.camera.pickEllipsoid(m.endPosition, viewer.scene.globe.ellipsoid); if (!c) return;
-    const g = Cesium.Cartographic.fromCartesian(c);
-    document.getElementById(_cropDrag.id).value = (_cropDrag.axis === 'lon' ? Cesium.Math.toDegrees(g.longitude) : Cesium.Math.toDegrees(g.latitude)).toFixed(5);
+    if (_cropDrag.axis === 'height') {                          // intersect a vertical plane at the box centre
+      const [w, s, , e, n] = _cropBboxNorm(); const center = Cesium.Cartesian3.fromDegrees((w+e)/2, (s+n)/2, 0);
+      const ray = viewer.camera.getPickRay(m.endPosition); if (!ray) return;
+      const up = Cesium.Cartesian3.normalize(center, new Cesium.Cartesian3());
+      const toCam = Cesium.Cartesian3.subtract(viewer.camera.positionWC, center, new Cesium.Cartesian3());
+      Cesium.Cartesian3.subtract(toCam, Cesium.Cartesian3.multiplyByScalar(up, Cesium.Cartesian3.dot(toCam, up), new Cesium.Cartesian3()), toCam);
+      const hit = Cesium.IntersectionTests.rayPlane(ray, Cesium.Plane.fromPointNormal(center, Cesium.Cartesian3.normalize(toCam, new Cesium.Cartesian3())));
+      if (hit) document.getElementById(_cropDrag.id).value = Cesium.Cartographic.fromCartesian(hit).height.toFixed(1);
+    } else {
+      const c = viewer.camera.pickEllipsoid(m.endPosition, viewer.scene.globe.ellipsoid); if (!c) return;
+      const g = Cesium.Cartographic.fromCartesian(c);
+      document.getElementById(_cropDrag.id).value = (_cropDrag.axis === 'lon' ? Cesium.Math.toDegrees(g.longitude) : Cesium.Math.toDegrees(g.latitude)).toFixed(5);
+    }
     updateCropBox();
   }, Cesium.ScreenSpaceEventType.MOUSE_MOVE);
   _cropDragHandler.setInputAction(() => { _cropDrag = null; viewer.scene.screenSpaceCameraController.enableInputs = true; }, Cesium.ScreenSpaceEventType.LEFT_UP);
@@ -1414,7 +1436,7 @@ function dumpCrop(kind) {
     src = /tiling=implicit/.test(src) ? src.replace('tiling=implicit', 'tiling=explicit') : (/tiling=/.test(src) ? src : src + '&tiling=explicit');
     if (!/hierarchy=/.test(src)) src += '&hierarchy=eager';
   }
-  const bb = _cropBbox();
+  const bb = _cropBboxNorm();
   if (bb.some(Number.isNaN)) { setStatus('Set the crop box first (⬚ Set box to view).'); return; }
   const ge = parseFloat(document.getElementById('crop-ge').value) || 0;
   const stream = (kind === 'las' && document.getElementById('crop-stream')?.checked) ? '&stream=1' : '';
