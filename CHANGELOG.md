@@ -17,9 +17,15 @@ Format loosely follows [Keep a Changelog](https://keepachangelog.com/).
   - **Viewer Crop & Dump UI**: "Set box to view (80%)", a translucent box on the globe, editable W/E/S/N
     + minH/maxH, max-GE, ⬇ LAS / ⬇ GLB. **Cesium drag handles** (yellow W/E/S/N face points dragged on the
     ellipsoid resize the box live).
-  - *Remaining*: true splat→splat crop (KHR_gaussian_splatting output needs an SPZ **decoder** round-trip —
-    we only have the encoder; splat sources crop to LAS via `centroids` today), NASA-3DTRJS/R3F
-    TransformControls box, and shelling `pdal writers.copc`/`untwine` for LAZ/COPC.
+  - **`/dump/copc`**: shells out to `pdal translate crop.las crop.copc.laz` (reuses the out-of-core LAS
+    temp file), streams the COPC; graceful 501 when PDAL isn't on PATH.
+  - **`/dump/tileset`**: no-decode crop — emits a filtered 3D Tiles tileset referencing only the in-bbox
+    tiles (each leaf keeps its world transform + the original tile GLB URI). The clean **splat** crop
+    (gltf-transform can't even read the SPZ-compressed splat GLBs — required extension fails validation),
+    and works for points/mesh too. Verified: georeferenced LCC splat → 41 in-bbox tiles.
+  - *Remaining*: single-file splat merge (raw container-level GLB concat preserving the SPZ extension, since
+    gltf-transform refuses it), mesh out-of-core (USD streaming), NASA-3DTRJS/R3F TransformControls box
+    (drei-style PivotControls, cf. repalash/threepipe), and LAS streaming-to-client without disk (two-pass).
 
 ### Added — 2026-06-29 (`stream-cache` cont.: bbox crop engine + shadeless rendering)
 - **bbox crop / subsample extract — engine (point clouds → LAS)**. New `/dump/las?url=<potree>&bbox=

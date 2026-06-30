@@ -478,8 +478,12 @@
       <label for="crop-ge">max GE (m)</label><input type="number" id="crop-ge" min="0" step="1" value="0" />
     </div>
     <div class="sb-row" style="gap:6px">
-      <button class="sb-btn" onclick="dumpCrop('las')" title="Point clouds / splats → LAS">⬇ LAS (points)</button>
+      <button class="sb-btn" onclick="dumpCrop('las')" title="Point clouds → out-of-core LAS">⬇ LAS</button>
+      <button class="sb-btn" onclick="dumpCrop('copc')" title="Point clouds → COPC (needs PDAL on the server)">⬇ COPC</button>
+    </div>
+    <div class="sb-row" style="gap:6px">
       <button class="sb-btn" onclick="dumpCrop('glb')" title="Meshes → merged GLB">⬇ GLB (mesh)</button>
+      <button class="sb-btn" onclick="dumpCrop('tileset')" title="Any (esp. splats) → filtered 3D Tiles tileset, no decode">⬇ Tileset (splat/any)</button>
     </div>
     <div class="sb-note" style="font-size:10px;opacity:.7">Dumps the loaded tileset within the box. Octree sources are fetched as explicit tiling.</div>
   </div>

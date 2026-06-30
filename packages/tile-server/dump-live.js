@@ -19,6 +19,7 @@ import { createReadStream } from 'node:fs';
 import { unlink } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { spawn } from 'node:child_process';
 import { Document, NodeIO } from '@gltf-transform/core';
 import { ALL_EXTENSIONS } from '@gltf-transform/extensions';
 import { decompressGlb, LasWriter, ecefToLlh, llhToEcef, CORS } from '../core/index.js';
@@ -97,7 +98,7 @@ async function expandImplicit(node, worldM, base, bb, maxGE, maxDepth, onContent
     const box = cellBox(rootBox, level, x, y, z, dims);
     if (!tileIntersects({ boundingVolume: { box } }, worldM, bb)) return;
     const descend = rootGE / 2 ** level > maxGE && level < maxDepth;
-    if (bit(sub.content, tIdx) && (add || !descend)) await onContent(absUrl(subst(contentTpl, level, x, y, z), base), worldM);
+    if (bit(sub.content, tIdx) && (add || !descend)) await onContent(absUrl(subst(contentTpl, level, x, y, z), base), worldM, { boundingVolume: { box } });
     if (!descend) return;
     for (let i = 0; i < cells; i++) await walk(level + 1, x*2 + (i&1), y*2 + ((i>>1)&1), dims === 3 ? z*2 + ((i>>2)&1) : 0);
   };
@@ -119,7 +120,7 @@ async function traverse(tilesetUrl, bb, maxGE, maxDepth, onContent) {
     const refine = (node.refine || 'REPLACE').toUpperCase();
     const takeContent = node.content && !/\.json(\?|$)/i.test(node.content.uri || '') &&
       (refine === 'ADD' || !descend);                    // ADD: every level; REPLACE: frontier only
-    if (takeContent) await onContent(absUrl(node.content.uri, base), m);
+    if (takeContent) await onContent(absUrl(node.content.uri, base), m, node);
     if (!descend) return;
     // external tileset ref as content → recurse into it
     if (node.content && /\.json(\?|$)/i.test(node.content.uri || '')) {
@@ -136,16 +137,33 @@ const io = new NodeIO().registerExtensions(ALL_EXTENSIONS);
 
 export async function handleDump(req, res, u) {
   if (!u.pathname.startsWith('/dump/')) return false;
-  const kind = u.pathname === '/dump/las' ? 'las' : u.pathname === '/dump/glb' ? 'glb' : null;
+  const kind = { '/dump/las': 'las', '/dump/glb': 'glb', '/dump/copc': 'copc', '/dump/tileset': 'tileset' }[u.pathname] || null;
   const url = u.searchParams.get('url');
   const bboxStr = u.searchParams.get('bbox');
   const maxGE = u.searchParams.has('maxGE') ? Number(u.searchParams.get('maxGE')) : 0;       // 0 = finest
   const maxDepth = u.searchParams.has('maxDepth') ? Number(u.searchParams.get('maxDepth')) : 99;
   if (!kind || !url || !bboxStr) {
-    res.writeHead(400, CORS); res.end('GET /dump/{las|glb}?url=<tileset.json>&bbox=west,south,minH,east,north,maxH[&maxGE=m][&maxDepth=N]'); return true;
+    res.writeHead(400, CORS); res.end('GET /dump/{las|copc|glb|tileset}?url=<tileset.json>&bbox=west,south,minH,east,north,maxH[&maxGE=m][&maxDepth=N]'); return true;
   }
   const bb = bboxStr.split(',').map(Number);
   if (bb.length !== 6 || bb.some(Number.isNaN)) { res.writeHead(400, CORS); res.end('bbox needs 6 numbers (deg,deg,m,deg,deg,m)'); return true; }
+
+  // tileset mode: no decode/merge — emit a filtered 3D Tiles tileset referencing only the in-bbox tiles
+  // (each leaf keeps its world transform + points at the original tile GLB). Works for splats too.
+  if (kind === 'tileset') {
+    try {
+      const children = [];
+      await traverse(url, bb, maxGE, maxDepth, async (glbUrl, worldM, node) => {
+        const box = node?.boundingVolume?.box || [0,0,0, 1,0,0, 0,1,0, 0,0,1];
+        children.push({ transform: Array.from(worldM), boundingVolume: { box }, geometricError: 0, refine: 'ADD', content: { uri: glbUrl } });
+      });
+      const ts = { asset: { version: '1.1' }, geometricError: 1e7,
+        root: { boundingVolume: { region: [bb[0]/R2D, bb[1]/R2D, bb[3]/R2D, bb[4]/R2D, bb[2], bb[5]] }, geometricError: 1e7, refine: 'ADD', children } };
+      res.writeHead(200, { 'Content-Type': 'application/json', 'Content-Disposition': 'attachment; filename="crop-tileset.json"',
+        'X-Dump-Tiles': String(children.length), 'Access-Control-Expose-Headers': 'X-Dump-Tiles', ...CORS });
+      return void res.end(JSON.stringify(ts));
+    } catch (e) { console.error('[dump-live]', e.message); res.writeHead(500, CORS); return void res.end(e.message); }
+  }
 
   try {
     const out = new Document();                          // for /dump/glb: merged mesh (in-memory)
@@ -155,8 +173,9 @@ export async function handleDump(req, res, u) {
 
     // ── OUT-OF-CORE LAS: stream points to a temp file via LasWriter (O(1) RAM — header back-patched on
     // close, never holds all points). ECEF offset = bbox centre so quantized int32 stays in range.
+    const wantLas = kind === 'las' || kind === 'copc';
     let lasw = null, tmp = null;
-    if (kind === 'las') {
+    if (wantLas) {
       const cE = llhToEcef((bb[0] + bb[3]) / 2, (bb[1] + bb[4]) / 2, (bb[2] + bb[5]) / 2);
       tmp = join(tmpdir(), `dump-${Date.now()}-${Math.floor(performance.now())}.las`);
       lasw = new LasWriter(tmp, { scale: [0.001, 0.001, 0.001], offset: cE });
@@ -176,7 +195,7 @@ export async function handleDump(req, res, u) {
           const pos = prim.getAttribute('POSITION'); if (!pos) continue;
           const mode = prim.getMode();                    // 0=POINTS, 4=TRIANGLES
           const n = pos.getCount();
-          if (kind === 'las') {                           // POINTS (and splats/centres) → streamed LAS
+          if (wantLas) {                                  // POINTS (and splats/centres) → streamed LAS
             const col = prim.getAttribute('COLOR_0');
             for (let i = 0; i < n; i++) {
               const p = pos.getElement(i, [0,0,0]);
@@ -214,13 +233,26 @@ export async function handleDump(req, res, u) {
       }
     });
 
-    if (kind === 'las') {
+    if (wantLas) {
       await lasw.close();                                  // back-patch header (count + bbox)
-      res.writeHead(200, { 'Content-Type': 'application/octet-stream', 'Content-Disposition': 'attachment; filename="crop.las"',
-        'X-Dump-Points': String(points), 'X-Dump-Tiles': String(tiles), 'Access-Control-Expose-Headers': 'X-Dump-Points,X-Dump-Tiles,X-Dump-Primitives', ...CORS });
-      const stream = createReadStream(tmp);                // stream the temp file → response (O(1) RAM)
-      stream.pipe(res);
-      stream.on('close', () => unlink(tmp).catch(() => {}));
+      const hdr = { 'X-Dump-Points': String(points), 'X-Dump-Tiles': String(tiles), 'Access-Control-Expose-Headers': 'X-Dump-Points,X-Dump-Tiles,X-Dump-Primitives', ...CORS };
+      if (kind === 'las') {
+        res.writeHead(200, { 'Content-Type': 'application/octet-stream', 'Content-Disposition': 'attachment; filename="crop.las"', ...hdr });
+        const stream = createReadStream(tmp); stream.pipe(res); stream.on('close', () => unlink(tmp).catch(() => {}));
+        return true;
+      }
+      // copc: shell out to pdal (needs the LAS on disk anyway) → COPC LAZ, then stream it.
+      const copc = tmp.replace(/\.las$/, '.copc.laz');
+      const cleanup = () => { unlink(tmp).catch(() => {}); unlink(copc).catch(() => {}); };
+      const p = spawn('pdal', ['translate', tmp, copc], { stdio: ['ignore', 'ignore', 'pipe'] });
+      let perr = '';
+      p.stderr.on('data', d => { perr += d; });
+      p.on('error', () => { cleanup(); if (!res.headersSent) { res.writeHead(501, CORS); res.end('pdal not installed — /dump/copc needs PDAL on PATH. Use /dump/las and convert with `pdal translate crop.las out.copc.laz`.'); } });
+      p.on('close', (code) => {
+        if (code !== 0) { cleanup(); if (!res.headersSent) { res.writeHead(500, CORS); res.end('pdal failed: ' + perr.slice(0, 300)); } return; }
+        res.writeHead(200, { 'Content-Type': 'application/octet-stream', 'Content-Disposition': 'attachment; filename="crop.copc.laz"', ...hdr });
+        const stream = createReadStream(copc); stream.pipe(res); stream.on('close', cleanup);
+      });
       return true;
     }
     const merged = Buffer.from(await io.writeBinary(out));
