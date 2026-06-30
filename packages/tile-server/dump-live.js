@@ -131,11 +131,14 @@ async function traverse(tilesetUrl, bb, maxGE, maxDepth, onContent) {
     if (!tileIntersects(node, m, bb)) return;               // prune: skip subtrees outside the bbox
     if (node.implicitTiling) return expandImplicit(node, m, base, bb, maxGE, maxDepth, onContent);   // implicit subtree walk
     const ge = node.geometricError ?? 0;
-    const hasKids = (node.children && node.children.length) || (node.content && /\.json(\?|$)/i.test(node.content.uri || ''));
-    const descend = ge > maxGE && hasKids;
+    const isJsonContent = node.content && /\.json(\?|$)/i.test(node.content.uri || '');
+    const hasContent = node.content && !isJsonContent;
+    const hasKids = (node.children && node.children.length) || isJsonContent;
+    // Descend while finer than maxGE, OR while this branch hasn't hit content yet (Bing/sparse trees have
+    // content-less coarse tiles — without this, a coarse maxGE stops above the content and yields nothing).
+    const descend = hasKids && (ge > maxGE || !hasContent);
     const refine = (node.refine || 'REPLACE').toUpperCase();
-    const takeContent = node.content && !/\.json(\?|$)/i.test(node.content.uri || '') &&
-      (refine === 'ADD' || !descend);                    // ADD: every level; REPLACE: frontier only
+    const takeContent = hasContent && (refine === 'ADD' || !descend);  // ADD: every level; REPLACE: frontier
     if (takeContent) await onContent(absUrl(node.content.uri, base), m, node);
     if (!descend) return;
     // external tileset ref as content → recurse into it
