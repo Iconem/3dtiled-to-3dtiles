@@ -23,7 +23,7 @@ import { spawn } from 'node:child_process';
 import { crc32 } from 'node:zlib';
 import { Document, NodeIO } from '@gltf-transform/core';
 import { ALL_EXTENSIONS } from '@gltf-transform/extensions';
-import { readSpz, combine, writeSpz, writeSog, writeGlb, writePly, MemoryReadFileSystem, MemoryFileSystem } from '@playcanvas/splat-transform';
+import { readSpz, combine, writeSpz, writeSog, writeGlb, writePly, Transform, MemoryReadFileSystem, MemoryFileSystem } from '@playcanvas/splat-transform';
 import { decompressGlb, LasWriter, lasHeaderBuffer, lasRecordBuffer, ecefToLlh, llhToEcef, enuFrame, CORS } from '../core/index.js';
 
 // Resolve the PDAL binary for /dump/copc. Prefer $PDAL_BIN, then the pixi-global shim (`pixi global
@@ -94,6 +94,27 @@ function matMul(a, b) {                       // column-major 4×4, returns a·b
 }
 const xform = (m, x, y, z) => [m[0]*x+m[4]*y+m[8]*z+m[12], m[1]*x+m[5]*y+m[9]*z+m[13], m[2]*x+m[6]*y+m[10]*z+m[14]];
 
+// Decompose a column-major 4×4 (rigid + uniform scale) into a splat-transform TRS `Transform`. Setting
+// each tile's DataTable.transform to its world placement lets combine()/the writers BAKE positions,
+// quaternions, scales AND spherical harmonics into one consistent frame — without this, every tile's
+// node-local splats stack at the same place (the merged dump was wrong for multi-tile sources). Uniform
+// scale = mean of the column norms (tile transforms are rigid/uniform in practice).
+function matToTransform(M) {
+  const sx = Math.hypot(M[0],M[1],M[2]) || 1, sy = Math.hypot(M[4],M[5],M[6]) || 1, sz = Math.hypot(M[8],M[9],M[10]) || 1;
+  const s = (sx + sy + sz) / 3;
+  const m00=M[0]/sx, m10=M[1]/sx, m20=M[2]/sx, m01=M[4]/sy, m11=M[5]/sy, m21=M[6]/sy, m02=M[8]/sz, m12=M[9]/sz, m22=M[10]/sz;  // mRC, normalized rotation
+  let qx, qy, qz, qw; const tr = m00 + m11 + m22;
+  if (tr > 0)                     { const S = Math.sqrt(tr + 1) * 2;        qw = 0.25*S; qx = (m21-m12)/S; qy = (m02-m20)/S; qz = (m10-m01)/S; }
+  else if (m00 > m11 && m00 > m22){ const S = Math.sqrt(1+m00-m11-m22) * 2; qw = (m21-m12)/S; qx = 0.25*S; qy = (m01+m10)/S; qz = (m02+m20)/S; }
+  else if (m11 > m22)             { const S = Math.sqrt(1+m11-m00-m22) * 2; qw = (m02-m20)/S; qx = (m01+m10)/S; qy = 0.25*S; qz = (m12+m21)/S; }
+  else                            { const S = Math.sqrt(1+m22-m00-m11) * 2; qw = (m10-m01)/S; qx = (m02+m20)/S; qy = (m12+m21)/S; qz = 0.25*S; }
+  const t = new Transform();
+  t.translation.set(M[12], M[13], M[14]);
+  t.rotation.set(qx, qy, qz, qw);                            // pc.Quat order is (x, y, z, w)
+  t.scale = s;
+  return t;
+}
+
 const fetchBuf = (u) => fetch(u).then(r => { if (!r.ok) throw new Error(`fetch ${u} → ${r.status}`); return r.arrayBuffer(); }).then(a => Buffer.from(a));
 const absUrl = (uri, base) => /^https?:/i.test(uri) ? uri : new URL(uri, base).href;
 const inBbox = (lon, lat, h, bb) => lon >= bb[0] && lon <= bb[3] && lat >= bb[1] && lat <= bb[4] && h >= bb[2] && h <= bb[5];
@@ -162,6 +183,21 @@ async function expandImplicit(node, worldM, base, bb, maxGE, maxDepth, onContent
     for (let i = 0; i < cells; i++) await walk(level + 1, x*2 + (i&1), y*2 + ((i>>1)&1), dims === 3 ? z*2 + ((i>>2)&1) : 0);
   };
   await walk(0, 0, 0, 0);
+}
+
+// ECEF position of the SOURCE tileset's own origin (root bounding-volume centre), seeded with the same
+// initM the dump uses. Used as a STABLE ENU output frame for splat dumps: every crop of the same source
+// shares one coordinate system, so multiple boxes line up when loaded together (independent of the bbox).
+async function rootOriginEcef(tilesetUrl, initM) {
+  try {
+    const ts = JSON.parse((await fetchBuf(tilesetUrl)).toString('utf8'));
+    const root = ts.root; if (!root) return null;
+    const m = root.transform ? matMul(initM, root.transform) : initM;
+    const bv = root.boundingVolume;
+    if (bv?.box) return xform(m, bv.box[0], bv.box[1], bv.box[2]);                 // box centre (tile-local → ECEF)
+    if (bv?.region) { const [w, s, e, n, mn, mx] = bv.region; return llhToEcef((w+e)/2*R2D, (s+n)/2*R2D, (mn+mx)/2); }  // region is geographic
+    return xform(m, 0, 0, 0);                                                       // fallback: transformed origin
+  } catch { return null; }
 }
 
 // Walk a tileset tree; call onContent(absoluteGlbUrl, worldMatrix) for each content tile to harvest.
@@ -303,6 +339,16 @@ export async function handleDump(req, res, u) {
     try {
       const fmt = ['sog', 'glb', 'ply'].includes(u.searchParams.get('format')) ? u.searchParams.get('format') : 'spz';
       const clip = u.searchParams.get('clip') !== '0' && u.searchParams.get('clip') !== 'false';   // per-splat-centroid clip (default ON)
+      // Output frame: local ENU anchored at the SOURCE scene's own origin (not the bbox centre), so every
+      // crop of the same source shares ONE coordinate system → multiple boxes line up when loaded together.
+      // Each tile's splats are baked tile-local → ENU so tiles don't stack; ENU keeps coords small/metric
+      // (precise + SuperSplat-friendly) vs raw ECEF (~6.4e6 m → overflows SPZ fixed-point). Falls back to the
+      // bbox centre only if the root origin can't be resolved. Menu (col-major) maps ECEF → ENU (rows E/N/U, −R·c).
+      const c = (await rootOriginEcef(url, initM)) || llhToEcef((bb[0]+bb[3])/2, (bb[1]+bb[4])/2, (bb[2]+bb[5])/2);
+      const [refLon, refLat] = ecefToLlh(c[0], c[1], c[2]);
+      const { EAST: E, NORTH: N, UP: U } = enuFrame(refLon, refLat);
+      const Menu = [ E[0], N[0], U[0], 0,  E[1], N[1], U[1], 0,  E[2], N[2], U[2], 0,
+        -(E[0]*c[0]+E[1]*c[1]+E[2]*c[2]), -(N[0]*c[0]+N[1]*c[1]+N[2]*c[2]), -(U[0]*c[0]+U[1]*c[1]+U[2]*c[2]), 1 ];
       const dts = []; let totIn = 0, totRaw = 0;
       await traverse(url, bb, maxGE, maxDepth, async (glbUrl, worldM) => {
         let glb; try { glb = await fetchBuf(glbUrl); } catch { return; }
@@ -310,19 +356,25 @@ export async function handleDump(req, res, u) {
         const rfs = new MemoryReadFileSystem(); rfs.set('t.spz', new Uint8Array(sp.blob));
         let dt; try { dt = await readSpz(await rfs.createSource('t.spz')); } catch (e) { return void console.warn('[dump-live] readSpz:', e.message); }
         totRaw += dt.numRows;
+        // SPZ positions are node-local: the full tile-local → ECEF chain is worldM · YUP_ZUP · nodeM
+        // (nodeM carries the spz→glTF axis fix + per-tile translation). Verified: SPZ centroids land in
+        // the tile box only with this matrix.
+        const Mfull = matMul(matMul(worldM, YUP_ZUP), sp.nodeM);
         if (clip) {                                       // drop splats whose centroid is outside the bbox
-          // SPZ positions are node-local: place them in ECEF via the same chain meshes use,
-          // M = worldM · YUP_ZUP · nodeM (nodeM carries the spz→glTF axis fix + per-tile translation).
-          const M = matMul(matMul(worldM, YUP_ZUP), sp.nodeM);
           const xs = dt.getColumnByName('x')?.data, ys = dt.getColumnByName('y')?.data, zs = dt.getColumnByName('z')?.data;
           if (xs && ys && zs) {
             const keep = [];
-            for (let i = 0; i < dt.numRows; i++) { const [X, Y, Z] = xform(M, xs[i], ys[i], zs[i]); const [lon, lat, h] = ecefToLlh(X, Y, Z); if (inBbox(lon, lat, h, bb)) keep.push(i); }
+            for (let i = 0; i < dt.numRows; i++) { const [X, Y, Z] = xform(Mfull, xs[i], ys[i], zs[i]); const [lon, lat, h] = ecefToLlh(X, Y, Z); if (inBbox(lon, lat, h, bb)) keep.push(i); }
             dt = dt.clone({ rows: keep });
           }
         }
         totIn += dt.numRows;
-        if (dt.numRows) dts.push(dt);
+        if (dt.numRows) {
+          // Tag this tile's data with its tile-local → output-ENU placement; combine()/the writers bake it
+          // (positions + quaternions + scales + SH) so multi-tile dumps land in one consistent frame.
+          dt.transform = matToTransform(matMul(Menu, Mfull));
+          dts.push(dt);
+        }
       }, initM);
       if (!dts.length) { res.writeHead(404, CORS); res.end('no splat tiles in bbox (is this a splat source?)'); return true; }
       const merged = combine(dts);
