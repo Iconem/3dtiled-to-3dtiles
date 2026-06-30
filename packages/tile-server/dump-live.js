@@ -38,16 +38,37 @@ function makeProject(bb, enu) {
 
 // Extract the raw SPZ blob from a splat tile GLB WITHOUT decoding it via gltf-transform (which can't
 // read the required KHR_gaussian_splatting_compression_spz_2 extension). Manual GLB parse: JSON chunk →
-// the primitive's spz bufferView → slice from the BIN chunk. Returns null if not an spz splat GLB.
+// the primitive's spz bufferView → slice from the BIN chunk. Also returns the splat node's local matrix
+// (`nodeM`): SPZ positions are node-local, so per-splat clipping needs worldM·YUP_ZUP·nodeM (the same
+// chain the mesh path uses — verified: SPZ centroids land inside their tile's box only with this matrix).
+// Returns null if not an spz splat GLB; `{ blob, nodeM }` otherwise.
 function extractSpz(glb) {
   if (glb.length < 28 || glb.toString('latin1', 0, 4) !== 'glTF') return null;
   const jl = glb.readUInt32LE(12);
   let json; try { json = JSON.parse(glb.toString('utf8', 20, 20 + jl)); } catch { return null; }
-  const ext = json.meshes?.[0]?.primitives?.[0]?.extensions?.KHR_gaussian_splatting?.extensions?.KHR_gaussian_splatting_compression_spz_2;
+  const prims = json.meshes?.[0]?.primitives?.[0];
+  const ext = prims?.extensions?.KHR_gaussian_splatting?.extensions?.KHR_gaussian_splatting_compression_spz_2;
   if (!ext || ext.bufferView == null) return null;
   const bv = json.bufferViews?.[ext.bufferView]; if (!bv) return null;
   const binStart = 28 + jl;                                  // 12B header + JSON chunk(8B+jl) + BIN chunk header(8B)
-  return glb.subarray(binStart + (bv.byteOffset || 0), binStart + (bv.byteOffset || 0) + bv.byteLength);
+  const blob = glb.subarray(binStart + (bv.byteOffset || 0), binStart + (bv.byteOffset || 0) + bv.byteLength);
+  return { blob, nodeM: nodeMatrix(json) };
+}
+
+// Local matrix of the GLB node that carries the splat mesh (mesh 0). Splat GLBs typically store a single
+// node with an explicit `matrix` (Rx180 spz→glTF axis fix + per-tile translation); fall back to TRS, then
+// identity. Column-major 4×4.
+function nodeMatrix(json) {
+  const node = (json.nodes || []).find(n => n.mesh === 0) || json.nodes?.[0];
+  if (!node) return IDENT;
+  if (Array.isArray(node.matrix) && node.matrix.length === 16) return node.matrix;
+  const t = node.translation || [0, 0, 0], r = node.rotation || [0, 0, 0, 1], s = node.scale || [1, 1, 1];
+  const [x, y, z, w] = r, x2 = x+x, y2 = y+y, z2 = z+z;
+  const xx = x*x2, xy = x*y2, xz = x*z2, yy = y*y2, yz = y*z2, zz = z*z2, wx = w*x2, wy = w*y2, wz = w*z2;
+  return [ (1-(yy+zz))*s[0], (xy+wz)*s[0], (xz-wy)*s[0], 0,
+           (xy-wz)*s[1], (1-(xx+zz))*s[1], (yz+wx)*s[1], 0,
+           (xz+wy)*s[2], (yz-wx)*s[2], (1-(xx+yy))*s[2], 0,
+           t[0], t[1], t[2], 1 ];
 }
 
 const IDENT = [1,0,0,0, 0,1,0,0, 0,0,1,0, 0,0,0,1];
@@ -254,30 +275,35 @@ export async function handleDump(req, res, u) {
     } catch (e) { console.error('[dump-live]', e.message); res.writeHead(500, CORS); res.end(e.message); return true; }
   }
 
-  // splat mode: merge in-bbox SPLAT tiles into ONE supersplat-ingestable file (.spz/.sog) via PlayCanvas
-  // splat-transform — extract each tile's SPZ blob (no gltf-transform decode), readSpz → DataTable,
-  // combine, writeSpz/writeSog. Tile-level crop (tiles share the dataset frame, so no per-splat transform).
+  // splat mode: merge in-bbox SPLAT tiles into ONE supersplat-ingestable file (.spz/.glb/.sog/.ply) via
+  // PlayCanvas splat-transform — extract each tile's SPZ blob (no gltf-transform decode), readSpz →
+  // DataTable, combine, write. Tile-level crop keeps every tile that intersects the bbox; per-splat clip
+  // (default ON, &clip=0 to disable) additionally drops splats whose centroid falls outside the bbox,
+  // placing each via worldM·YUP_ZUP·nodeM (the mesh chain).
   if (kind === 'splat') {
     try {
       const fmt = ['sog', 'glb', 'ply'].includes(u.searchParams.get('format')) ? u.searchParams.get('format') : 'spz';
-      const clip = u.searchParams.get('clip') === '1' || u.searchParams.get('clip') === 'true';   // per-splat-centroid clip
-      const dts = [];
+      const clip = u.searchParams.get('clip') !== '0' && u.searchParams.get('clip') !== 'false';   // per-splat-centroid clip (default ON)
+      const dts = []; let totIn = 0, totRaw = 0;
       await traverse(url, bb, maxGE, maxDepth, async (glbUrl, worldM) => {
         let glb; try { glb = await fetchBuf(glbUrl); } catch { return; }
-        const spz = extractSpz(glb); if (!spz) return;
-        const rfs = new MemoryReadFileSystem(); rfs.set('t.spz', new Uint8Array(spz));
+        const sp = extractSpz(glb); if (!sp) return;
+        const rfs = new MemoryReadFileSystem(); rfs.set('t.spz', new Uint8Array(sp.blob));
         let dt; try { dt = await readSpz(await rfs.createSource('t.spz')); } catch (e) { return void console.warn('[dump-live] readSpz:', e.message); }
+        totRaw += dt.numRows;
         if (clip) {                                       // drop splats whose centroid is outside the bbox
-          // EXPERIMENTAL: readSpz returns a per-tile dt.transform that this does NOT yet compose, so the
-          // placement is off and it under-clips. Opt-in (&clip=1, default off) until the frame is validated.
+          // SPZ positions are node-local: place them in ECEF via the same chain meshes use,
+          // M = worldM · YUP_ZUP · nodeM (nodeM carries the spz→glTF axis fix + per-tile translation).
+          const M = matMul(matMul(worldM, YUP_ZUP), sp.nodeM);
           const xs = dt.getColumnByName('x')?.data, ys = dt.getColumnByName('y')?.data, zs = dt.getColumnByName('z')?.data;
           if (xs && ys && zs) {
             const keep = [];
-            for (let i = 0; i < dt.numRows; i++) { const [X, Y, Z] = xform(worldM, xs[i], ys[i], zs[i]); const [lon, lat, h] = ecefToLlh(X, Y, Z); if (inBbox(lon, lat, h, bb)) keep.push(i); }
+            for (let i = 0; i < dt.numRows; i++) { const [X, Y, Z] = xform(M, xs[i], ys[i], zs[i]); const [lon, lat, h] = ecefToLlh(X, Y, Z); if (inBbox(lon, lat, h, bb)) keep.push(i); }
             dt = dt.clone({ rows: keep });
           }
         }
-        dts.push(dt);
+        totIn += dt.numRows;
+        if (dt.numRows) dts.push(dt);
       });
       if (!dts.length) { res.writeHead(404, CORS); res.end('no splat tiles in bbox (is this a splat source?)'); return true; }
       const merged = combine(dts);
@@ -287,7 +313,8 @@ export async function handleDump(req, res, u) {
       else await writeSpz({ filename: name, dataTable: merged }, mfs);
       const out = mfs.results.get(name);
       res.writeHead(200, { 'Content-Type': 'application/octet-stream', 'Content-Disposition': `attachment; filename="${name}"`,
-        'X-Dump-Tiles': String(dts.length), 'X-Dump-Splats': String(merged.numRows), 'Access-Control-Expose-Headers': 'X-Dump-Tiles,X-Dump-Splats', ...CORS });
+        'X-Dump-Tiles': String(dts.length), 'X-Dump-Splats': String(merged.numRows), 'X-Dump-Splats-Raw': String(totRaw), 'X-Dump-Clipped': String(clip ? totRaw - totIn : 0),
+        'Access-Control-Expose-Headers': 'X-Dump-Tiles,X-Dump-Splats,X-Dump-Splats-Raw,X-Dump-Clipped', ...CORS });
       res.end(Buffer.from(out.buffer || out)); return true;
     } catch (e) { console.error('[dump-live]', e.message); if (!res.headersSent) { res.writeHead(500, CORS); res.end(e.message); } else res.end(); return true; }
   }

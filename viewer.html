@@ -494,6 +494,9 @@
       <button class="sb-btn" onclick="dumpCrop('splat')" title="Splats → merged single file (splat-transform; supersplat-ingestable)">⬇ Splat</button>
       <button class="sb-btn" onclick="dumpCrop('zip')" title="Any (mesh/splat/points) → streamed ZIP bundle (out-of-core, single download)">⬇ ZIP</button>
     </div>
+    <label class="sb-check" title="Splat dump: drop individual splats whose centroid falls outside the box (per-splat clip via worldM·YUP_ZUP·nodeM). Off = keep every splat of each intersecting tile.">
+      <input type="checkbox" id="crop-splatclip" checked /> Splat: clip splats outside box
+    </label>
     <div class="sb-note" style="font-size:10px;opacity:.7">Dumps the loaded tileset within the box. Octree sources are fetched as explicit tiling.</div>
   </div>
 
@@ -1445,7 +1448,8 @@ function dumpCrop(kind) {
   let extra = '';
   if (kind === 'las' && document.getElementById('crop-stream')?.checked) extra += '&stream=1';
   if ((kind === 'las' || kind === 'copc') && document.getElementById('crop-enu')?.checked) extra += '&enu=1';
-  if (kind === 'splat') extra += `&format=${document.getElementById('crop-splatfmt')?.value || 'spz'}`;
+  if (kind === 'splat') { extra += `&format=${document.getElementById('crop-splatfmt')?.value || 'spz'}`;
+    if (!document.getElementById('crop-splatclip')?.checked) extra += '&clip=0'; }
   const url = `${MW}/dump/${kind}?url=${encodeURIComponent(src)}&bbox=${bb.join(',')}&maxGE=${ge}${extra}`;
   tlog(`⬇ dump ${kind} (GE ${ge}) — download starting…`);
   window.open(url, '_blank');
