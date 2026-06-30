@@ -23,7 +23,22 @@ import { spawn } from 'node:child_process';
 import { crc32 } from 'node:zlib';
 import { Document, NodeIO } from '@gltf-transform/core';
 import { ALL_EXTENSIONS } from '@gltf-transform/extensions';
+import { readSpz, combine, writeSpz, writeSog, MemoryReadFileSystem, MemoryFileSystem } from '@playcanvas/splat-transform';
 import { decompressGlb, LasWriter, lasHeaderBuffer, lasRecordBuffer, ecefToLlh, llhToEcef, CORS } from '../core/index.js';
+
+// Extract the raw SPZ blob from a splat tile GLB WITHOUT decoding it via gltf-transform (which can't
+// read the required KHR_gaussian_splatting_compression_spz_2 extension). Manual GLB parse: JSON chunk →
+// the primitive's spz bufferView → slice from the BIN chunk. Returns null if not an spz splat GLB.
+function extractSpz(glb) {
+  if (glb.length < 28 || glb.toString('latin1', 0, 4) !== 'glTF') return null;
+  const jl = glb.readUInt32LE(12);
+  let json; try { json = JSON.parse(glb.toString('utf8', 20, 20 + jl)); } catch { return null; }
+  const ext = json.meshes?.[0]?.primitives?.[0]?.extensions?.KHR_gaussian_splatting?.extensions?.KHR_gaussian_splatting_compression_spz_2;
+  if (!ext || ext.bufferView == null) return null;
+  const bv = json.bufferViews?.[ext.bufferView]; if (!bv) return null;
+  const binStart = 28 + jl;                                  // 12B header + JSON chunk(8B+jl) + BIN chunk header(8B)
+  return glb.subarray(binStart + (bv.byteOffset || 0), binStart + (bv.byteOffset || 0) + bv.byteLength);
+}
 
 const IDENT = [1,0,0,0, 0,1,0,0, 0,0,1,0, 0,0,0,1];
 // 3D Tiles glTF content is Y-up; Cesium applies RX(+90): (x,y,z)→(x,−z,y). Bake it so our ECEF matches.
@@ -198,7 +213,7 @@ function zipStreamer(res) {
 
 export async function handleDump(req, res, u) {
   if (!u.pathname.startsWith('/dump/')) return false;
-  const kind = { '/dump/las': 'las', '/dump/glb': 'glb', '/dump/copc': 'copc', '/dump/tileset': 'tileset', '/dump/zip': 'zip' }[u.pathname] || null;
+  const kind = { '/dump/las': 'las', '/dump/glb': 'glb', '/dump/copc': 'copc', '/dump/tileset': 'tileset', '/dump/zip': 'zip', '/dump/splat': 'splat' }[u.pathname] || null;
   const url = u.searchParams.get('url');
   const bboxStr = u.searchParams.get('bbox');
   const maxGE = u.searchParams.has('maxGE') ? Number(u.searchParams.get('maxGE')) : 0;       // 0 = finest
@@ -222,8 +237,33 @@ export async function handleDump(req, res, u) {
         root: { boundingVolume: { region: [bb[0]/R2D, bb[1]/R2D, bb[3]/R2D, bb[4]/R2D, bb[2], bb[5]] }, geometricError: 1e7, refine: 'ADD', children } };
       res.writeHead(200, { 'Content-Type': 'application/json', 'Content-Disposition': 'attachment; filename="crop-tileset.json"',
         'X-Dump-Tiles': String(children.length), 'Access-Control-Expose-Headers': 'X-Dump-Tiles', ...CORS });
-      return void res.end(JSON.stringify(ts));
-    } catch (e) { console.error('[dump-live]', e.message); res.writeHead(500, CORS); return void res.end(e.message); }
+      res.end(JSON.stringify(ts)); return true;
+    } catch (e) { console.error('[dump-live]', e.message); res.writeHead(500, CORS); res.end(e.message); return true; }
+  }
+
+  // splat mode: merge in-bbox SPLAT tiles into ONE supersplat-ingestable file (.spz/.sog) via PlayCanvas
+  // splat-transform — extract each tile's SPZ blob (no gltf-transform decode), readSpz → DataTable,
+  // combine, writeSpz/writeSog. Tile-level crop (tiles share the dataset frame, so no per-splat transform).
+  if (kind === 'splat') {
+    try {
+      const fmt = u.searchParams.get('format') === 'sog' ? 'sog' : 'spz';
+      const dts = [];
+      await traverse(url, bb, maxGE, maxDepth, async (glbUrl) => {
+        let glb; try { glb = await fetchBuf(glbUrl); } catch { return; }
+        const spz = extractSpz(glb); if (!spz) return;
+        const rfs = new MemoryReadFileSystem(); rfs.set('t.spz', new Uint8Array(spz));
+        try { dts.push(await readSpz(await rfs.createSource('t.spz'))); } catch (e) { console.warn('[dump-live] readSpz:', e.message); }
+      });
+      if (!dts.length) { res.writeHead(404, CORS); res.end('no splat tiles in bbox (is this a splat source?)'); return true; }
+      const merged = combine(dts);
+      const mfs = new MemoryFileSystem(), name = `crop.${fmt}`;
+      if (fmt === 'sog') await writeSog({ filename: name, dataTable: merged }, mfs);
+      else await writeSpz({ filename: name, dataTable: merged }, mfs);
+      const out = mfs.results.get(name);
+      res.writeHead(200, { 'Content-Type': 'application/octet-stream', 'Content-Disposition': `attachment; filename="${name}"`,
+        'X-Dump-Tiles': String(dts.length), 'X-Dump-Splats': String(merged.numRows), 'Access-Control-Expose-Headers': 'X-Dump-Tiles,X-Dump-Splats', ...CORS });
+      res.end(Buffer.from(out.buffer || out)); return true;
+    } catch (e) { console.error('[dump-live]', e.message); if (!res.headersSent) { res.writeHead(500, CORS); res.end(e.message); } else res.end(); return true; }
   }
 
   // zip mode: out-of-core single-download bundle — stream each in-bbox tile GLB (one at a time) + a
@@ -261,7 +301,7 @@ export async function handleDump(req, res, u) {
         if (chunk.length >= 8192) { await writeChunk(res, Buffer.concat(chunk)); chunk = []; }
       });
       if (chunk.length) await writeChunk(res, Buffer.concat(chunk));
-      return void res.end();
+      res.end(); return true;
     } catch (e) { console.error('[dump-live]', e.message); if (!res.headersSent) { res.writeHead(500, CORS); res.end(e.message); } else res.end(); return true; }
   }
 
