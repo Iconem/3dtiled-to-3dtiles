@@ -339,16 +339,17 @@ export async function handleDump(req, res, u) {
     try {
       const fmt = ['sog', 'glb', 'ply'].includes(u.searchParams.get('format')) ? u.searchParams.get('format') : 'spz';
       const clip = u.searchParams.get('clip') !== '0' && u.searchParams.get('clip') !== 'false';   // per-splat-centroid clip (default ON)
-      // Output frame: local ENU anchored at the SOURCE scene's own origin (not the bbox centre), so every
-      // crop of the same source shares ONE coordinate system → multiple boxes line up when loaded together.
-      // Each tile's splats are baked tile-local → ENU so tiles don't stack; ENU keeps coords small/metric
-      // (precise + SuperSplat-friendly) vs raw ECEF (~6.4e6 m → overflows SPZ fixed-point). Falls back to the
-      // bbox centre only if the root origin can't be resolved. Menu (col-major) maps ECEF → ENU (rows E/N/U, −R·c).
+      // Output frame: a local **Y-up** frame anchored at the SOURCE scene's own origin (not the bbox centre),
+      // so every crop of the same source shares ONE coordinate system → multiple boxes line up. Y-up (not
+      // ENU Z-up!) because splat-transform's engine/IDENTITY space is PlayCanvas Y-up — emitting Z-up would
+      // tilt the model ~90° in SuperSplat (the "Z↔Y swap"). Axes: X=East, Y=Up, Z=−North (right-handed).
+      // Each tile's splats are baked tile-local → this frame (positions+quats+scales+SH) so tiles don't stack;
+      // local coords stay small/metric (raw ECEF ~6.4e6 m overflows SPZ fixed-point). Mframe maps ECEF→frame.
       const c = (await rootOriginEcef(url, initM)) || llhToEcef((bb[0]+bb[3])/2, (bb[1]+bb[4])/2, (bb[2]+bb[5])/2);
       const [refLon, refLat] = ecefToLlh(c[0], c[1], c[2]);
       const { EAST: E, NORTH: N, UP: U } = enuFrame(refLon, refLat);
-      const Menu = [ E[0], N[0], U[0], 0,  E[1], N[1], U[1], 0,  E[2], N[2], U[2], 0,
-        -(E[0]*c[0]+E[1]*c[1]+E[2]*c[2]), -(N[0]*c[0]+N[1]*c[1]+N[2]*c[2]), -(U[0]*c[0]+U[1]*c[1]+U[2]*c[2]), 1 ];
+      const Edot = E[0]*c[0]+E[1]*c[1]+E[2]*c[2], Ndot = N[0]*c[0]+N[1]*c[1]+N[2]*c[2], Udot = U[0]*c[0]+U[1]*c[1]+U[2]*c[2];
+      const Menu = [ E[0], U[0], -N[0], 0,  E[1], U[1], -N[1], 0,  E[2], U[2], -N[2], 0,  -Edot, -Udot, Ndot, 1 ];  // rows E / U / −N
       const dts = []; let totIn = 0, totRaw = 0;
       await traverse(url, bb, maxGE, maxDepth, async (glbUrl, worldM) => {
         let glb; try { glb = await fetchBuf(glbUrl); } catch { return; }
