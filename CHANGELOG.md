@@ -5,6 +5,20 @@ Format loosely follows [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+### Fixed — 2026-06-30 (`main`: 3DTRJS gizmo drag + mousewheel crash)
+- **Crop gizmo drag was inverted/"applied twice":** `_closestOnAxis` (closest point of the mouse ray to a
+  handle's world axis) had a sign error — it computed `(f − b·e)/(1−b²)` = **−s**, reflecting the dragged
+  point through the current handle, so a face/arrow moved the wrong way by the same magnitude. Now
+  `(b·e − f)/(1−b²)`. Verified numerically (ray over x=5 → closest (5,0,0), was (−5,0,0)). Affected both
+  the face-resize handles and the translate arrows. (The old `_cropGizmoInfo` self-test missed it — it
+  bypasses `_closestOnAxis`.)
+- **3DTRJS mousewheel crash** (`Cannot read properties of null (reading 'layers')`, spamming every frame):
+  `GlobeControls.update()` raycasts the whole scene on zoom (`intersectObject(scene)`); a tile disposed
+  mid-frame leaves a transient null in the traversal. `controls.update()` is now wrapped in try/catch
+  (log-once), mirroring the existing `tiles.update()` guard.
+- **Gizmo handles smaller** (handle 0.06→0.03 of max half-extent; arrows 1.6→1.1× + shorter head) — they
+  were bulky. **Auto-shown** now after "⬚ Set box to view" in 3DTRJS mode.
+
 ### Fixed — 2026-06-30 (`stream-cache` cont.: splat-dump output corruption + dump/viewer feedback)
 - **`/dump/splat` produced corrupt SPZ/SOG/PLY** — three independent `@playcanvas/splat-transform` bugs,
   all now fixed + verified end-to-end with a standalone DataTable harness (see

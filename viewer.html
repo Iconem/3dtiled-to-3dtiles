@@ -1400,7 +1400,8 @@ function _autoGE() {
 function setCropToView() {
   if (_3dtMode) {                                             // 3DTRJS has no Cesium viewer — raycast the three.js scene
     const ok = window.__3dtrjs?.setCropToView();
-    setStatus(ok ? 'Crop box set from 3DTRJS view.' : 'Point the 3DTRJS camera at the tileset/globe, then retry.');
+    if (ok && !_cropGizmo3DOn) toggleCropGizmo3D();           // auto-show the 3D box gizmo once the box exists
+    setStatus(ok ? 'Crop box set — drag arrows to move, face handles to resize.' : 'Point the 3DTRJS camera at the tileset/globe, then retry.');
     return;
   }
   if (!viewer) { setStatus('Cesium not ready.'); return; }
@@ -2261,11 +2262,16 @@ function pause() {
 
 let _frames = 0;
 let _tilesUpdateErrLogged = false;
+let _controlsUpdateErrLogged = false;
 function animate() {
   animId = requestAnimationFrame(animate);
   _frames++;
   if (needsFraming) _tryFraming();
-  controls?.update();
+  // Guard: GlobeControls.update() raycasts the whole scene on zoom (intersectObject(scene)); a tile
+  // disposed mid-frame can leave a transient null in the traversal → "Cannot read properties of null
+  // (reading 'layers')", which otherwise spams every frame during zoom inertia. Swallow + log once.
+  try { controls?.update(); }
+  catch (e) { if (!_controlsUpdateErrLogged) { console.warn('[3DTRJS] controls.update() threw (continuing):', e.message); _controlsUpdateErrLogged = true; } }
   camera.updateMatrixWorld();
   if (globe && globe.group.visible) {
     globe.setCamera(camera);
@@ -2388,7 +2394,7 @@ function _syncCropGizmo() {
   cropGizmo.add(box);
   const edges = new LineSegments(new EdgesGeometry(box.geometry), new LineBasicMaterial({ color: 0x00e5ff, depthTest: false }));
   edges.renderOrder = 999; cropGizmo.add(edges);
-  const hs = Math.max(halfE, halfN, halfU) * 0.06;             // handle size
+  const hs = Math.max(halfE, halfN, halfU) * 0.03;             // handle size (smaller — was 0.06, too bulky)
   const COL = [0xff5252, 0x69f069, 0x4f9dff];                  // E/N/U → red/green/blue
   // 6 face handles (resize). axisIndex 0=E(lon) 1=N(lat) 2=U(height).
   const faces = [
@@ -2404,7 +2410,7 @@ function _syncCropGizmo() {
   // 3 translate arrows (the pivot): cone tips along +E/+N/+U; dragging moves the whole box on that axis.
   const arms = [{ axis: 0, dir: [1,0,0], len: halfE }, { axis: 1, dir: [0,1,0], len: halfN }, { axis: 2, dir: [0,0,1], len: halfU }];
   for (const a of arms) {
-    const L = a.len * 1.6 + hs * 6, dir = new Vector3(...a.dir);
+    const L = a.len * 1.1 + hs * 4, dir = new Vector3(...a.dir);   // shorter arrows (was 1.6 + hs*6)
     const shaft = new Mesh(new CylinderGeometry(hs*0.25, hs*0.25, L, 8), new MeshBasicMaterial({ color: COL[a.axis], depthTest: false }));
     const cone = new Mesh(new ConeGeometry(hs*0.9, hs*2.4, 12), new MeshBasicMaterial({ color: COL[a.axis], depthTest: false }));
     // orient +Y (cylinder/cone default) onto the axis dir
@@ -2424,7 +2430,7 @@ function _closestOnAxis(P, A, mouseNdc) {
   const o = raycaster.ray.origin, d = raycaster.ray.direction;       // d is unit
   const r = P.clone().sub(o); const b = A.dot(d), e = d.dot(r), f = A.dot(r);
   const denom = 1 - b*b; if (Math.abs(denom) < 1e-6) return P.clone();
-  const sLine = (f - b*e) / denom;                                   // along A
+  const sLine = (b*e - f) / denom;                                   // along A — closest of two lines: s=(b·e−f)/(1−b²)
   return P.clone().add(A.clone().multiplyScalar(sLine));
 }
 // world ECEF point → {lon,lat,height} degrees/m (undo ecefRoot's display rotation first).
