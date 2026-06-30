@@ -16,6 +16,14 @@ Format loosely follows [Keep a Changelog](https://keepachangelog.com/).
 - **PDAL for `/dump/copc` via pixi** (not conda): `pixi global install pdal` (2.10.2) → `~/.pixi/bin/pdal`.
   The server resolves it as `$PDAL_BIN` → pixi-global shim → `pdal` on PATH. pixi is the right installer —
   PDAL is a conda-forge native binary, not a pip package (uv is Python-only, so it can't supply it).
+- **3DTilesRendererJS bbox PivotControls gizmo** (`⬚ 3D box gizmo` in Crop & Dump, 3DTRJS mode): a
+  vanilla-three port of the drei/threepipe PivotControls idea, purpose-built for the crop box — a
+  translucent box with **3 ENU translate arrows** (move the whole box) + **6 face handles** (drag a face
+  to resize that geographic bound; the requested face-gizmo bonus). Placed via the globe ellipsoid's
+  `getEastNorthUpFrame` under `ecefRoot`, so it aligns with the tiles; bounds are re-derived exactly from
+  each dragged handle's position (`getPositionToCartographic`). Shares the same DOM bbox the Cesium box
+  and the dumper read. Verified in-browser: correct ECEF placement (centre at Earth radius), 12 handles,
+  drag of the east face +100 m → +0.001352° lon (matches `100/(111320·cosφ)`), only that bound changes.
 
 ### Added — 2026-06-30 (`stream-cache` cont.: dumper out-of-core outputs + splat merge)
 - **Disk-free out-of-core LAS** (`/dump/las?...&stream=1`): 2-pass (count+bbox, then stream 8k-record
@@ -29,9 +37,7 @@ Format loosely follows [Keep a Changelog](https://keepachangelog.com/).
   from the GLB (gltf-transform can't read the required spz extension), `readSpz`→`combine`→`writeSpz`.
   Verified: LCC Guan_Temple → 41 tiles → 6 414 134 splats → 102 MB valid SPZ.
 - Viewer Crop & Dump: LAS / COPC / GLB / Tileset / Splat(SPZ) / ZIP buttons + "disk-free stream" toggle.
-- *Remaining*: 3DTRJS/R3F **PivotControls** bbox gizmo (drei pivot ported to vanilla three by
-  repalash/threepipe — vendor it + expose the 3DTRJS scene; face-gizmo bonus); single-file mesh merge
-  out-of-core (streaming GLB needs 2-pass byte layout); zip64 for >4 GB.
+- *Remaining*: single-file mesh merge out-of-core (streaming GLB needs 2-pass byte layout); zip64 for >4 GB.
 
 ### Added — 2026-06-30 (`stream-cache` cont.: dumper out-of-core + implicit + crop UI handles)
 - **Generic 3D Tiles bbox dumper** matured: ingests any tileset (our /stream outputs, /bing, /threemx,
