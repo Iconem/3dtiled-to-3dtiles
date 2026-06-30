@@ -398,7 +398,7 @@ export async function handleDump(req, res, u) {
       // copc: shell out to pdal (needs the LAS on disk anyway) → COPC LAZ, then stream it.
       const copc = tmp.replace(/\.las$/, '.copc.laz');
       const cleanup = () => { unlink(tmp).catch(() => {}); unlink(copc).catch(() => {}); };
-      const p = spawn('pdal', ['translate', tmp, copc], { stdio: ['ignore', 'ignore', 'pipe'] });
+      const p = spawn(process.env.PDAL_BIN || 'pdal', ['translate', tmp, copc], { stdio: ['ignore', 'ignore', 'pipe'] });
       let perr = '';
       p.stderr.on('data', d => { perr += d; });
       p.on('error', () => { cleanup(); if (!res.headersSent) { res.writeHead(501, CORS); res.end('pdal not installed — /dump/copc needs PDAL on PATH. Use /dump/las and convert with `pdal translate crop.las out.copc.laz`.'); } });
