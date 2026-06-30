@@ -41,6 +41,7 @@ import { handleGltf } from './gltf-live.js';
 import { handleBing } from './bing-live.js';
 import { handleThreemx } from './threemx-live.js';
 import { handleDump } from './dump-live.js';
+import { handleGeoSplats } from './geosplats-live.js';
 import { progressGet } from '../core/index.js';
 
 // Port resolution order: --port <n> (CLI, wins) → TILE_PORT → PORT → 3001. The CLI/TILE_PORT escape
@@ -110,6 +111,7 @@ http.createServer(async (req, res) => {
     if (await handleBing(req, res, u)) return;            // /bing — Bing Maps 3D (tf=3dv4 GLB) → 3D Tiles
     if (await handleThreemx(req, res, u)) return;         // /threemx — Bentley/Acute3D 3MX → 3D Tiles
     if (await handleDump(req, res, u)) return;            // /dump/las — bbox crop of a point cloud → LAS
+    if (await handleGeoSplats(req, res, u)) return;       // /geosplats — MapTiler GeoSplats → 3D Tiles (server-side key/referer)
     res.writeHead(404, CORS); res.end('not found — try /stream, /copc, /potree, /sog, /lcc, /convert, /3dtiles-self-contained, or /3dtiles-tools');
   } catch (e) {
     console.error('[tile-server]', e.stack || e.message);

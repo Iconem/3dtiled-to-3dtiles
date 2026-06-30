@@ -744,6 +744,15 @@ function currentPresets() {
     { id: '3mx-byu',    label: '🏛 BYU Athletic (RGB)', type: 'mesh', url: `${MW}/threemx/tileset.json?url=${encodeURIComponent('https://campusmodel.groups.et.byu.net/Athletic_Buildings_3MX/Scene/Athletic_Buildings_3MX.3mx')}` },
     { id: '3mx-chapelle', label: '🏛 Chapelle (scanit, .3mxb)', type: 'mesh', url: `${MW}/threemx/tileset.json?url=${encodeURIComponent('https://www.scanit-alsace.fr/PARTAGE/CHAPELLE/Scene/Data/MESH.3mxb')}` },
   ];
+  // MapTiler GeoSplats (HLOD splats) → 3D Tiles via /geosplats (key+referer handled server-side; the
+  // browser only talks to our middleware). model.json URLs carry MapTiler demo keys (origin-restricted).
+  if (selectedFormat === 'geosplats') {
+    const gs = (mdl) => `${MW}/geosplats/tileset.json?url=${encodeURIComponent(mdl)}&lod=5`;
+    return [
+      { id: 'gs-1', label: '✨ GeoSplats — model A (Baltic)', type: 'splat', url: gs('https://api.maptiler.com/splats/019e67bf-b89b-743d-91dd-79f7f4b4bd4e/model.json?key=GKF1QdQ4MpjgqtKiQuxR') },
+      { id: 'gs-2', label: '✨ GeoSplats — model B', type: 'splat', url: gs('https://api.maptiler.com/splats/019e5ff3-e23b-7063-bed2-c385d3e96d99/model.json?key=mNLmXyaTH4gRlwJHSYWp') },
+    ];
+  }
   const f = fmtMeta(selectedFormat);
   if (!f) return [];
   const pills = f.assets.map(a => ({ id: `${f.fmt}-${a.id}`, label: `${f.icon} ${a.label}`, type: f.type, url: assetUrl(f, a), octree: f.octree,
@@ -965,7 +974,7 @@ function buildPresetBar() {
     seg('tiling', [['implicit-to-explicit', '⬡→⬢ implicit→explicit'], ['upgrade', '⬆ upgrade'], ['packages', '📦 packages']], toolName, setTool, '3dtiles-tools operation');
   } else {
     // 3) FORMAT  4) tiling toggle (octree)  5) centroids (splat, stream)  6) asset pills
-    seg('fmt', [...FORMATS.map(f => [f.fmt, `${f.icon} ${f.label}`]), ['3dtiles', '◈ 3D Tiles'], ['packages', '📦 Packages'], ['bing', '🗺 Bing 3D'], ['threemx', '🏛 3MX']], selectedFormat, setFormat, 'source format');
+    seg('fmt', [...FORMATS.map(f => [f.fmt, `${f.icon} ${f.label}`]), ['3dtiles', '◈ 3D Tiles'], ['packages', '📦 Packages'], ['bing', '🗺 Bing 3D'], ['threemx', '🏛 3MX'], ['geosplats', '✨ GeoSplats']], selectedFormat, setFormat, 'source format');
     if (fmtMeta(selectedFormat)?.octree) seg('tiling', [['implicit', '⬡ implicit'], ['explicit', '⬢ explicit']], tilingMode, setTiling, 'octree tiling');
     if (viewerMode === 'stream' && canCentroids()) {     // centroids-only: tiled-splat formats → POINTS preview
       const cb = document.createElement('button');
