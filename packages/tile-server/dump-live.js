@@ -64,7 +64,9 @@ function extractSpz(glb) {
   const bv = json.bufferViews?.[ext.bufferView]; if (!bv) return null;
   const binStart = 28 + jl;                                  // 12B header + JSON chunk(8B+jl) + BIN chunk header(8B)
   const blob = glb.subarray(binStart + (bv.byteOffset || 0), binStart + (bv.byteOffset || 0) + bv.byteLength);
-  return { blob, nodeM: nodeMatrix(json) };
+  const splatNode = (json.nodes || []).find(n => n.mesh === 0) || json.nodes?.[0];
+  const hasNodeMatrix = Array.isArray(splatNode?.matrix) && splatNode.matrix.length === 16;
+  return { blob, nodeM: nodeMatrix(json), hasNodeMatrix };
 }
 
 // Local matrix of the GLB node that carries the splat mesh (mesh 0). Splat GLBs typically store a single
@@ -85,7 +87,8 @@ function nodeMatrix(json) {
 
 const IDENT = [1,0,0,0, 0,1,0,0, 0,0,1,0, 0,0,0,1];
 // 3D Tiles glTF content is Y-up; Cesium applies RX(+90): (x,y,z)→(x,−z,y). Bake it so our ECEF matches.
-const YUP_ZUP = [1,0,0,0, 0,0,1,0, 0,-1,0,0, 0,0,0,1];
+const YUP_ZUP    = [1,0,0,0, 0,0,1,0, 0,-1,0,0, 0,0,0,1];   // RX(−90): (x,y,z)→(x,z,−y)  [historical default]
+const YUP_ZUP_P90= [1,0,0,0, 0,0,-1,0, 0,1,0,0, 0,0,0,1];   // RX(+90): (x,y,z)→(x,−z,y)  [Cesium Y_UP_TO_Z_UP]
 function matMul(a, b) {                       // column-major 4×4, returns a·b
   const o = new Array(16);
   for (let c = 0; c < 4; c++) for (let r = 0; r < 4; r++)
@@ -339,6 +342,16 @@ export async function handleDump(req, res, u) {
     try {
       const fmt = ['sog', 'glb', 'ply'].includes(u.searchParams.get('format')) ? u.searchParams.get('format') : 'spz';
       const clip = u.searchParams.get('clip') !== '0' && u.searchParams.get('clip') !== 'false';   // per-splat-centroid clip (default ON)
+      // Y-up→Z-up rotation is source-dependent (verified WL vs LCC, 2026-07-01):
+      //  • standard/third-party splat tilesets bake per-tile placement into an explicit glb node.matrix and
+      //    are authored Y-up per the glTF spec → need Cesium's RX(+90) (Y_UP_TO_Z_UP), else the export is
+      //    vertically flipped (poles point away from the ground).
+      //  • OUR converters (buildSpzGlb) emit a bare {mesh:0} node (no matrix) and bake orientation into the
+      //    tileset root transform (lccGeoref [East,−Up,North]) → need RX(−90), else they flip.
+      // Detect per-tile from node.matrix presence; &rx=90|-90 forces it.
+      const rxForce = u.searchParams.get('rx');
+      const rxPick = (hasNodeMatrix) => rxForce === '90' ? YUP_ZUP_P90 : rxForce === '-90' ? YUP_ZUP
+        : (hasNodeMatrix ? YUP_ZUP_P90 : YUP_ZUP);
       // Output frame: a local **Y-up** frame anchored at the SOURCE scene's own origin (not the bbox centre),
       // so every crop of the same source shares ONE coordinate system → multiple boxes line up. Y-up (not
       // ENU Z-up!) because splat-transform's engine/IDENTITY space is PlayCanvas Y-up — emitting Z-up would
@@ -360,7 +373,7 @@ export async function handleDump(req, res, u) {
         // SPZ positions are node-local: the full tile-local → ECEF chain is worldM · YUP_ZUP · nodeM
         // (nodeM carries the spz→glTF axis fix + per-tile translation). Verified: SPZ centroids land in
         // the tile box only with this matrix.
-        const Mfull = matMul(matMul(worldM, YUP_ZUP), sp.nodeM);
+        const Mfull = matMul(matMul(worldM, rxPick(sp.hasNodeMatrix)), sp.nodeM);
         if (clip) {                                       // drop splats whose centroid is outside the bbox
           const xs = dt.getColumnByName('x')?.data, ys = dt.getColumnByName('y')?.data, zs = dt.getColumnByName('z')?.data;
           if (xs && ys && zs) {

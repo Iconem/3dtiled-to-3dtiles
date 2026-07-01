@@ -5,6 +5,19 @@ Format loosely follows [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+### Fixed — 2026-07-01 (`main`: splat crop-export vertical flip + GeoSplats orientation)
+- **Splat crop export (`/dump/splat`) flipped third-party 3D-Tiles splats vertically** (WL GSplat: the
+  electric pole pointed away from the ground; adjacent tiles looked vertically offset). The dump baked a
+  fixed `RX(−90)` Y-up→Z-up, but Cesium/3d-tiles-renderer use `RX(+90)` (`Y_UP_TO_Z_UP`) for standard
+  Y-up glTF. Our own converters (`buildSpzGlb`) emit a bare `{mesh:0}` node and bake orientation into the
+  tileset root transform, so they need `RX(−90)`; standard tilesets bake per-tile placement into an explicit
+  `node.matrix` and need `RX(+90)`. The dump now **auto-detects per tile** (explicit `node.matrix` → RX(+90),
+  else RX(−90)); `&rx=90|-90` forces it. Verified via Y-histogram: WL and LCC exports both land ground-down.
+- **GeoSplats rendered as a vertical slab** in Cesium and 3DTRJS (models A and B). Both renderers apply the
+  glTF Y-up→Z-up correction before the tileset transform, so the frame must be the **standard ENU
+  `[East, North, Up]`** — the previous `[East, Up, −North]` double-rotated it upright→sideways. Now default;
+  `&frame=` selects variants. (B is a genuinely small ~4 m capture, not mis-scaled.)
+
 ### Fixed — 2026-07-01 (`main`: GeoSplats now render in Cesium + correct altitude)
 - **Cesium failed every GeoSplats tile** with `attribute.value.length must be in the range [1, 4]`. Root
   cause: the tileset.json didn't declare the `3DTILES_content_gltf` → `KHR_gaussian_splatting` extension, so
