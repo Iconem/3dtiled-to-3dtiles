@@ -51,7 +51,19 @@ function dataTableToSplatGlb(dt) {
 }
 
 const REFERER = 'https://www.maptiler.com/';
-const gfetch = (u) => fetch(u, { headers: { Referer: REFERER, Origin: 'https://www.maptiler.com' } });
+const sleep = (ms) => new Promise(r => setTimeout(r, ms));
+// The viewer streams many octants in parallel; MapTiler rate-limits bursts (429) and occasionally drops a
+// connection, which surfaced as sporadic "Request has failed" tile errors + visible gaps. Retry transient
+// failures (429/5xx/network) with exponential backoff so tiles fill in instead of failing.
+async function gfetch(u, tries = 4) {
+  for (let i = 0; ; i++) {
+    try {
+      const r = await fetch(u, { headers: { Referer: REFERER, Origin: 'https://www.maptiler.com' } });
+      if (r.ok || i >= tries - 1 || !(r.status === 429 || r.status >= 500)) return r;
+    } catch (e) { if (i >= tries - 1) throw e; }
+    await sleep(200 * 2 ** i);                                 // 200, 400, 800 ms
+  }
+}
 const ui = (grid) => ({ 1: 1, 8: 3, 64: 6, 512: 9 }[grid] ?? 1);   // octant-id bit width per grid (SDK ne.ui)
 
 // tiny cache so per-tile requests don't re-fetch model.json / metadata.json each time
@@ -89,16 +101,27 @@ function eulerXYZ(xd, yd, zd) {
 // NOTE: readSog already decodes means via the meta.json codebook to REAL local units (~hundreds of m),
 // so `model_scale` (which the SDK applies to its raw-texture pipeline, even `/=256`) must NOT be applied
 // here — doing so shrank the scene to sub-metre and broke refinement. We place 1:1: translate the whole
-// scene by −center (so it sits at lat/lon/alt), apply the model Euler (offset.[xyz]_rot), then a Y-up ENU
-// frame [East, Up, −North] = the MapLibre model world the SDK rotates in (X=East, Y=Up, Z=South). The
-// Euler offset is per-model (A y_rot=-178, B y_rot=217) — real orientation, applied as Rx·Ry·Rz (SDK order).
-// `center` = union bbox centre of all sub-models. model_scale is NOT applied (readSog gives real units).
-function georefTransform(gp, center) {
-  const e = llhToEcef(gp.lon, gp.lat, gp.alt || 0);
+// scene by −center (so it sits at lat/lon/alt), apply the model Euler (offset.[xyz]_rot), then the ENU frame.
+// ORIENTATION: the GLB splats are Y-up (readSog / PlayCanvas convention — Y is the thin vertical axis; verified
+// union extent X≈3940 m, Z≈1800 m, Y≈328 m). The frame that lands them FLAT and upright in Cesium is
+// [East, Up, −North] (col1 = content Y → world Up) — the same Y-up placement SOG uses (RX(−90) baked into an
+// ENU frame). [East, −Up, North] (the LCC/readSplatFile convention) stands the scene up as a vertical slab,
+// so it is NOT the default here. &flipup=1 selects it for the rare upside-down capture. The per-model SDK
+// Euler (offset.[xyz]_rot) is OFF by default (it's authored in MapLibre's frame and mis-rotates ours); &euler=1.
+// ALTITUDE: global_position.alt is in MapTiler's model_scale-normalised MapLibre frame, NOT our 1:1 ellipsoidal
+// metres — using it raw buries the scene (model A alt=−307.6 → ~300 m underground; alt·model_scale≈−0.2 m ≈ 0).
+// So we default the placement height to 0 (scene origin on the ellipsoid ≈ ground for these near-sea-level
+// captures). TUNING knobs on /geosplats/tileset.json (converge without redeploys): &flipup=1 → [East, −Up,
+// North]; &yaw=<deg> rotate about up (heading); &euler=1 apply SDK offset Euler; &alt=<m> set placement height.
+function georefTransform(gp, center, opt = {}) {
+  const alt = opt.alt != null ? opt.alt : 0;
+  const e = llhToEcef(gp.lon, gp.lat, alt);
   const { EAST: E, NORTH: N, UP: U } = enuFrame(gp.lon, gp.lat);
-  const place = [ E[0],E[1],E[2],0,  U[0],U[1],U[2],0,  -N[0],-N[1],-N[2],0,  e[0],e[1],e[2],1 ];  // [East, Up, −North, origin]
+  const uy = opt.flipUp ? -1 : 1;                            // default +Up (Y-up, scene lies flat); &flipup → −Up
+  const place = [ E[0],E[1],E[2],0,  uy*U[0],uy*U[1],uy*U[2],0,  -uy*N[0],-uy*N[1],-uy*N[2],0,  e[0],e[1],e[2],1 ];
   const o = gp.offset || {};
-  const rot = eulerXYZ(o.x_rot || 0, o.y_rot || 0, o.z_rot || 0);
+  let rot = opt.euler ? eulerXYZ(o.x_rot || 0, o.y_rot || 0, o.z_rot || 0) : [1,0,0,0, 0,1,0,0, 0,0,1,0, 0,0,0,1];
+  if (opt.yaw) { const c=Math.cos(opt.yaw*D2R), s=Math.sin(opt.yaw*D2R); rot = matMul([c,0,-s,0, 0,1,0,0, s,0,c,0, 0,0,0,1], rot); }  // extra yaw about up (local Y)
   const recenter = [ 1,0,0,0, 0,1,0,0, 0,0,1,0, -center[0], -center[1], -center[2], 1 ];
   return matMul(matMul(place, rot), recenter);
 }
@@ -155,10 +178,16 @@ function buildSubmodelOctree(meta, m, modelUrl, enc) {
 async function octantDataTable(splatsBase, modelId, baseurl, key, grid, oct, lod) {
   const meta = await fetchMeta(splatsBase, modelId, baseurl, key);
   const octBin = oct.toString(2).padStart(ui(grid), '0');
-  const dir = `delta_data/grid_${grid}/octant_${octBin}_LOD${lod}/`;
-  const want = meta.entries.filter(en => en[0].includes(`grid_${grid}/octant_${octBin}_LOD${lod}/`));
-  if (!want.length) throw new Error(`no entries for ${dir}`);
-  const buf = new Uint8Array(await (await gfetch(`${splatsBase}/${modelId}/${baseurl}/${grid}/${oct}/${lod}?key=${key}`)).arrayBuffer());
+  const prefix = `grid_${grid}/octant_${octBin}_LOD`;
+  // cell.counts[] can claim a LOD that has no delta_data entries (data was only baked to a coarser LOD for
+  // this octant). Rather than 500, fall back to the highest available LOD ≤ requested (else the lowest).
+  const avail = [...new Set(meta.entries
+    .map(en => { const m = en[0].match(new RegExp(prefix.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '(\\d+)/')); return m ? +m[1] : null; })
+    .filter(v => v != null))].sort((a, b) => a - b);
+  if (!avail.length) throw new Error(`no entries for octant ${octBin} (grid ${grid})`);
+  const useLod = avail.includes(lod) ? lod : (avail.filter(v => v <= lod).pop() ?? avail[0]);
+  const want = meta.entries.filter(en => en[0].includes(`${prefix}${useLod}/`));
+  const buf = new Uint8Array(await (await gfetch(`${splatsBase}/${modelId}/${baseurl}/${grid}/${oct}/${useLod}?key=${key}`)).arrayBuffer());
   const fs = new MemoryReadFileSystem();
   let off = 0;                                                // bundle = entries concatenated in array order
   for (const en of want) { const name = en[0].split('/').pop(); fs.set(name, buf.subarray(off, off + en[2])); off += en[2]; }
@@ -196,9 +225,22 @@ export async function handleGeoSplats(req, res, u) {
           content: { uri: `/geosplats/tile.glb?url=${enc(modelUrl)}&m=${i}&grid=1&oct=0&lod=${lod}` } };
       });
       // octant boxes are in raw local coords; root.transform recenters (−center) + places them on the globe.
-      const root = { transform: georefTransform(gp, center), geometricError: ghalf * 4, refine: 'ADD',
+      const opt = { flipUp: u.searchParams.get('flipup') === '1', euler: u.searchParams.get('euler') === '1',
+        yaw: u.searchParams.has('yaw') ? Number(u.searchParams.get('yaw')) : 0,
+        alt: u.searchParams.has('alt') ? Number(u.searchParams.get('alt')) : null };
+      const root = { transform: georefTransform(gp, center, opt), geometricError: ghalf * 4, refine: 'ADD',
         boundingVolume: { box: [center[0],center[1],center[2], ghalf,0,0, 0,ghalf,0, 0,0,ghalf] }, children };
-      const ts = { asset: { version: '1.1', tilesetVersion: 'geosplats' }, geometricError: ghalf * 4, root };
+      // Declare the gaussian-splatting glTF extension at the tileset level. Cesium routes a tileset to its
+      // native Gaussian-splat renderer ONLY when 3DTILES_content_gltf.extensionsRequired lists
+      // KHR_gaussian_splatting (see GaussianSplat3DTileContent.tilesetRequiresGaussianSplattingExt). Without
+      // this block Cesium loads our splat GLBs as ordinary meshes → "attribute.value.length must be in [1,4]"
+      // on the splat-only SCALE/ROTATION attributes. Every other splat converter here emits the same block.
+      const ts = { asset: { version: '1.1', tilesetVersion: 'geosplats' }, geometricError: ghalf * 4, root,
+        extensionsUsed: ['3DTILES_content_gltf'],
+        extensions: { '3DTILES_content_gltf': {
+          extensionsUsed:     ['KHR_gaussian_splatting', 'KHR_gaussian_splatting_compression_spz_2'],
+          extensionsRequired: ['KHR_gaussian_splatting', 'KHR_gaussian_splatting_compression_spz_2'],
+        }} };
       return void sendJson(res, ts), true;
     }
 

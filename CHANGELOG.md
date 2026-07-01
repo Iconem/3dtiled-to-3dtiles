@@ -5,6 +5,23 @@ Format loosely follows [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+### Fixed — 2026-07-01 (`main`: GeoSplats now render in Cesium + correct altitude)
+- **Cesium failed every GeoSplats tile** with `attribute.value.length must be in the range [1, 4]`. Root
+  cause: the tileset.json didn't declare the `3DTILES_content_gltf` → `KHR_gaussian_splatting` extension, so
+  Cesium routed our splat GLBs to its **mesh** loader (which chokes on the splat-only SCALE/ROTATION
+  attributes) instead of its native Gaussian-splat renderer. The tileset now emits that extension block —
+  the same one every other splat converter here already emits (`GaussianSplat3DTileContent.tilesetRequires
+  GaussianSplattingExt` gates on it). GeoSplats render in **both** Cesium and 3DTRJS; the force-3DTRJS
+  workaround in `viewer.html` is removed.
+- **Scene was buried ~300 m underground.** `global_position.alt` is in MapTiler's `model_scale`-normalised
+  MapLibre frame, not our 1:1 ellipsoidal metres (model A `alt=−307.6`; `alt·model_scale ≈ −0.2 m ≈ 0`).
+  Placement height now defaults to **0** (origin on the ellipsoid ≈ ground for these near-sea-level
+  captures); `&alt=<m>` overrides. Verified in Cesium: scene sits on the ground, correctly oriented
+  (measured `X→East, Y→Up, Z→North`).
+- **Sporadic tile failures.** Transient MapTiler rate-limiting (429) now retried with exponential backoff;
+  deep octants whose `counts[]` claim a LOD with no baked `delta_data` entries now fall back to the highest
+  available LOD instead of returning HTTP 500.
+
 ### Added — 2026-07-01 (`main`: GeoSplats HLOD octree)
 - **`/geosplats` now emits an HLOD octree** from each sub-model's `voxel_grids` (grid_1 → grid_8 →
   grid_64), instead of one tile per sub-model. Parent→child by **spatial containment** (child octant

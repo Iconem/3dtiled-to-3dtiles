@@ -999,8 +999,9 @@ function buildPresetBar() {
 }
 
 function selectPreset(p) {
-  // (GeoSplats tiles are KHR_gaussian_splatting GLBs — Cesium renders them natively now that the unlit
-  //  CustomShader is no longer attached to splats; 3DTRJS also works. No forced renderer switch.)
+  // (GeoSplats tiles now declare the 3DTILES_content_gltf → KHR_gaussian_splatting extension at the tileset
+  //  level, so Cesium routes them to its native Gaussian-splat renderer — same as every other splat format.
+  //  No forced renderer switch; both Cesium and 3DTRJS render them.)
   // City pills (Bing) share the world tileset's URL + carry a flyTo target. If that dataset is already
   // loaded, just fly there (no reload); otherwise load it and fly once it's ready.
   const sameDatasetLoaded = !p.custom && currentPresetObj && currentPresetObj.url === p.url;
