@@ -5,6 +5,36 @@ Format loosely follows [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+### Added — 2026-07-01 (`main`: MapTiler GeoSplats → 3D Tiles live converter)
+- **`/geosplats` stream converter** (`packages/tile-server/geosplats-live.js`) — turns a MapTiler
+  **GeoSplats** `model.json` into OGC 3D Tiles, reverse-engineered from the format + SDK bundle
+  (see [`docs-references/maptiler-geosplats.md`](docs-references/maptiler-geosplats.md)):
+  - `GET /geosplats/tileset.json?url=<model.json>[&lod=1..8]` → georeferenced tileset, one tile per
+    sub-model (grid_1/octant_0), placed via `global_position` (lat/lon/alt) in a local **Y-up** ENU frame
+    (`[East, Up, −North]`), recentred by the union bbox of all sub-models.
+  - `GET /geosplats/tile.glb?…&m&grid&oct&lod` → fetch the octant bundle from the API proxy
+    (`…/<modelId>/<baseurl>/<grid>/<octant>/<lod>` = the `entries` files concatenated in array order),
+    slice by the TOC, `readSog` → **`KHR_gaussian_splatting_compression_spz_2`** GLB (`buildSplatTileGlb`).
+  - **Keys are origin-restricted**, so the upstream fetch runs server-side with
+    `Referer: https://www.maptiler.com/` — the browser only ever talks to our middleware.
+  - Scale: `readSog` already decodes means to real local units, so `model_scale` (SDK raw-texture path,
+    even `/=256`) is **not** applied; positions are placed 1:1 (was shrinking the scene sub-metre).
+  - HLOD over the `voxel_grids` octree is a TODO (MVP = one tile per sub-model).
+- **Viewer: ✨ GeoSplats format pills** (models A/B) → `/geosplats/tileset.json`. README + a
+  reverse-engineered format mirror added under `docs-references/`.
+
+### Fixed — 2026-07-01 (`main`: splat dump orientation + GeoSplats render)
+- **Splat dump emitted ENU Z-up → ~90° tilt in SuperSplat** ("grass aligned along some directions"):
+  splat-transform's engine space is PlayCanvas **Y-up** (`Transform.PLY` is only Rz180). The `/dump/splat`
+  output frame is now local **Y-up** (`[East, Up, −North]`). Verified: LCC Guan height lands on Y.
+- **Multi-tile splat dumps stacked all tiles at the origin** — each tile's node-local SPZ was never baked
+  into a common frame, so `combine()` (identical transforms) baked nothing. Now each tile's `DataTable`
+  is tagged with its `worldM·YUP_ZUP·nodeM` placement (→ positions + quats + scales + SH baked), anchored
+  at the **source scene's own root origin** so multiple crops share one coordinate system.
+- **Cesium crashed on splat tilesets** (fragment-shader compile error, `POINTS`+`UNLIT`): the shadeless
+  CustomShader was being attached to splats. It's now **mesh-only** (Bing/3MX) — Cesium renders
+  `KHR_gaussian_splatting` GLBs natively, so GeoSplats/other splats load there without the crash.
+
 ### Fixed — 2026-06-30 (`main`: 3DTRJS gizmo drag + mousewheel crash)
 - **Crop gizmo drag was inverted/"applied twice":** `_closestOnAxis` (closest point of the mouse ray to a
   handle's world axis) had a sign error — it computed `(f − b·e)/(1−b²)` = **−s**, reflecting the dragged

@@ -999,9 +999,8 @@ function buildPresetBar() {
 }
 
 function selectPreset(p) {
-  // GeoSplats tiles are KHR_gaussian_splatting GLBs — render them via 3DTRJS (GaussianSplatPlugin).
-  // Cesium's points+unlit shader path crashes on them, so force the Three.js renderer first.
-  if (!_3dtMode && /\/geosplats\//.test(p.url || '')) { setRenderer('3dtrjs'); }
+  // (GeoSplats tiles are KHR_gaussian_splatting GLBs — Cesium renders them natively now that the unlit
+  //  CustomShader is no longer attached to splats; 3DTRJS also works. No forced renderer switch.)
   // City pills (Bing) share the world tileset's URL + carry a flyTo target. If that dataset is already
   // loaded, just fly there (no reload); otherwise load it and fly once it's ready.
   const sameDatasetLoaded = !p.custom && currentPresetObj && currentPresetObj.url === p.url;
@@ -1386,6 +1385,10 @@ function toggleDebug(on) {
 // into the textures, so UNLIT avoids dark/over-shaded results; brightness multiplies the tile colour.
 function applyShading() {
   if (_3dtMode || !currentTileset || !window.Cesium) return;
+  // Splats: NEVER attach a CustomShader. Cesium renders KHR_gaussian_splatting GLBs with its own splat
+  // shader; injecting UNLIT/a custom fragment there produces an invalid program (POINTS+unlit → shader
+  // compile error that halts rendering). Shadeless is only for baked-lighting photogrammetry (Bing/3MX).
+  if (currentType === 'splat') { try { currentTileset.customShader = undefined; } catch {} return; }
   const unlit = document.getElementById('shadeless-toggle')?.checked;
   const b = parseFloat(document.getElementById('brightness-input')?.value) || 1;
   try {

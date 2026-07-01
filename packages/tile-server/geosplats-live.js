@@ -51,7 +51,6 @@ function dataTableToSplatGlb(dt) {
 }
 
 const REFERER = 'https://www.maptiler.com/';
-const D2R = Math.PI / 180;
 const gfetch = (u) => fetch(u, { headers: { Referer: REFERER, Origin: 'https://www.maptiler.com' } });
 const ui = (grid) => ({ 1: 1, 8: 3, 64: 6, 512: 9 }[grid] ?? 1);   // octant-id bit width per grid (SDK ne.ui)
 
@@ -74,32 +73,22 @@ const fetchMeta = (splatsBase, modelId, baseurl, key) =>
 
 // column-major 4×4 multiply (a·b)
 function matMul(a, b) { const o = new Array(16); for (let c = 0; c < 4; c++) for (let r = 0; r < 4; r++) o[c*4+r] = a[r]*b[c*4]+a[4+r]*b[c*4+1]+a[8+r]*b[c*4+2]+a[12+r]*b[c*4+3]; return o; }
-// Euler (deg) → column-major rotation, order Rz·Ry·Rx.
-function euler(xd, yd, zd) {
-  const cx=Math.cos(xd*D2R), sx=Math.sin(xd*D2R), cy=Math.cos(yd*D2R), sy=Math.sin(yd*D2R), cz=Math.cos(zd*D2R), sz=Math.sin(zd*D2R);
-  // R = Rz*Ry*Rx (row-major), emitted column-major
-  const m = [
-    cz*cy,            sz*cy,           -sy,
-    cz*sy*sx - sz*cx, sz*sy*sx + cz*cx, cy*sx,
-    cz*sy*cx + sz*sx, sz*sy*cx - cz*sx, cy*cx,
-  ];
-  return [ m[0],m[1],m[2],0, m[3],m[4],m[5],0, m[6],m[7],m[8],0, 0,0,0,1 ];
-}
 
 // 3D Tiles root transform placing GeoSplats local coords on the globe from `global_position`.
 // NOTE: readSog already decodes means via the meta.json codebook to REAL local units (~hundreds of m),
 // so `model_scale` (which the SDK applies to its raw-texture pipeline, even `/=256`) must NOT be applied
 // here — doing so shrank the scene to sub-metre and broke refinement. We place 1:1: translate the whole
-// scene by −center (so it sits at lat/lon/alt), apply the Euler offset, then the [East,−Up,North] frame
-// (bakes splat Y-up → ECEF Z-up, the lccGeoref convention). `center` = union bbox centre of all sub-models.
+// scene by −center (so it sits at lat/lon/alt), then a **Y-up** ENU frame. GeoSplats local data is Y-up
+// (smallest extent = height on Y; X/Z are the ~square ground footprint), so the frame columns are
+// [East, Up, −North] (local +Y → ECEF Up = upright; right-handed). The `global_position.offset` Euler
+// (y_rot≈-178, z_rot=180) is the SDK's own raw-pipeline convention and does NOT compose with this frame
+// (it tipped the scene vertical) — omitted. `center` = union bbox centre of all sub-models.
 function georefTransform(gp, center) {
   const e = llhToEcef(gp.lon, gp.lat, gp.alt || 0);
   const { EAST: E, NORTH: N, UP: U } = enuFrame(gp.lon, gp.lat);
-  const place = [ E[0],E[1],E[2],0,  -U[0],-U[1],-U[2],0,  N[0],N[1],N[2],0,  e[0],e[1],e[2],1 ];  // [East,−Up,North,origin]
-  const o = gp.offset || {};
-  const rot = euler(o.x_rot || 0, o.y_rot || 0, o.z_rot || 0);
-  const recenter = [ 1,0,0,0, 0,1,0,0, 0,0,1,0, -center[0]+(o.x||0), -center[1]+(o.y||0), -center[2]+(o.z||0), 1 ];
-  return matMul(matMul(place, rot), recenter);
+  const place = [ E[0],E[1],E[2],0,  U[0],U[1],U[2],0,  -N[0],-N[1],-N[2],0,  e[0],e[1],e[2],1 ];  // [East, Up, −North, origin]
+  const recenter = [ 1,0,0,0, 0,1,0,0, 0,0,1,0, -center[0], -center[1], -center[2], 1 ];
+  return matMul(place, recenter);
 }
 
 // Fetch one octant bundle and decode it to a splat DataTable via readSog.
