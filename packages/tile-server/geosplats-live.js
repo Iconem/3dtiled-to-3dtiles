@@ -98,27 +98,37 @@ function eulerXYZ(xd, yd, zd) {
 }
 
 // 3D Tiles root transform placing GeoSplats local coords on the globe from `global_position`.
-// NOTE: readSog already decodes means via the meta.json codebook to REAL local units (~hundreds of m),
-// so `model_scale` (which the SDK applies to its raw-texture pipeline, even `/=256`) must NOT be applied
-// here — doing so shrank the scene to sub-metre and broke refinement. We place 1:1: translate the whole
-// scene by −center (so it sits at lat/lon/alt), apply the model Euler (offset.[xyz]_rot), then the ENU frame.
-// ORIENTATION: the GLB splats are Y-up (readSog / PlayCanvas convention — Y is the thin vertical axis; verified
-// union extent X≈3940 m, Z≈1800 m, Y≈328 m). The frame that lands them FLAT and upright in Cesium is
-// [East, Up, −North] (col1 = content Y → world Up) — the same Y-up placement SOG uses (RX(−90) baked into an
-// ENU frame). [East, −Up, North] (the LCC/readSplatFile convention) stands the scene up as a vertical slab,
-// so it is NOT the default here. &flipup=1 selects it for the rare upside-down capture. The per-model SDK
-// Euler (offset.[xyz]_rot) is OFF by default (it's authored in MapLibre's frame and mis-rotates ours); &euler=1.
+// NOTE: readSog decodes means via the meta.json codebook; the local units are per-model (A ≈ 300 m aerial,
+// B ≈ 4 m object — verified union extents). `model_scale` is NOT applied (it maps to MapTiler's MapLibre
+// mercator frame, not metres — applying it shrinks every scene to sub-metre). We place 1:1: translate by
+// −center (so the scene sits at lat/lon), apply the ENU frame.
+// ORIENTATION (verified in-browser 2026-07-01, Cesium AND 3DTRJS): use the STANDARD ENU frame
+// [East, North, Up] ('enu'). Both renderers apply the glTF Y-up→Z-up correction to the splat content BEFORE
+// this transform, so the content is already Z-up here and plain ENU lands it FLAT + upright. Earlier frames
+// that pre-baked a Y-up→Z-up rotation ([East, Up, −North] and [East, −Up, North]) DOUBLE-rotated it and stood
+// the scene up as a vertical slab — those are the wrong defaults. DEBUG sweep: &frame=enu|eun|e-un|e-nu|enu2.
+// The per-model SDK Euler (offset.[xyz]_rot) is OFF by default (authored in MapLibre's frame; &euler=1).
 // ALTITUDE: global_position.alt is in MapTiler's model_scale-normalised MapLibre frame, NOT our 1:1 ellipsoidal
 // metres — using it raw buries the scene (model A alt=−307.6 → ~300 m underground; alt·model_scale≈−0.2 m ≈ 0).
 // So we default the placement height to 0 (scene origin on the ellipsoid ≈ ground for these near-sea-level
-// captures). TUNING knobs on /geosplats/tileset.json (converge without redeploys): &flipup=1 → [East, −Up,
-// North]; &yaw=<deg> rotate about up (heading); &euler=1 apply SDK offset Euler; &alt=<m> set placement height.
+// captures). TUNING knobs: &frame=<name> pick ENU variant; &yaw=<deg> heading; &euler=1 SDK Euler; &alt=<m>.
+// Named ENU frames: which world axis each CONTENT column (X,Y,Z) maps to. Cesium AND 3d-tiles-renderer both
+// apply the glTF Y-up→Z-up correction BEFORE this transform, so 'enu' (standard [East,North,Up]) is the
+// right one for Z-up-corrected content. DEBUG sweep knob &frame=<name> picks one without a redeploy.
+const FRAMES = (E, N, U) => ({
+  enu:   [ E, N, U ],           // [East, North, Up]  — standard; correct once Cesium/3DTRJS un-swap glTF Y-up
+  eun:   [ E, U, neg(N) ],      // [East, Up, −North]
+  'e-un':[ E, neg(U), N ],      // [East, −Up, North] (lcc convention)
+  'e-nu':[ E, neg(N), U ],      // [East, −North, Up]
+  enu2:  [ E, neg(N), neg(U) ], // [East, −North, −Up]
+});
+const neg = (v) => [-v[0], -v[1], -v[2]];
 function georefTransform(gp, center, opt = {}) {
   const alt = opt.alt != null ? opt.alt : 0;
   const e = llhToEcef(gp.lon, gp.lat, alt);
   const { EAST: E, NORTH: N, UP: U } = enuFrame(gp.lon, gp.lat);
-  const uy = opt.flipUp ? -1 : 1;                            // default +Up (Y-up, scene lies flat); &flipup → −Up
-  const place = [ E[0],E[1],E[2],0,  uy*U[0],uy*U[1],uy*U[2],0,  -uy*N[0],-uy*N[1],-uy*N[2],0,  e[0],e[1],e[2],1 ];
+  const [C0, C1, C2] = (FRAMES(E, N, U)[opt.frame] || FRAMES(E, N, U).enu);
+  const place = [ C0[0],C0[1],C0[2],0,  C1[0],C1[1],C1[2],0,  C2[0],C2[1],C2[2],0,  e[0],e[1],e[2],1 ];
   const o = gp.offset || {};
   let rot = opt.euler ? eulerXYZ(o.x_rot || 0, o.y_rot || 0, o.z_rot || 0) : [1,0,0,0, 0,1,0,0, 0,0,1,0, 0,0,0,1];
   if (opt.yaw) { const c=Math.cos(opt.yaw*D2R), s=Math.sin(opt.yaw*D2R); rot = matMul([c,0,-s,0, 0,1,0,0, s,0,c,0, 0,0,0,1], rot); }  // extra yaw about up (local Y)
@@ -225,7 +235,7 @@ export async function handleGeoSplats(req, res, u) {
           content: { uri: `/geosplats/tile.glb?url=${enc(modelUrl)}&m=${i}&grid=1&oct=0&lod=${lod}` } };
       });
       // octant boxes are in raw local coords; root.transform recenters (−center) + places them on the globe.
-      const opt = { flipUp: u.searchParams.get('flipup') === '1', euler: u.searchParams.get('euler') === '1',
+      const opt = { frame: u.searchParams.get('frame') || 'enu', euler: u.searchParams.get('euler') === '1',
         yaw: u.searchParams.has('yaw') ? Number(u.searchParams.get('yaw')) : 0,
         alt: u.searchParams.has('alt') ? Number(u.searchParams.get('alt')) : null };
       const root = { transform: georefTransform(gp, center, opt), geometricError: ghalf * 4, refine: 'ADD',
