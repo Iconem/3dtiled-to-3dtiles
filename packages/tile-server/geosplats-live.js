@@ -73,22 +73,82 @@ const fetchMeta = (splatsBase, modelId, baseurl, key) =>
 
 // column-major 4×4 multiply (a·b)
 function matMul(a, b) { const o = new Array(16); for (let c = 0; c < 4; c++) for (let r = 0; r < 4; r++) o[c*4+r] = a[r]*b[c*4]+a[4+r]*b[c*4+1]+a[8+r]*b[c*4+2]+a[12+r]*b[c*4+3]; return o; }
+const D2R = Math.PI / 180;
+// GeoSplats model rotation from global_position.offset, decoded from the SDK: quat Rx(x)·Ry(y)·Rz(z)
+// (axis-angle, right-multiplied) applied in the MapLibre Y-up model world (X=East, Y=Up, Z=South) —
+// which is exactly our [East, Up, −North] placement frame. Column-major, order Rx·Ry·Rz.
+function eulerXYZ(xd, yd, zd) {
+  const cx=Math.cos(xd*D2R), sx=Math.sin(xd*D2R), cy=Math.cos(yd*D2R), sy=Math.sin(yd*D2R), cz=Math.cos(zd*D2R), sz=Math.sin(zd*D2R);
+  const Rx = [1,0,0,0, 0,cx,sx,0, 0,-sx,cx,0, 0,0,0,1];
+  const Ry = [cy,0,-sy,0, 0,1,0,0, sy,0,cy,0, 0,0,0,1];
+  const Rz = [cz,sz,0,0, -sz,cz,0,0, 0,0,1,0, 0,0,0,1];
+  return matMul(matMul(Rx, Ry), Rz);
+}
 
 // 3D Tiles root transform placing GeoSplats local coords on the globe from `global_position`.
 // NOTE: readSog already decodes means via the meta.json codebook to REAL local units (~hundreds of m),
 // so `model_scale` (which the SDK applies to its raw-texture pipeline, even `/=256`) must NOT be applied
 // here — doing so shrank the scene to sub-metre and broke refinement. We place 1:1: translate the whole
-// scene by −center (so it sits at lat/lon/alt), then a **Y-up** ENU frame. GeoSplats local data is Y-up
-// (smallest extent = height on Y; X/Z are the ~square ground footprint), so the frame columns are
-// [East, Up, −North] (local +Y → ECEF Up = upright; right-handed). The `global_position.offset` Euler
-// (y_rot≈-178, z_rot=180) is the SDK's own raw-pipeline convention and does NOT compose with this frame
-// (it tipped the scene vertical) — omitted. `center` = union bbox centre of all sub-models.
+// scene by −center (so it sits at lat/lon/alt), apply the model Euler (offset.[xyz]_rot), then a Y-up ENU
+// frame [East, Up, −North] = the MapLibre model world the SDK rotates in (X=East, Y=Up, Z=South). The
+// Euler offset is per-model (A y_rot=-178, B y_rot=217) — real orientation, applied as Rx·Ry·Rz (SDK order).
+// `center` = union bbox centre of all sub-models. model_scale is NOT applied (readSog gives real units).
 function georefTransform(gp, center) {
   const e = llhToEcef(gp.lon, gp.lat, gp.alt || 0);
   const { EAST: E, NORTH: N, UP: U } = enuFrame(gp.lon, gp.lat);
   const place = [ E[0],E[1],E[2],0,  U[0],U[1],U[2],0,  -N[0],-N[1],-N[2],0,  e[0],e[1],e[2],1 ];  // [East, Up, −North, origin]
+  const o = gp.offset || {};
+  const rot = eulerXYZ(o.x_rot || 0, o.y_rot || 0, o.z_rot || 0);
   const recenter = [ 1,0,0,0, 0,1,0,0, 0,0,1,0, -center[0], -center[1], -center[2], 1 ];
-  return matMul(place, recenter);
+  return matMul(matMul(place, rot), recenter);
+}
+
+// ── HLOD over the voxel-grid octree ─────────────────────────────────────────────
+// Each sub-model's metadata.voxel_grids has DENSE octant arrays per grid (grid_1→8→64→512; array index =
+// octant id, offset<0 = empty), each cell = { offset, total_count, counts[8] (cumulative per LOD), center,
+// bounding_box }. We map the grid hierarchy to a 3D Tiles REPLACE octree: grid_1 (whole sub-model, coarse
+// LOD) → grid_8 → grid_64 (finer octants, higher LOD). Parent→child by spatial containment (child centre
+// inside parent bbox), so we don't depend on the octant-id bit layout. geometricError = octant diagonal
+// (decreases with depth → correct REPLACE). Only visible octants stream. grid_512 omitted (grid_64 depth).
+const LOD_FOR_GRID = { 1: 4, 8: 6, 64: 8 };                  // finer grid → higher-detail LOD
+const CHILD_GRID = { 1: 8, 8: 64, 64: null };
+function octantsOf(meta, g) {
+  const arr = meta.voxel_grids?.['grid_' + g] || [];
+  const out = [];
+  arr.forEach((c, i) => { if (c && c.offset >= 0 && c.total_count > 0 && c.bounding_box) out.push({ oct: i, bb: c.bounding_box, center: c.center, counts: c.counts }); });
+  return out;
+}
+function boxOf(bb) {
+  const cx=(bb.min.x+bb.max.x)/2, cy=(bb.min.y+bb.max.y)/2, cz=(bb.min.z+bb.max.z)/2;
+  const hx=Math.max(0.5,(bb.max.x-bb.min.x)/2), hy=Math.max(0.5,(bb.max.y-bb.min.y)/2), hz=Math.max(0.5,(bb.max.z-bb.min.z)/2);
+  return { box: [cx,cy,cz, hx,0,0, 0,hy,0, 0,0,hz], diag: 2*Math.hypot(hx,hy,hz) };
+}
+const inside = (c, bb) => !!c && c.x>=bb.min.x && c.x<=bb.max.x && c.y>=bb.min.y && c.y<=bb.max.y && c.z>=bb.min.z && c.z<=bb.max.z;
+function pickLod(counts, target) {                          // clamp target to a LOD that actually has splats
+  if (!counts) return target;
+  if (counts[target-1] > 0) return target;
+  for (let L = 1; L <= 8; L++) if (counts[L-1] > 0) return L;
+  return target;
+}
+// Build the octree subtree for one sub-model. Returns the grid_1 tile (nested), or null.
+function buildSubmodelOctree(meta, m, modelUrl, enc) {
+  const byGrid = { 1: octantsOf(meta, 1), 8: octantsOf(meta, 8), 64: octantsOf(meta, 64) };
+  // grid_1's single cell usually omits bounding_box (only finer cells carry it) → synthesize from the
+  // sub-model bbox so the root octant still gets content + a proper geometricError.
+  if (!byGrid[1].length && meta.bounding_box) {
+    const g1 = meta.voxel_grids?.grid_1?.[0], bb = meta.bounding_box;
+    byGrid[1] = [{ oct: 0, bb, center: g1?.center || { x:(bb.min.x+bb.max.x)/2, y:(bb.min.y+bb.max.y)/2, z:(bb.min.z+bb.max.z)/2 }, counts: g1?.counts }];
+  }
+  const mk = (g, cell) => {
+    const b = boxOf(cell.bb), cg = CHILD_GRID[g];
+    const lod = pickLod(cell.counts, LOD_FOR_GRID[g] || 8);
+    const kids = cg ? byGrid[cg].filter(cc => inside(cc.center, cell.bb)).map(cc => mk(cg, cc)) : [];
+    return { boundingVolume: { box: b.box }, geometricError: cg ? b.diag : b.diag / 4, refine: 'REPLACE',
+      content: { uri: `/geosplats/tile.glb?url=${enc(modelUrl)}&m=${m}&grid=${g}&oct=${cell.oct}&lod=${lod}` }, children: kids };
+  };
+  if (byGrid[1].length) return mk(1, byGrid[1][0]);
+  if (byGrid[8].length) return { boundingVolume: { box: boxOf(meta.bounding_box).box }, geometricError: 1e5, refine: 'REPLACE', children: byGrid[8].map(c => mk(8, c)) };
+  return null;
 }
 
 // Fetch one octant bundle and decode it to a splat DataTable via readSog.
@@ -117,24 +177,25 @@ export async function handleGeoSplats(req, res, u) {
       const model = await fetchModel(modelUrl);
       const gp = model.global_position || {};
       const enc = (o) => encodeURIComponent(o);
-      // Gather each sub-model's local bbox (grid_1 octant) → per-tile boxes + the union (for centering).
+      // Fetch every sub-model's metadata (voxel_grids) → per-sub-model octree + the union bbox (for centering).
       const gmin = [Infinity,Infinity,Infinity], gmax = [-Infinity,-Infinity,-Infinity];
       const subs = await Promise.all((model.models || []).map(async (sm, i) => {
-        let bb = null; try { bb = (await fetchMeta(splatsBase, modelId, sm.baseurl, key)).bounding_box; } catch {}
+        let meta = null; try { meta = await fetchMeta(splatsBase, modelId, sm.baseurl, key); } catch {}
+        const bb = meta?.bounding_box;
         if (bb) { for (const k of [0,1,2]) { const lo=[bb.min.x,bb.min.y,bb.min.z][k], hi=[bb.max.x,bb.max.y,bb.max.z][k]; if(lo<gmin[k])gmin[k]=lo; if(hi>gmax[k])gmax[k]=hi; } }
-        return { i, bb };
+        return { i, meta };
       }));
       const center = gmin[0] === Infinity ? [0,0,0] : [(gmin[0]+gmax[0])/2,(gmin[1]+gmax[1])/2,(gmin[2]+gmax[2])/2];
       const ghalf = gmin[0] === Infinity ? 1000 : Math.max(gmax[0]-gmin[0], gmax[1]-gmin[1], gmax[2]-gmin[2]) / 2;
-      const children = subs.map(({ i, bb }) => {
-        let box = [center[0],center[1],center[2], ghalf,0,0, 0,ghalf,0, 0,0,ghalf], ge = ghalf/8;
-        if (bb) { const cx=(bb.min.x+bb.max.x)/2, cy=(bb.min.y+bb.max.y)/2, cz=(bb.min.z+bb.max.z)/2;
-          const hx=Math.max(1,(bb.max.x-bb.min.x)/2), hy=Math.max(1,(bb.max.y-bb.min.y)/2), hz=Math.max(1,(bb.max.z-bb.min.z)/2);
-          box=[cx,cy,cz, hx,0,0, 0,hy,0, 0,0,hz]; ge=Math.max(hx,hy,hz)/8; }
-        return { boundingVolume: { box }, geometricError: ge, refine: 'ADD',
+      // HLOD: each sub-model → its voxel-grid octree (grid_1→8→64). Falls back to a single full-LOD tile.
+      const children = subs.map(({ i, meta }) => {
+        const tree = meta && buildSubmodelOctree(meta, i, modelUrl, enc);
+        if (tree) return tree;
+        const bb = meta?.bounding_box; const b = bb ? boxOf(bb) : { box: [center[0],center[1],center[2], ghalf,0,0, 0,ghalf,0, 0,0,ghalf], diag: ghalf*2 };
+        return { boundingVolume: { box: b.box }, geometricError: b.diag/4, refine: 'REPLACE',
           content: { uri: `/geosplats/tile.glb?url=${enc(modelUrl)}&m=${i}&grid=1&oct=0&lod=${lod}` } };
       });
-      // boxes are in raw local coords; root.transform recenters (−center) + places them on the globe.
+      // octant boxes are in raw local coords; root.transform recenters (−center) + places them on the globe.
       const root = { transform: georefTransform(gp, center), geometricError: ghalf * 4, refine: 'ADD',
         boundingVolume: { box: [center[0],center[1],center[2], ghalf,0,0, 0,ghalf,0, 0,0,ghalf] }, children };
       const ts = { asset: { version: '1.1', tilesetVersion: 'geosplats' }, geometricError: ghalf * 4, root };

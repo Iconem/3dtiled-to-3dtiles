@@ -5,6 +5,22 @@ Format loosely follows [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+### Added — 2026-07-01 (`main`: GeoSplats HLOD octree)
+- **`/geosplats` now emits an HLOD octree** from each sub-model's `voxel_grids` (grid_1 → grid_8 →
+  grid_64), instead of one tile per sub-model. Parent→child by **spatial containment** (child octant
+  centre inside parent bbox — independent of the octant-id bit layout); `geometricError` = octant diagonal
+  (monotonically decreasing → correct `REPLACE` refinement); finer grids fetch higher progressive LODs
+  (grid_1→LOD4, grid_8→LOD6, grid_64→LOD8, clamped to a LOD that has splats). Only occupied octants become
+  tiles. Verified: model A → 1892 tiles, depth 3, GE 7880→722→378→38, every level a valid `_spz_2` GLB.
+  grid_1's cell omits a bbox in the metadata, so it's synthesised from the sub-model bounds.
+
+### Fixed — 2026-07-01 (`main`: GeoSplats orientation)
+- **Scene was mis-oriented** (appeared vertical): the `global_position.offset` Euler is **per-model** (real
+  orientation, not a constant), and — decoded from the SDK — is `Rx(x_rot)·Ry(y_rot)·Rz(z_rot)` applied in
+  a Y-up model world (`X=East, Y=Up, Z=South`). The converter now applies exactly that (was wrong order /
+  dropped) in the `[East, Up, −North]` placement frame. `model_scale` stays un-applied (readSog already
+  yields real metric units; A ≈ 500 m aerial, B ≈ 4.6 m object). Heading may still need a visual tweak.
+
 ### Added — 2026-07-01 (`main`: MapTiler GeoSplats → 3D Tiles live converter)
 - **`/geosplats` stream converter** (`packages/tile-server/geosplats-live.js`) — turns a MapTiler
   **GeoSplats** `model.json` into OGC 3D Tiles, reverse-engineered from the format + SDK bundle
