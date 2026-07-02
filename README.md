@@ -856,6 +856,13 @@ Converts a PlayCanvas **[Streamed SOG](docs-references/streamed-sog.md)** datase
 > streamed-SOG — so the **SOG adapter/converter reads Arrival `.lod` directly**; no Arrival-specific code.
 > Verified live against `ugc.arrival.space`. (Arrival's per-entity `rotation`/`scale`/`position` from its
 > own API are a separate placement layer, not part of the `.lod` payload.)
+>
+> **Not georeferenced** (checked 2026-07-02): `lod-meta.json` and every per-chunk `meta.json` carry only
+> local tree bounds — no lon/lat/EPSG anywhere in the `.lod` payload itself, so `sog-live.js`'s root
+> transform is a fixed local upright-correction (`RX(−90°)`), same as any other non-georeferenced SOG
+> source. Real-world placement for an Arrival scene would need to fetch its **entity API** separately
+> (the `rotation`/`scale`/`position` mentioned above) and compose that into the root transform —
+> untried, Arrival-specific, not implemented here.
 
 ```sh
 cd packages/sog-to-3dtiles

@@ -598,6 +598,12 @@ const TOOLS_DATASETS = {
       url: 'https://bertt.github.io/cesium_3dtiles_samples/samples/1.1/delaware/tileset.json' },
     { id: 'grenoble-trees', label: 'Grenoble Trees 1.1 (instanced glb)', type: 'mesh',
       url: 'https://bertt.github.io/cesium_3dtiles_samples/samples/1.1/grenoble_trees/tileset.json' },
+    // Our own octree formats' implicit output, materialized explicit through this same tool — one
+    // Potree and one COPC example (the prebuilt-offline mode no longer has a per-pill explicit toggle).
+    { id: 'potree-lion',    label: 'Potree · Lion 2.0 (octree→explicit)', type: 'pointcloud',
+      url: `${SDATA}/output/potree/lion_p2/tileset.json` },
+    { id: 'copc-autzen',    label: 'COPC · Autzen (octree→explicit)', type: 'pointcloud',
+      url: `${SDATA}/output/copc/autzen-3dtiles-from-copc/tileset.json` },
   ],
   'upgrade': [
     { id: 'lille-pyramid', label: 'Lille Pyramid (b3dm→glb)', type: 'mesh',
@@ -640,12 +646,11 @@ const FORMATS = [
   { fmt: 'rad', icon: '✦', label: 'RAD', type: 'splat', octree: false, stream: true, assets: [
       { id: 'coit',      label: 'Coit',       src: 'input/RAD/coit.rad',             out: 'output/rad/coit-3dtiles-from-rad'        },
       { id: 'tastier',   label: 'Tastier',    src: 'input/RAD/tastier500k.rad',      out: 'output/rad/tastier500k-3dtiles-from-rad' },
-      { id: 'elevator',  label: 'Elevator',   src: 'input/PLY/Elevator-lod.rad',     out: 'output/rad/Elevator-3dtiles-from-rad'    },
-      { id: 'svir',      label: 'Svirnas',    src: 'input/PLY/SvirnasAlyt-lod.rad',  out: 'output/rad/SvirnasAlyt-3dtiles-from-rad' },
+      { id: 'elevator',  label: 'WIP PLY-RAD · Elevator',   src: 'input/PLY/Elevator-lod.rad',     out: 'output/rad/Elevator-3dtiles-from-rad'    },
+      { id: 'svir',      label: 'WIP PLY-RAD · Svirnas',    src: 'input/PLY/SvirnasAlyt-lod.rad',  out: 'output/rad/SvirnasAlyt-3dtiles-from-rad' },
   ]},
   { fmt: 'i3s', icon: '🧱', label: 'I3S', type: 'mesh', octree: false, stream: true, assets: [
       { id: 'nyc',    label: 'NYC Buildings', src: 'input/I3S-SLPK/Buildings_NewYork_v18.slpk', streamSrc: 'input/I3S-SLPK/Buildings_NewYork_v18/3dSceneLayer.json.gz', out: 'output/i3s/Buildings_NewYork_v18' },
-      { id: 'autzen-i3s', label: 'Autzen LAS (LEPCC—unsupported)', src: 'input/I3S-SLPK/SMALL_AUTZEN_LAS_All.slpk', out: 'output/i3s/SMALL_AUTZEN_LAS_All' },
   ]},
 ];
 
@@ -656,14 +661,17 @@ const DIRECT = [
   { id: 'strasbourg', icon: '🏙', label: '3DT · Strasbourg', type: 'mesh', url: 'https://s3.eu-west-2.wasabisys.com/ems-sgct-photomaillage/ODACIT/EMS_PM2022/tileset.json' },
   { id: 'clermont', icon: '🏙', label: '3DT · Clermont', type: 'mesh', url: 'https://3d.craig.fr/datasets/Clermont/3dtiles/tileset.json' },
   { id: 'lille', icon: '🏙', label: '3DT · Lille', type: 'mesh', url: 'https://webimaging.lillemetropole.fr/externe/maillage/2016_mel_10cm/3dtiles/tileset.json' },
+  { id: 'marseille',    icon: '🏙', label: '3DT · Marseille (root.json)',   type: 'mesh', url: 'https://d3h9zulrmcj1j6.cloudfront.net/Marseille_Cesium/root.json' },
   // Public CesiumGS open-data samples (raw GitHub, CORS-friendly) — verified 200.
   { id: 'cgs-implicit', icon: '◈', label: '3DT · CesiumGS implicit (1.1)', type: 'mesh', url: 'https://raw.githubusercontent.com/CesiumGS/3d-tiles-samples/main/1.1/SparseImplicitQuadtree/tileset.json' },
   { id: 'cgs-lod',      icon: '◈', label: '3DT · CesiumGS discrete-LOD',   type: 'mesh', url: 'https://raw.githubusercontent.com/CesiumGS/3d-tiles-samples/main/1.0/TilesetWithDiscreteLOD/tileset.json' },
-  { id: 'marseille',    icon: '🏙', label: '3DT · Marseille (root.json)',   type: 'mesh', url: 'https://d3h9zulrmcj1j6.cloudfront.net/Marseille_Cesium/root.json' },
   { id: 'jastrebia',    icon: '✦', label: '3DT · Jastrzębia Góra (splat)', type: 'splat', url: 'https://ugfld3ibxevvegyw.private.blob.vercel-storage.com/JastrebiaGora/tileset.json?vercel-blob-valid-until=1782816064570&vercel-blob-delegation=eyJzdG9yZUlkIjoic3RvcmVfdWdGbGQzSUJ4RVZ2ZUd5dyIsIm93bmVySWQiOiJ0ZWFtX2pBeXZWbEloS09HSGtCaHhEdGdUaVFOUCIsInBhdGhuYW1lIjoiKiIsIm9wZXJhdGlvbnMiOlsiZ2V0IiwiaGVhZCJdLCJ2YWxpZFVudGlsIjoxNzgyODE4NzY0MzgzLCJpYXQiOjE3ODI4MTU0NjQ0NTR9.4H_KtLWVCwAapby1v5fGyNpFINDdTQD5w5t472dunHU&vercel-blob-signature=EilSXkhEeB5PM4ZDE7s8QsRoPwf0zPn6A3c6F_Z3czo' },
   // Live KTX2+Draco decompress (→ JPG) via /gltf over a tileset that HAS them (Bing 3dv4). For any
   // KTX/Draco tileset, point /gltf at its tileset.json: /gltf/tileset.json?ops=decompress&url=<tileset>.
   { id: 'gltf-ktx', icon: '◈', label: '3DT · KTX→decode (Bing via /gltf)', type: 'mesh', url: `${MW}/gltf/tileset.json?ops=decompress&tex=jpg&url=${encodeURIComponent(`${MW}/bing/tileset.json?g=15530`)}` },
+  // Google Photorealistic 3D Tiles — public demo key from Google's own docs (origin-unrestricted demo
+  // quota). Root quadtree covers the whole globe; navigate/zoom to any city like the Bing 3D pill.
+  { id: 'google-3dtiles', icon: '🌍', label: '3DT · Google Photorealistic', type: 'mesh', url: 'https://tile.googleapis.com/v1/3dtiles/root.json?key=REMOVED_GOOGLE_API_KEY' },
   // (tastier .3tz / .3dtiles packages live under the 📦 Packages pill, not here.)
 ];
 
@@ -672,13 +680,11 @@ const isRemoteUrl = s => /^https?:\/\//i.test(s);
 const srcUrl = s => isRemoteUrl(s) ? s : `${SDATA}/${s}`;
 
 // Resolve an asset's tileset URL for the current mode (null = not available in this mode).
+// Prebuilt-offline octree pills always serve their plain implicit tileset — implicit→explicit is its
+// own demo under Tools (one Potree + one COPC example there), not a per-pill toggle here anymore.
 function assetUrl(f, a) {
   if (viewerMode === 'offline') {
     if (!a.out) return null;                         // remote / stream-only asset → no prebuilt output
-    if (f.octree && tilingMode === 'explicit') {
-      const dir = encodeURIComponent(`sample-data/${a.out}`);
-      return `${MW}/3dtiles-tools/tileset.json?tool=implicit-to-explicit&dir=${dir}`;
-    }
     return `${SDATA}/${a.out}/tileset.json`;
   }
   // stream may use a different source than convert/offline (e.g. I3S streams the extracted
@@ -755,8 +761,8 @@ function currentPresets() {
   if (selectedFormat === 'geosplats') {
     const gs = (mdl) => `${MW}/geosplats/tileset.json?url=${encodeURIComponent(mdl)}&lod=5`;
     return [
-      { id: 'gs-1', label: '✨ GeoSplats — Jastrzębia Góra, Poland', type: 'splat', url: gs('https://api.maptiler.com/splats/019e67bf-b89b-743d-91dd-79f7f4b4bd4e/model.json?key=GKF1QdQ4MpjgqtKiQuxR') },
-      { id: 'gs-2', label: '✨ GeoSplats — Biltmore Hotel, Miami', type: 'splat', url: gs('https://api.maptiler.com/splats/019e5ff3-e23b-7063-bed2-c385d3e96d99/model.json?key=mNLmXyaTH4gRlwJHSYWp') },
+      { id: 'gs-1', label: '✨ Jastrzębia Góra, Poland', type: 'splat', url: gs('https://api.maptiler.com/splats/019e67bf-b89b-743d-91dd-79f7f4b4bd4e/model.json?key=GKF1QdQ4MpjgqtKiQuxR') },
+      { id: 'gs-2', label: '✨ Biltmore Hotel, Miami', type: 'splat', url: gs('https://api.maptiler.com/splats/019e5ff3-e23b-7063-bed2-c385d3e96d99/model.json?key=mNLmXyaTH4gRlwJHSYWp') },
     ];
   }
   const f = fmtMeta(selectedFormat);
@@ -884,6 +890,9 @@ function setMode(m) {
   // Prebuilt-offline serves ready static tileset URLs — raw-url wrapping (which builds /stream|/convert
   // middleware URLs) would mangle them, so force it off when entering offline.
   if (m === 'offline' && rawUrlMode) { document.getElementById('rawurl-mode').checked = false; setRawUrlMode(false); }
+  // Those pseudo-format categories are streaming-only (no prebuilt output dir) and aren't offered as
+  // offline categories — snap back to a real tiled format if we're leaving one of them behind.
+  if (m === 'offline' && !fmtMeta(selectedFormat)) selectedFormat = FORMATS[0].fmt;
   // When entering tools mode, pick first available asset for the current tool
   if (m === 'tools') { buildPresetBar(); const first = currentPresets()[0]; if (first) selectPreset(first); }
   else rebuildAndReselect();
@@ -985,9 +994,13 @@ function buildPresetBar() {
     // 3) TOOL NAME  4) asset pills (tool-specific open datasets)
     seg('tiling', [['implicit-to-explicit', '⬡→⬢ implicit→explicit'], ['upgrade', '⬆ upgrade'], ['packages', '📦 packages']], toolName, setTool, '3dtiles-tools operation');
   } else {
-    // 3) FORMAT  4) tiling toggle (octree)  5) centroids (splat, stream)  6) asset pills
-    seg('fmt', [...FORMATS.map(f => [f.fmt, `${f.icon} ${f.label}`]), ['3dtiles', '◈ 3D Tiles'], ['packages', '📦 Packages'], ['bing', '🗺 Bing 3D'], ['threemx', '🏛 3MX'], ['geosplats', '✨ GeoSplats']], selectedFormat, setFormat, 'source format');
-    if (fmtMeta(selectedFormat)?.octree) seg('tiling', [['implicit', '⬡ implicit'], ['explicit', '⬢ explicit']], tilingMode, setTiling, 'octree tiling');
+    // 3) FORMAT  4) tiling toggle (octree, stream only)  5) centroids (splat, stream)  6) asset pills
+    // The pseudo-format categories (3dtiles/packages/bing/threemx/geosplats) are all streaming — none of
+    // them have a prebuilt output directory — so prebuilt-offline mode only lists the real tiled formats.
+    const extraFmts = viewerMode === 'offline' ? [] :
+      [['3dtiles', '◈ 3D Tiles'], ['packages', '📦 Packages'], ['bing', '🗺 Bing 3D'], ['threemx', '🏛 3MX'], ['geosplats', '✨ GeoSplats']];
+    seg('fmt', [...FORMATS.map(f => [f.fmt, `${f.icon} ${f.label}`]), ...extraFmts], selectedFormat, setFormat, 'source format');
+    if (viewerMode === 'stream' && fmtMeta(selectedFormat)?.octree) seg('tiling', [['implicit', '⬡ implicit'], ['explicit', '⬢ explicit']], tilingMode, setTiling, 'octree tiling');
     if (viewerMode === 'stream' && canCentroids()) {     // centroids-only: tiled-splat formats → POINTS preview
       const cb = document.createElement('button');
       cb.className = 'preset mode' + (centroidsOnly ? ' active' : '');
