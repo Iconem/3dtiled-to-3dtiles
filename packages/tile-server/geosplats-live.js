@@ -102,11 +102,12 @@ function eulerXYZ(xd, yd, zd) {
 // B ≈ 4 m object — verified union extents). `model_scale` is NOT applied (it maps to MapTiler's MapLibre
 // mercator frame, not metres — applying it shrinks every scene to sub-metre). We place 1:1: translate by
 // −center (so the scene sits at lat/lon), apply the ENU frame.
-// ORIENTATION (verified in-browser 2026-07-01, Cesium AND 3DTRJS): use the STANDARD ENU frame
-// [East, North, Up] ('enu'). Both renderers apply the glTF Y-up→Z-up correction to the splat content BEFORE
-// this transform, so the content is already Z-up here and plain ENU lands it FLAT + upright. Earlier frames
-// that pre-baked a Y-up→Z-up rotation ([East, Up, −North] and [East, −Up, North]) DOUBLE-rotated it and stood
-// the scene up as a vertical slab — those are the wrong defaults. DEBUG sweep: &frame=enu|eun|e-un|e-nu|enu2.
+// ORIENTATION (verified in-browser 2026-07-02 on the upright Biltmore Hotel, model B): use 'enu2' =
+// [East, −North, −Up]. Both renderers apply the glTF Y-up→Z-up correction to the content before this
+// transform; the content's up is then −Z, so plain ENU [East,North,Up] renders FLAT but UPSIDE-DOWN. 'enu2'
+// is a 180° flip about East (a proper rotation, not a mirror) that rights it. ([East,Up,−North] / [East,−Up,
+// North] pre-bake ANOTHER Y-up→Z-up rotation → vertical slab.) N/S heading ends up flipped 180° (we don't
+// apply the SDK offset Euler); nudge with &yaw if needed. DEBUG sweep: &frame=enu|enu2|eun|e-un|e-nu.
 // The per-model SDK Euler (offset.[xyz]_rot) is OFF by default (authored in MapLibre's frame; &euler=1).
 // ALTITUDE: global_position.alt is in MapTiler's model_scale-normalised MapLibre frame, NOT our 1:1 ellipsoidal
 // metres — using it raw buries the scene (model A alt=−307.6 → ~300 m underground; alt·model_scale≈−0.2 m ≈ 0).
@@ -128,7 +129,8 @@ function georefTransform(gp, center, opt = {}) {
   const e = llhToEcef(gp.lon, gp.lat, alt);
   const { EAST: E, NORTH: N, UP: U } = enuFrame(gp.lon, gp.lat);
   const [C0, C1, C2] = (FRAMES(E, N, U)[opt.frame] || FRAMES(E, N, U).enu);
-  const place = [ C0[0],C0[1],C0[2],0,  C1[0],C1[1],C1[2],0,  C2[0],C2[1],C2[2],0,  e[0],e[1],e[2],1 ];
+  const s = opt.scale || 1;                                  // uniform metric scale baked into the ENU basis
+  const place = [ s*C0[0],s*C0[1],s*C0[2],0,  s*C1[0],s*C1[1],s*C1[2],0,  s*C2[0],s*C2[1],s*C2[2],0,  e[0],e[1],e[2],1 ];
   const o = gp.offset || {};
   let rot = opt.euler ? eulerXYZ(o.x_rot || 0, o.y_rot || 0, o.z_rot || 0) : [1,0,0,0, 0,1,0,0, 0,0,1,0, 0,0,0,1];
   if (opt.yaw) { const c=Math.cos(opt.yaw*D2R), s=Math.sin(opt.yaw*D2R); rot = matMul([c,0,-s,0, 0,1,0,0, s,0,c,0, 0,0,0,1], rot); }  // extra yaw about up (local Y)
@@ -234,18 +236,29 @@ export async function handleGeoSplats(req, res, u) {
         return { boundingVolume: { box: b.box }, geometricError: b.diag/4, refine: 'REPLACE',
           content: { uri: `/geosplats/tile.glb?url=${enc(modelUrl)}&m=${i}&grid=1&oct=0&lod=${lod}` } };
       });
-      // octant boxes are in raw local coords; root.transform recenters (−center) + places them on the globe.
-      const opt = { frame: u.searchParams.get('frame') || 'enu', euler: u.searchParams.get('euler') === '1',
-        yaw: u.searchParams.has('yaw') ? Number(u.searchParams.get('yaw')) : 0,
+      // SCALE to real-world metres. readSog units are per-model (A ≈ raw thousands, B ≈ raw single-digits) and
+      // do NOT match; `model_scale` normalises them. Decoded from the SDK: the world-unit→metre factor is
+      // 512·ZOOM_TO_METER[14] = 2445.98, so real size ≈ raw · model_scale · 2445.98 (verified: A main ≈ 2 km,
+      // B ≈ 0.4 km). We bake this uniform scale S into the root transform's ENU basis; &scale=<f> overrides.
+      const SCALE_K = 512 * 4.7773;                              // ZOOM_TO_METER[14] — SDK metres-per-world-unit
+      const S = u.searchParams.has('scale') ? Number(u.searchParams.get('scale')) : ((gp.model_scale || 0) * SCALE_K || 1);
+      // octant boxes are in raw local coords; root.transform recenters (−center), scales by S, places on globe.
+      const opt = { frame: u.searchParams.get('frame') || 'enu2', euler: u.searchParams.get('euler') === '1',
+        scale: S, yaw: u.searchParams.has('yaw') ? Number(u.searchParams.get('yaw')) : 0,
         alt: u.searchParams.has('alt') ? Number(u.searchParams.get('alt')) : null };
-      const root = { transform: georefTransform(gp, center, opt), geometricError: ghalf * 4, refine: 'ADD',
+      // geometricError is world-space metres and is NOT affected by the tile transform's scale, so multiply
+      // every GE by S to keep LOD selection consistent with the now-scaled geometry (boxes inherit S via the
+      // transform automatically). Root box stays raw (center/ghalf) — it too inherits S from root.transform.
+      const scaleGE = (node) => { if (node.geometricError != null) node.geometricError *= S; (node.children || []).forEach(scaleGE); };
+      children.forEach(scaleGE);
+      const root = { transform: georefTransform(gp, center, opt), geometricError: ghalf * 4 * S, refine: 'ADD',
         boundingVolume: { box: [center[0],center[1],center[2], ghalf,0,0, 0,ghalf,0, 0,0,ghalf] }, children };
       // Declare the gaussian-splatting glTF extension at the tileset level. Cesium routes a tileset to its
       // native Gaussian-splat renderer ONLY when 3DTILES_content_gltf.extensionsRequired lists
       // KHR_gaussian_splatting (see GaussianSplat3DTileContent.tilesetRequiresGaussianSplattingExt). Without
       // this block Cesium loads our splat GLBs as ordinary meshes → "attribute.value.length must be in [1,4]"
       // on the splat-only SCALE/ROTATION attributes. Every other splat converter here emits the same block.
-      const ts = { asset: { version: '1.1', tilesetVersion: 'geosplats' }, geometricError: ghalf * 4, root,
+      const ts = { asset: { version: '1.1', tilesetVersion: 'geosplats' }, geometricError: ghalf * 4 * S, root,
         extensionsUsed: ['3DTILES_content_gltf'],
         extensions: { '3DTILES_content_gltf': {
           extensionsUsed:     ['KHR_gaussian_splatting', 'KHR_gaussian_splatting_compression_spz_2'],

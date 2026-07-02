@@ -5,6 +5,17 @@ Format loosely follows [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+### Fixed — 2026-07-02 (`main`: GeoSplats real-world scale + upright orientation)
+- **GeoSplats models had no real-world scale** (B — the Biltmore Hotel, ~486 m — rendered ~4 m). `readSog`
+  units are per-model and don't match; `model_scale` normalises them. Decoded from the MapTiler SDK: the
+  world-unit→metre factor is `512·ZOOM_TO_METER[14]` = 2445.98, so real size ≈ `raw · model_scale · 2445.98`.
+  Now baked as a uniform scale into the root transform's ENU basis (all geometricErrors ×S to keep LOD
+  consistent). Verified: A ≈ 2 km (Jastrzębia Góra), B ≈ 486 m (Biltmore). `&scale=<f>` overrides.
+- **GeoSplats rendered upside-down** with the earlier `[East, North, Up]` frame (flat but inverted — only
+  obvious once B was scaled up to a recognisable building). After the renderer's glTF Y-up→Z-up correction
+  the content's up is −Z, so the correct frame is `enu2` = **`[East, −North, −Up]`** (a 180° flip about East,
+  a proper rotation). Now default. N/S heading is flipped 180° (SDK offset Euler still off); `&yaw` nudges.
+
 ### Fixed — 2026-07-01 (`main`: splat crop-export vertical flip + GeoSplats orientation)
 - **Splat crop export (`/dump/splat`) flipped third-party 3D-Tiles splats vertically** (WL GSplat: the
   electric pole pointed away from the ground; adjacent tiles looked vertically offset). The dump baked a
