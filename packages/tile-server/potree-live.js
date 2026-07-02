@@ -159,16 +159,31 @@ async function getCtx(url) {
     };
     updateByCoord2(nodes);
 
-    // Load one deferred proxy chunk, fold its nodes+proxies in.
-    const loadChunk2 = async (name) => {
-      if (loadedChunks2.has(name)) return;
-      const p = pendingChunks2.get(name); if (!p) return;
-      loadedChunks2.add(name); pendingChunks2.delete(name);
-      const buf = await rangeGet(hierUrl, p.byteOffset, p.byteSize);
-      const { nodes: nn, proxies: pp } = parsePotree2Chunk(buf, name, p.box);
-      for (const [k, v] of nn) nodes.set(k, v);
-      for (const [k, v] of pp) if (!loadedChunks2.has(k)) pendingChunks2.set(k, v);
-      updateByCoord2(nn);
+    // Load one deferred proxy chunk, fold its nodes+proxies in. Idempotent + shares one in-flight fetch
+    // across concurrent callers (mirrors the 1.x `loadOne` fix): the FIRST implicit-tiling load fires
+    // many concurrent `.subtree` requests, and several can want the same still-pending chunk. Marking
+    // `loadedChunks2`/removing from `pendingChunks2` BEFORE awaiting (the old code) let a second,
+    // concurrent `ensureBlock2` see the chunk as "already loaded" and index availability from `nodes`
+    // before the first caller's fetch had actually landed — its `.subtree` came back with that branch
+    // empty, and 3d-tiles-renderer never retries a subtree it already resolved as empty. A later,
+    // separately-triggered reload (e.g. switching to explicit and back) worked because by then the
+    // chunk really was in `nodes` from the earlier attempt.
+    const inFlightChunks2 = new Map();          // name → Promise<void>
+    const loadChunk2 = (name) => {
+      if (loadedChunks2.has(name)) return Promise.resolve();
+      if (inFlightChunks2.has(name)) return inFlightChunks2.get(name);
+      const p = pendingChunks2.get(name); if (!p) return Promise.resolve();
+      const promise = rangeGet(hierUrl, p.byteOffset, p.byteSize).then(buf => {
+        const { nodes: nn, proxies: pp } = parsePotree2Chunk(buf, name, p.box);
+        for (const [k, v] of nn) nodes.set(k, v);
+        for (const [k, v] of pp) if (!loadedChunks2.has(k)) pendingChunks2.set(k, v);
+        updateByCoord2(nn);
+        loadedChunks2.add(name);
+        pendingChunks2.delete(name);
+        inFlightChunks2.delete(name);
+      }).catch(e => { inFlightChunks2.delete(name); throw e; });
+      inFlightChunks2.set(name, promise);
+      return promise;
     };
 
     // For a subtree at (L,x,y,z): load all pending proxy chunks overlapping the block [L, L+subtreeLevels].

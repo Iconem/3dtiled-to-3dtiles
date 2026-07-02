@@ -812,6 +812,12 @@ tileset.modelMatrix = enu;`,
    ────────────────────────────────────────────── */
 let viewer = null;
 let currentTileset = null;
+// The tileset's placement BEFORE any Z-offset nudge: null for an already-georeferenced tileset (its
+// own root.transform is the placement, modelMatrix stays identity-plus-offset); the applied ENU frame
+// for a non-georeferenced tileset placed via "Local Frame" (splat test data is commonly local-coords,
+// so it goes through this path). applyZOffset() composes onto this instead of overwriting modelMatrix
+// outright — a bare translation would silently discard the ENU rotation and un-place the tileset.
+let _placementBase = null;
 let currentPresetId = null;
 let currentPresetObj = null;   // the selected preset {url, rawSrc?} — for raw-url toggle re-resolution
 let currentType = 'pointcloud';
@@ -1116,6 +1122,7 @@ async function loadTileset() {
     if (gen !== _loadGen) { viewer.scene.primitives.remove(tileset); return; }  // stale: user already picked something else
     viewer.scene.primitives.add(tileset);
     currentTileset = tileset;
+    _placementBase = null;          // new tileset: forget any previous tileset's Local Frame placement
     tileset.show = _assetVisible;   // respect the Show-asset toggle across loads
     if (_cesiumDebug) { tileset.debugShowBoundingVolume = true; tileset.debugColorizeTiles = true; }
     applyShading();   // unlit/brightness for baked-lighting photogrammetry (Bing/3MX)
@@ -1250,6 +1257,7 @@ function applyLocalFrame() {
   const origin = Cesium.Cartesian3.fromDegrees(lon, lat, alt);
   const enu = Cesium.Transforms.eastNorthUpToFixedFrame(origin);
   currentTileset.modelMatrix = enu;
+  _placementBase = Cesium.Matrix4.clone(enu);   // Z-offset composes on top of this, doesn't replace it
 
   // Fly camera to the new location
   const bs = new Cesium.BoundingSphere(origin, range * 0.5);
@@ -1276,7 +1284,14 @@ function applyZOffset() {
   const up = Cesium.Ellipsoid.WGS84.geodeticSurfaceNormal(c, new Cesium.Cartesian3())
           || Cesium.Cartesian3.normalize(c, new Cesium.Cartesian3());
   const t = Cesium.Cartesian3.multiplyByScalar(up, dz, new Cesium.Cartesian3());
-  currentTileset.modelMatrix = Cesium.Matrix4.fromTranslation(t);
+  // Compose the nudge onto the CURRENT placement base instead of overwriting modelMatrix outright.
+  // For an already-georeferenced tileset there's no base (identity) — same as before. For a
+  // non-georeferenced tileset placed via "Local Frame" (splat test data very often is: no real CRS,
+  // so it auto-places at the Local Frame origin) the base is that ENU rotation — a bare translation
+  // here would have silently discarded it, un-placing the tileset (looked exactly like "Z offset does
+  // nothing" for splats specifically, since georeferenced ptc/mesh test data never hit this path).
+  const base = _placementBase || Cesium.Matrix4.IDENTITY;
+  currentTileset.modelMatrix = Cesium.Matrix4.multiply(Cesium.Matrix4.fromTranslation(t), base, new Cesium.Matrix4());
   // Gaussian-splat content (GeoSplats) is drawn by a separate native primitive
   // (Cesium3DTileset.gaussianSplatPrimitive) that caches its own ENU anchor (_rootTransform) and only
   // rebuilds it after ~2 stable selected-tile frames, or a ~30-frame stall fallback for a still-streaming

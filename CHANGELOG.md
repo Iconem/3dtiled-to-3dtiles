@@ -5,6 +5,35 @@ Format loosely follows [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+### Fixed — 2026-07-02 (`main`: Potree 2.0 hierarchy race, Cesium Local-Frame Z-offset, README overhaul)
+- **Potree 2.0 live streaming (`/potree`, `/stream`) could serve incomplete implicit subtrees on a
+  cold cache.** `loadChunk2()` marked a hierarchy chunk as loaded and removed it from the pending set
+  *before* awaiting its actual fetch — a second, concurrent `ensureBlock2()` (routine on first load,
+  when many `.subtree` requests arrive in parallel) could see the chunk as "already loaded" and index
+  availability before that chunk's nodes had actually landed, so its subtree came back with that
+  branch looking empty. 3d-tiles-renderer doesn't retry a subtree it already resolved, so the branch
+  stayed empty until something else (e.g. reloading via explicit tiling) happened to fully populate
+  the shared per-URL cache. Fixed to share one in-flight promise per chunk across concurrent callers —
+  the same fix already applied to the Potree 1.x `.hrc` path (`loadOne`) previously, but missed here.
+- **Cesium "Z offset" silently un-placed non-georeferenced tilesets** (most test splat data has no
+  real CRS and auto-places via "Local Frame", i.e. `Cesium.Transforms.eastNorthUpToFixedFrame`).
+  `applyZOffset()` replaced `tileset.modelMatrix` with a bare translation, discarding that ENU
+  rotation outright — looked exactly like "Z offset does nothing" for splats specifically, since
+  georeferenced point-cloud/mesh test data never went through the Local-Frame path. Now composes the
+  vertical nudge on top of whatever placement (georef or Local Frame) is already in effect.
+- **README**: major reorganization — Ambition/format-comparison/related-tilers move to the front;
+  `/stream` lazy-loading status moves up next to the meta-converter docs; a new `TODO / Future work`
+  section (Docker/GHCR/Traefik packaging, a 3DTilesRendererJS-native plugin, pinned open-data test
+  fixtures, Fumadocs) sits right after `Monorepo & usage`; the materialization-continuum architecture
+  doc moves ahead of the individual per-format converter docs; per-format schema diagrams move to a
+  new end-of-document appendix. Format tables: added 3D Tiles packages (`.3tz`/`.3dtiles`), 3MX and
+  Bing Maps 3D as a new "generic tiled formats" table (removing them from the stale "candidate/roadmap"
+  list, where 3MX in particular was wrongly still listed as unsupported); dropped plain LAS/LAZ from
+  the comparison table (no native tiling/LoD — point clouds there are now just COPC + Potree); removed
+  a stale `copc-to-3dtiles` TODO for explicit tiling — both the offline converter and the live `/copc`
+  endpoint already support `--tiling`/`?tiling=explicit`. Added a distilled local mirror of the COPC
+  spec (`docs-references/copc-format.md`) alongside the existing per-format mirrors.
+
 ### Fixed — 2026-07-02 (`main`: splat/GeoSplats export & viewer follow-ups)
 - **`/dump/splat` Y-up→Z-up regression on third-party tiles (WL Grange) fixed.** The 2026-07-01 auto-pick
   (`hasNodeMatrix ? YUP_ZUP_P90 : YUP_ZUP`) meant to give node-matrix-authored tiles real Cesium
