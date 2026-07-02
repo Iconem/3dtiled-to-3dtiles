@@ -615,6 +615,11 @@ const TOOLS_DATASETS = {
   'packages': [
     { id: 'tastier-3tz',     label: 'tastier .3tz (ZIP+index)',  type: 'splat', pkg: 'sample-data/input/3DTILES-PACKAGES/tastier.3tz' },
     { id: 'tastier-3dtiles', label: 'tastier .3dtiles (SQLite)', type: 'splat', pkg: 'sample-data/input/3DTILES-PACKAGES/tastier.3dtiles' },
+    // A real third-party .3tz found in the wild (loaders.gl's own test fixture, vendored locally — .3tz
+    // needs random-access reads, which 3dtiles-self-contained.js only supports for LOCAL files, not
+    // remote URLs; see docs-references/3tz-3dtiles-packages.md).
+    { id: 'loadersgl-3tz',  label: 'loaders.gl test.3tz (mesh)', type: 'mesh',
+      pkg: 'sample-data/input/3DTILES-PACKAGES/loadersgl-test.3tz' },
   ],
 };
 
@@ -662,16 +667,13 @@ const DIRECT = [
   { id: 'clermont', icon: '🏙', label: '3DT · Clermont', type: 'mesh', url: 'https://3d.craig.fr/datasets/Clermont/3dtiles/tileset.json' },
   { id: 'lille', icon: '🏙', label: '3DT · Lille', type: 'mesh', url: 'https://webimaging.lillemetropole.fr/externe/maillage/2016_mel_10cm/3dtiles/tileset.json' },
   { id: 'marseille',    icon: '🏙', label: '3DT · Marseille (root.json)',   type: 'mesh', url: 'https://d3h9zulrmcj1j6.cloudfront.net/Marseille_Cesium/root.json' },
-  // Public CesiumGS open-data samples (raw GitHub, CORS-friendly) — verified 200.
-  { id: 'cgs-implicit', icon: '◈', label: '3DT · CesiumGS implicit (1.1)', type: 'mesh', url: 'https://raw.githubusercontent.com/CesiumGS/3d-tiles-samples/main/1.1/SparseImplicitQuadtree/tileset.json' },
   { id: 'cgs-lod',      icon: '◈', label: '3DT · CesiumGS discrete-LOD',   type: 'mesh', url: 'https://raw.githubusercontent.com/CesiumGS/3d-tiles-samples/main/1.0/TilesetWithDiscreteLOD/tileset.json' },
-  { id: 'jastrebia',    icon: '✦', label: '3DT · Jastrzębia Góra (splat)', type: 'splat', url: 'https://ugfld3ibxevvegyw.private.blob.vercel-storage.com/JastrebiaGora/tileset.json?vercel-blob-valid-until=1782816064570&vercel-blob-delegation=eyJzdG9yZUlkIjoic3RvcmVfdWdGbGQzSUJ4RVZ2ZUd5dyIsIm93bmVySWQiOiJ0ZWFtX2pBeXZWbEloS09HSGtCaHhEdGdUaVFOUCIsInBhdGhuYW1lIjoiKiIsIm9wZXJhdGlvbnMiOlsiZ2V0IiwiaGVhZCJdLCJ2YWxpZFVudGlsIjoxNzgyODE4NzY0MzgzLCJpYXQiOjE3ODI4MTU0NjQ0NTR9.4H_KtLWVCwAapby1v5fGyNpFINDdTQD5w5t472dunHU&vercel-blob-signature=EilSXkhEeB5PM4ZDE7s8QsRoPwf0zPn6A3c6F_Z3czo' },
-  // Live KTX2+Draco decompress (→ JPG) via /gltf over a tileset that HAS them (Bing 3dv4). For any
-  // KTX/Draco tileset, point /gltf at its tileset.json: /gltf/tileset.json?ops=decompress&url=<tileset>.
-  { id: 'gltf-ktx', icon: '◈', label: '3DT · KTX→decode (Bing via /gltf)', type: 'mesh', url: `${MW}/gltf/tileset.json?ops=decompress&tex=jpg&url=${encodeURIComponent(`${MW}/bing/tileset.json?g=15530`)}` },
   // Google Photorealistic 3D Tiles — public demo key from Google's own docs (origin-unrestricted demo
   // quota). Root quadtree covers the whole globe; navigate/zoom to any city like the Bing 3D pill.
   { id: 'google-3dtiles', icon: '🌍', label: '3DT · Google Photorealistic', type: 'mesh', url: 'https://tile.googleapis.com/v1/3dtiles/root.json?key=REMOVED_GOOGLE_API_KEY' },
+  // ArcGIS 3D Tiles Server (ESRI's own 3D Tiles publishing service, not I3S) — real public examples.
+  { id: 'esri-portcoast', icon: '🌍', label: '3DT · ESRI Portcoast (mesh)', type: 'mesh', url: 'https://tiles.arcgis.com/tiles/V6ZHFr6zdgNZuVG0/arcgis/rest/services/Portcoast_industrial/3DTilesServer/tileset.json' },
+  { id: 'esri-mantes', icon: '🌍', label: '3DT · ESRI Mantes-la-Jolie (splat)', type: 'splat', url: 'https://tiles.arcgis.com/tiles/uujCiiEZAflDbdxE/arcgis/rest/services/Coll%C3%A9giale_Mantes_la_Jolie_Drone_3D_Gaussian_Splat/3DTilesServer/tileset.json' },
   // (tastier .3tz / .3dtiles packages live under the 📦 Packages pill, not here.)
 ];
 

@@ -72,11 +72,14 @@ export function cgcs2000Lon0(epsg) {
 }
 
 // Fallback root `transform` for LCC scenes with no usable EPSG (meta.epsg 0/unknown — Guanlan Ancient
-// Town, religious_center_L2_P): the same RX(+90°) Y-up→Z-up flip `boundToZUpBox` bakes unconditionally
-// into every bounding box `(cx,cy,cz)→(cx,−cz,cy)`, but with no ENU placement (local origin, unit
-// East/Up/North). Without this the box sits Z-up-flattened while the splat GLB content stays raw
-// Y-up — the box/content axis mismatch is what renders as "lying vertical instead of flat".
-export const LCC_LOCAL_UPRIGHT = [1,0,0,0, 0,0,1,0, 0,-1,0,0, 0,0,0,1];
+// Town, religious_center_L2_P). MUST match lccGeoref's own flip, NOT boundToZUpBox's — those two are
+// different conventions (a 2026-07-02 bug: this constant was first built to match boundToZUpBox's
+// `(x,y,z)→(x,−z,y)`, which rendered content flat but upside-down). Decomposing lccGeoref's actual
+// working matrix (columns [East,−Up,North,origin], applied as East·x − Up·y + North·z + origin) against
+// local axes East=(1,0,0), North=(0,1,0), Up=(0,0,1) — i.e. Up maps to output Z, the 3D-Tiles up axis —
+// gives (x,y,z)→(x,z,−y), the SAME flip extract-live.js's `YUP_ZUP_P90` uses for LCC crops (already
+// verified there against 10 real Guan_Temple tiles). No ENU placement (local origin, unit basis).
+export const LCC_LOCAL_UPRIGHT = [1,0,0,0, 0,0,-1,0, 0,1,0,0, 0,0,0,1];
 
 // Georeference an LCC scene from its meta (`epsg` + projected `offset`) → root `transform` placing the
 // local frame on the globe. The column layout [East, −Up, North, origin] bakes the splat glTF Y-up→Z-up

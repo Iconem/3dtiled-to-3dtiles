@@ -609,11 +609,18 @@ Composability goal: `source → convert → [centroids] → [gltf: draco/ktx2 de
 
 | Endpoint | What | Ops / params (current) |
 |---|---|---|
+| `/stream/tileset.json?url=<SRC>&format=<fmt>&transform=<op>` (rides along on the tileset's own `/stream/tile/…` content URIs — no separate flag per tile request) | per-tile transform applied to **every streamed tile** (covers implicit COPC/Potree the `/gltf` proxy can't reach, since `/stream` builds each GLB itself) | `transform=meshopt` (**encode** — EXT_meshopt, works on POINTS → point tiles ~⅓ size) · `transform=draco` (encode, mesh tiles only, no-op on POINTS) · `transform=ktx` (encode ETC1S) · `transform=ktx-uastc` (encode UASTC, higher quality/larger) · `transform=decompress` (decode draco+meshopt+KTX2, `+&tex=jpg\|png` picks the KTX2 decode output) |
+| `/convert/tileset.json?url=<SRC>[&format=<fmt>][&centroids=1]` | preprocess + cache: converts the **whole** dataset once, then serves static | any format the meta-converter supports (`cache=full` equivalent) |
 | `/3dtiles-tools/tileset.json?tool=<t>&dir=<path>\|url=<tileset>` | per-tile tileset transforms | `tool=implicit-to-explicit` · `tool=upgrade` (b3dm/pnts→glb, glTF 1.0→2.0, `CESIUM_RTC` bake) |
 | `/gltf/tileset.json?url=<tileset>&ops=<ops>[&tex=jpg\|png]` (+ `/gltf/tile.glb?url=<glb>&ops=`) | generic per-tile **glTF-Transform** pipeline (proxies an explicit tileset, recurses external refs) | `ops=decompress` (= `draco,meshopt,ktx`) · or any of `draco` · `meshopt` · `ktx` (decode); KTX2 decodes to `tex=jpg` (default, fast/small) or `png` |
-| `/stream/tileset.json?url=<SRC>&format=<fmt>&transform=<op>` (rides along on the tileset's own `/stream/tile/…` content URIs — no separate flag per tile request) | per-tile transform applied to **every streamed tile** (covers implicit COPC/Potree the `/gltf` proxy can't reach, since `/stream` builds each GLB itself) | `transform=meshopt` (**encode** — EXT_meshopt, works on POINTS → point tiles ~⅓ size) · `transform=draco` (encode, mesh tiles only, no-op on POINTS) · `transform=ktx` (encode ETC1S) · `transform=ktx-uastc` (encode UASTC, higher quality/larger) · `transform=decompress` (decode draco+meshopt+KTX2, `+&tex=jpg\|png` picks the KTX2 decode output) |
 | `/bing/tileset.json?root=<quadkey>&g=<genid>&maxLevel=<L>[&decompress=1]` | Bing Maps 3D (`tf=3dv4`) → 3D Tiles | `root` quadkey, `g` genid (default 15340), `maxLevel`, `decompress` |
+| `/3dtiles-self-contained/tileset.json?url=<path\|URL.3tz\|.3dtiles>` | serve a `.3tz`/`.3dtiles` package in-place, no extraction | local path or `http(s)://`; `.3tz` local-only, `.3dtiles` local + remote via sql.js |
 | `/threemx/tileset.json?url=<Scene.3mx\|root.3mxb>` | Bentley 3MX → 3D Tiles | (georef from SRS+SRSOrigin when present) |
+| `/geosplats/tileset.json?url=<model.json>&lod=<N>` | MapTiler GeoSplats (HLOD SOGS octants) → 3D Tiles | `lod` picks the max octree depth fetched; key/referer handled server-side |
+
+`/threemx` and `/geosplats` are still their **own** standalone endpoints (like `/copc` etc. used to be)
+— **not yet migrated** into `/stream`'s `ADAPTERS` registry or `/tiles`'s dispatch, so they don't get
+the unified `cache=`/`/tiles` vocabulary the other six formats do. Tracked in TODO / Future work.
 
 > The `/gltf` pipeline runs per-tile **only on explicit tilesets** (concrete tile URIs — 3MX/Bing/RAD/I3S
 > outputs and external mesh 3D Tiles); it recurses external-tileset refs. **Implicit** COPC/Potree octree
