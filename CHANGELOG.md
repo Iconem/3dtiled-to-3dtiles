@@ -5,6 +5,23 @@ Format loosely follows [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+### Docs — 2026-07-02 (`main`: README accuracy pass + new TODO items)
+- Fixed a stale `/package` endpoint name throughout README (renamed to `/3dtiles-self-contained` a
+  while back, but several examples/prose references never got updated) — heading, example URLs, and
+  cross-references now all agree.
+- Documented `/bing/fragment/<face>-<level>-<x>-<y>.json?g=<genid>`, the lazy-continuation route behind
+  `/bing/tileset.json` (previously undocumented despite being load-bearing for Bing streaming).
+- Documented `/3dtiles-self-contained`'s local-filesystem-path support (`?url=` resolves relative to
+  the tile-server's own CWD, not fetched over HTTP — unique among the adapters here).
+- Clarified `viewer.html`'s Tools → `packages` grouping routes to `/3dtiles-self-contained`, not a real
+  `/3dtiles-tools?tool=packages` value.
+- Expanded the `/stream?transform=` table row with `ktx`/`ktx-uastc` (previously only mentioned in prose).
+- Documented that Arrival.Space's `.lod` payload carries no georeferencing metadata (checked directly).
+- New TODO items: migrate `/threemx`/`/geosplats` into `/tiles`; find a real open-data `.3tz`/`.3dtiles`
+  sample (currently only our own repo-packed one); a new "Inspected, no tiled splat/generic format
+  found" section (Scaniverse, ESRI beyond I3S, other Bentley services, ReCap, Leica/Faro/Matterport,
+  Gauzilla Pro).
+
 ### Changed — 2026-07-02 (`main`: `/dump` renamed to `/extract`)
 - `packages/tile-server/dump-live.js` → `extract-live.js`, `handleDump` → `handleExtract`, `X-Dump-*`
   response headers → `X-Extract-*`, `viewer.html`'s `dumpCrop`/`getDumpMatrix`/"Crop & Dump" → `extractCrop`

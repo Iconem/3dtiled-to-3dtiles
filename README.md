@@ -359,15 +359,23 @@ Roughly in the order we're tackling them:
 - [x] ~~Streaming endpoint consolidation~~ — **done** (2026-07-02): `/stream` reads `cache=none|hierarchy`
   (not `hierarchy=eager|lazy`); the old per-format aliases (`/copc`, `/potree`, `/sog`, `/lcc`, `/rad`,
   `/i3s`) are gone (verified redundant with `/stream/tileset.json?format=<fmt>`); `/tiles` dispatches
-  to `/stream`/`/convert` in-process instead of a 307 redirect; Potree 1.x's `tiling=explicit` was
-  simplified to full materialization instead of per-chunk lazy fragments. See "Endpoint rework" above
-  and the CHANGELOG.
+  to `/stream`/`/convert` in-process instead of a 307 redirect; Potree 1.x's `tiling=explicit`, and RAD
+  and I3S entirely, were simplified to full materialization instead of per-chunk/lazy-fragment
+  continuation routes; `/dump` was renamed `/extract` (clearer, less overloaded name). See "Endpoint
+  rework" above and the CHANGELOG.
 - [ ] **Composable `tiling=explicit`.** The still-open, more invasive half of the item above: route
-  `&tiling=explicit` for COPC/Potree-2.0 (and eventually I3S, if it ever gets an implicit
-  representation) *through* the existing `/3dtiles-tools?tool=implicit-to-explicit` tool against their
-  own implicit `/stream` output, instead of each format's live adapter keeping a bespoke
-  `buildTilesetExplicit`. Deferred until the consolidation above has settled — untested whether
+  `&tiling=explicit` for COPC/Potree-2.0 *through* the existing `/3dtiles-tools?tool=implicit-to-explicit`
+  tool against their own implicit `/stream` output, instead of each format's live adapter keeping a
+  bespoke `buildTilesetExplicit`. Deferred until the consolidation above has settled — untested whether
   `implicit-to-explicit`'s generic walker round-trips cleanly against our own live implicit tilesets.
+  (I3S dropped out of scope here: it was simplified to always-explicit directly, having no implicit
+  representation worth composing through the tool.) `viewer.html`'s Tools → implicit-to-explicit demo
+  now includes a Potree and a COPC example against our own prebuilt output as a stopgap — that's the
+  tool working *against* our formats offline, not the live routing described here.
+- [ ] **Migrate `/threemx` and `/geosplats` into `/tiles`.** Both are stale relative to the
+  consolidation above — real streaming adapters with their own bespoke endpoints, not yet wired into
+  `/stream`'s `ADAPTERS` registry or `/tiles`'s dispatch, so they don't get the unified `cache=`
+  vocabulary (or `/tiles`'s single entry point) other formats do.
 - [ ] **Dockerize the server.** A `docker-compose`-runnable `packages/tile-server` (+ viewer), with a
   GitHub Actions workflow building and publishing images to **GHCR** on release, so it can be dropped
   straight into a `docker-compose`/**Portainer** stack behind **Traefik** — no manual Node setup.
@@ -386,6 +394,30 @@ Roughly in the order we're tackling them:
   Tastier RAD, Geghard, Tende 3MX, …) as versioned fixtures — either vendored into their own small
   GitHub repo(s) or referenced by stable upstream URL — so CI and new contributors get a reproducible
   test corpus instead of relying on live third-party hosts.
+- [ ] **Find a real open-data `.3tz`/`.3dtiles` package.** `viewer.html`'s Packages pills currently only
+  demo our own repo-packed `sample-data/input/3DTILES-PACKAGES/tastier.{3tz,3dtiles}` — we don't have a
+  publicly-hosted example of either package format found in the wild to verify `/3dtiles-self-contained`
+  against a real third-party `.3tz`/`.3dtiles` file, not just our own packer's output.
+
+### Inspected, no tiled splat/generic format found
+
+A quick pass over other capture/scanner ecosystems, looking for a *tiled* (multi-file, LOD-hierarchy)
+splat or generic point/mesh format worth adding an adapter for — none surfaced. Not deeply
+independently researched (a web-search-depth pass, not a spec audit like the sources in
+`docs-references/`), so treat as a starting point, not a verdict:
+- **Niantic Scaniverse** — exports single-file GLB/USDZ/OBJ/PLY splat or mesh scans; no multi-file tiled
+  hierarchy format found.
+- **ESRI tiled data** beyond I3S (already supported) — didn't find another ESRI *tiled* format distinct
+  from I3S worth a separate adapter.
+- **Bentley/other Bentley services** — ContextCapture emits **3MX** (already supported); didn't find a
+  second Bentley tiled format beyond that and standard **Cesium 3D Tiles** (already the target format).
+- **Autodesk ReCap `.rcp`/`.rcs`** — already tracked as blocked (see the point-cloud adapter tiers
+  above): no open reader/writer, not itself a *tiled* container in the sense the other formats here are.
+- **Laser scanner vendors (Leica, Faro, Matterport)** — proprietary single-project registration formats
+  (Leica `.lgs`/e57 export, Faro `.fls`/`.fws`, Matterport's own cloud pipeline); no publicly documented
+  *tiled* multi-LOD format surfaced for any of the three.
+- **Gauzilla Pro** — a Gaussian-splat viewer/tool, not a distinct tiled storage format of its own (reads/
+  writes standard PLY/SPZ-family splat files as far as could be found).
 
 ---
 
@@ -518,13 +550,20 @@ were a strict subset of what `/stream/tileset.json?format=<fmt>` already did (ve
 they didn't even forward `hierarchy`/`prefetch`, so `cache=hierarchy` was silently unreachable through
 them). `/3dtiles-tools` stays as its own endpoint (a tileset-level *transform*, not a format converter).
 
-**Not yet done** (see [TODO / Future work](#todo--future-work)): `tiling=explicit` routing *through*
-the existing `implicit-to-explicit` tool, so Potree/COPC/I3S share one explicit-tiling code path
-instead of each format's live adapter having its own bespoke `buildTilesetExplicit`. What shipped now
-is more modest — Potree 1.x's `tiling=explicit` was simplified to fully materialize the tree in one
-response (no more per-format lazy-fragment continuation needing its own routes); RAD and I3S's
-lazy-fragment continuation (needed for their core `cache=none` streaming, not just `tiling=explicit`)
-moved under `/stream/rad/subtree/<n>.json` and `/stream/i3s/node|tile/<n>.json|glb` respectively.
+**Not yet done** (see [TODO / Future work](#todo--future-work)): live `tiling=explicit` routing
+*through* the existing `implicit-to-explicit` tool for octree formats (COPC/Potree), so the LIVE
+`/stream?tiling=explicit` path shares one explicit-tiling code path instead of each octree adapter
+having its own bespoke `buildTilesetExplicit`. What shipped now is more modest:
+- Potree 1.x's `tiling=explicit` was simplified to fully materialize the tree in one response (no more
+  per-format lazy-fragment continuation needing its own routes).
+- RAD and I3S (2026-07-02): removed their lazy-fragment continuation entirely (`/stream/rad/subtree/`,
+  `/stream/i3s/node|tile/…&lazy=1`) — neither format has a persisted spatial index to make a partial
+  read meaningfully cheaper than a full eager scan, so `cache=none`/`cache=hierarchy` are now
+  equivalent for both, always fully materializing (same simplification as Potree 1.x above).
+- **Offline-only**, not the live path above: `viewer.html`'s Tools → `implicit-to-explicit` demo now
+  includes one Potree and one COPC example, pointing the *existing* tool directly at their prebuilt
+  octree output — this demonstrates the tool against our own formats but doesn't change how live
+  `/stream?tiling=explicit` builds its tree.
 
 ### Factory / composability ideas (future)
 
@@ -572,7 +611,7 @@ Composability goal: `source → convert → [centroids] → [gltf: draco/ktx2 de
 |---|---|---|
 | `/3dtiles-tools/tileset.json?tool=<t>&dir=<path>\|url=<tileset>` | per-tile tileset transforms | `tool=implicit-to-explicit` · `tool=upgrade` (b3dm/pnts→glb, glTF 1.0→2.0, `CESIUM_RTC` bake) |
 | `/gltf/tileset.json?url=<tileset>&ops=<ops>[&tex=jpg\|png]` (+ `/gltf/tile.glb?url=<glb>&ops=`) | generic per-tile **glTF-Transform** pipeline (proxies an explicit tileset, recurses external refs) | `ops=decompress` (= `draco,meshopt,ktx`) · or any of `draco` · `meshopt` · `ktx` (decode); KTX2 decodes to `tex=jpg` (default, fast/small) or `png` |
-| `/stream/tileset.json?url=<SRC>&format=<fmt>&transform=<op>` | per-tile transform applied to **every streamed tile** (covers implicit COPC/Potree the `/gltf` proxy can't reach, since `/stream` builds each GLB itself) | `transform=meshopt` (**encode** — EXT_meshopt, works on POINTS → point tiles ~⅓ size) · `transform=draco` (encode, mesh tiles only) · `transform=decompress` (decode draco/meshopt/KTX2, `+&tex=jpg\|png`) |
+| `/stream/tileset.json?url=<SRC>&format=<fmt>&transform=<op>` (rides along on the tileset's own `/stream/tile/…` content URIs — no separate flag per tile request) | per-tile transform applied to **every streamed tile** (covers implicit COPC/Potree the `/gltf` proxy can't reach, since `/stream` builds each GLB itself) | `transform=meshopt` (**encode** — EXT_meshopt, works on POINTS → point tiles ~⅓ size) · `transform=draco` (encode, mesh tiles only, no-op on POINTS) · `transform=ktx` (encode ETC1S) · `transform=ktx-uastc` (encode UASTC, higher quality/larger) · `transform=decompress` (decode draco+meshopt+KTX2, `+&tex=jpg\|png` picks the KTX2 decode output) |
 | `/bing/tileset.json?root=<quadkey>&g=<genid>&maxLevel=<L>[&decompress=1]` | Bing Maps 3D (`tf=3dv4`) → 3D Tiles | `root` quadkey, `g` genid (default 15340), `maxLevel`, `decompress` |
 | `/threemx/tileset.json?url=<Scene.3mx\|root.3mxb>` | Bentley 3MX → 3D Tiles | (georef from SRS+SRSOrigin when present) |
 
@@ -827,7 +866,7 @@ out-rad/
 > [`@cesium/3d-tiles-tools`](https://github.com/CesiumGS/3d-tiles-tools) as an **optional dependency**,
 > but no `--3tz`/`--3dtiles` CLI flag actually exists yet to use it for packaging — for `.3tz`/`.3dtiles`
 > today, convert to a plain tileset dir then use the in-repo packer (`scripts/pack-3dtiles.mjs`) or
-> `npx 3d-tiles-tools convert`, both documented under `/package` below.
+> `npx 3d-tiles-tools convert`, both documented under `/3dtiles-self-contained` below.
 
 **Live `/stream` (no pre-conversion)** — `packages/tile-server/rad-live.js`, served at
 `GET /stream/tileset.json?url=<.rad>&format=rad`:
@@ -1124,7 +1163,7 @@ curl -L "https://data.geopf.fr/telechargement/download/LiDARHD-NUALID/NUALHD_1-0
 | `@gltf-transform/core` ^4 | both |
 | `proj4` | copc-to-3dtiles |
 | `@sparkjsdev/spark` | rad-to-3dtiles |
-| `@cesium/3d-tiles-tools` (optional) | both — declared for future `.3tz`/`.3dtiles` packaging; not wired to a CLI flag yet (use `scripts/pack-3dtiles.mjs` or `npx 3d-tiles-tools convert` today, see `/package`) |
+| `@cesium/3d-tiles-tools` (optional) | both — declared for future `.3tz`/`.3dtiles` packaging; not wired to a CLI flag yet (use `scripts/pack-3dtiles.mjs` or `npx 3d-tiles-tools convert` today, see `/3dtiles-self-contained`) |
 
 ---
 
@@ -1178,6 +1217,9 @@ COPC, Potree 1.x/2.0, EPT, I3S/SLPK, streamed-SOG, LCC, RAD, 3D Tiles packages, 
 - ✅ **Bing Maps 3D** — `GET /bing/tileset.json?root=<quadkey>&g=<genid>&maxLevel=<L>[&decompress=1]`.
   `tf=3dv4` GLB (Draco + KTX2, ECEF in node matrix) served as-is; quadtree of quadkeys as lazy fragments,
   availability by HTTP probe, geographic `region` bounding volumes. Verified live (Berlin, keyless `g=15340`).
+  The lazy fragments are their own route, `GET /bing/fragment/<face>-<level>-<x>-<y>.json?g=<genid>` —
+  a partial explicit tileset continuing the tree from that boundary node; `tileset.json`'s deep tiles
+  reference these by absolute URL, fetched only as the camera refines in. Example: `/bing/fragment/0-3-3-2.json?g=15530`.
 - **Nexus** `.nxs/.nxz` — *moderate, postponed*: header parse + Corto decode exist in JS but are WebGL/Worker-coupled (port needed), Corto not on npm, DAG→tree mapping is the thorny bit.
 
 ### 2.5D terrain (separate track, future)
@@ -1591,12 +1633,19 @@ GET /convert/tileset.json?url=<SRC>&centroids=1    # cached separately from the 
 Point-cloud inputs (COPC/Potree) are already POINTS, so the flag is a no-op for them. The output is a
 standard POINTS tileset with **no** `KHR_gaussian_splatting` extension advertised.
 
-### `/package` — serve `.3tz` / `.3dtiles` packages in-place ✅
+### `/3dtiles-self-contained` — serve `.3tz` / `.3dtiles` packages in-place ✅
 
 ```sh
 # Open a .3tz package directly in any 3D Tiles viewer without extracting it:
-GET http://localhost:3001/package/tileset.json?url=/abs/path/to/scene.3tz
-GET http://localhost:3001/package/tiles/0/0/0.glb?url=/abs/path/to/scene.3tz
+GET http://localhost:3001/3dtiles-self-contained/tileset.json?url=/abs/path/to/scene.3tz
+GET http://localhost:3001/3dtiles-self-contained/tiles/0/0/0.glb?url=/abs/path/to/scene.3tz
+```
+
+`?url=` also takes a **local filesystem path** (resolved relative to the tile-server's own CWD, not
+fetched over HTTP) alongside `http(s)://` — unique among the adapters here, which all `fetch()` and so
+need an absolute URL. Working example against this repo's bundled sample package:
+```sh
+GET http://localhost:3001/3dtiles-self-contained/tiles/node_7.glb?url=sample-data%2Finput%2F3DTILES-PACKAGES%2Ftastier.3dtiles&format=3dtiles-pkg
 ```
 
 `.3tz` is a ZIP file with a `@3dtilesIndex1@` binary index that maps every tile path to its offset
@@ -1667,6 +1716,13 @@ content is converted to glb on the fly; `.glb` is proxied as-is. Works on local 
 
 `i3dm`/`cmpt` content and full PBR material rebuilds are deferred to `3d-tiles-tools`
 (`upgrade --targetVersion 1.1`).
+
+**`viewer.html`'s "⚙ Tools" mode groups a third operation, `packages`,** alongside these two for UX —
+but it isn't a `/3dtiles-tools?tool=…` value at all: it routes to the *separate*
+**`/3dtiles-self-contained`** endpoint (a `.3tz`/`.3dtiles` package → a standard streamed 3D Tiles
+tileset — see "`/3dtiles-self-contained` — serve `.3tz` / `.3dtiles` packages in-place" below), not a
+tileset-level transcode. The grouping is "pick an operation to demo," not an architectural claim that
+`packages` lives under `/3dtiles-tools`.
 
 **Doable but low value (noted, not planned):**
 - **Point-budget / downsample proxy** — serve fewer/decimated tiles to weak clients. Marginal: a
@@ -1785,7 +1841,7 @@ A consolidated, honest list of what is **not** handled (and where it would go). 
 - **Browser runtime not built** — `fs` / `zlib` / `worker_threads` are Node-only; core's planned `fs-io`
   abstraction + `CompressionStream`/WASM-brotli paths don't exist yet (decoders are mostly portable; see Runtime table).
 - **`.3tz`/`.3dtiles` packaging IS built in** (`scripts/pack-3dtiles.mjs`, dependency-free) and serving
-  packages in-place is too (`/package`, `/3dtiles-self-contained`) — see the `/package` section below.
+  packages in-place is too — see the `/3dtiles-self-contained` section below.
   **Tileset-level transforms** (version `upgrade` 1.0→1.1, `combine` multiple tilesets, content-format
   transcodes) are **not** built in; use Cesium's
   [3d-tiles-tools](https://github.com/CesiumGS/3d-tiles-tools) (CLI + JS API) for those — `npx
@@ -1804,7 +1860,7 @@ A consolidated, honest list of what is **not** handled (and where it would go). 
 npm run serve:tiles            # alias: npm run serve:live  → http://localhost:3001
 #   GET /stream/tileset.json?url=<SRC>&format=<fmt>[&cache=none|hierarchy][&prefetch=N] ← unified streaming dispatcher
 #   GET /convert/tileset.json?url=<SRC>[&format=<fmt>][&centroids=1] ← preprocess+cache, any format
-#   GET /package/tileset.json?url=<local/path.3tz>                   ← serve .3tz/.3dtiles in-place
+#   GET /3dtiles-self-contained/tileset.json?url=<local/path.3tz>    ← serve .3tz/.3dtiles in-place
 ```
 
 `/stream` is the single front-door: it detects the format and delegates to that format's range adapter
