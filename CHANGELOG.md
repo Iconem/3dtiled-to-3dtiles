@@ -5,6 +5,21 @@ Format loosely follows [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+### Docs — 2026-07-02 (`main`: second README staleness pass)
+- **`i3s-to-3dtiles` mislabeled "UNTESTED"** in the docs-references summary table while its own
+  dedicated section already documents it as validated on `Buildings_NewYork_v18.slpk` (5882 tiles,
+  placed correctly in NYC) — fixed the summary to match.
+- **"Performance & parallelism" described conversion as still single-threaded/sequential**, with a
+  worker/bounded-concurrency pool as "the clear next optimization... not yet done" — that work is
+  already done (all five operational converters use `parallelMap` + async gzip, tier 1) and is
+  accurately described in the separate "Parallelism (per converter)" section a few hundred lines
+  earlier; this section just never got updated. Corrected in place (kept, since other headings link
+  to it) rather than deleted, and pointed at the accurate section.
+- **RAD `geometricError` undershoot listed as an open bug with only a `--ge-scale` workaround** —
+  `rad-to-3dtiles` already defaults to a spatial GE basis (`bboxDiag/∛count`, `--ge-basis=spatial`)
+  that fixes the underlying ~4× undershoot; the featureSize basis this bullet described as the only
+  option is now opt-in legacy (`--ge-basis=featuresize`). Marked resolved.
+
 ### Docs — 2026-07-02 (`main`: README staleness pass)
 - Fixed several stale claims flagged during review: the meta-converter dispatch note and two
   "Missing features" bullets described converters as not-yet-moved under `packages/<fmt>/` and

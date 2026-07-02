@@ -1095,14 +1095,17 @@ curl -L "https://data.geopf.fr/telechargement/download/LiDARHD-NUALID/NUALHD_1-0
 
 ## Performance & parallelism
 
-Tile **conversion is currently single-threaded and sequential** — each converter walks its node
-list in a `for … await` loop, doing decode → SPZ/GLB encode (gzip) → `fs.writeFile` one tile at a
-time on the main thread. The tree walk is cheap; the cost is per-tile encoding (gzip, WebP decode
-for SOG, point packing). That work is **embarrassingly parallel and independent per tile**, so the
-clear next optimization is a **`worker_threads` pool** (or `Promise.all` with bounded concurrency)
-fanning tiles across cores — near-linear speedup on multi-core, since tiles don't depend on each
-other. Memory is already bounded per-chunk (esp. SOG/LCC: decode one chunk → write its tiles →
-release). Not yet done; tracked as the headline perf TODO.
+**This is stale as of the tier-1 parallelization work — see "[Parallelism (per
+converter)](#parallelism-per-converter)" above for the current, accurate picture.** (Kept here,
+corrected, since other sections still link to this heading.) Tile work — decode → SPZ/GLB encode
+(gzip) → write — is **embarrassingly parallel and independent per tile**. All five operational
+converters (rad, sog, lcc, copc, potree) now fan tiles out via `parallelMap` (bounded concurrency =
+cores−1) + async gzip, verified byte/content-identical to the prior serial versions; i3s (draft)
+remains serial. Memory is already bounded per-chunk (esp. SOG/LCC: decode one chunk → write its
+tiles → release). The **outstanding piece** is tier 2 — a real `worker_threads` pool for true
+multicore *decode* (WASM/CPU-bound: LAZ, WebP, brotli) rather than just bounded concurrency on the
+main thread's event loop; see the per-converter table for where that headroom is biggest (SOG's WebP
+decode, mainly).
 
 ---
 
@@ -1346,7 +1349,7 @@ trees on disk — the converter reads those directly, no unzip). Mix of `3DObjec
 | `lcc-format.md` | XGRIDS LCC (Lixel CyberColor) — `meta.lcc`/`Index.bin`/`Data.bin` (32 B/splat, 10-10-10-2 rot, packed-11 SH); input to `lcc-to-3dtiles` (source: github.com/xgrids/LCCWhitepaper). Attribution required. |
 | `potree-format.md` | Potree 1.x (`cloud.js` + `.hrc`/`.bin`/`.laz`) and 2.0 (binary octree) — input to `potree-to-3dtiles`. Key: 1.x decode is `POSITION·scale + the NODE's box.min` (node-relative), with the `createChildAABB` octant convention bit0→Z/bit1→Y/bit2→X. cloud.js can carry a proj4 CRS. Sources: potree repo `docs/` (pinned commits). |
 | `nexus-format.md` | 🟠 CNR-ISTI Nexus multiresolution mesh (DAG of patches) — **doc-referenced, no converter** (mesh, not splats; niche). Refs: github.com/cnr-isti-vclab/nexus, FastDec paper |
-| `i3s-spec.md` | 🟡 Esri I3S (Indexed 3D Scene Layer / SLPK) — **draft converter `i3s-to-3dtiles/` (UNTESTED)**: explicit nodepages + uncompressed `DefaultGeometrySchema` mesh / point cloud only. Ref: github.com/esri/i3s-spec |
+| `i3s-spec.md` | 🟡 Esri I3S (Indexed 3D Scene Layer / SLPK) — **draft converter `i3s-to-3dtiles/`** (validated on `Buildings_NewYork_v18.slpk` → 5882 tiles, see below): explicit nodepages + uncompressed `DefaultGeometrySchema` mesh / point cloud only. Ref: github.com/esri/i3s-spec |
 | `streaming-architecture-design-log.md` | Design log for the live-streaming harmonization — lazy hierarchy, the `cache = none/hierarchy/full` continuum, push/pull, per-format wiring + parallel hierarchy build. Companion to the README "materialization continuum" section. |
 | `streaming-adapter-plans.md` | Implementation plans for candidate adapters — **Bentley 3MX** (`3MXBO`/OpenCTM) and **Bing Maps 3D** (`tf=3dv4` GLB+Draco+KTX2, quadtree) — plus feasibility verdicts for **Nexus** (moderate, postponed) and **Autodesk ReCap** (blocked). Research-backed. |
 
@@ -1733,9 +1736,10 @@ A consolidated, honest list of what is **not** handled (and where it would go). 
 ### Parallelism & performance
 - **`WorkerPool` (worker_threads) tier not wired** — all converters use only the async-gzip + `parallelMap`
   tier (main-thread decode on the libuv pool). True multicore decode (the WASM/CPU-bound decoders) is unused headroom.
-- **RAD `geometricError` undershoots** — featureSize-based GE is ~4× lower than a spatial (tile-diagonal)
-  basis (Elevator: ours 1.22 vs William's 4.66), so renderers under-refine → coarse/"missing" tiles at
-  distance. Workaround `--ge-scale ~4`; no spatial-GE option yet.
+- ~~**RAD `geometricError` undershoots**~~ — **fixed**: `rad-to-3dtiles` now defaults to a **spatial**
+  GE basis (`bboxDiag/∛count`, `--ge-basis=spatial`) instead of the featureSize basis that undershot
+  by ~4× (Elevator: ours 1.22 vs William's 4.66) and caused renderers to under-refine at distance. The
+  old featureSize basis is still available via `--ge-basis=featuresize` for comparison/legacy output.
 
 ### Architecture & runtime
 - **Browser runtime not built** — `fs` / `zlib` / `worker_threads` are Node-only; core's planned `fs-io`
