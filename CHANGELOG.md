@@ -5,6 +5,48 @@ Format loosely follows [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+### Changed — 2026-07-02 (`main`: `/dump` renamed to `/extract`)
+- `packages/tile-server/dump-live.js` → `extract-live.js`, `handleDump` → `handleExtract`, `X-Dump-*`
+  response headers → `X-Extract-*`, `viewer.html`'s `dumpCrop`/`getDumpMatrix`/"Crop & Dump" → `extractCrop`
+  /`getExtractMatrix`/"Crop & Extract". No back-compat alias — the old `/dump/*` paths are gone.
+
+### Changed — 2026-07-02 (`main`: RAD and I3S always fully materialize — no more lazy-fragment mode)
+- **RAD**: removed the 4-level lazy-fragment continuation (`buildRadLazySubtree`, `/stream/rad/subtree/<n>.json`).
+  RAD has no persisted spatial index, so a "lazy" read still needs each chunk's full bytes — measured
+  against the 1.28 GB `coit.rad` sample, eager (all chunks) took 9.7s vs the old lazy fragment's 7.6s,
+  not enough of a win to justify a whole extra code path. `cache=none` and `cache=hierarchy` now both
+  eager-scan once (cached per URL, same `makeTileset` either way).
+- **I3S**: same simplification — removed `buildI3sFragment`, `/stream/i3s/node/<n>.json`, and the
+  `&lazy=1` tile mode. I3S node pages are cheap JSON metadata (not geometry), so eager cold start (page 0
+  sync + remaining pages in the background, capped at a 3s wait) was already fast; the lazy path bought
+  little for the added complexity. `cache=none`/`cache=hierarchy` are now equivalent for I3S too.
+- Both mirror the Potree 1.x `tiling=explicit` simplification from earlier this session — one
+  fully-materialized-explicit-tree code path instead of eager+lazy forks.
+
+### Fixed — 2026-07-02 (`main`: `/dump/splat` LCC crops placed splats dozens of meters off)
+- **`dump-live.js`'s generic Y-up→Z-up flip (`YUP_ZUP`) double-applied for LCC sources**, since
+  `lccGeoref`'s `[East,−Up,North]` root-transform columns already bake that same flip in (unlike every
+  other adapter's plain `[East,North,Up]` georef, which needs `dump-live.js` to supply it separately).
+  Net effect: a real rotation-about-local-X error in every LCC `/dump/splat` (and `/dump/zip`) crop.
+  Quantified against 10 sampled Guan_Temple tiles' own declared bounding boxes: the old default placed
+  splat centroids 50–246 m outside their own ~31 m-half-diagonal tile box; the corrected rotation lands
+  them 11–25 m off (plausible centroid-vs-box-center noise, not error) — this is the "horse statue
+  cropped a few dozen meters off" bug. `dump-live.js` now detects an LCC source (`format=lcc` in the
+  nested `/stream` URL, or an `/LCC/` path segment) and uses the inverse rotation (`YUP_ZUP_P90`) for it;
+  every other no-node-matrix format is untouched. `&rx=90|-90` still force either rotation for testing.
+
+### Fixed — 2026-07-02 (`main`: LCC scenes with no EPSG rendered lying on their side)
+- **`lccGeoref()` returning `null` (meta.epsg 0/unknown — Guanlan Ancient Town, religious_center_L2_P)
+  left `root.transform` unset entirely**, so the splat GLB content stayed in its raw Y-up frame while
+  `boundToZUpBox` had already (unconditionally) RX(+90°)-flattened the bounding boxes — the box/content
+  axis mismatch rendered as "lying vertical instead of flat" (confirmed: Guan_Temple has a real EPSG
+  4547 and rendered correctly; the other two have `epsg: 0` and didn't).
+- Added `LCC_LOCAL_UPRIGHT` (`packages/core/geo.js`) — the same RX(+90°) flip baked into `lccGeoref`'s
+  `[East,−Up,North]` columns, but with identity East/Up/North and zero translation (no real ENU
+  placement). `lcc-live.js` and `lcc-to-3dtiles` now fall back to it whenever `lccGeoref()` returns
+  `null`, so ungeoreferenced LCC scenes still render flat/upright at the local frame origin — just not
+  geolocated.
+
 ### Changed — 2026-07-02 (`main`: streaming endpoint consolidation, no back-compat)
 - **`/stream` now reads `cache=none|hierarchy`**, not `hierarchy=lazy|eager` — matches the `/tiles`
   vocabulary, which now passes its query string straight through instead of translating it.

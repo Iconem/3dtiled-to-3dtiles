@@ -15,7 +15,7 @@ converters' live counterpart): point it at a `<format>` source URL and it serves
 (Unreal, Unity, Nvidia Omniverse, Open-3d-Engine), GIS software (QGIS, ESRI etc), anything that speaks the OGC standard — can consume any of these tiled
 formats **without a pre-conversion step**, with tile-hierarchy/content **caching** and **prefetching**
 tunable per use case (`cache=none|hierarchy|all`). `viewer.html` (CesiumJS + 3DTilesRendererJS) is the
-reference client, and doubles as a **bbox + geometric-error-aware crop/extract** tool (`/dump/*`) for
+reference client, and doubles as a **bbox + geometric-error-aware crop/extract** tool (`/extract/*`) for
 pulling a sub-region, with user-controlled Geometric Error target precision, of any of these formats back out as LAS/COPC/GLB/SPZ/SOG/PLY.
 
 **Where this is going next.** Two items are concrete and addressable in the near term, not just
@@ -1922,14 +1922,14 @@ for that particular capture, not an error in the scale derivation — the deriva
 exact and matches two independent models to within a few percent already. `&scale=<f>` is the pragmatic
 per-model pin if a specific scene needs it exact.
 
-### `/dump` — bbox + geometric-error crop/extract (implemented ✅)
+### `/extract` — bbox + geometric-error crop/extract (implemented ✅)
 
-Its own endpoint family, **not** a `/convert` specialization — `packages/tile-server/dump-live.js`
+Its own endpoint family, **not** a `/convert` specialization — `packages/tile-server/extract-live.js`
 ingests *any* 3D Tiles source (one of this repo's own live/offline outputs, or an external tileset)
 and walks it with the same shared bbox+GE+refine-aware `traverse()` regardless of output kind:
 
 ```sh
-GET /dump/{las|glb|copc|tileset|zip|splat}?url=<tileset.json>&bbox=<west,south,minH,east,north,maxH>[&maxGE=<m>][&maxDepth=N]
+GET /extract/{las|glb|copc|tileset|zip|splat}?url=<tileset.json>&bbox=<west,south,minH,east,north,maxH>[&maxGE=<m>][&maxDepth=N]
 ```
 
 - `bbox` is **geographic** (lon/lat degrees + ellipsoidal height m) — what you'd draw on the globe;
@@ -1947,8 +1947,13 @@ GET /dump/{las|glb|copc|tileset|zip|splat}?url=<tileset.json>&bbox=<west,south,m
   the crop's bbox center, so multiple crops of the same source share one coordinate system — the
   tradeoff is that a single crop far from the source root can look "off-center" relative to its own
   bounding box when loaded standalone in a viewer that assumes content sits near its own origin.
+- LCC's splat crop had a real placement bug (not the origin-anchoring tradeoff above): its
+  `[East,−Up,North]` root-transform column layout already bakes the Y-up→Z-up content flip in (unlike
+  every other adapter's plain `[East,North,Up]` georef), so the extractor's generic flip double-applied
+  — fixed 2026-07-02 by detecting an LCC source (`format=lcc` in the nested `/stream` URL, or an
+  `/LCC/` path segment) and using the inverse rotation for it. See CHANGELOG.
 
-viewer.html's "CROP & DUMP" sidebar section drives this directly.
+viewer.html's "CROP & EXTRACT" sidebar section drives this directly.
 
 ### COPC — Autzen Stadium, Oregon (10.6M pts)
 

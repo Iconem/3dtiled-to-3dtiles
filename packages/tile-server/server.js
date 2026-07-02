@@ -38,7 +38,7 @@ import { handle3dtilesTools } from './3dtiles-tools-live.js';
 import { handleGltf } from './gltf-live.js';
 import { handleBing } from './bing-live.js';
 import { handleThreemx } from './threemx-live.js';
-import { handleDump } from './dump-live.js';
+import { handleExtract } from './extract-live.js';
 import { handleGeoSplats } from './geosplats-live.js';
 import { progressGet } from '../core/index.js';
 
@@ -96,7 +96,7 @@ http.createServer(async (req, res) => {
     if (await handleGltf(req, res, u)) return;            // /gltf?ops=decompress — per-tile glTF-Transform pipeline
     if (await handleBing(req, res, u)) return;            // /bing — Bing Maps 3D (tf=3dv4 GLB) → 3D Tiles
     if (await handleThreemx(req, res, u)) return;         // /threemx — Bentley/Acute3D 3MX → 3D Tiles
-    if (await handleDump(req, res, u)) return;            // /dump/las — bbox crop of a point cloud → LAS
+    if (await handleExtract(req, res, u)) return;         // /extract/las — bbox crop of a point cloud → LAS
     if (await handleGeoSplats(req, res, u)) return;       // /geosplats — MapTiler GeoSplats → 3D Tiles (server-side key/referer)
     res.writeHead(404, CORS); res.end('not found — try /tiles, /stream, /convert, /3dtiles-self-contained, or /3dtiles-tools');
   } catch (e) {

@@ -71,6 +71,13 @@ export function cgcs2000Lon0(epsg) {
   return null;
 }
 
+// Fallback root `transform` for LCC scenes with no usable EPSG (meta.epsg 0/unknown — Guanlan Ancient
+// Town, religious_center_L2_P): the same RX(+90°) Y-up→Z-up flip `boundToZUpBox` bakes unconditionally
+// into every bounding box `(cx,cy,cz)→(cx,−cz,cy)`, but with no ENU placement (local origin, unit
+// East/Up/North). Without this the box sits Z-up-flattened while the splat GLB content stays raw
+// Y-up — the box/content axis mismatch is what renders as "lying vertical instead of flat".
+export const LCC_LOCAL_UPRIGHT = [1,0,0,0, 0,0,1,0, 0,-1,0,0, 0,0,0,1];
+
 // Georeference an LCC scene from its meta (`epsg` + projected `offset`) → root `transform` placing the
 // local frame on the globe. The column layout [East, −Up, North, origin] bakes the splat glTF Y-up→Z-up
 // RX(+90°) into the frame (SPZ-verbatim positions sit upright + located). null if no/unknown CRS — so

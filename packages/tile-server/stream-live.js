@@ -9,9 +9,11 @@
  *   GET /stream/tileset.json?url=<SRC>&format=<fmt>[&cache=none|hierarchy][&prefetch=N][&tiling=…]
  *   GET /stream/tile/<key>.glb?url=<SRC>&format=<fmt>       → one range-built tile from that adapter
  *   GET /stream/subtrees/<key>.subtree?url=<SRC>&format=<fmt>  → implicit-tiling subtree (octree fmts)
- *   GET /stream/rad/subtree/<n>.json?url=<SRC>              → RAD lazy-fragment continuation
- *   GET /stream/i3s/node/<n>.json?url=<SRC>                 → I3S lazy-fragment continuation
- *   GET /stream/i3s/tile/<n>.glb?url=<SRC>&lazy=1           → I3S lazy tile (needs &lazy=1 — see below)
+ *
+ * RAD and I3S have no persisted spatial index to make a lazy/partial hierarchy read meaningful (see
+ * their file-header comments), so both always fully materialize their explicit tree regardless of
+ * `cache=` — matching the Potree 1.x `tiling=explicit` simplification. (2026-07-02: this removed their
+ * `/stream/rad/subtree/…` and `/stream/i3s/node,tile/…` lazy-fragment continuation routes.)
  *
  * vs `/convert` (preprocess + cache: converts the whole dataset once, then serves static — works for
  * EVERY format, not just the ones with a range adapter); for formats without one, `/stream` returns
@@ -24,8 +26,8 @@ import { copcTileset, copcTile, copcSubtree, copcTileRe } from './copc-live.js';
 import { potreeTileset, potreeTile, potreeSubtree, potreeTileRe } from './potree-live.js';
 import { sogTileset, sogTile, sogTileRe } from './sog-live.js';
 import { lccTileset, lccTile, lccTileRe } from './lcc-live.js';
-import { radTileset, radTile, radTileRe, radSubtree } from './rad-live.js';
-import { i3sTileset, i3sTile, i3sTileRe, i3sNode } from './i3s-live.js';
+import { radTileset, radTile, radTileRe } from './rad-live.js';
+import { i3sTileset, i3sTile, i3sTileRe } from './i3s-live.js';
 import { handleSelfContained } from './3dtiles-self-contained.js';
 import { detectFormatByName, compressGlb, decompressGlb } from '../core/index.js';
 
@@ -87,48 +89,9 @@ function tagContentUris(node, suffix) {
   }
 }
 
-// RAD and I3S each need one extra sub-route beyond tileset.json/tile/subtrees: a lazy "fragment"
-// (a partial tileset.json continuing the tree from one boundary node) that their own lazy builders
-// reference by ABSOLUTE uri (a relative "tile/…" inside a fragment nested under /stream/<fmt>/… would
-// resolve wrong). Namespaced by format (/stream/rad/…, /stream/i3s/…) since the shapes differ (RAD:
-// one subtree-continuation kind; I3S: node-continuation AND lazy tile serving, which additionally
-// needs &lazy=1 threaded through to hit the correct cached context — see i3s-live.js getCtx).
-async function handleFormatFragment(u, res) {
-  const url = u.searchParams.get('url');
-  if (!url) return false;
-  const r = u.pathname.match(/^\/stream\/rad\/subtree\/(\d+)\.json$/);
-  if (r) {
-    const centroids = u.searchParams.get('centroids') === '1' || u.searchParams.get('centroids') === 'true';
-    const ts = await radSubtree(url, Number(r[1]), { centroids });
-    if (!ts) { res.writeHead(404, CORS); res.end('not a lazy rad dataset'); return true; }
-    res.writeHead(200, { 'Content-Type': 'application/json', ...CORS });
-    res.end(JSON.stringify(ts));
-    return true;
-  }
-  const n = u.pathname.match(/^\/stream\/i3s\/node\/(\d+)\.json$/);
-  if (n) {
-    const frag = await i3sNode(url, Number(n[1]));
-    if (!frag) { res.writeHead(404, CORS); res.end('no such node'); return true; }
-    res.writeHead(200, { 'Content-Type': 'application/json', ...CORS });
-    res.end(JSON.stringify(frag));
-    return true;
-  }
-  const t = u.pathname.match(/^\/stream\/i3s\/tile\/(\d+)\.glb$/);
-  if (t) {
-    const lazy = u.searchParams.get('lazy') === '1' || u.searchParams.get('lazy') === 'true';
-    const glb = await i3sTile(url, t[1], { lazy });
-    if (!glb) { res.writeHead(404, CORS); res.end('no such node / no geometry'); return true; }
-    res.writeHead(200, { 'Content-Type': 'model/gltf-binary', ...CORS });
-    res.end(glb);
-    return true;
-  }
-  return false;
-}
-
 /** Try to handle a /stream/* request. Returns true iff it owned the response. */
 export async function handleStream(req, res, u) {
   if (!u.pathname.startsWith('/stream/')) return false;
-  if (await handleFormatFragment(u, res)) return true;
   const url = u.searchParams.get('url');
   if (!url) { res.writeHead(400, CORS); res.end('missing ?url=<source url>'); return true; }
   const name = url.split('?')[0].split('/').pop() || '';

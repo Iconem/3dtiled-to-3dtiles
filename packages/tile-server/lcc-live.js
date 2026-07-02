@@ -12,7 +12,7 @@
  * Note: data.bin is a sibling of meta.lcc (named `data.bin`); `index.bin` likewise.
  */
 import { decodeSplats } from '../lcc-to-3dtiles/src/lccDecode.js';
-import { buildSplatTileGlb, computeBounds, lccGeoref } from '../core/index.js';
+import { buildSplatTileGlb, computeBounds, lccGeoref, LCC_LOCAL_UPRIGHT } from '../core/index.js';
 
 const ROOT_GE_FACTOR = 0.05, DEPTH_RATIO = 0.5;
 
@@ -63,10 +63,11 @@ async function getCtx(url) {
     if (lods.length) units.push({ box: boundToZUpBox(min, max), lods });
   }
   const diag = Math.hypot(bb.max[0]-bb.min[0], bb.max[1]-bb.min[1], bb.max[2]-bb.min[2]) || 1;
-  const transform = lccGeoref(meta, 'lcc-live');
+  const geo = lccGeoref(meta, 'lcc-live');
+  const transform = geo || LCC_LOCAL_UPRIGHT;   // no usable EPSG → still flip upright, just not geolocated
   const ctx = { dataUrl: base + 'data.bin', units, scaleMin: scaleAttr.min, scaleMax: scaleAttr.max, sceneBox: boundToZUpBox(bb.min, bb.max), rootGE: diag * ROOT_GE_FACTOR, transform };
   ctxCache.set(url, ctx);
-  console.log(`[lcc-live] ${url} → ${units.length} units, georef=${!!transform}${meta.epsg ? ' (EPSG:'+meta.epsg+')' : ''}`);
+  console.log(`[lcc-live] ${url} → ${units.length} units, georef=${!!geo}${meta.epsg ? ' (EPSG:'+meta.epsg+')' : ' (local upright, no EPSG)'}`);
   return ctx;
 }
 

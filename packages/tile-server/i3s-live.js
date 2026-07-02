@@ -26,7 +26,7 @@ import { parseSLPKArchive } from '@loaders.gl/i3s';
 import { DataViewReadableFile } from '@loaders.gl/zip';
 import { decodeDefaultGeometry, geodeticToEcef, obbToBox } from '../i3s-to-3dtiles/src/i3sParse.js';
 import { buildGlb } from '../i3s-to-3dtiles/src/glbBuild.js';
-import { enuFrame, parallelMap, defaultConcurrency } from '../core/index.js';
+import { enuFrame } from '../core/index.js';
 
 const MESH_TYPES  = new Set(['IntegratedMesh', '3DObject']);
 const POINT_TYPES = new Set(['PointCloud']);
@@ -78,9 +78,8 @@ async function makeFileReader(url) {
 // ── Per-URL context (cached): scene layer + flattened node table + ENU frame ───────────────────
 
 const ctxCache = new Map();
-async function getCtx(url, lazy = false) {
-  const cacheKey = url + (lazy ? ':lazy' : ':eager');
-  if (ctxCache.has(cacheKey)) return ctxCache.get(cacheKey);
+async function getCtx(url) {
+  if (ctxCache.has(url)) return ctxCache.get(url);
 
   const getFile = await makeFileReader(url);
   const sl = JSON.parse((await getFile('3dSceneLayer.json')).toString('utf8'));
@@ -120,19 +119,11 @@ async function getCtx(url, lazy = false) {
   if (!nodes.length) throw new Error('No node pages (nodepages/0.json). Legacy 3dNodeIndexDocument not supported.');
   let _allPagesLoaded = pg0.nodes.length < nodesPerPage;   // true if single page
 
-  // LAZY: load node pages on demand (page p = nodes [p·nodesPerPage, …]). Used by the lazy fragment
-  // builder so cold start touches only page 0, never the whole nodepage set (huge layers → instant).
-  const loadedPages = new Set([0]);
-  const loadPageForNode = async (idx) => {
-    const p = Math.floor(idx / nodesPerPage);
-    if (loadedPages.has(p)) return;
-    loadedPages.add(p);
-    try { addNodes(JSON.parse((await getFile(`nodepages/${p}.json`)).toString('utf8'))); } catch { /* past last page */ }
-  };
-
-  // EAGER (default): pull remaining pages in parallel batches in the background so the full explicit
-  // tree is ready. Skipped entirely in lazy mode (no full-hierarchy read).
-  const _pagesDonePromise = (_allPagesLoaded || lazy) ? Promise.resolve() : (async () => {
+  // Pull remaining pages in parallel batches in the background so the full explicit tree is ready —
+  // always (2026-07-02: dropped the lazy on-demand-page mode; I3S has no persisted spatial index to make
+  // a partial read meaningful, and node pages are cheap JSON metadata, not geometry, so eager cold start
+  // is already fast). `i3sTileset` waits up to 3s for this before falling back to whatever's loaded.
+  const _pagesDonePromise = _allPagesLoaded ? Promise.resolve() : (async () => {
     const BATCH = 8;
     let page = 1;
     while (true) {
@@ -144,7 +135,6 @@ async function getCtx(url, lazy = false) {
       let done = false;
       for (let i = 0; i < results.length; i++) {
         if (results[i].status !== 'fulfilled') { done = true; break; }
-        loadedPages.add(results[i].value.page);
         addNodes(results[i].value.pg);
         if (results[i].value.pg.nodes.length < nodesPerPage) { done = true; break; }
       }
@@ -163,15 +153,15 @@ async function getCtx(url, lazy = false) {
     return [dx*EAST[0]+dy*EAST[1]+dz*EAST[2], dx*NORTH[0]+dy*NORTH[1]+dz*NORTH[2], dx*UP[0]+dy*UP[1]+dz*UP[2]]; };
 
   const ctx = {
-    getFile, nodes, schema, isGeographic, layerType, lazy, nodesPerPage, loadPageForNode,
+    getFile, nodes, schema, isGeographic, layerType,
     isPoint: POINT_TYPES.has(layerType),
     bufIdx: uncompressedBufferIndex >= 0 ? uncompressedBufferIndex : 0,
     originEcef, EAST, NORTH, UP, toEnu,
     _pagesDonePromise, get _allPagesLoaded() { return _allPagesLoaded; },
   };
-  ctxCache.set(cacheKey, ctx);
+  ctxCache.set(url, ctx);
   console.log(`[i3s-live] ${url} → ${layerType} v${sl.store?.version}, ${nodes.length} nodes from page 0 (${isGeographic ? 'WGS84' : 'local'})`
-    + `${lazy ? ' [lazy: pages on demand]' : (_allPagesLoaded ? '' : ' — loading remaining pages in background')}`);
+    + `${_allPagesLoaded ? '' : ' — loading remaining pages in background'}`);
   return ctx;
 }
 
@@ -231,66 +221,6 @@ function buildTileset(ctx, urlParam) {
   };
 }
 
-const I3S_SUB_DEPTH = 4;     // node levels per lazy fragment
-// LAZY I3S fragment: build I3S_SUB_DEPTH levels rooted at `rootIdx`, loading node pages on demand. At
-// the boundary, each child becomes an external tileset ref (/i3s/node/<ci>.json) fetched only as the
-// camera refines in — so cold start touches only page 0 regardless of layer size. Mirrors the eager
-// buildTileset's box/GE conventions exactly (so eager and lazy render identically). isRoot carries the
-// shared ENU→ECEF transform; external fragments inherit it through the ref chain.
-async function buildI3sFragment(ctx, rootIdx, urlParam, isRoot) {
-  const enc = encodeURIComponent(urlParam);
-
-  // PHASE 1 — PARALLEL page load. BFS the I3S_SUB_DEPTH window (plus the boundary children, whose OBB
-  // we need for their stub box) and load each level's node pages concurrently. For a massive multi-page
-  // layer this is ~depth round-trips instead of one page fetch per node, serially.
-  // Load depth 0..I3S_SUB_DEPTH+1: the deepest emitted nodes are at I3S_SUB_DEPTH, and their children
-  // (depth +1) become boundary stubs — we need those children's OBB resident for the stub box.
-  let frontier = [rootIdx];
-  for (let depth = 0; depth <= I3S_SUB_DEPTH + 1 && frontier.length; depth++) {
-    await parallelMap(frontier, i => ctx.loadPageForNode(i), { concurrency: Math.min(defaultConcurrency(), 16) });
-    const next = [];
-    for (const i of frontier) { const n = ctx.nodes[i]; if (n && depth <= I3S_SUB_DEPTH) for (const c of n.children || []) next.push(c); }
-    frontier = next;
-  }
-
-  // PHASE 2 — synchronous build (all pages resident → no await, no `seen` race across siblings).
-  const seen = new Set();
-  const build = (idx, depth) => {
-    const node = ctx.nodes[idx];
-    if (!node || seen.has(idx)) return null;
-    seen.add(idx);
-    const box = obbToEnuBox(ctx, node.obb);
-    const diag = 2 * Math.hypot(box[3], box[7], box[11]);
-    const tile = { boundingVolume: { box }, geometricError: 0, refine: 'REPLACE' };
-    // Absolute URL (+lazy=1): fragments live under /stream/i3s/node/… so a relative `tile/…` would
-    // mis-resolve.
-    if (nodeHasGeometry(node)) tile.content = { uri: `/stream/i3s/tile/${idx}.glb?url=${enc}&lazy=1` };
-    const childIds = node.children || [];
-    const kids = [];
-    if (childIds.length && depth >= I3S_SUB_DEPTH) {
-      // Boundary: each child continues in its own external fragment (no own content on the stub).
-      for (const ci of childIds) {
-        const cn = ctx.nodes[ci]; if (!cn) continue;
-        const cbox = obbToEnuBox(ctx, cn.obb);
-        const cdiag = 2 * Math.hypot(cbox[3], cbox[7], cbox[11]);
-        kids.push({ boundingVolume: { box: cbox }, geometricError: cdiag * 0.5, refine: 'REPLACE', content: { uri: `/stream/i3s/node/${ci}.json?url=${enc}` } });
-      }
-    } else {
-      for (const ci of childIds) { const c = build(ci, depth + 1); if (c) kids.push(c); }
-    }
-    if (kids.length) tile.children = kids;
-    tile.geometricError = kids.length ? diag * 0.5 : 0;
-    return tile;
-  };
-  const root = build(rootIdx, 0);
-  if (!root) return null;
-  if (isRoot && ctx.isGeographic) {
-    const { EAST:E, NORTH:N, UP:U, originEcef:o } = ctx;
-    root.transform = [ E[0],E[1],E[2],0, N[0],N[1],N[2],0, U[0],U[1],U[2],0, o[0],o[1],o[2],1 ];
-  }
-  return { asset: { version: '1.1' }, geometricError: root.geometricError || 1e6, root, extensionsUsed: ['3DTILES_content_gltf'] };
-}
-
 // Minimal valid glTF 2.0 GLB with an empty scene — served when a node advertises content but its
 // geometry is missing/empty, so renderers don't error on a 404 (they just draw nothing for it).
 const EMPTY_GLB = (() => {
@@ -331,24 +261,17 @@ async function serveTileGlb(ctx, idx) {
 
 // Pure builders for the /stream dispatcher.
 export const i3sTileRe = /^\d+$/;
-export async function i3sTileset(url, opts = {}) {
-  const ctx = await getCtx(url, !!opts.lazy);
-  if (ctx.lazy) return buildI3sFragment(ctx, 0, url, true);     // lazy: page-0-only root fragment
-  // eager: wait up to 3 s for all pages so the explicit tree is complete; page 0 is always ready.
+export async function i3sTileset(url) {
+  const ctx = await getCtx(url);
+  // Wait up to 3 s for all node pages so the explicit tree is complete; page 0 is always ready, so a
+  // huge layer still degrades to "root + whatever loaded so far" instead of failing outright.
   if (!ctx._allPagesLoaded) await Promise.race([ctx._pagesDonePromise, new Promise(r => setTimeout(r, 3000))]);
   return buildTileset(ctx, url);
 }
-export async function i3sNode(url, idx) {     // lazy external-fragment for a boundary node
-  const ctx = await getCtx(url, true);
-  return buildI3sFragment(ctx, idx, url, false);
-}
-export async function i3sTile(url, key, opts = {}) {
-  const ctx = await getCtx(url, !!opts.lazy);
-  if (ctx.lazy) await ctx.loadPageForNode(Number(key));         // ensure this node's page is resident
-  return serveTileGlb(ctx, Number(key));
-}
+export async function i3sTile(url, key) { return serveTileGlb(await getCtx(url), Number(key)); }
 
 // Direct /i3s/* HTTP routes were removed 2026-07-02 — /stream/tileset.json?format=i3s&url=<…> already
-// covers tileset serving; the lazy fragment continuation (i3sNode) and lazy tile serving (i3sTile,
-// which needs &lazy=1 threaded through to hit the right cached context) moved to
-// /stream/i3s/node/<n>.json and /stream/i3s/tile/<n>.glb (handled in stream-live.js). See CHANGELOG.
+// covers tileset serving. The lazy fragment continuation (/stream/i3s/node/<n>.json) and lazy tile mode
+// (&lazy=1) were removed the same day: I3S has no persisted spatial index to make a partial read
+// meaningful, and node pages are cheap JSON metadata (not geometry), so eager cold start is already
+// fast — always explicit, matching the Potree 1.x `tiling=explicit` simplification. See CHANGELOG.

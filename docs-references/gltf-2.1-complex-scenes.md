@@ -15,7 +15,7 @@ repo (3D Tiles ⇄ glTF, streaming, and the bbox dumper).
   chunk-level compression). → tracked in [glTF#2594](https://github.com/KhronosGroup/glTF/issues/2594).
 - **External Assets + Packaging** — declarative multi-file scene graphs (glTFX folded into core) and a
   single self-contained package (embedded buffer-views as a virtual FS) — chosen deliberately **over a
-  ZIP container**. Our `/dump/zip` bundle is the pragmatic stand-in until this lands.
+  ZIP container**. Our `/extract/zip` bundle is the pragmatic stand-in until this lands.
 - **Shapes + Bounding Volume Hierarchies** — implicit box/sphere/capsule/cylinder/plane in core + a
   `boundingVolume` node property → the spatial machinery OGC 3D Tiles already proves (the foundation 2.1
   cites for progressive streaming, LOD, availability maps).

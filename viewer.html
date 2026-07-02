@@ -479,9 +479,9 @@
     </div>
   </div>
 
-  <!-- Crop & Dump (bbox subsample extract → LAS/GLB) -->
+  <!-- Crop & Extract (bbox subsample extract → LAS/GLB) -->
   <div class="sb-section">
-    <h4>Crop &amp; Dump</h4>
+    <h4>Crop &amp; Extract</h4>
     <button class="sb-btn" id="crop-tobbox" onclick="setCropToView()" title="Set the crop box to ~80% of the current view, on the globe">⬚ Set box to view (80%)</button>
     <div class="sb-row"><label>W / E (°)</label><input type="number" id="crop-w" step="0.0005" onchange="updateCropBox()" /><input type="number" id="crop-e" step="0.0005" onchange="updateCropBox()" /></div>
     <div class="sb-row"><label>S / N (°)</label><input type="number" id="crop-s" step="0.0005" onchange="updateCropBox()" /><input type="number" id="crop-n" step="0.0005" onchange="updateCropBox()" /></div>
@@ -496,21 +496,21 @@
       <input type="checkbox" id="crop-enu" checked /> LAS local ENU frame (else ECEF)
     </label>
     <div class="sb-row" style="gap:6px">
-      <button class="sb-btn" onclick="dumpCrop('las')" title="Point clouds → out-of-core LAS">⬇ LAS</button>
-      <button class="sb-btn" onclick="dumpCrop('copc')" title="Point clouds → COPC (needs PDAL on the server)">⬇ COPC</button>
-      <button class="sb-btn" onclick="dumpCrop('glb')" title="Meshes → single merged GLB (gltf-transform, in-memory)">⬇ GLB</button>
+      <button class="sb-btn" onclick="extractCrop('las')" title="Point clouds → out-of-core LAS">⬇ LAS</button>
+      <button class="sb-btn" onclick="extractCrop('copc')" title="Point clouds → COPC (needs PDAL on the server)">⬇ COPC</button>
+      <button class="sb-btn" onclick="extractCrop('glb')" title="Meshes → single merged GLB (gltf-transform, in-memory)">⬇ GLB</button>
     </div>
     <div class="sb-row" style="gap:6px">
       <label for="crop-splatfmt" title="Splat output format">Splat</label>
       <select id="crop-splatfmt"><option value="spz">SPZ</option><option value="glb">GLB</option><option value="sog">SOG</option><option value="ply">PLY</option></select>
-      <button class="sb-btn" onclick="dumpCrop('splat')" title="Splats → merged single file (splat-transform; supersplat-ingestable)">⬇ Splat</button>
-      <button class="sb-btn" onclick="dumpCrop('zip')" title="Any (mesh/splat/points) → streamed ZIP bundle (out-of-core, single download)">⬇ ZIP</button>
+      <button class="sb-btn" onclick="extractCrop('splat')" title="Splats → merged single file (splat-transform; supersplat-ingestable)">⬇ Splat</button>
+      <button class="sb-btn" onclick="extractCrop('zip')" title="Any (mesh/splat/points) → streamed ZIP bundle (out-of-core, single download)">⬇ ZIP</button>
     </div>
-    <label class="sb-check" title="Splat dump: drop individual splats whose centroid falls outside the box (per-splat clip via worldM·YUP_ZUP·nodeM). Off = keep every splat of each intersecting tile.">
+    <label class="sb-check" title="Splat extract: drop individual splats whose centroid falls outside the box (per-splat clip via worldM·YUP_ZUP·nodeM). Off = keep every splat of each intersecting tile.">
       <input type="checkbox" id="crop-splatclip" checked /> Splat: clip splats outside box
     </label>
-    <button class="sb-btn" id="crop-gizmo-btn" onclick="toggleCropGizmo3D()" title="3DTilesRendererJS only: edit the box in 3D with a PivotControls-style gizmo — 3 ENU translate arrows (move the box) + 6 face handles (resize each side). Drives the same bbox the dump uses.">⬚ 3D box gizmo (3DTRJS)</button>
-    <div class="sb-note" style="font-size:10px;opacity:.7">Dumps the loaded tileset within the box. Octree sources are fetched as explicit tiling.</div>
+    <button class="sb-btn" id="crop-gizmo-btn" onclick="toggleCropGizmo3D()" title="3DTilesRendererJS only: edit the box in 3D with a PivotControls-style gizmo — 3 ENU translate arrows (move the box) + 6 face handles (resize each side). Drives the same bbox the extract uses.">⬚ 3D box gizmo (3DTRJS)</button>
+    <div class="sb-note" style="font-size:10px;opacity:.7">Extracts the loaded tileset within the box. Octree sources are fetched as explicit tiling.</div>
   </div>
 
   <!-- Navigation -->
@@ -1448,7 +1448,7 @@ function applyShading() {
   } catch (e) { console.warn('[shading]', e.message); }
 }
 
-// ── Crop & Dump: a geographic bbox box on the globe → /dump/{las|glb} ────────────────
+// ── Crop & Extract: a geographic bbox box on the globe → /extract/{las|glb} ────────────────
 let _cropEntity = null;
 const _cropBbox = () => ['crop-w','crop-s','crop-minh','crop-e','crop-n','crop-maxh'].map(id => parseFloat(document.getElementById(id).value));
 // normalized [minLon,minLat,minH,maxLon,maxLat,maxH] (handles can drag a bound past its opposite).
@@ -1537,11 +1537,11 @@ function _setupCropDrag() {
   }, Cesium.ScreenSpaceEventType.MOUSE_MOVE);
   _cropDragHandler.setInputAction(() => { _cropDrag = null; viewer.scene.screenSpaceCameraController.enableInputs = true; }, Cesium.ScreenSpaceEventType.LEFT_UP);
 }
-function dumpCrop(kind) {
+function extractCrop(kind) {
   const field = document.getElementById('tileset-url').value.trim();
   if (!field) { setStatus('Load a tileset first.'); return; }
   let src = (rawUrlMode && !field.startsWith(MW)) ? buildMiddlewareUrl(field) : field;   // need a tileset.json
-  if (/\/stream\/tileset\.json/.test(src)) {                 // octree sources must be explicit for the dumper
+  if (/\/stream\/tileset\.json/.test(src)) {                 // octree sources must be explicit for the extractor
     src = /tiling=implicit/.test(src) ? src.replace('tiling=implicit', 'tiling=explicit') : (/tiling=/.test(src) ? src : src + '&tiling=explicit');
     src = /cache=/.test(src) ? src.replace(/cache=\w+/, 'cache=hierarchy') : src + '&cache=hierarchy';
   }
@@ -1554,19 +1554,19 @@ function dumpCrop(kind) {
   if (kind === 'splat') { extra += `&format=${document.getElementById('crop-splatfmt')?.value || 'spz'}`;
     if (!document.getElementById('crop-splatclip')?.checked) extra += '&clip=0'; }
   // Viewer-applied extra modelMatrix (Z-offset nudge / local-frame ENU placement) — the source tileset on
-  // the server has none of it, so without this the dump bbox misses shifted/placed data (e.g. Geghard -1800m).
-  const mm = _dumpModelMatrix();
+  // the server has none of it, so without this the extract bbox misses shifted/placed data (e.g. Geghard -1800m).
+  const mm = _extractModelMatrix();
   if (mm) extra += `&matrix=${mm.join(',')}`;
-  const url = `${MW}/dump/${kind}?url=${encodeURIComponent(src)}&bbox=${bb.join(',')}&maxGE=${ge}${extra}`;
-  tlog(`⬇ dump ${kind} (GE ${ge}) — download starting…`);
+  const url = `${MW}/extract/${kind}?url=${encodeURIComponent(src)}&bbox=${bb.join(',')}&maxGE=${ge}${extra}`;
+  tlog(`⬇ extract ${kind} (GE ${ge}) — download starting…`);
   window.open(url, '_blank');
 }
 
 // The extra ECEF modelMatrix the viewer applied on top of the source tileset (Z-offset / local frame),
-// as a column-major 16-array, or null if none. The dumper seeds traversal with it so the crop reproduces
+// as a column-major 16-array, or null if none. the extractor seeds traversal with it so the crop reproduces
 // the on-screen position. Cesium: tileset.modelMatrix. 3DTRJS: the zOffset translation along ECEF up.
-function _dumpModelMatrix() {
-  if (_3dtMode) { const m = window.__3dtrjs?.getDumpMatrix?.(); return (m && m.length === 16) ? m : null; }
+function _extractModelMatrix() {
+  if (_3dtMode) { const m = window.__3dtrjs?.getExtractMatrix?.(); return (m && m.length === 16) ? m : null; }
   if (!currentTileset || !window.Cesium) return null;
   const mm = currentTileset.modelMatrix;
   if (!mm || Cesium.Matrix4.equalsEpsilon(mm, Cesium.Matrix4.IDENTITY, 1e-9)) return null;
@@ -2188,9 +2188,9 @@ function setZOffset(v) {
 
 // The extra raw-ECEF modelMatrix the viewer applied on top of the source tileset, as a column-major
 // 16-array (or null). Only the geo-meaningful globe-mode Z-offset (translate along raw-ECEF up) is
-// reported — the dumper seeds traversal with it so a vertically-nudged tileset (e.g. Geghard −1800 m)
+// reported — the extractor seeds traversal with it so a vertically-nudged tileset (e.g. Geghard −1800 m)
 // still crops correctly. Non-georef (orbit/env) data has no geographic bbox, so → null there.
-function getDumpMatrix() {
+function getExtractMatrix() {
   if (controlMode !== 'globe' || !tilesIsEcef || !zOffset) return null;
   const t = tilesUp.clone().multiplyScalar(zOffset);         // raw-ECEF translation (same as _applyZOffset)
   return [1,0,0,0, 0,1,0,0, 0,0,1,0, t.x, t.y, t.z, 1];
@@ -2450,11 +2450,11 @@ function _pump() {
 }
 
 // ── Crop-bbox PivotControls gizmo ───────────────────────────────────────────────
-// A vanilla-three port of the drei/threepipe PivotControls idea, purpose-built for the dumper's
+// A vanilla-three port of the drei/threepipe PivotControls idea, purpose-built for the extractor's
 // geographic crop box: a translucent box at the bbox, **3 ENU translate arrows** (the pivot — moves
 // the whole box along East/North/Up) + **6 face handles** (the bonus — drag a face to resize that
 // geographic bound). Shares the SAME DOM state (crop-w/s/e/n/minh/maxh) the Cesium box and the
-// dumper read, so edits here drive /dump exactly like the Cesium handles do. ENU↔ECEF via the
+// extractor read, so edits here drive /extract exactly like the Cesium handles do. ENU↔ECEF via the
 // globe ellipsoid; bounds are re-derived exactly from each handle's dragged position (getPositionTo
 // Cartographic), so the small-area box drawing being approximate never corrupts the saved bbox.
 const D2R = Math.PI / 180, R2Dg = 180 / Math.PI;
@@ -2716,7 +2716,7 @@ function setOrtho(on) {
   _startProjTween(_oldProj, camera);
 }
 
-window.__3dtrjs = { init, load, loadIon, pause, setControlMode, setZOffset, getDumpMatrix, setBasemap, setDebug, setErrorTarget, setPointSize, getPointSize, setFov, setVisible, setOrtho, frameTileset, flyToCarto, setCropToView: cropToView3D, showCropGizmo, hideCropGizmo, syncCropGizmo: _syncCropGizmo, _cropGizmoInfo, _debug, _pump };
+window.__3dtrjs = { init, load, loadIon, pause, setControlMode, setZOffset, getExtractMatrix, setBasemap, setDebug, setErrorTarget, setPointSize, getPointSize, setFov, setVisible, setOrtho, frameTileset, flyToCarto, setCropToView: cropToView3D, showCropGizmo, hideCropGizmo, syncCropGizmo: _syncCropGizmo, _cropGizmoInfo, _debug, _pump };
 console.log('[3DTRJS] module ready — GaussianSplatPlugin:', GaussianSplatPlugin ? 'loaded' : 'unavailable');
 </script>
 </body>

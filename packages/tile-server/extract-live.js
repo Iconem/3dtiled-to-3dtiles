@@ -1,11 +1,11 @@
 /**
- * dump-live.js — **generic 3D Tiles bbox crop / subsample extract**. Since every adapter here emits 3D
- * Tiles, the dumper ingests *3D Tiles* (any source — our /stream COPC/Potree/SOG/LCC/RAD/I3S outputs,
- * /bing, /threemx, or an external tileset) and branches by content type:
- *   • POINTS / splats  → LAS   (GET /dump/las)
- *   • TRIANGLES (mesh) → merged GLB (GET /dump/glb)
+ * extract-live.js — **generic 3D Tiles bbox crop / subsample extract**. Since every adapter here emits
+ * 3D Tiles, the extractor ingests *3D Tiles* (any source — our /stream COPC/Potree/SOG/LCC/RAD/I3S
+ * outputs, /bing, /threemx, or an external tileset) and branches by content type:
+ *   • POINTS / splats  → LAS   (GET /extract/las)
+ *   • TRIANGLES (mesh) → merged GLB (GET /extract/glb)
  *
- *   GET /dump/{las|glb}?url=<tileset.json>&bbox=<west,south,minH,east,north,maxH>[&maxGE=<m>][&maxDepth=N]
+ *   GET /extract/{las|glb}?url=<tileset.json>&bbox=<west,south,minH,east,north,maxH>[&maxGE=<m>][&maxDepth=N]
  *
  * `bbox` is GEOGRAPHIC (lon/lat degrees + ellipsoidal height m) — what you'd draw on the globe. Traversal
  * honours per-tile refine: **ADD** tiles contribute at every level down to `maxGE` (accumulate); **REPLACE**
@@ -26,7 +26,7 @@ import { ALL_EXTENSIONS } from '@gltf-transform/extensions';
 import { readSpz, combine, writeSpz, writeSog, writeGlb, writePly, Transform, MemoryReadFileSystem, MemoryFileSystem } from '@playcanvas/splat-transform';
 import { decompressGlb, LasWriter, lasHeaderBuffer, lasRecordBuffer, ecefToLlh, llhToEcef, enuFrame, CORS } from '../core/index.js';
 
-// Resolve the PDAL binary for /dump/copc. Prefer $PDAL_BIN, then the pixi-global shim (`pixi global
+// Resolve the PDAL binary for /extract/copc. Prefer $PDAL_BIN, then the pixi-global shim (`pixi global
 // install pdal` → ~/.pixi/bin/pdal[.exe]), then `pdal` on PATH. pixi is the right installer here — PDAL
 // is a conda-forge native binary, not a pip package (uv is Python-only).
 function resolvePdal() {
@@ -302,15 +302,15 @@ function zipStreamer(res) {
   };
 }
 
-export async function handleDump(req, res, u) {
-  if (!u.pathname.startsWith('/dump/')) return false;
-  const kind = { '/dump/las': 'las', '/dump/glb': 'glb', '/dump/copc': 'copc', '/dump/tileset': 'tileset', '/dump/zip': 'zip', '/dump/splat': 'splat' }[u.pathname] || null;
+export async function handleExtract(req, res, u) {
+  if (!u.pathname.startsWith('/extract/')) return false;
+  const kind = { '/extract/las': 'las', '/extract/glb': 'glb', '/extract/copc': 'copc', '/extract/tileset': 'tileset', '/extract/zip': 'zip', '/extract/splat': 'splat' }[u.pathname] || null;
   const url = u.searchParams.get('url');
   const bboxStr = u.searchParams.get('bbox');
   const maxGE = u.searchParams.has('maxGE') ? Number(u.searchParams.get('maxGE')) : 0;       // 0 = finest
   const maxDepth = u.searchParams.has('maxDepth') ? Number(u.searchParams.get('maxDepth')) : 99;
   if (!kind || !url || !bboxStr) {
-    res.writeHead(400, CORS); res.end('GET /dump/{las|copc|glb|tileset}?url=<tileset.json>&bbox=west,south,minH,east,north,maxH[&maxGE=m][&maxDepth=N]'); return true;
+    res.writeHead(400, CORS); res.end('GET /extract/{las|copc|glb|tileset}?url=<tileset.json>&bbox=west,south,minH,east,north,maxH[&maxGE=m][&maxDepth=N]'); return true;
   }
   const bb = bboxStr.split(',').map(Number);
   if (bb.length !== 6 || bb.some(Number.isNaN)) { res.writeHead(400, CORS); res.end('bbox needs 6 numbers (deg,deg,m,deg,deg,m)'); return true; }
@@ -332,9 +332,9 @@ export async function handleDump(req, res, u) {
       const ts = { asset: { version: '1.1' }, geometricError: 1e7,
         root: { boundingVolume: { region: [bb[0]/R2D, bb[1]/R2D, bb[3]/R2D, bb[4]/R2D, bb[2], bb[5]] }, geometricError: 1e7, refine: 'ADD', children } };
       res.writeHead(200, { 'Content-Type': 'application/json', 'Content-Disposition': 'attachment; filename="crop-tileset.json"',
-        'X-Dump-Tiles': String(children.length), 'Access-Control-Expose-Headers': 'X-Dump-Tiles', ...CORS });
+        'X-Extract-Tiles': String(children.length), 'Access-Control-Expose-Headers': 'X-Extract-Tiles', ...CORS });
       res.end(JSON.stringify(ts)); return true;
-    } catch (e) { console.error('[dump-live]', e.message); res.writeHead(500, CORS); res.end(e.message); return true; }
+    } catch (e) { console.error('[extract-live]', e.message); res.writeHead(500, CORS); res.end(e.message); return true; }
   }
 
   // splat mode: merge in-bbox SPLAT tiles into ONE supersplat-ingestable file (.spz/.glb/.sog/.ply) via
@@ -351,13 +351,19 @@ export async function handleDump(req, res, u) {
       // Y_UP_TO_Z_UP — confirmed by multiplying a real `Cesium.Axis.Y_UP_TO_Z_UP` in Node: it equals the
       // `YUP_ZUP` constant below, not `YUP_ZUP_P90` (their inline labels were swapped — see the constants'
       // comment above). That inverse-rotation bug is what produced the "inverted Z instead of Y" WL Grange
-      // export regression. Our own converters (LCC etc., no node.matrix, orientation baked into the
-      // tileset ROOT transform instead) are confirmed working with `YUP_ZUP` — so default BOTH cases to
-      // `YUP_ZUP` (real Cesium Y_UP_TO_Z_UP) until a source is found that genuinely needs the inverse.
-      // &rx=90|-90 still forces YUP_ZUP_P90 / YUP_ZUP respectively for one-off testing.
+      // export regression. Our own converters without a node.matrix (SOG etc., orientation baked into the
+      // tileset ROOT transform instead) are confirmed working with `YUP_ZUP`.
+      // LCC is the ONE exception: `lccGeoref`'s column layout is [East,−Up,North] (not the plain
+      // [East,North,Up] every other adapter's georef uses) — it bakes the Y-up→Z-up flip INTO root.transform
+      // ON TOP OF the ENU placement, so applying the generic YUP_ZUP here double-flips it (net RX180°).
+      // Empirically verified against a real Guan_Temple tile: its splat centroid landed ~130-190m outside
+      // its own 30×45×30m box with YUP_ZUP, vs ~5-13m off (plausible centroid noise) with YUP_ZUP_P90 — the
+      // "off by a few dozen meters" LCC crop bug. &rx=90|-90 still forces YUP_ZUP_P90/YUP_ZUP for one-off testing.
       const rxForce = u.searchParams.get('rx');
+      let srcFormat = null; try { srcFormat = new URL(url).searchParams.get('format'); } catch {}
+      const isLcc = srcFormat === 'lcc' || /\/LCC\//i.test(url);
       const rxPick = (hasNodeMatrix) => rxForce === '90' ? YUP_ZUP_P90 : rxForce === '-90' ? YUP_ZUP
-        : YUP_ZUP;
+        : (isLcc ? YUP_ZUP_P90 : YUP_ZUP);
       // Output frame: a local **Y-up** frame anchored at the SOURCE scene's own origin (not the bbox centre),
       // so every crop of the same source shares ONE coordinate system → multiple boxes line up. Y-up (not
       // ENU Z-up!) because splat-transform's engine/IDENTITY space is PlayCanvas Y-up — emitting Z-up would
@@ -374,7 +380,7 @@ export async function handleDump(req, res, u) {
         let glb; try { glb = await fetchBuf(glbUrl); } catch { return; }
         const sp = extractSpz(glb); if (!sp) return;
         const rfs = new MemoryReadFileSystem(); rfs.set('t.spz', new Uint8Array(sp.blob));
-        let dt; try { dt = await readSpz(await rfs.createSource('t.spz')); } catch (e) { return void console.warn('[dump-live] readSpz:', e.message); }
+        let dt; try { dt = await readSpz(await rfs.createSource('t.spz')); } catch (e) { return void console.warn('[extract-live] readSpz:', e.message); }
         totRaw += dt.numRows;
         // SPZ positions are node-local: the full tile-local → ECEF chain is worldM · YUP_ZUP · nodeM
         // (nodeM carries the spz→glTF axis fix + per-tile translation). Verified: SPZ centroids land in
@@ -410,10 +416,10 @@ export async function handleDump(req, res, u) {
       // Honour byteOffset+byteLength so we emit exactly the written bytes.
       const u8 = out instanceof Uint8Array ? out : new Uint8Array(out);
       res.writeHead(200, { 'Content-Type': 'application/octet-stream', 'Content-Disposition': `attachment; filename="${name}"`,
-        'X-Dump-Tiles': String(dts.length), 'X-Dump-Splats': String(merged.numRows), 'X-Dump-Splats-Raw': String(totRaw), 'X-Dump-Clipped': String(clip ? totRaw - totIn : 0),
-        'Access-Control-Expose-Headers': 'X-Dump-Tiles,X-Dump-Splats,X-Dump-Splats-Raw,X-Dump-Clipped', ...CORS });
+        'X-Extract-Tiles': String(dts.length), 'X-Extract-Splats': String(merged.numRows), 'X-Extract-Splats-Raw': String(totRaw), 'X-Extract-Clipped': String(clip ? totRaw - totIn : 0),
+        'Access-Control-Expose-Headers': 'X-Extract-Tiles,X-Extract-Splats,X-Extract-Splats-Raw,X-Extract-Clipped', ...CORS });
       res.end(Buffer.from(u8.buffer, u8.byteOffset, u8.byteLength)); return true;
-    } catch (e) { console.error('[dump-live]', e.message); if (!res.headersSent) { res.writeHead(500, CORS); res.end(e.message); } else res.end(); return true; }
+    } catch (e) { console.error('[extract-live]', e.message); if (!res.headersSent) { res.writeHead(500, CORS); res.end(e.message); } else res.end(); return true; }
   }
 
   // zip mode: out-of-core single-download bundle — stream each in-bbox tile GLB (one at a time) + a
@@ -432,18 +438,18 @@ export async function handleDump(req, res, u) {
       await zip.add('tileset.json', Buffer.from(JSON.stringify(ts)));
       await zip.end();
       return true;
-    } catch (e) { console.error('[dump-live]', e.message); if (!res.headersSent) { res.writeHead(500, CORS); res.end(e.message); } else res.end(); return true; }
+    } catch (e) { console.error('[extract-live]', e.message); if (!res.headersSent) { res.writeHead(500, CORS); res.end(e.message); } else res.end(); return true; }
   }
 
   // Disk-free out-of-core LAS: 2-pass (pass 1 counts + bbox for the header, pass 2 streams records).
-  // No temp file, O(1) RAM — at the cost of traversing/decoding tiles twice. (?stream=1 on /dump/las)
+  // No temp file, O(1) RAM — at the cost of traversing/decoding tiles twice. (?stream=1 on /extract/las)
   if (kind === 'las' && (u.searchParams.get('stream') === '1' || u.searchParams.get('stream') === 'true')) {
     try {
       const scale = [0.001, 0.001, 0.001], { proj, offset } = makeProject(bb, u.searchParams.has('enu'));
       let count = 0; const mn = [Infinity,Infinity,Infinity], mx = [-Infinity,-Infinity,-Infinity];
       await forEachPoint(url, bb, maxGE, maxDepth, (X, Y, Z) => { const [px,py,pz]=proj(X,Y,Z); count++; if(px<mn[0])mn[0]=px; if(py<mn[1])mn[1]=py; if(pz<mn[2])mn[2]=pz; if(px>mx[0])mx[0]=px; if(py>mx[1])mx[1]=py; if(pz>mx[2])mx[2]=pz; }, initM);
       res.writeHead(200, { 'Content-Type': 'application/octet-stream', 'Content-Disposition': 'attachment; filename="crop.las"',
-        'X-Dump-Points': String(count), 'Access-Control-Expose-Headers': 'X-Dump-Points', ...CORS });
+        'X-Extract-Points': String(count), 'Access-Control-Expose-Headers': 'X-Extract-Points', ...CORS });
       res.write(lasHeaderBuffer({ scale, offset, count, bbox: count ? { min: mn, max: mx } : null }));
       let chunk = [];                                     // batch ~8k records per write
       await forEachPoint(url, bb, maxGE, maxDepth, async (X, Y, Z, r, g, b) => {
@@ -452,11 +458,11 @@ export async function handleDump(req, res, u) {
       }, initM);
       if (chunk.length) await writeChunk(res, Buffer.concat(chunk));
       res.end(); return true;
-    } catch (e) { console.error('[dump-live]', e.message); if (!res.headersSent) { res.writeHead(500, CORS); res.end(e.message); } else res.end(); return true; }
+    } catch (e) { console.error('[extract-live]', e.message); if (!res.headersSent) { res.writeHead(500, CORS); res.end(e.message); } else res.end(); return true; }
   }
 
   try {
-    const out = new Document();                          // for /dump/glb: merged mesh (in-memory)
+    const out = new Document();                          // for /extract/glb: merged mesh (in-memory)
     const outBuf = out.createBuffer();
     const outScene = out.createScene();
     let tiles = 0, prims = 0, points = 0;
@@ -525,7 +531,7 @@ export async function handleDump(req, res, u) {
 
     if (wantLas) {
       await lasw.close();                                  // back-patch header (count + bbox)
-      const hdr = { 'X-Dump-Points': String(points), 'X-Dump-Tiles': String(tiles), 'Access-Control-Expose-Headers': 'X-Dump-Points,X-Dump-Tiles,X-Dump-Primitives', ...CORS };
+      const hdr = { 'X-Extract-Points': String(points), 'X-Extract-Tiles': String(tiles), 'Access-Control-Expose-Headers': 'X-Extract-Points,X-Extract-Tiles,X-Extract-Primitives', ...CORS };
       if (kind === 'las') {
         res.writeHead(200, { 'Content-Type': 'application/octet-stream', 'Content-Disposition': 'attachment; filename="crop.las"', ...hdr });
         const stream = createReadStream(tmp); stream.pipe(res); stream.on('close', () => unlink(tmp).catch(() => {}));
@@ -537,7 +543,7 @@ export async function handleDump(req, res, u) {
       const p = spawn(PDAL_BIN, ['translate', tmp, copc], { stdio: ['ignore', 'ignore', 'pipe'] });
       let perr = '';
       p.stderr.on('data', d => { perr += d; });
-      p.on('error', () => { cleanup(); if (!res.headersSent) { res.writeHead(501, CORS); res.end('pdal not installed — /dump/copc needs PDAL. Install with `pixi global install pdal` (or set PDAL_BIN). Or use /dump/las and convert with `pdal translate crop.las out.copc.laz`.'); } });
+      p.on('error', () => { cleanup(); if (!res.headersSent) { res.writeHead(501, CORS); res.end('pdal not installed — /extract/copc needs PDAL. Install with `pixi global install pdal` (or set PDAL_BIN). Or use /extract/las and convert with `pdal translate crop.las out.copc.laz`.'); } });
       p.on('close', (code) => {
         if (code !== 0) { cleanup(); if (!res.headersSent) { res.writeHead(500, CORS); res.end('pdal failed: ' + perr.slice(0, 300)); } return; }
         res.writeHead(200, { 'Content-Type': 'application/octet-stream', 'Content-Disposition': 'attachment; filename="crop.copc.laz"', ...hdr });
@@ -547,10 +553,10 @@ export async function handleDump(req, res, u) {
     }
     const merged = Buffer.from(await io.writeBinary(out));
     res.writeHead(200, { 'Content-Type': 'model/gltf-binary', 'Content-Disposition': 'attachment; filename="crop.glb"',
-      'X-Dump-Primitives': String(prims), 'X-Dump-Tiles': String(tiles), 'Access-Control-Expose-Headers': 'X-Dump-Points,X-Dump-Tiles,X-Dump-Primitives', ...CORS });
+      'X-Extract-Primitives': String(prims), 'X-Extract-Tiles': String(tiles), 'Access-Control-Expose-Headers': 'X-Extract-Points,X-Extract-Tiles,X-Extract-Primitives', ...CORS });
     res.end(merged);
   } catch (e) {
-    console.error('[dump-live]', e.message);
+    console.error('[extract-live]', e.message);
     if (!res.headersSent) { res.writeHead(500, CORS); res.end(e.message); } else res.end();
   }
   return true;
