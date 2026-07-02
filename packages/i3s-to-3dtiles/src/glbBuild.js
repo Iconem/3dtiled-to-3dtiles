@@ -1,26 +1,28 @@
 /**
  * glbBuild.js  (i3s-to-3dtiles)  — DRAFT, UNTESTED
  *
- * Minimal binary glTF 2.0 (.glb) writer for the two I3S payloads this draft emits:
- *   - TRIANGLES (mode 4): POSITION [+ NORMAL] [+ COLOR_0], non-indexed (I3S geometry is a
- *     flat per-attribute vertex array; we draw it as a triangle soup).
+ * Minimal binary glTF 2.0 (.glb) writer for the I3S payloads this draft emits:
+ *   - TRIANGLES (mode 4): POSITION [+ NORMAL] [+ COLOR_0] [+ TEXCOORD_0 + baseColorTexture],
+ *     non-indexed (I3S geometry is a flat per-attribute vertex array; we draw it as a triangle soup).
  *   - POINTS    (mode 0): POSITION [+ COLOR_0].
- * No materials/textures/Draco — those paths are gated out in index.js. Vertices are written in
- * a node-LOCAL frame; the 3D Tiles tile transform (from the node OBB centre) places them in ECEF.
+ * No Draco — that path is gated out in index.js/i3s-live.js. The texture image (JPEG/PNG bytes,
+ * already the raw file — no re-encode) is embedded as-is; DDS/KTX2/Basis-encoded textures are gated
+ * out by the caller before reaching here (no decoder in this adapter, same as Draco/LEPCC geometry).
+ * Vertices are written in a node-LOCAL frame; the 3D Tiles tile transform (from the node OBB centre)
+ * places them in ECEF.
  */
 
 const COMP = { F32: 5126, U8: 5121 };  // glTF componentType
-const F32_BYTES = 4;
 
 function pad4(n) { return (n + 3) & ~3; }
 
 /**
  * @param {Object} g  { mode:'TRIANGLES'|'POINTS', positions:Float32Array(3N) (LOCAL),
- *                       normals?:Float32Array(3N), colors?:Uint8Array(4N) }
+ *                       normals?:Float32Array(3N), colors?:Uint8Array(4N), uvs?:Float32Array(2N),
+ *                       texture?:{bytes:Buffer, mimeType:'image/jpeg'|'image/png'} }
  */
 export function buildGlb(g) {
   const N = g.positions.length / 3;
-  const buffers = [];        // { data:Buffer, target?:number }
   const accessors = [];
   const bufferViews = [];
   const attributes = {};
@@ -49,6 +51,19 @@ export function buildGlb(g) {
     accessors.push({ bufferView: addView(Buffer.from(g.colors.buffer, g.colors.byteOffset, g.colors.byteLength)),
                      componentType: COMP.U8, count: N, type: 'VEC4', normalized: true });
   }
+  // TEXCOORD_0 (only meaningful alongside a texture, but harmless to emit alone)
+  if (g.uvs && g.uvs.length === N * 2) {
+    attributes.TEXCOORD_0 = accessors.length;
+    accessors.push({ bufferView: addView(Buffer.from(g.uvs.buffer, g.uvs.byteOffset, g.uvs.byteLength)),
+                     componentType: COMP.F32, count: N, type: 'VEC2' });
+  }
+
+  // Embedded base-color texture: image bytes (untouched — already a browser-native JPEG/PNG) as their
+  // own bufferView, referenced by an image/texture/material trio.
+  let imageViewIdx = -1;
+  if (g.texture && attributes.TEXCOORD_0 !== undefined) {
+    imageViewIdx = addView(g.texture.bytes);
+  }
 
   // assemble single binary buffer + bufferView byteOffsets
   let offset = 0;
@@ -58,18 +73,28 @@ export function buildGlb(g) {
     chunks.push(bv.data);
     const padded = pad4(bv.data.length);
     if (padded > bv.data.length) chunks.push(Buffer.alloc(padded - bv.data.length));
-    offset = padded;
+    // BUGFIX (2026-07-02): this was `offset = padded` — resetting to the CURRENT view's padded length
+    // instead of accumulating, so every bufferView from the 3rd onward got the wrong byteOffset (silently
+    // "worked" for 2-view outputs like POSITION+COLOR_0 point clouds, since offset-after-view-1 happens to
+    // equal the correct cumulative sum there). With 3+ views (mesh POSITION+NORMAL+COLOR_0[+TEXCOORD_0+image])
+    // COLOR_0 and everything after it pointed at the wrong bytes — root cause of "black/garbled textures".
+    offset += padded;
   }
   const bin = Buffer.concat(chunks);
 
   const gltf = {
     asset: { version: '2.0', generator: 'i3s-to-3dtiles (draft)' },
     scene: 0, scenes: [{ nodes: [0] }], nodes: [{ mesh: 0 }],
-    meshes: [{ primitives: [{ attributes, mode: g.mode === 'POINTS' ? 0 : 4 }] }],
+    meshes: [{ primitives: [{ attributes, mode: g.mode === 'POINTS' ? 0 : 4, ...(imageViewIdx >= 0 ? { material: 0 } : {}) }] }],
     accessors,
     bufferViews: bufferViews.map(bv => ({ buffer: 0, byteOffset: bv.byteOffset, byteLength: bv.byteLength })),
     buffers: [{ byteLength: bin.length }],
   };
+  if (imageViewIdx >= 0) {
+    gltf.images = [{ bufferView: imageViewIdx, mimeType: g.texture.mimeType }];
+    gltf.textures = [{ source: 0 }];
+    gltf.materials = [{ pbrMetallicRoughness: { baseColorTexture: { index: 0 }, metallicFactor: 0, roughnessFactor: 1 } }];
+  }
 
   // GLB container
   const json = Buffer.from(JSON.stringify(gltf), 'utf8');

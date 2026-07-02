@@ -38,6 +38,7 @@ import { handle3dtilesTools } from './3dtiles-tools-live.js';
 import { handleGltf } from './gltf-live.js';
 import { handleBing } from './bing-live.js';
 import { handleExtract } from './extract-live.js';
+import { handleProxy } from './proxy-live.js';
 import { progressGet } from '../core/index.js';
 
 // Port resolution order: --port <n> (CLI, wins) → TILE_PORT → PORT → 3001. The CLI/TILE_PORT escape
@@ -94,6 +95,7 @@ http.createServer(async (req, res) => {
     if (await handleGltf(req, res, u)) return;            // /gltf?ops=decompress — per-tile glTF-Transform pipeline
     if (await handleBing(req, res, u)) return;            // /bing — Bing Maps 3D (tf=3dv4 GLB) → 3D Tiles
     if (await handleExtract(req, res, u)) return;         // /extract/las — bbox crop of a point cloud → LAS
+    if (await handleProxy(req, res, u)) return;            // /proxy?url= — generic CORS-open passthrough for public sources
     res.writeHead(404, CORS); res.end('not found — try /tiles, /stream, /convert, /3dtiles-self-contained, or /3dtiles-tools');
   } catch (e) {
     console.error('[tile-server]', e.stack || e.message);
@@ -112,4 +114,5 @@ http.createServer(async (req, res) => {
   console.log(`  gltf     (per-tile glTF-Transform) /gltf/tileset.json?url=<tileset>&ops=decompress  (Draco/meshopt/KTX2 decode)`);
   console.log(`  bing     Bing Maps 3D (td1 implicit manifest) → /bing/tileset.json?g=<genid>[&decompress=1]`);
   console.log(`  extract  bbox+GE crop/extract → /extract/{las|glb|copc|tileset|zip|splat}?url=<tileset.json>&bbox=...`);
+  console.log(`  proxy    generic CORS-open passthrough → /proxy?url=<absolute source URL>`);
 });

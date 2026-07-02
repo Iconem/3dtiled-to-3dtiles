@@ -12,9 +12,10 @@
  *
  * EXPLICITLY NOT SUPPORTED (the converter detects and WARNs/skips, per the user's request to
  * gate to a few standard schemes):
- *   ✗ Draco-compressed geometry      ✗ textures / PBR materials      ✗ per-feature attributes
+ *   ✗ Draco-compressed geometry      ✗ DDS/KTX2/Basis textures       ✗ per-feature attributes
  *   ✗ legacy per-node 3dNodeIndexDocument index (pre-1.7)            ✗ Point (symbol/instance) layers
  *   ✗ Building Scene Layer (composite of sublayers)                  ✗ non-WGS84 / vertical CRS nuance
+ * (JPEG/PNG base-color textures ARE embedded when present — see textureFormatFor below.)
  *
  * SLPK input: an `.slpk` is a plain zip — extract it first (`unzip foo.slpk -d dir/`) and pass dir.
  * Resource files may be gzip'd inside; that is handled transparently.
@@ -66,6 +67,20 @@ export async function convert(inDir, outDir, opts = {}) {
 
   await fs.mkdir(path.join(outDir, 'tiles'), { recursive: true });
 
+  // Texture lookup — see i3s-live.js's textureFormatFor for the full rationale: pick a browser-native
+  // raster (jpg/png) format if the layer's textureSetDefinitions offer one, else null (untextured).
+  const materialDefs = layer.raw.materialDefinitions || [];
+  const textureSetDefs = layer.raw.textureSetDefinitions || [];
+  const RASTER_EXT = { jpg: 'image/jpeg', jpeg: 'image/jpeg', png: 'image/png' };
+  function textureFormatFor(materialDefIdx) {
+    const md = materialDefs[materialDefIdx];
+    const tsId = md?.pbrMetallicRoughness?.baseColorTexture?.textureSetDefinitionId;
+    if (tsId == null) return null;
+    const formats = textureSetDefs[tsId]?.formats || [];
+    const raster = formats.find(f => RASTER_EXT[f.format?.toLowerCase()]);
+    return raster ? { name: raster.name, ext: raster.format.toLowerCase(), mimeType: RASTER_EXT[raster.format.toLowerCase()] } : null;
+  }
+
   let textureSkips = 0, attrSkips = 0, written = 0, emptyNodes = 0;
 
   // ONE shared LOCAL ENU frame for the whole tileset, at the root node's OBB centre. Geometry +
@@ -113,7 +128,6 @@ export async function convert(inDir, outDir, opts = {}) {
     const res = mesh?.geometry ? mesh.geometry.resource
               : (Number.isInteger(node.resourceId) ? node.resourceId : null);
     if (res != null) {
-      if (mesh?.material && mesh.material.resource >= 0) textureSkips++;  // texture resource present → dropped
       if (mesh?.attribute) attrSkips++;           // per-feature attributes present → dropped
       const buf = await readMaybeGzip(inDir, `nodes/${res}/geometries/${bufIdx}.bin`)
         .catch(() => readMaybeGzip(inDir, `geometries/${res}.bin`).catch(() => null));
@@ -140,7 +154,19 @@ export async function convert(inDir, outDir, opts = {}) {
           } else {
             for (let i = 0; i < g.vertexCount; i++) expand(aabb, positions[i*3], positions[i*3+1], positions[i*3+2]);
           }
-          const glb = buildGlb({ mode: isPoint ? 'POINTS' : 'TRIANGLES', positions, normals: g.normal, colors: g.color });
+          let texture;
+          if (mesh?.material && mesh.material.resource >= 0) {
+            const fmt = textureFormatFor(mesh.material.definition ?? 0);
+            if (!fmt) textureSkips++;   // only compressed (dds/ktx2/basis) formats available — no decoder
+            else {
+              // Real extension, not a generic `.bin` — a texture's on-disk/in-archive name carries its
+              // actual format (`.jpg`/`.png`), unlike geometry (always literally `<n>.bin`). See
+              // i3s-live.js's serveTileGlb for the live-mode verification of this.
+              try { texture = { bytes: await readMaybeGzip(inDir, `nodes/${mesh.material.resource}/textures/${fmt.name}.${fmt.ext}`), mimeType: fmt.mimeType }; }
+              catch { /* texture resource missing — fall back to untextured */ }
+            }
+          }
+          const glb = buildGlb({ mode: isPoint ? 'POINTS' : 'TRIANGLES', positions, normals: g.normal, colors: g.color, uvs: g.uv0, texture });
           const uri = `tiles/node_${idx}.glb`;
           await fs.writeFile(path.join(outDir, uri), glb);
           tile.content = { uri };
@@ -194,7 +220,7 @@ export async function convert(inDir, outDir, opts = {}) {
   await fs.writeFile(path.join(outDir, 'tileset.json'), JSON.stringify(tileset, null, 2));
 
   console.log(`└─ done → ${outDir}/tileset.json  (${written} GLB tiles)`);
-  if (textureSkips) warn(`${textureSkips} nodes had materials/textures — DROPPED (geometry only).`);
+  if (textureSkips) warn(`${textureSkips} nodes had only DDS/KTX2/Basis-compressed textures (no decoder) — DROPPED (geometry only).`);
   if (attrSkips)    warn(`${attrSkips} nodes had per-feature attributes — DROPPED.`);
   if (emptyNodes)   warn(`${emptyNodes} nodes had no readable geometry.`);
   console.log('  NOTE: draft — geographic-WGS84 mesh placement validated on NYC; projected CRS unverified.');

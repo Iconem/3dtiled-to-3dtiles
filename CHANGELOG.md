@@ -5,6 +5,35 @@ Format loosely follows [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+### Fixed/Added — 2026-07-03 (`main`: uniform crop, CORS proxy, I3S SLPK+textures, Agisoft pill)
+- **Uniform splat-crop flip.** Replaced the hardcoded `isLcc` special-case in `extract-live.js` with a
+  documented `SPLAT_FLIP_BAKED = {lcc, sog}` table + `splatFlip()` — discovered SOG had the identical
+  latent bug LCC did. Verified against real tile data for LCC, SOG, and RAD.
+- **Generic CORS proxy** (`packages/tile-server/proxy-live.js`, new file): `/proxy?url=<source>`,
+  tileset-aware (recursively rewrites nested `content.uri` to route children back through the proxy,
+  inheriting the parent's query string — Agisoft Cloud's access token lives only on the root URL).
+  Fixes the Agisoft Jam pill (its host sends no CORS header on any resource).
+- **I3S SLPK detection fixed**: only ever matched `.slpk` literally in the URL; ArcGIS Online's own
+  download endpoint (`.../content/items/<id>/data`) has no `.slpk` anywhere in the URL. Now sniffs the
+  PKZIP magic bytes via a ranged GET when the URL doesn't already look like JSON.
+- **I3S textures implemented** (previously geometry-only, a documented scope-gate): `materialDefinitions`/
+  `textureSetDefinitions` lookup picks a browser-native `jpg`/`png` format when available (DDS/KTX2/
+  Basis-only stays gated, same as Draco/LEPCC); texture bytes fetched via the same per-node resource
+  bucket geometry uses, trying the bare resource name first (live ArcGIS REST) then the real extension
+  (SLPK archives have no bare-name alias); a magic-byte check guards against ArcGIS's CDN occasionally
+  returning HTTP 200 with a JSON error body instead of a real 404. `glbBuild.js` gained a `TEXCOORD_0`
+  accessor + embedded image/material.
+- **Real pre-existing bug found while wiring up textures**: `glbBuild.js`'s binary-buffer assembly reset
+  the running byte offset to each bufferView's own padded length (`offset = padded`) instead of
+  accumulating (`offset += padded`) — silently correct for 2-view outputs (POSITION+COLOR_0 point
+  clouds) but corrupting every bufferView from the 3rd onward for mesh outputs (POSITION+NORMAL+COLOR_0,
+  worse once TEXCOORD_0+image were added) — the actual root cause of the reported all-black textures,
+  not a texture-specific bug at all. Fixed; both offline (`i3s-to-3dtiles`) and live (`i3s-live.js`)
+  paths share the fix via the same `buildGlb()`.
+- I3S LEPCC decompression researched (not implemented): no public bitstream spec, no known open
+  decoder — verdict hard/impractical without Esri publishing the format.
+- Added the Agisoft Cloud tileset pill (routed through `/proxy`).
+
 ### Docs — 2026-07-02 (`main`: README accuracy pass + new TODO items)
 - Fixed a stale `/package` endpoint name throughout README (renamed to `/3dtiles-self-contained` a
   while back, but several examples/prose references never got updated) — heading, example URLs, and

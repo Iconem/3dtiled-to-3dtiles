@@ -412,6 +412,58 @@ Roughly in the order we're tackling them:
   demo our own repo-packed `sample-data/input/3DTILES-PACKAGES/tastier.{3tz,3dtiles}` — we don't have a
   publicly-hosted example of either package format found in the wild to verify `/3dtiles-self-contained`
   against a real third-party `.3tz`/`.3dtiles` file, not just our own packer's output.
+- [x] ~~Add a generic CORS proxy~~ — done (2026-07-02): `/proxy?url=<source>`, tileset-aware
+  `content.uri` rewriting so nested children keep routing through it. Fixes the Agisoft Jam pill (its
+  host sends no CORS header at all, on any resource). See "`/proxy`" above.
+- [x] ~~I3S: SLPK support~~ — the SLPK-archive code path already existed in `i3s-live.js`
+  (`@loaders.gl/i3s`'s `parseSLPKArchive`) but only ever triggered on a URL literally ending in `.slpk`
+  — ArcGIS Online's own download endpoint (`.../content/items/<id>/data`) has no `.slpk` anywhere in the
+  URL (the real filename only shows up in a `Content-Disposition` header). Fixed 2026-07-02: sniff the
+  first bytes for the PKZIP magic (`PK`) when the URL doesn't already look like JSON, so any zip-shaped
+  response is detected regardless of URL shape.
+- [x] ~~I3S: mesh textures rendering black~~ — done (2026-07-02). Two separate things were wrong:
+  (1) textures were **never implemented** at all — `uv0` was decoded from the geometry buffer and then
+  silently dropped before reaching the glTF writer, and no texture image was ever fetched (an explicit,
+  documented scope-gate, not a bug). Added: `materialDefinitions`/`textureSetDefinitions` lookup (picks
+  a browser-native `jpg`/`png` format when the layer offers one; DDS/KTX2/Basis-only layers are gated
+  out the same way Draco/LEPCC are — geometry still renders, untextured), texture fetch via the same
+  per-node resource bucket geometry uses (`nodes/<res>/textures/<name>.bin`, uniform across the SLPK/
+  REST-dir/live-SceneServer source modes), and a `TEXCOORD_0` accessor + embedded image/material in
+  `glbBuild.js`. (2) A genuine **pre-existing bug** in `glbBuild.js`'s binary-buffer assembly: the
+  running byte offset was reset to each bufferView's own padded length (`offset = padded`) instead of
+  accumulating (`offset += padded`) — a no-op for 2-view outputs (POSITION+COLOR_0 point clouds) but
+  silently corrupting every bufferView from the 3rd onward once meshes had POSITION+NORMAL+COLOR_0 (and
+  worse once TEXCOORD_0+image were added) — the actual root cause of the reported all-black textures.
+  Verified live against the real ArcGIS Rancho Mesh SceneServer (JPEG magic bytes at the correct offset,
+  full-color textured mesh rendering in the viewer).
+- [ ] **I3S: LEPCC decompression.** Researched, not implemented. LEPCC (point-cloud position/attribute
+  compression, Esri's own codec, related to but distinct from the open-sourced LERC) has no public
+  bitstream spec and no known open-source decoder (unlike LERC, which Esri did open-source). A
+  from-scratch decoder would mean binary reverse-engineering rather than implementing a documented
+  algorithm — real risk of silently-wrong output with no reference tool to validate against. Verdict:
+  **hard to impractical** without Esri publishing the format or an existing implementation surfacing.
+  Both real ArcGIS point-cloud samples we could find (Moro Bay LiDAR .slpk/SceneServer) are LEPCC-only,
+  so they stay in the pill list labeled unsupported rather than being silently dropped.
+- [ ] **`/convert`-equivalent for `3d-tiles-tools`.** `3d-tiles-tools` (the real, unscoped npm package —
+  see the dependencies note above) isn't wired up as a dependency anywhere in this repo despite being
+  referenced in prose. Worth a `/convert`-style endpoint that shells out to / calls it directly (tileset
+  upgrade, implicit↔explicit, glTF-to-3TILES packaging, etc. — whatever it covers that our own
+  `/3dtiles-tools` endpoint's hand-rolled `implicit-to-explicit`/`upgrade` ops don't), mirroring how
+  `/convert` relates to `/stream`: one endpoint per capability tier.
+- [ ] **Test `/stream?cache=all`.** Recent verification passes (threemx/geosplats migration, uniform
+  crop, ArcGIS I3S) only exercised `cache=none`. `cache=all` (routes to `/convert`, preprocess + cache
+  the whole dataset) shares the same underlying adapters but hasn't been separately re-verified against
+  the newer/changed formats.
+- [ ] **Crop uniformity: georeferenced vs. non-georeferenced.** The `SPLAT_FLIP_BAKED` uniform-crop fix
+  (see "`/extract`" above) was verified against georeferenced real-world tiles for LCC/SOG/RAD. Not yet
+  separately verified: whether the same flip table holds for a **non-georeferenced** (local-frame, no
+  ENU→ECEF root transform) source of each format — worth a dedicated pass before trusting it universally.
+- [ ] **Standalone React + Vite viewer app.** Port `viewer.html`'s functionality (format/cache/prefetch/
+  transform/option/model top-bar pills, the full sidepanel — renderer choice, basemap, tileset/LOD,
+  crop & extract, navigation, local frame — CesiumJS + 3DTRJS rendering, and a link to the new Fumadocs
+  site) into a proper React app under `apps/viewer` (or similar), built with shadcn/ui for every input/
+  label/select. `viewer.html` stays as-is alongside it during the transition — this is a rewrite, not a
+  replace-in-place. See the architecture plan below before implementation starts.
 
 ### Inspected, no tiled splat/generic format found
 
@@ -1029,7 +1081,10 @@ Layer) → 3D Tiles 1.1. Validated on `Buildings_NewYork_v18.slpk` → **5882 gl
 place correctly in NYC: I3S geographic-layer vertices are `(Δlon°, Δlat°, Δheight_m)` relative to the
 node OBB centre, converted per-vertex to ECEF (stored relative to the centre for float32 precision,
 tile `transform` translates back). Still a draft: **projected/vertical CRS** placement is not handled,
-normals stay in the source frame, and Draco/LEPCC/textures/attributes are gated out.
+normals stay in the source frame, and Draco/LEPCC/attributes are gated out. **JPEG/PNG base-color
+textures ARE embedded** (2026-07-02) when the layer offers a raster format; DDS/KTX2/Basis-only
+textures have no decoder here and are gated the same way Draco/LEPCC are (geometry still renders,
+untextured).
 
 ```sh
 unzip your-layer.slpk -d your-layer/        # an SLPK is a plain zip
@@ -1044,8 +1099,9 @@ node src/index.js ../your-layer ./out-i3s
 | Explicit `nodepages/*.json` trees | Legacy per-node `3dNodeIndexDocument` index (pre-1.7) |
 | `IntegratedMesh` / `3DObject` → glTF **TRIANGLES** | **Draco**-compressed geometry (no decoder) |
 | `PointCloud` → glTF **POINTS** | `Point` (symbol/instance) & `Building` (composite) layers |
-| Uncompressed `DefaultGeometrySchema` (PerAttributeArray) | Textures / PBR materials (dropped — geometry only) |
+| Uncompressed `DefaultGeometrySchema` (PerAttributeArray) | **LEPCC**-compressed point-cloud positions (no decoder) |
 | OBB → 3D Tiles `box`; node tree → REPLACE tileset | Per-feature attributes (dropped); non-WGS84 vertical CRS |
+| **JPEG/PNG base-color textures** (embedded, per-node) | DDS/KTX2/Basis-encoded textures (no decoder — gated, geometry-only) |
 
 **Investigation notes** (answering "is it complex? meshes/points/instances/mix? implicit?"):
 I3S **does** cover meshes (`IntegratedMesh`, `3DObject`), point clouds (`PointCloud`), and
@@ -1053,10 +1109,11 @@ symbol/model **instances** (`Point` layers); a **Building Scene Layer** is the "
 sublayers. Tiling is **always explicit** (a node tree addressed via paged indices); I3S has **no
 implicit/template scheme** like 3D Tiles subtrees, so the user's "explicit tiling only" constraint is
 automatic. The node-tree → tileset mapping is **direct** (OBB↔box, children↔children, REPLACE). The
-genuinely hard parts — and why this stays a draft — are **Draco** geometry, **textures/materials**,
-**per-feature attributes** (→ `EXT_mesh_features`/metadata), and the **CRS/ECEF vertex placement**
-nuances. A mesh-or-points-only, uncompressed, explicit-tree converter (this draft) is **moderate**;
-full-fidelity I3S is **high** effort and overlaps mature tools (loaders.gl, Cesium ion).
+genuinely hard remaining parts — and why this stays a draft — are **Draco**/**LEPCC** geometry
+compression (no decoders; raster **textures** are now handled, see above), **per-feature attributes**
+(→ `EXT_mesh_features`/metadata), and the **CRS/ECEF vertex placement** nuances. A mesh-or-points-only,
+uncompressed, explicit-tree converter (this draft) is **moderate**; full-fidelity I3S is **high** effort
+and overlaps mature tools (loaders.gl, Cesium ion).
 
 > **ESRI also publishes Gaussian splats as 3D Tiles directly**, not through I3S: ArcGIS's
 > **3D Tiles Server** hosts `KHR_gaussian_splatting`/SPZ GLB tilesets alongside its regular
@@ -1073,7 +1130,7 @@ readme](https://github.com/Esri/i3s-spec/blob/master/docs/2.1/pcsl_ReadMe.md), t
 and the [ArcGIS 3D Tiles samples experience](https://experience.arcgis.com/experience/e2e1e497d13b41cab368c894fd9b3df7)
 (ArcGIS portal items — open each `item.html` link and use its "Download" button for the SLPK, or the
 REST service URL directly for streaming). All four verified live against `/stream?format=i3s`:
-- Integrated mesh (**works**) — SLPK: [item `95a427c7a6ec4789b03c1a177366b54c`](https://3dcities.maps.arcgis.com/home/item.html?id=95a427c7a6ec4789b03c1a177366b54c) (`Rancho_Mesh_v18.slpk`, 285 MB) · service: [item `01eff699c8404a27a65e0877201136b4`](https://3dcities.maps.arcgis.com/home/item.html?id=01eff699c8404a27a65e0877201136b4) → `https://tiles.arcgis.com/tiles/z2tnIkrLQ2BRzr6P/arcgis/rest/services/Rancho_Mesh_v18/SceneServer`
+- Integrated mesh (**works, fully textured**) — SLPK: [item `95a427c7a6ec4789b03c1a177366b54c`](https://3dcities.maps.arcgis.com/home/item.html?id=95a427c7a6ec4789b03c1a177366b54c) (`Rancho_Mesh_v18.slpk`, 285 MB) · service: [item `01eff699c8404a27a65e0877201136b4`](https://3dcities.maps.arcgis.com/home/item.html?id=01eff699c8404a27a65e0877201136b4) → `https://tiles.arcgis.com/tiles/z2tnIkrLQ2BRzr6P/arcgis/rest/services/Rancho_Mesh_v18/SceneServer`. The SLPK link is ArcGIS Online's own download endpoint (`.../content/items/<id>/data`) — no `.slpk` anywhere in the URL (only in a `Content-Disposition` header), which the adapter didn't originally detect as an archive at all; both this and the texture support (see the scope table above) were fixed 2026-07-02, verified byte-identical (same JPEG at the same buffer offset) against both the SLPK and the SceneServer URL for the same underlying dataset.
 - Point cloud (**LEPCC-compressed — unsupported**, same gap as the Autzen sample) — SLPK: [item `496552d059644b4892c51ad06bdba8e2`](https://www.arcgis.com/home/item.html?id=496552d059644b4892c51ad06bdba8e2) (`Moro_Bay_LiDAR.slpk`, 578 MB) · service: [item `908d6b986f314d51b1ff50b3bc321dfd`](https://www.arcgis.com/home/item.html?id=908d6b986f314d51b1ff50b3bc321dfd) → `https://tiles.arcgis.com/tiles/z2tnIkrLQ2BRzr6P/arcgis/rest/services/Moro_Bay_LiDAR/SceneServer`. A second point-cloud sample (item `fc3f4a4919394808830cd11df4631a54`, `BARNEGAT_BAY_LiDAR_UTM`) is also LEPCC — every real ArcGIS point-cloud SceneServer sample found so far uses it, since it's Esri's own default point-cloud codec.
 - **Live ArcGIS SceneServer REST support added** (2026-07-02) to test the "service" URLs above directly
   (previously the adapter only read a static `3dSceneLayer.json`/SLPK tree, not the REST API's
@@ -2070,13 +2127,41 @@ GET /extract/{las|glb|copc|tileset|zip|splat}?url=<tileset.json>&bbox=<west,sout
   the crop's bbox center, so multiple crops of the same source share one coordinate system — the
   tradeoff is that a single crop far from the source root can look "off-center" relative to its own
   bounding box when loaded standalone in a viewer that assumes content sits near its own origin.
-- LCC's splat crop had a real placement bug (not the origin-anchoring tradeoff above): its
-  `[East,−Up,North]` root-transform column layout already bakes the Y-up→Z-up content flip in (unlike
-  every other adapter's plain `[East,North,Up]` georef), so the extractor's generic flip double-applied
-  — fixed 2026-07-02 by detecting an LCC source (`format=lcc` in the nested `/stream` URL, or an
-  `/LCC/` path segment) and using the inverse rotation for it. See CHANGELOG.
+- LCC's (and, it turns out, SOG's) splat crop had a real placement bug: their root-transform already
+  bakes the FULL Y-up→Z-up content flip in (unlike RAD's — the extractor's original default — which
+  assumes the renderer applies that flip automatically), so the extractor's generic flip double-applied.
+  Originally patched as a single hardcoded `isLcc` special-case, which — fair callout — was "pretty
+  weird, double-flipping 180°" and not obviously generalizable. Replaced 2026-07-02 with a small,
+  documented per-**format** table (`SPLAT_FLIP_BAKED = {lcc, sog}`) in `extract-live.js`'s `splatFlip()`:
+  any format whose adapter bakes the full flip itself goes in the set; everything else (RAD, and any
+  future format following RAD's convention) uses the default. This is the general answer to "should all
+  tilesets crop the same way" — **yes**, modulo which of the two conventions (`auto` renderer-flip vs
+  `baked` self-flip) that format's own `/stream` adapter already committed to; the table is where that
+  one bit of per-format knowledge lives, not scattered special-casing. Verified against real tile data
+  for all three formats (LCC, SOG, RAD) via centroid-vs-declared-box sampling. **Not yet verified**: the
+  georeferenced vs. non-georeferenced case split for each format — see TODO/Future work.
 
 viewer.html's "CROP & EXTRACT" sidebar section drives this directly.
+
+### `/proxy` — generic CORS proxy (implemented ✅)
+
+```sh
+GET /proxy?url=<absolute source URL>
+```
+
+For public tilesets whose host sends no `Access-Control-Allow-Origin` at all (confirmed against
+Agisoft Cloud's `cloud.agisoft.com/api/...tileset.json` — no CORS header on the tileset.json OR its
+tile GLBs), a browser-side Cesium/3DTRJS fetch is blocked even though the data itself is public. A pure
+byte passthrough only fixes the ROOT request — Agisoft's `content.uri`s are relative ("Data/d000.glb"),
+so children resolve against `/proxy`'s own path once loaded through a naive proxy, not the original host.
+So `/proxy` is tileset-aware: for a JSON response shaped like a 3D Tiles tileset (`asset`+`root`), it
+recursively rewrites every `content.uri` to an absolute `/proxy?url=<resolved>` (same tree-walk as
+`/gltf`'s `rewriteTree`), so children keep flowing back through the proxy however deep the tree goes.
+A resolved child URI that carries no query string of its own **inherits the parent's** — Agisoft's own
+access token lives only on the root `tileset.json?access=…` URL, and every child content URI is a bare
+relative path with no token; confirmed live that the token is required per-resource (302 without it, 200
+with), so silently dropping it while resolving relative paths would re-break every child tile. Anything
+else (a tile GLB, a subtree binary) streams through byte-for-byte. Used by the Agisoft Jam pill.
 
 ### COPC — Autzen Stadium, Oregon (10.6M pts)
 

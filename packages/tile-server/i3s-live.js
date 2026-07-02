@@ -16,9 +16,16 @@
  *     (`?f=json` for JSON, plain binary for geometry) — never a static `3dSceneLayer.json` file.
  *   • REST / extracted-SLPK dir — url = …/3dSceneLayer.json[.gz]; resources fetched file-by-file
  *     (best for large layers like NYC — we never pull the whole dataset).
- *   • SLPK archive             — url = ….slpk; the zip is fetched once and read via loaders.gl.
+ *   • SLPK archive             — url = ….slpk, OR any URL whose response is a zip regardless of its
+ *     path (e.g. ArcGIS Online's `…/content/items/<id>/data` download endpoint has no `.slpk` in the
+ *     URL at all — detected by sniffing the first bytes for the local PKZIP magic, or by a
+ *     Content-Disposition filename ending `.slpk`). The whole archive is fetched once into memory and
+ *     read via loaders.gl.
  *
- * Scope matches the offline draft: uncompressed geometry only (Draco/LEPCC gated out), no textures.
+ * Scope matches the offline draft: uncompressed geometry only (Draco/LEPCC gated out). Textures ARE
+ * embedded when the node's material references a raster (JPEG/PNG) format in `textureSetDefinitions`
+ * — DDS/KTX2/Basis-encoded textures have no decoder here and are silently skipped (geometry still
+ * renders, untextured), same gating philosophy as Draco/LEPCC.
  *
  *   GET /stream/tileset.json?format=i3s&url=<3dSceneLayer.json | .slpk | SceneServer URL>
  *   GET /stream/tile/<nodeIndex>.glb?format=i3s&url=<same URL>
@@ -58,11 +65,27 @@ function arcgisSceneServerReader(url) {
   };
 }
 
+// Does `url` look like an SLPK (zip) archive when the URL itself gives no clue? A HEAD (or tiny
+// ranged GET, for hosts that don't support HEAD well) is enough: ArcGIS Online's download endpoint
+// answers with `Content-Disposition: attachment; filename="Foo.slpk"` and no `.slpk` anywhere in the
+// URL path, so a pure extension check misses it — fall back to sniffing the local-file-header PKZIP
+// magic (0x50 0x4B, "PK") in the first bytes.
+async function probeIsSlpk(url) {
+  try {
+    const r = await fetch(url, { headers: { Range: 'bytes=0-3' } });
+    if (!r.ok && r.status !== 206) return false;
+    if (/\.slpk"?\s*$/i.test(r.headers.get('content-disposition') || '')) return true;
+    const b = Buffer.from(await r.arrayBuffer());
+    return b.length >= 2 && b[0] === 0x50 && b[1] === 0x4b;   // 'PK'
+  } catch { return false; }
+}
+
 // Build a uniform getFile(relPath) → Buffer (gunzipped) over an SLPK archive, a live ArcGIS SceneServer,
 // or a plain HTTP base dir (extracted SLPK mirror).
 async function makeFileReader(url) {
   if (/\/SceneServer(\/|$|\?)/i.test(url)) return arcgisSceneServerReader(url);
-  if (/\.slpk(\?|$)/i.test(url)) {
+  const looksLikeJson = /\.json(\.gz)?(\?|$)/i.test(url);
+  if (/\.slpk(\?|$)/i.test(url) || (!looksLikeJson && await probeIsSlpk(url))) {
     const buf = await fetchBuf(url);
     const ab = buf.buffer.slice(buf.byteOffset, buf.byteOffset + buf.byteLength);
     const archive = await parseSLPKArchive(new DataViewReadableFile(new DataView(ab)), undefined, 'slpk');
@@ -126,6 +149,23 @@ async function getCtx(url) {
   if (typeof schemaEnc === 'string' && schemaEnc.toLowerCase().startsWith('lepcc'))
     throw new Error('I3S PointCloud uses LEPCC-compressed positions — not supported.');
 
+  // Texture lookup: materialDefinitions[].pbrMetallicRoughness.baseColorTexture.textureSetDefinitionId
+  // → textureSetDefinitions[].formats[] (each a {name, format} — the SAME logical texture encoded
+  // multiple ways, e.g. a plain "jpg" alongside a mipmapped "dds"). We only have a decoder for
+  // browser-native raster formats (jpg/png) — pick that one, or null if the layer only ships
+  // compressed variants (dds/ktx2/basis), matching the Draco/LEPCC "gate, don't crash" pattern.
+  const materialDefs = sl.materialDefinitions || [];
+  const textureSetDefs = sl.textureSetDefinitions || [];
+  const RASTER_EXT = { jpg: 'image/jpeg', jpeg: 'image/jpeg', png: 'image/png' };
+  function textureFormatFor(materialDefIdx) {
+    const md = materialDefs[materialDefIdx];
+    const tsId = md?.pbrMetallicRoughness?.baseColorTexture?.textureSetDefinitionId;
+    if (tsId == null) return null;
+    const formats = textureSetDefs[tsId]?.formats || [];
+    const raster = formats.find(f => RASTER_EXT[f.format?.toLowerCase()]);
+    return raster ? { name: raster.name, ext: raster.format.toLowerCase(), mimeType: RASTER_EXT[raster.format.toLowerCase()] } : null;
+  }
+
   const nodesPerPage = sl.nodePages?.nodesPerPage ?? sl.store?.index?.nodesPerPage ?? 64;
   const schema = sl.store?.defaultGeometrySchema || null;
   const sr = sl.spatialReference || sl.store?.spatialReference;
@@ -174,7 +214,7 @@ async function getCtx(url) {
     return [dx*EAST[0]+dy*EAST[1]+dz*EAST[2], dx*NORTH[0]+dy*NORTH[1]+dz*NORTH[2], dx*UP[0]+dy*UP[1]+dz*UP[2]]; };
 
   const ctx = {
-    getFile, nodes, schema, isGeographic, layerType,
+    getFile, nodes, schema, isGeographic, layerType, textureFormatFor,
     isPoint: POINT_TYPES.has(layerType),
     bufIdx: uncompressedBufferIndex >= 0 ? uncompressedBufferIndex : 0,
     originEcef, EAST, NORTH, UP, toEnu,
@@ -277,7 +317,37 @@ async function serveTileGlb(ctx, idx) {
       positions[i*3] = u[0]; positions[i*3+1] = u[2]; positions[i*3+2] = -u[1]; // glTF (E, U, −N)
     }
   }
-  return Buffer.from(buildGlb({ mode: ctx.isPoint ? 'POINTS' : 'TRIANGLES', positions, normals: g.normal, colors: g.color }));
+
+  // Texture: node.mesh.material.{definition,resource} — resource is the SAME per-node resource
+  // bucket geometry uses, definition indexes materialDefinitions[] for the format lookup. Unlike
+  // geometry (always literally `<n>.bin`), a texture's on-disk name convention differs by source mode:
+  // a live ArcGIS SceneServer accepts the BARE name (`nodes/<res>/textures/0`, its REST layer strips
+  // any `.bin`/`.json` suffix but otherwise serves whatever's asked); an SLPK archive has NO bare-name
+  // alias at all (@loaders.gl's SLPKArchive only knows `.jpg`/`.png`/`.ktx`/… — verified: bare 404s,
+  // `.jpg` succeeds), and an extracted-SLPK mirror keeps the same real on-disk filenames. Try bare
+  // first (the common case), fall back to the real extension.
+  let texture;
+  const mat = node.mesh?.material;
+  if (mat && mat.resource >= 0) {
+    const fmt = ctx.textureFormatFor(mat.definition ?? 0);
+    if (fmt) {
+      // Some ArcGIS SceneServer CDN responses come back HTTP 200 with a JSON error BODY instead of a
+      // real 404 (observed intermittently against the live Rancho Mesh service) — validate the magic
+      // bytes before trusting either candidate, so a flaky/mismatched response falls through to
+      // "untextured" instead of embedding `{"error":...}` as if it were image data.
+      const isRaster = (b) => b && b.length > 4 && (
+        (b[0] === 0xff && b[1] === 0xd8 && b[2] === 0xff) ||                          // JPEG
+        (b[0] === 0x89 && b[1] === 0x50 && b[2] === 0x4e && b[3] === 0x47));          // PNG
+      const base = `nodes/${mat.resource}/textures/${fmt.name}`;
+      let bytes;
+      for (const cand of [base, `${base}.${fmt.ext}`]) {
+        try { const b = await ctx.getFile(cand); if (isRaster(b)) { bytes = b; break; } } catch { /* try next */ }
+      }
+      if (bytes) texture = { bytes, mimeType: fmt.mimeType };
+    }
+  }
+
+  return Buffer.from(buildGlb({ mode: ctx.isPoint ? 'POINTS' : 'TRIANGLES', positions, normals: g.normal, colors: g.color, uvs: g.uv0, texture }));
 }
 
 // Pure builders for the /stream dispatcher.
