@@ -24,6 +24,7 @@ export function detectFormatByName(name) {
   if (l.endsWith('.lcc')) return 'lcc';
   if (l.endsWith('3dscenelayer.json') || l.endsWith('3dscenelayer.json.gz')) return 'i3s';
   if (l.endsWith('.3tz') || l.endsWith('.3dtiles')) return 'package';
+  if (l.endsWith('.3mx') || l.endsWith('.3mxb')) return 'threemx';
   return null;
 }
 

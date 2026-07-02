@@ -9,11 +9,19 @@
  *   GET /stream/tileset.json?url=<SRC>&format=<fmt>[&cache=none|hierarchy][&prefetch=N][&tiling=…]
  *   GET /stream/tile/<key>.glb?url=<SRC>&format=<fmt>       → one range-built tile from that adapter
  *   GET /stream/subtrees/<key>.subtree?url=<SRC>&format=<fmt>  → implicit-tiling subtree (octree fmts)
+ *   GET /stream/threemx/node/<path>.json?url=<SRC>          → 3MX lazy-fragment continuation (one .3mxb)
  *
  * RAD and I3S have no persisted spatial index to make a lazy/partial hierarchy read meaningful (see
  * their file-header comments), so both always fully materialize their explicit tree regardless of
  * `cache=` — matching the Potree 1.x `tiling=explicit` simplification. (2026-07-02: this removed their
- * `/stream/rad/subtree/…` and `/stream/i3s/node,tile/…` lazy-fragment continuation routes.)
+ * `/stream/rad/subtree/…` and `/stream/i3s/node,tile/…` lazy-fragment continuation routes.) 3MX is a
+ * genuine DAG with no persisted spatial index, so it keeps its own lazy continuation (above) — the same
+ * mechanism RAD/I3S used to have, just for a format where "scan everything eagerly" isn't cheap.
+ *
+ * threemx and geosplats (2026-07-02) moved here from their own standalone /threemx, /geosplats
+ * endpoints — same ADAPTERS-registry pattern as every other format, so they now get cache=/prefetch=/
+ * /tiles too. geosplats keeps a few of its own tuning query params (lod/frame/euler/scale/yaw/alt),
+ * threaded through like tiling/centroids below.
  *
  * vs `/convert` (preprocess + cache: converts the whole dataset once, then serves static — works for
  * EVERY format, not just the ones with a range adapter); for formats without one, `/stream` returns
@@ -28,6 +36,8 @@ import { sogTileset, sogTile, sogTileRe } from './sog-live.js';
 import { lccTileset, lccTile, lccTileRe } from './lcc-live.js';
 import { radTileset, radTile, radTileRe } from './rad-live.js';
 import { i3sTileset, i3sTile, i3sTileRe } from './i3s-live.js';
+import { threemxTileset, threemxTile, threemxTileRe, threemxNode } from './threemx-live.js';
+import { geosplatsTileset, geosplatsTile, geosplatsTileRe } from './geosplats-live.js';
 import { handleSelfContained } from './3dtiles-self-contained.js';
 import { detectFormatByName, compressGlb, decompressGlb } from '../core/index.js';
 
@@ -68,12 +78,14 @@ const COORD_RE = /^\d+-\d+-\d+-\d+$/;
 // streams too (decode each chunk's center column for the tree, full-encode tiles on demand).
 // COPC/Potree are octrees → support &tiling=implicit|explicit (default implicit) + on-the-fly subtrees.
 const ADAPTERS = {
-  copc:   { tileset: copcTileset,   tile: copcTile,   subtree: copcSubtree,   tileRe: copcTileRe,   octree: true },
-  potree: { tileset: potreeTileset, tile: potreeTile, subtree: potreeSubtree, tileRe: potreeTileRe, octree: true },
-  sog:    { tileset: sogTileset,    tile: sogTile,    tileRe: sogTileRe },
-  lcc:    { tileset: lccTileset,    tile: lccTile,    tileRe: lccTileRe },
-  rad:    { tileset: radTileset,    tile: radTile,    tileRe: radTileRe },
-  i3s:    { tileset: i3sTileset,    tile: i3sTile,    tileRe: i3sTileRe },
+  copc:      { tileset: copcTileset,      tile: copcTile,      subtree: copcSubtree, tileRe: copcTileRe,      octree: true },
+  potree:    { tileset: potreeTileset,    tile: potreeTile,    subtree: potreeSubtree, tileRe: potreeTileRe, octree: true },
+  sog:       { tileset: sogTileset,       tile: sogTile,       tileRe: sogTileRe },
+  lcc:       { tileset: lccTileset,       tile: lccTile,       tileRe: lccTileRe },
+  rad:       { tileset: radTileset,       tile: radTile,       tileRe: radTileRe },
+  i3s:       { tileset: i3sTileset,       tile: i3sTile,       tileRe: i3sTileRe },
+  threemx:   { tileset: threemxTileset,   tile: threemxTile,   tileRe: threemxTileRe },
+  geosplats: { tileset: geosplatsTileset, tile: geosplatsTile, tileRe: geosplatsTileRe },
 };
 export const streamableFormats = Object.keys(ADAPTERS);
 
@@ -89,9 +101,28 @@ function tagContentUris(node, suffix) {
   }
 }
 
+// 3MX is an arbitrary DAG with no persisted spatial index (unlike RAD/I3S, which dropped this same kind
+// of route once eager-scanning turned out to be cheap) — discovering its tree at all means fetching
+// every .3mxb, so it genuinely needs a lazy per-node continuation. Namespaced under /stream/threemx/…
+// since the shape (one child .3mxb → one fragment) doesn't fit the generic tile/subtree routes below.
+async function handleThreemxNode(u, res) {
+  const n = u.pathname.match(/^\/stream\/threemx\/node\/(.+)\.json$/);
+  if (!n) return false;
+  const url = u.searchParams.get('url');
+  if (!url) { res.writeHead(400, CORS); res.end('missing ?url=<source url>'); return true; }
+  const frag = await threemxNode(url, decodeURIComponent(n[1]));
+  if (!frag) { res.writeHead(404, CORS); res.end('no such node'); return true; }
+  // threemx-live.js bakes absolute /stream/tile/…&format=threemx URIs itself (a relative "tile/…" here
+  // would resolve against THIS fragment's own path, not /stream/) — no tagContentUris needed.
+  res.writeHead(200, { 'Content-Type': 'application/json', ...CORS });
+  res.end(JSON.stringify(frag));
+  return true;
+}
+
 /** Try to handle a /stream/* request. Returns true iff it owned the response. */
 export async function handleStream(req, res, u) {
   if (!u.pathname.startsWith('/stream/')) return false;
+  if (await handleThreemxNode(u, res)) return true;
   const url = u.searchParams.get('url');
   if (!url) { res.writeHead(400, CORS); res.end('missing ?url=<source url>'); return true; }
   const name = url.split('?')[0].split('/').pop() || '';
@@ -130,7 +161,16 @@ export async function handleStream(req, res, u) {
     // transform: per-tile glTF-Transform op; rides along on child tile URIs so /stream/tile carries it.
     const transform = TRANSFORMS.has(u.searchParams.get('transform')) ? u.searchParams.get('transform') : null;
     const tex = u.searchParams.get('tex') === 'png' ? 'png' : 'jpg';
-    const ts = await adapter.tileset(url, { tiling: u.searchParams.get('tiling'), lazy, hierarchy, prefetch, centroids });
+    // geosplats-only tuning knobs (ignored by every other adapter, same pattern as tiling/centroids above).
+    const geosplatsOpts = fmt === 'geosplats' ? {
+      lod: u.searchParams.has('lod') ? Number(u.searchParams.get('lod')) : undefined,
+      frame: u.searchParams.get('frame') || undefined,
+      euler: u.searchParams.get('euler') === '1',
+      scale: u.searchParams.has('scale') ? Number(u.searchParams.get('scale')) : undefined,
+      yaw: u.searchParams.has('yaw') ? Number(u.searchParams.get('yaw')) : undefined,
+      alt: u.searchParams.has('alt') ? Number(u.searchParams.get('alt')) : undefined,
+    } : null;
+    const ts = await adapter.tileset(url, { tiling: u.searchParams.get('tiling'), lazy, hierarchy, prefetch, centroids, ...geosplatsOpts });
     tagContentUris(ts.root, `&format=${fmt}` + (centroids ? '&centroids=1' : '')
       + (transform ? `&transform=${transform}` + (transform === 'decompress' && tex === 'png' ? '&tex=png' : '') : ''));
     res.writeHead(200, { 'Content-Type': 'application/json', ...CORS });

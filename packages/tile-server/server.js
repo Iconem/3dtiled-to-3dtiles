@@ -37,9 +37,7 @@ import { handleSelfContained } from './3dtiles-self-contained.js';
 import { handle3dtilesTools } from './3dtiles-tools-live.js';
 import { handleGltf } from './gltf-live.js';
 import { handleBing } from './bing-live.js';
-import { handleThreemx } from './threemx-live.js';
 import { handleExtract } from './extract-live.js';
-import { handleGeoSplats } from './geosplats-live.js';
 import { progressGet } from '../core/index.js';
 
 // Port resolution order: --port <n> (CLI, wins) → TILE_PORT → PORT → 3001. The CLI/TILE_PORT escape
@@ -95,9 +93,7 @@ http.createServer(async (req, res) => {
     if (await handle3dtilesTools(req, res, u)) return;    // /3dtiles-tools?tool=implicit-to-explicit|upgrade
     if (await handleGltf(req, res, u)) return;            // /gltf?ops=decompress — per-tile glTF-Transform pipeline
     if (await handleBing(req, res, u)) return;            // /bing — Bing Maps 3D (tf=3dv4 GLB) → 3D Tiles
-    if (await handleThreemx(req, res, u)) return;         // /threemx — Bentley/Acute3D 3MX → 3D Tiles
     if (await handleExtract(req, res, u)) return;         // /extract/las — bbox crop of a point cloud → LAS
-    if (await handleGeoSplats(req, res, u)) return;       // /geosplats — MapTiler GeoSplats → 3D Tiles (server-side key/referer)
     res.writeHead(404, CORS); res.end('not found — try /tiles, /stream, /convert, /3dtiles-self-contained, or /3dtiles-tools');
   } catch (e) {
     console.error('[tile-server]', e.stack || e.message);
@@ -109,11 +105,11 @@ http.createServer(async (req, res) => {
 }).listen(PORT, () => {
   console.log(`tile-server on http://localhost:${PORT}`);
   console.log(`  tiles    (unified, no redirect) /tiles/tileset.json?url=<SRC>&format=<fmt>&cache=<none|hierarchy|full>[&prefetch=N][&tiling=implicit|explicit]`);
-  console.log(`  stream   (cache=none/hierarchy; copc/potree/sog/lcc/rad/i3s) /stream/tileset.json?url=<SRC>&format=<fmt>[&cache=none|hierarchy][&prefetch=N]`);
+  console.log(`  stream   (cache=none/hierarchy; copc/potree/sog/lcc/rad/i3s/threemx/geosplats) /stream/tileset.json?url=<SRC>&format=<fmt>[&cache=none|hierarchy][&prefetch=N]`);
   console.log(`  convert  (preprocess+cache, any fmt) /convert/tileset.json?url=<SRC>[&format=<fmt>][&centroids=1]`);
   console.log(`  3dtiles-self-contained  /3dtiles-self-contained/tileset.json?url=<path-or-URL.3tz|.3dtiles>`);
   console.log(`  3dtiles-tools  /3dtiles-tools/tileset.json?tool=implicit-to-explicit|upgrade&dir=<path>[&base=<url>]`);
   console.log(`  gltf     (per-tile glTF-Transform) /gltf/tileset.json?url=<tileset>&ops=decompress  (Draco/meshopt/KTX2 decode)`);
   console.log(`  bing     Bing Maps 3D (td1 implicit manifest) → /bing/tileset.json?g=<genid>[&decompress=1]`);
-  console.log(`  threemx  Bentley 3MX → /threemx/tileset.json?url=<Scene.3mx | root.3mxb>`);
+  console.log(`  extract  bbox+GE crop/extract → /extract/{las|glb|copc|tileset|zip|splat}?url=<tileset.json>&bbox=...`);
 });

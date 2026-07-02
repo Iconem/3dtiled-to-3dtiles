@@ -1,8 +1,8 @@
 /**
  * geosplats-live.js — **MapTiler GeoSplats → OGC 3D Tiles** live stream converter.
  *
- *   GET /geosplats/tileset.json?url=<model.json URL>[&lod=1..8]
- *   GET /geosplats/tile.glb?url=<model.json URL>&m=<submodel#>&grid=<1|8|64|512>&oct=<n>&lod=<1..8>
+ *   GET /stream/tileset.json?url=<model.json URL>&format=geosplats[&lod=1..8]
+ *   GET /stream/tile/<m>-<grid>-<oct>-<lod>.glb?url=<model.json URL>&format=geosplats
  *
  * GeoSplats (https://www.maptiler.com/geosplats/) is a georeferenced HLOD splat format: a `model.json`
  * (global_position georef + N sub-models) and per-sub-model `metadata.json` (voxel-grid octree + LOD +
@@ -20,7 +20,7 @@
  * Reverse-engineered structure: docs-references/maptiler-geosplats.md.
  */
 import { readSog, MemoryReadFileSystem } from '@playcanvas/splat-transform';
-import { CORS, sendJson, sendGlb, llhToEcef, enuFrame, buildSplatTileGlb, computeBounds } from '../core/index.js';
+import { llhToEcef, enuFrame, buildSplatTileGlb, computeBounds } from '../core/index.js';
 
 const SH_C0 = 0.28209479177387814;
 // readSog yields a PLY-convention DataTable (SH-DC colour, logit opacity, ln scale, quat rot_0=w). Convert
@@ -183,8 +183,10 @@ function buildSubmodelOctree(meta, m, modelUrl, enc) {
     const b = boxOf(cell.bb), cg = CHILD_GRID[g];
     const lod = pickLod(cell.counts, LOD_FOR_GRID[g] || 8);
     const kids = cg ? byGrid[cg].filter(cc => inside(cc.center, cell.bb)).map(cc => mk(cg, cc)) : [];
+    // Relative (resolved against the tileset.json's own URL) — the /stream/tile/<key>.glb generic
+    // route handles it; tagContentUris appends &format=geosplats.
     return { boundingVolume: { box: b.box }, geometricError: cg ? b.diag : b.diag / 4, refine: 'REPLACE',
-      content: { uri: `/geosplats/tile.glb?url=${enc(modelUrl)}&m=${m}&grid=${g}&oct=${cell.oct}&lod=${lod}` }, children: kids };
+      content: { uri: `tile/${m}-${g}-${cell.oct}-${lod}.glb?url=${enc(modelUrl)}` }, children: kids };
   };
   if (byGrid[1].length) return mk(1, byGrid[1][0]);
   if (byGrid[8].length) return { boundingVolume: { box: boxOf(meta.bounding_box).box }, geometricError: 1e5, refine: 'REPLACE', children: byGrid[8].map(c => mk(8, c)) };
@@ -211,88 +213,78 @@ async function octantDataTable(splatsBase, modelId, baseurl, key, grid, oct, lod
   return readSog(fs, 'meta.json');
 }
 
-export async function handleGeoSplats(req, res, u) {
-  if (!u.pathname.startsWith('/geosplats/')) return false;
-  const modelUrl = u.searchParams.get('url');
-  if (!modelUrl) { res.writeHead(400, CORS); res.end('GET /geosplats/tileset.json?url=<model.json URL>[&lod=1..8]'); return true; }
+// Pure builders for the /stream dispatcher.
+export async function geosplatsTileset(modelUrl, opts = {}) {
   const { splatsBase, modelId, key } = parseModelUrl(modelUrl);
-  const lod = Math.min(8, Math.max(1, Number(u.searchParams.get('lod')) || 6));
-
-  try {
-    if (u.pathname === '/geosplats/tileset.json') {
-      const model = await fetchModel(modelUrl);
-      const gp = model.global_position || {};
-      const enc = (o) => encodeURIComponent(o);
-      // Fetch every sub-model's metadata (voxel_grids) → per-sub-model octree + the union bbox (for centering).
-      const gmin = [Infinity,Infinity,Infinity], gmax = [-Infinity,-Infinity,-Infinity];
-      const subs = await Promise.all((model.models || []).map(async (sm, i) => {
-        let meta = null; try { meta = await fetchMeta(splatsBase, modelId, sm.baseurl, key); } catch {}
-        const bb = meta?.bounding_box;
-        if (bb) { for (const k of [0,1,2]) { const lo=[bb.min.x,bb.min.y,bb.min.z][k], hi=[bb.max.x,bb.max.y,bb.max.z][k]; if(lo<gmin[k])gmin[k]=lo; if(hi>gmax[k])gmax[k]=hi; } }
-        return { i, meta };
-      }));
-      const center = gmin[0] === Infinity ? [0,0,0] : [(gmin[0]+gmax[0])/2,(gmin[1]+gmax[1])/2,(gmin[2]+gmax[2])/2];
-      const ghalf = gmin[0] === Infinity ? 1000 : Math.max(gmax[0]-gmin[0], gmax[1]-gmin[1], gmax[2]-gmin[2]) / 2;
-      // HLOD: each sub-model → its voxel-grid octree (grid_1→8→64). Falls back to a single full-LOD tile.
-      const children = subs.map(({ i, meta }) => {
-        const tree = meta && buildSubmodelOctree(meta, i, modelUrl, enc);
-        if (tree) return tree;
-        const bb = meta?.bounding_box; const b = bb ? boxOf(bb) : { box: [center[0],center[1],center[2], ghalf,0,0, 0,ghalf,0, 0,0,ghalf], diag: ghalf*2 };
-        return { boundingVolume: { box: b.box }, geometricError: b.diag/4, refine: 'REPLACE',
-          content: { uri: `/geosplats/tile.glb?url=${enc(modelUrl)}&m=${i}&grid=1&oct=0&lod=${lod}` } };
-      });
-      // SCALE to real-world metres. readSog units are per-model (A ≈ raw thousands, B ≈ raw single-digits) and
-      // do NOT match; `model_scale` normalises them into MapTiler's WEB-MERCATOR tile frame. From the SDK the
-      // mercator-tile→metre factor is 512·ZOOM_TO_METER[14] = 2445.98, but that's at the EQUATOR — web mercator
-      // stretches by 1/cos(lat), so REAL metres = mercator·cos(lat). Without the cos() the scene overscaled by
-      // 1/cos(lat): model A (lat 55° → ×1.74) was clearly too big, B (lat 26° → ×1.11) slightly. So:
-      //   S = model_scale · 512·ZOOM_TO_METER[14] · cos(lat)   (verified: A ≈ 0.9 km, B footprint matches map).
-      // `&scale=<f>` overrides the whole S if a specific model still needs tuning.
-      const SCALE_K = 512 * 4.7773 * Math.cos((gp.lat || 0) * D2R);   // equator tile-metre × cos(lat) latitude correction
-      const S = u.searchParams.has('scale') ? Number(u.searchParams.get('scale')) : ((gp.model_scale || 0) * SCALE_K || 1);
-      // octant boxes are in raw local coords; root.transform recenters (−center), scales by S, places on globe.
-      // HEADING: auto-derive from the SDK per-model offset.y_rot. In the enu2 frame the compass heading that
-      // aligns the scene with the map is y_rot−180° (verified on model B / Biltmore: y_rot=217 → 37°, tennis
-      // courts land east, golf west; model A y_rot=−178 → ≈+2°, negligible). &yaw=<deg> adds a fine-tune on top.
-      const autoYaw = (gp.offset?.y_rot ?? 0) - 180;
-      const opt = { frame: u.searchParams.get('frame') || 'enu2', euler: u.searchParams.get('euler') === '1',
-        scale: S, yaw: autoYaw + (u.searchParams.has('yaw') ? Number(u.searchParams.get('yaw')) : 0),
-        alt: u.searchParams.has('alt') ? Number(u.searchParams.get('alt')) : null };
-      // geometricError is world-space metres and is NOT affected by the tile transform's scale, so multiply
-      // every GE by S to keep LOD selection consistent with the now-scaled geometry (boxes inherit S via the
-      // transform automatically). Root box stays raw (center/ghalf) — it too inherits S from root.transform.
-      const scaleGE = (node) => { if (node.geometricError != null) node.geometricError *= S; (node.children || []).forEach(scaleGE); };
-      children.forEach(scaleGE);
-      const root = { transform: georefTransform(gp, center, opt), geometricError: ghalf * 4 * S, refine: 'ADD',
-        boundingVolume: { box: [center[0],center[1],center[2], ghalf,0,0, 0,ghalf,0, 0,0,ghalf] }, children };
-      // Declare the gaussian-splatting glTF extension at the tileset level. Cesium routes a tileset to its
-      // native Gaussian-splat renderer ONLY when 3DTILES_content_gltf.extensionsRequired lists
-      // KHR_gaussian_splatting (see GaussianSplat3DTileContent.tilesetRequiresGaussianSplattingExt). Without
-      // this block Cesium loads our splat GLBs as ordinary meshes → "attribute.value.length must be in [1,4]"
-      // on the splat-only SCALE/ROTATION attributes. Every other splat converter here emits the same block.
-      const ts = { asset: { version: '1.1', tilesetVersion: 'geosplats' }, geometricError: ghalf * 4 * S, root,
-        extensionsUsed: ['3DTILES_content_gltf'],
-        extensions: { '3DTILES_content_gltf': {
-          extensionsUsed:     ['KHR_gaussian_splatting', 'KHR_gaussian_splatting_compression_spz_2'],
-          extensionsRequired: ['KHR_gaussian_splatting', 'KHR_gaussian_splatting_compression_spz_2'],
-        }} };
-      return void sendJson(res, ts), true;
-    }
-
-    if (u.pathname === '/geosplats/tile.glb') {
-      const model = await fetchModel(modelUrl);
-      const sm = (model.models || [])[Number(u.searchParams.get('m')) || 0];
-      if (!sm) { res.writeHead(404, CORS); res.end('submodel not found'); return true; }
-      const grid = Number(u.searchParams.get('grid')) || 1, oct = Number(u.searchParams.get('oct')) || 0;
-      const dt = await octantDataTable(splatsBase, modelId, sm.baseurl, key, grid, oct, lod);
-      const glb = await dataTableToSplatGlb(dt);             // _spz_2 splat GLB (viewer-renderable)
-      return void sendGlb(res, Buffer.isBuffer(glb) ? glb : Buffer.from(glb)), true;
-    }
-
-    res.writeHead(404, CORS); res.end('try /geosplats/tileset.json?url=<model.json>'); return true;
-  } catch (e) {
-    console.error('[geosplats-live]', e.message);
-    if (!res.headersSent) { res.writeHead(500, CORS); res.end(e.message); } else res.end();
-    return true;
-  }
+  const lod = Math.min(8, Math.max(1, opts.lod || 6));
+  const model = await fetchModel(modelUrl);
+  const gp = model.global_position || {};
+  const enc = (o) => encodeURIComponent(o);
+  // Fetch every sub-model's metadata (voxel_grids) → per-sub-model octree + the union bbox (for centering).
+  const gmin = [Infinity,Infinity,Infinity], gmax = [-Infinity,-Infinity,-Infinity];
+  const subs = await Promise.all((model.models || []).map(async (sm, i) => {
+    let meta = null; try { meta = await fetchMeta(splatsBase, modelId, sm.baseurl, key); } catch {}
+    const bb = meta?.bounding_box;
+    if (bb) { for (const k of [0,1,2]) { const lo=[bb.min.x,bb.min.y,bb.min.z][k], hi=[bb.max.x,bb.max.y,bb.max.z][k]; if(lo<gmin[k])gmin[k]=lo; if(hi>gmax[k])gmax[k]=hi; } }
+    return { i, meta };
+  }));
+  const center = gmin[0] === Infinity ? [0,0,0] : [(gmin[0]+gmax[0])/2,(gmin[1]+gmax[1])/2,(gmin[2]+gmax[2])/2];
+  const ghalf = gmin[0] === Infinity ? 1000 : Math.max(gmax[0]-gmin[0], gmax[1]-gmin[1], gmax[2]-gmin[2]) / 2;
+  // HLOD: each sub-model → its voxel-grid octree (grid_1→8→64). Falls back to a single full-LOD tile.
+  const children = subs.map(({ i, meta }) => {
+    const tree = meta && buildSubmodelOctree(meta, i, modelUrl, enc);
+    if (tree) return tree;
+    const bb = meta?.bounding_box; const b = bb ? boxOf(bb) : { box: [center[0],center[1],center[2], ghalf,0,0, 0,ghalf,0, 0,0,ghalf], diag: ghalf*2 };
+    return { boundingVolume: { box: b.box }, geometricError: b.diag/4, refine: 'REPLACE',
+      content: { uri: `tile/${i}-1-0-${lod}.glb?url=${enc(modelUrl)}` } };
+  });
+  // SCALE to real-world metres. readSog units are per-model (A ≈ raw thousands, B ≈ raw single-digits) and
+  // do NOT match; `model_scale` normalises them into MapTiler's WEB-MERCATOR tile frame. From the SDK the
+  // mercator-tile→metre factor is 512·ZOOM_TO_METER[14] = 2445.98, but that's at the EQUATOR — web mercator
+  // stretches by 1/cos(lat), so REAL metres = mercator·cos(lat). Without the cos() the scene overscaled by
+  // 1/cos(lat): model A (lat 55° → ×1.74) was clearly too big, B (lat 26° → ×1.11) slightly. So:
+  //   S = model_scale · 512·ZOOM_TO_METER[14] · cos(lat)   (verified: A ≈ 0.9 km, B footprint matches map).
+  // `&scale=<f>` overrides the whole S if a specific model still needs tuning.
+  const SCALE_K = 512 * 4.7773 * Math.cos((gp.lat || 0) * D2R);   // equator tile-metre × cos(lat) latitude correction
+  const S = opts.scale != null ? opts.scale : ((gp.model_scale || 0) * SCALE_K || 1);
+  // octant boxes are in raw local coords; root.transform recenters (−center), scales by S, places on globe.
+  // HEADING: auto-derive from the SDK per-model offset.y_rot. In the enu2 frame the compass heading that
+  // aligns the scene with the map is y_rot−180° (verified on model B / Biltmore: y_rot=217 → 37°, tennis
+  // courts land east, golf west; model A y_rot=−178 → ≈+2°, negligible). &yaw=<deg> adds a fine-tune on top.
+  const autoYaw = (gp.offset?.y_rot ?? 0) - 180;
+  const opt = { frame: opts.frame || 'enu2', euler: !!opts.euler,
+    scale: S, yaw: autoYaw + (opts.yaw || 0), alt: opts.alt != null ? opts.alt : null };
+  // geometricError is world-space metres and is NOT affected by the tile transform's scale, so multiply
+  // every GE by S to keep LOD selection consistent with the now-scaled geometry (boxes inherit S via the
+  // transform automatically). Root box stays raw (center/ghalf) — it too inherits S from root.transform.
+  const scaleGE = (node) => { if (node.geometricError != null) node.geometricError *= S; (node.children || []).forEach(scaleGE); };
+  children.forEach(scaleGE);
+  const root = { transform: georefTransform(gp, center, opt), geometricError: ghalf * 4 * S, refine: 'ADD',
+    boundingVolume: { box: [center[0],center[1],center[2], ghalf,0,0, 0,ghalf,0, 0,0,ghalf] }, children };
+  // Declare the gaussian-splatting glTF extension at the tileset level. Cesium routes a tileset to its
+  // native Gaussian-splat renderer ONLY when 3DTILES_content_gltf.extensionsRequired lists
+  // KHR_gaussian_splatting (see GaussianSplat3DTileContent.tilesetRequiresGaussianSplattingExt). Without
+  // this block Cesium loads our splat GLBs as ordinary meshes → "attribute.value.length must be in [1,4]"
+  // on the splat-only SCALE/ROTATION attributes. Every other splat converter here emits the same block.
+  return { asset: { version: '1.1', tilesetVersion: 'geosplats' }, geometricError: ghalf * 4 * S, root,
+    extensionsUsed: ['3DTILES_content_gltf'],
+    extensions: { '3DTILES_content_gltf': {
+      extensionsUsed:     ['KHR_gaussian_splatting', 'KHR_gaussian_splatting_compression_spz_2'],
+      extensionsRequired: ['KHR_gaussian_splatting', 'KHR_gaussian_splatting_compression_spz_2'],
+    }} };
 }
+
+export const geosplatsTileRe = /^\d+-\d+-\d+-\d+$/;         // <submodel#>-<grid>-<octant>-<lod>
+export async function geosplatsTile(modelUrl, key) {
+  const [m, grid, oct, lod] = key.split('-').map(Number);
+  const { splatsBase, modelId, key: apiKey } = parseModelUrl(modelUrl);
+  const model = await fetchModel(modelUrl);
+  const sm = (model.models || [])[m];
+  if (!sm) return null;
+  const dt = await octantDataTable(splatsBase, modelId, sm.baseurl, apiKey, grid, oct, lod);
+  const glb = await dataTableToSplatGlb(dt);                  // _spz_2 splat GLB (viewer-renderable)
+  return Buffer.isBuffer(glb) ? glb : Buffer.from(glb);
+}
+
+// Direct /geosplats/* HTTP routes were removed 2026-07-02 — /stream/tileset.json?format=geosplats&url=<…>
+// (+ /stream/tile/…) now covers tileset/tile serving. See CHANGELOG.

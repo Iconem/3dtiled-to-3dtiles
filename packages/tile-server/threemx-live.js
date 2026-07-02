@@ -7,9 +7,9 @@
  * **OpenCTM** (decoded via the vendored js-openctm) + **JPEG** textures (passthrough); each node's
  * textured mesh is assembled into a glTF with glTF-Transform.
  *
- *   GET /threemx/tileset.json?url=<Scene.3mx | root.3mxb URL>
- *   GET /threemx/node/<encRelPath>.json?url=<master>     (lazy fragment for a child .3mxb)
- *   GET /threemx/tile/<encRelPath>__<nodeIdx>.glb?url=<master>
+ *   GET /stream/tileset.json?url=<Scene.3mx | root.3mxb URL>&format=threemx
+ *   GET /stream/threemx/node/<encRelPath>.json?url=<master>     (lazy fragment for a child .3mxb)
+ *   GET /stream/tile/<encRelPath>__<nodeIdx>.glb?url=<master>&format=threemx
  *
  * Master `.3mx` JSON: layers[0] = { SRS, SRSOrigin, root }. `.3mxb`: "3MXBO" + uint32LE headerSize +
  * JSON header { nodes:[{bbMin,bbMax,maxScreenDiameter,children,resources}], resources:[{id,type,format,size}] }
@@ -18,7 +18,7 @@
  */
 import path from 'node:path';
 import { Document, NodeIO } from '@gltf-transform/core';
-import { sendJson, sendGlb, sendErr, georefFromCrs } from '../core/index.js';
+import { georefFromCrs } from '../core/index.js';
 import { decodeCTM } from '../threemx-to-3dtiles/src/ctm-decode.js';
 
 const CTM_RE = /__\d+$/;
@@ -84,12 +84,17 @@ async function buildFragment(ctx, relPath, masterUrl, isRoot) {
 
   const tiles = nodes.map((node, i) => {
     const tile = { boundingVolume: { box: boxOf(node.bbMin, node.bbMax) }, geometricError: geOf(node), refine: 'REPLACE' };
-    if ((node.resources || []).length) tile.content = { uri: `/threemx/tile/${encodeURIComponent(relPath)}__${i}.glb?url=${enc}` };
+    // Absolute (not relative "tile/…"): this tree can be embedded at /stream/tileset.json OR nested
+    // under /stream/threemx/node/<n>.json, where a relative ref would resolve against the FRAGMENT's
+    // own path (…/threemx/node/tile/…) instead of /stream/tile/… — same fix RAD/I3S needed pre-simplification.
+    if ((node.resources || []).length) tile.content = { uri: `/stream/tile/${encodeURIComponent(relPath)}__${i}.glb?url=${enc}&format=threemx` };
     const kids = [];
     for (const childRel of node.children || []) {
       const cr = joinRel(relDir, childRel);
+      // Absolute: this fragment can be embedded at /stream/tileset.json OR nested under
+      // /stream/threemx/node/<n>.json, where a relative ref would resolve wrong.
       kids.push({ boundingVolume: { box: boxOf(node.bbMin, node.bbMax) }, geometricError: geOf(node) * 0.5, refine: 'REPLACE',
-                  content: { uri: `/threemx/node/${encodeURIComponent(cr)}.json?url=${enc}` } });
+                  content: { uri: `/stream/threemx/node/${encodeURIComponent(cr)}.json?url=${enc}` } });
     }
     if (kids.length) tile.children = kids;
     return tile;
@@ -158,31 +163,19 @@ async function buildNodeGlb(ctx, relPath, nodeIdx) {
   return Buffer.from(await new NodeIO().writeBinary(doc));
 }
 
-// Pure builders for the dispatcher.
-export const threemxTileRe = /^.+$/;
+// Pure builders for the /stream dispatcher.
+export const threemxTileRe = /^.+__\d+$/;                    // <encodeURIComponent(relPath)>__<nodeIdx>
 export async function threemxTileset(url) { const ctx = await getCtx(url); return buildFragment(ctx, ctx.rootRel, url, true); }
-
-/** Try to handle a /threemx/* request. Returns true iff it owned the response. */
-export async function handleThreemx(req, res, u) {
-  if (!u.pathname.startsWith('/threemx/')) return false;
-  const url = u.searchParams.get('url');
-  if (!url) { sendErr(res, 400, 'missing ?url=<.3mx or .3mxb URL>'); return true; }
-  try {
-    if (u.pathname === '/threemx/tileset.json') { sendJson(res, await threemxTileset(url)); return true; }
-    const ctx = await getCtx(url);
-    const n = u.pathname.match(/^\/threemx\/node\/(.+)\.json$/);
-    if (n) { sendJson(res, await buildFragment(ctx, decodeURIComponent(n[1]), url, false)); return true; }
-    const t = u.pathname.match(/^\/threemx\/tile\/(.+)__(\d+)\.glb$/);
-    if (t) {
-      const glb = await buildNodeGlb(ctx, decodeURIComponent(t[1]), Number(t[2]));
-      if (!glb) { sendErr(res, 404, 'no geometry'); return true; }
-      sendGlb(res, glb);
-      return true;
-    }
-    sendErr(res, 404, 'not found');
-  } catch (e) {
-    console.error('[threemx-live]', e.message);
-    if (!res.headersSent) sendErr(res, 500, e.message); else res.end();
-  }
-  return true;
+export async function threemxTile(url, key) {
+  const us = key.lastIndexOf('__');
+  return buildNodeGlb(await getCtx(url), decodeURIComponent(key.slice(0, us)), Number(key.slice(us + 2)));
 }
+// Lazy fragment continuation for a child .3mxb — 3MX is an arbitrary DAG (no persisted spatial index
+// like RAD/I3S had), so unlike those two this genuinely can't collapse to "always eager": discovering
+// the tree at all means fetching every .3mxb, which for a real city-scale model is the whole point of
+// only doing it as the camera refines in. Called from stream-live.js's /stream/threemx/node/<path>.json.
+export async function threemxNode(url, relPath) { return buildFragment(await getCtx(url), relPath, url, false); }
+
+// Direct /threemx/* HTTP routes were removed 2026-07-02 — /stream/tileset.json?format=threemx&url=<…>
+// (+ /stream/tile/…) now covers tileset/tile serving; the lazy node-fragment continuation moved to
+// /stream/threemx/node/<path>.json (handled in stream-live.js). See CHANGELOG.
