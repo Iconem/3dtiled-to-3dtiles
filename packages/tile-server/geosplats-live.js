@@ -242,10 +242,13 @@ export async function handleGeoSplats(req, res, u) {
           content: { uri: `/geosplats/tile.glb?url=${enc(modelUrl)}&m=${i}&grid=1&oct=0&lod=${lod}` } };
       });
       // SCALE to real-world metres. readSog units are per-model (A ≈ raw thousands, B ≈ raw single-digits) and
-      // do NOT match; `model_scale` normalises them. Decoded from the SDK: the world-unit→metre factor is
-      // 512·ZOOM_TO_METER[14] = 2445.98, so real size ≈ raw · model_scale · 2445.98 (verified: A main ≈ 2 km,
-      // B ≈ 0.4 km). We bake this uniform scale S into the root transform's ENU basis; &scale=<f> overrides.
-      const SCALE_K = 512 * 4.7773;                              // ZOOM_TO_METER[14] — SDK metres-per-world-unit
+      // do NOT match; `model_scale` normalises them into MapTiler's WEB-MERCATOR tile frame. From the SDK the
+      // mercator-tile→metre factor is 512·ZOOM_TO_METER[14] = 2445.98, but that's at the EQUATOR — web mercator
+      // stretches by 1/cos(lat), so REAL metres = mercator·cos(lat). Without the cos() the scene overscaled by
+      // 1/cos(lat): model A (lat 55° → ×1.74) was clearly too big, B (lat 26° → ×1.11) slightly. So:
+      //   S = model_scale · 512·ZOOM_TO_METER[14] · cos(lat)   (verified: A ≈ 0.9 km, B footprint matches map).
+      // `&scale=<f>` overrides the whole S if a specific model still needs tuning.
+      const SCALE_K = 512 * 4.7773 * Math.cos((gp.lat || 0) * D2R);   // equator tile-metre × cos(lat) latitude correction
       const S = u.searchParams.has('scale') ? Number(u.searchParams.get('scale')) : ((gp.model_scale || 0) * SCALE_K || 1);
       // octant boxes are in raw local coords; root.transform recenters (−center), scales by S, places on globe.
       // HEADING: auto-derive from the SDK per-model offset.y_rot. In the enu2 frame the compass heading that
