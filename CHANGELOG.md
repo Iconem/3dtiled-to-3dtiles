@@ -5,6 +5,22 @@ Format loosely follows [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+### Added — 2026-07-02 (`main`: viewer show/hide + orthographic camera)
+- **"Show asset" toggle** in the sidebar — hide/show the loaded 3D asset (splat / mesh / point cloud) without
+  unloading, to compare its footprint against the basemap. Works in CesiumJS (`tileset.show`) and 3DTRJS
+  (`tiles.group.visible`); persists across loads.
+- **"Orthographic camera" toggle** — plan/true-scale projection for distortion-free footprint checks, in both
+  renderers (Cesium `switchToOrthographicFrustum`; 3DTRJS swaps in a `THREE.OrthographicCamera` + rebinds
+  controls/tiles/globe). NB Cesium's Gaussian-splat shader does not draw under an ortho frustum — ortho is for
+  basemap/mesh/point-cloud comparison; splats show in perspective.
+
+### Fixed — 2026-07-02 (`main`: GeoSplats per-model heading)
+- **GeoSplats compass heading was wrong** (model B / Biltmore rotated vs the map). The SDK stores a per-model
+  heading in `global_position.offset.y_rot`; in the enu2 frame the aligning yaw is **`y_rot − 180°`** (B
+  y_rot=217 → 37°: tennis courts land east, golf west, matching satellite; A y_rot=−178 → ≈+2°, negligible).
+  Applied automatically; `&yaw=<deg>` fine-tunes on top. The `&yaw` knob now rotates the ENU basis about Up
+  (a true heading) instead of the old content-Y spin.
+
 ### Fixed — 2026-07-02 (`main`: GeoSplats real-world scale + upright orientation)
 - **GeoSplats models had no real-world scale** (B — the Biltmore Hotel, ~486 m — rendered ~4 m). `readSog`
   units are per-model and don't match; `model_scale` normalises them. Decoded from the MapTiler SDK: the

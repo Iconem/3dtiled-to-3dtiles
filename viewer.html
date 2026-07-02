@@ -439,6 +439,12 @@
       <label for="max-sse">Max SSE (px)</label>
       <input type="number" id="max-sse" min="0.05" step="0.25" placeholder="auto" onchange="setMaxSSE(this.value)" />
     </div>
+    <label class="sb-check" title="Show/hide the loaded 3D asset (splat / mesh / point cloud) without unloading it — toggle off to compare its footprint against the basemap. Works in CesiumJS and 3DTRJS.">
+      <input type="checkbox" id="asset-visible-toggle" checked onchange="toggleAssetVisible(this.checked)" /> Show asset
+    </label>
+    <label class="sb-check" title="Orthographic (plan / true-scale) vs perspective camera. Ortho + top-down = compare the asset's footprint to the map with no perspective distortion. Works in CesiumJS and 3DTRJS.">
+      <input type="checkbox" id="ortho-toggle" onchange="setOrtho(this.checked)" /> Orthographic camera
+    </label>
     <label class="sb-check" title="Draw tile bounding volumes, colour tiles by octree depth">
       <input type="checkbox" id="debug-toggle" onchange="toggleDebug(this.checked)" /> Debug tiles (bounds + depth)
     </label>
@@ -1110,6 +1116,7 @@ async function loadTileset() {
     if (gen !== _loadGen) { viewer.scene.primitives.remove(tileset); return; }  // stale: user already picked something else
     viewer.scene.primitives.add(tileset);
     currentTileset = tileset;
+    tileset.show = _assetVisible;   // respect the Show-asset toggle across loads
     if (_cesiumDebug) { tileset.debugShowBoundingVolume = true; tileset.debugColorizeTiles = true; }
     applyShading();   // unlit/brightness for baked-lighting photogrammetry (Bing/3MX)
 
@@ -1380,6 +1387,24 @@ function toggleDebug(on) {
     currentTileset.debugShowBoundingVolume = on;
     currentTileset.debugColorizeTiles = on;
   }
+}
+
+// Show/hide the loaded asset (keep it loaded) so its footprint can be compared against the basemap.
+let _assetVisible = true;
+function toggleAssetVisible(show) {
+  _assetVisible = show;
+  if (_3dtMode) { window.__3dtrjs?.setVisible(show); return; }
+  if (currentTileset) currentTileset.show = show;
+}
+
+// Orthographic (plan) vs perspective camera — pairs with a top-down view for distortion-free footprint checks.
+let _ortho = false;
+function setOrtho(on) {
+  _ortho = on;
+  if (_3dtMode) { window.__3dtrjs?.setOrtho(on); return; }
+  if (!viewer) return;
+  if (on) viewer.camera.switchToOrthographicFrustum();
+  else    viewer.camera.switchToPerspectiveFrustum();
 }
 
 // Shadeless (unlit) + brightness via a Cesium CustomShader. Photogrammetry (Bing/3MX) bakes lighting
@@ -1757,7 +1782,7 @@ else window.addEventListener('cesium-ready', () => initCesium(), { once: true })
 <!-- ── 3DTilesRendererJS — real ellipsoid globe (GeneratedSurfacePlugin + XYZ overlay) ── -->
 <script type="module">
 import {
-  Scene, PerspectiveCamera, WebGLRenderer, Sphere, Vector2, Vector3, Group, Matrix4, Box3,
+  Scene, PerspectiveCamera, OrthographicCamera, WebGLRenderer, Sphere, Vector2, Vector3, Group, Matrix4, Box3,
   AmbientLight, DirectionalLight, Raycaster,
   Mesh, MeshBasicMaterial, BoxGeometry, EdgesGeometry, LineSegments, LineBasicMaterial,
   SphereGeometry, ConeGeometry, CylinderGeometry, Quaternion, Color, DoubleSide,
@@ -2573,7 +2598,40 @@ function _cropGizmoInfo(testDragBoundId, meters) {
   return info;
 }
 
-window.__3dtrjs = { init, load, loadIon, pause, setControlMode, setZOffset, getDumpMatrix, setBasemap, setDebug, setErrorTarget, setPointSize, getPointSize, setFov, frameTileset, flyToCarto, setCropToView: cropToView3D, showCropGizmo, hideCropGizmo, syncCropGizmo: _syncCropGizmo, _cropGizmoInfo, _debug, _pump };
+// Show/hide the loaded tileset group (keep it in memory) — for comparing the asset footprint to the basemap.
+function setVisible(show) { if (tiles) tiles.group.visible = !!show; }
+
+// Orthographic ↔ perspective camera swap. Keeps position/orientation; re-sizes the ortho frustum from the
+// current distance-to-target so the on-screen scale matches, then rebinds controls + tiles + globe to the
+// new camera (recreating the current-mode controller, which reads the global `camera`).
+let _persCam = null, _orthoOn = false;
+function setOrtho(on) {
+  if (!camera || !!on === _orthoOn) return;
+  const target = (controls && controls.target) ? controls.target.clone() : new Vector3();
+  if (on) {
+    _persCam = camera;
+    const dist = Math.max(1e-3, camera.position.distanceTo(target));
+    const halfH = dist * Math.tan((camera.fov * Math.PI / 180) / 2);
+    const halfW = halfH * camera.aspect;
+    const oc = new OrthographicCamera(-halfW, halfW, halfH, -halfH, camera.near, camera.far);
+    oc.position.copy(camera.position); oc.quaternion.copy(camera.quaternion); oc.up.copy(camera.up);
+    oc.updateProjectionMatrix(); oc.updateMatrixWorld(true);
+    camera = oc;
+  } else {
+    if (_persCam) { _persCam.position.copy(camera.position); _persCam.quaternion.copy(camera.quaternion); _persCam.up.copy(camera.up);
+      _persCam.aspect = camera.right ? (camera.right - camera.left) / (camera.top - camera.bottom) : _persCam.aspect;
+      _persCam.updateProjectionMatrix(); _persCam.updateMatrixWorld(true); camera = _persCam; }
+  }
+  _orthoOn = !!on;
+  // Rebind the current-mode controller to the new camera (constructors capture the camera by reference).
+  if (controlMode === 'globe') useGlobeControls(false);
+  else if (controlMode === 'orbit') { if (controls) controls.dispose(); controls = new OrbitControls(camera, renderer.domElement); controls.enableDamping = true; controls.minDistance = 0; controls.maxDistance = Infinity; controls.maxPolarAngle = Math.PI; controls.target.copy(target); controls.update(); }
+  else useEnvControls();
+  if (tiles) { tiles.setCamera(camera); tiles.setResolutionFromRenderer(camera, renderer); }
+  if (globe) { globe.setCamera(camera); globe.setResolutionFromRenderer(camera, renderer); }
+}
+
+window.__3dtrjs = { init, load, loadIon, pause, setControlMode, setZOffset, getDumpMatrix, setBasemap, setDebug, setErrorTarget, setPointSize, getPointSize, setFov, setVisible, setOrtho, frameTileset, flyToCarto, setCropToView: cropToView3D, showCropGizmo, hideCropGizmo, syncCropGizmo: _syncCropGizmo, _cropGizmoInfo, _debug, _pump };
 console.log('[3DTRJS] module ready — GaussianSplatPlugin:', GaussianSplatPlugin ? 'loaded' : 'unavailable');
 </script>
 </body>

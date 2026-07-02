@@ -127,13 +127,18 @@ const neg = (v) => [-v[0], -v[1], -v[2]];
 function georefTransform(gp, center, opt = {}) {
   const alt = opt.alt != null ? opt.alt : 0;
   const e = llhToEcef(gp.lon, gp.lat, alt);
-  const { EAST: E, NORTH: N, UP: U } = enuFrame(gp.lon, gp.lat);
+  let { EAST: E, NORTH: N, UP: U } = enuFrame(gp.lon, gp.lat);
+  // HEADING: rotate the horizontal ENU basis (E,N) about Up by `yaw` degrees. This spins the whole scene
+  // about the vertical regardless of which frame variant is used — the clean way to correct the compass
+  // heading (the SDK offset.y_rot lives in MapLibre's frame and does not compose with ours; &euler tilts).
+  if (opt.yaw) { const c = Math.cos(opt.yaw * D2R), s = Math.sin(opt.yaw * D2R);
+    const E2 = [c*E[0]+s*N[0], c*E[1]+s*N[1], c*E[2]+s*N[2]], N2 = [-s*E[0]+c*N[0], -s*E[1]+c*N[1], -s*E[2]+c*N[2]];
+    E = E2; N = N2; }
   const [C0, C1, C2] = (FRAMES(E, N, U)[opt.frame] || FRAMES(E, N, U).enu);
   const s = opt.scale || 1;                                  // uniform metric scale baked into the ENU basis
   const place = [ s*C0[0],s*C0[1],s*C0[2],0,  s*C1[0],s*C1[1],s*C1[2],0,  s*C2[0],s*C2[1],s*C2[2],0,  e[0],e[1],e[2],1 ];
   const o = gp.offset || {};
-  let rot = opt.euler ? eulerXYZ(o.x_rot || 0, o.y_rot || 0, o.z_rot || 0) : [1,0,0,0, 0,1,0,0, 0,0,1,0, 0,0,0,1];
-  if (opt.yaw) { const c=Math.cos(opt.yaw*D2R), s=Math.sin(opt.yaw*D2R); rot = matMul([c,0,-s,0, 0,1,0,0, s,0,c,0, 0,0,0,1], rot); }  // extra yaw about up (local Y)
+  const rot = opt.euler ? eulerXYZ(o.x_rot || 0, o.y_rot || 0, o.z_rot || 0) : [1,0,0,0, 0,1,0,0, 0,0,1,0, 0,0,0,1];
   const recenter = [ 1,0,0,0, 0,1,0,0, 0,0,1,0, -center[0], -center[1], -center[2], 1 ];
   return matMul(matMul(place, rot), recenter);
 }
@@ -243,8 +248,12 @@ export async function handleGeoSplats(req, res, u) {
       const SCALE_K = 512 * 4.7773;                              // ZOOM_TO_METER[14] — SDK metres-per-world-unit
       const S = u.searchParams.has('scale') ? Number(u.searchParams.get('scale')) : ((gp.model_scale || 0) * SCALE_K || 1);
       // octant boxes are in raw local coords; root.transform recenters (−center), scales by S, places on globe.
+      // HEADING: auto-derive from the SDK per-model offset.y_rot. In the enu2 frame the compass heading that
+      // aligns the scene with the map is y_rot−180° (verified on model B / Biltmore: y_rot=217 → 37°, tennis
+      // courts land east, golf west; model A y_rot=−178 → ≈+2°, negligible). &yaw=<deg> adds a fine-tune on top.
+      const autoYaw = (gp.offset?.y_rot ?? 0) - 180;
       const opt = { frame: u.searchParams.get('frame') || 'enu2', euler: u.searchParams.get('euler') === '1',
-        scale: S, yaw: u.searchParams.has('yaw') ? Number(u.searchParams.get('yaw')) : 0,
+        scale: S, yaw: autoYaw + (u.searchParams.has('yaw') ? Number(u.searchParams.get('yaw')) : 0),
         alt: u.searchParams.has('alt') ? Number(u.searchParams.get('alt')) : null };
       // geometricError is world-space metres and is NOT affected by the tile transform's scale, so multiply
       // every GE by S to keep LOD selection consistent with the now-scaled geometry (boxes inherit S via the
