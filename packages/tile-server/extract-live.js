@@ -93,6 +93,35 @@ const IDENT = [1,0,0,0, 0,1,0,0, 0,0,1,0, 0,0,0,1];
 // `YUP_ZUP_P90` (despite its old "[Cesium Y_UP_TO_Z_UP]" label) is its INVERSE, (x,y,z)→(x,z,−y).
 const YUP_ZUP    = [1,0,0,0, 0,0,1,0, 0,-1,0,0, 0,0,0,1];   // (x,y,z)→(x,−z,y) — real Cesium Y_UP_TO_Z_UP
 const YUP_ZUP_P90= [1,0,0,0, 0,0,-1,0, 0,1,0,0, 0,0,0,1];   // (x,y,z)→(x,z,−y) — its inverse
+
+// Which flip a no-node-matrix splat tile needs depends on what that FORMAT's own root.transform already
+// assumes — not something derivable from the GLB alone, so this is an explicit per-format table (not a
+// single hardcoded special case). Two conventions exist among our own converters:
+//  'auto'  (default) — root.transform assumes a renderer applies the real Cesium Y_UP_TO_Z_UP (RX+90°)
+//           to content automatically; extract-live has no renderer, so it must supply that RX90 itself
+//           (`YUP_ZUP`). RAD's root.transform is an explicit RX(180°) layered ON TOP of this assumption
+//           (see rad-to-3dtiles/tilesetBuilder.js) — verified against real coit.rad/tastier500k.rad tiles.
+//           Third-party splat GLBs that carry their OWN node.matrix (`hasNodeMatrix`, e.g. WL Grange)
+//           also fall here — same real-Y_UP_TO_Z_UP convention, confirmed by the 2026-07-02 WL Grange fix.
+//  'baked' — root.transform bakes the FULL Y-up→Z-up correction itself, with no automatic flip assumed,
+//           so extract-live must supply the INVERSE (`YUP_ZUP_P90`) or it double-flips (net RX180°).
+//           LCC: `lccGeoref`'s `[East,−Up,North]` column layout (not the plain `[East,North,Up]` every
+//           'auto' georef uses) bakes the flip into the ENU placement itself — verified against 10 real
+//           Guan_Temple tiles (centroids landed ~130-250m outside their own boxes with 'auto' vs ~5-25m
+//           off with 'baked'). SOG: the fixed `RX90` = `[1,0,0,0, 0,0,-1,0, 0,1,0,0, 0,0,0,1]` root
+//           transform (no real ENU ever) is exactly `YUP_ZUP_P90` already — verified against 6 real
+//           skatepark tiles (~110m off with 'auto' vs ~1-5m with 'baked'). Both bugs were found the same
+//           way: sample real tiles, compare the placed splat centroid to that tile's own declared box.
+const SPLAT_FLIP_BAKED = new Set(['lcc', 'sog']);
+// `srcFormat` comes from the nested /stream URL's own `format=` param — absent for a prebuilt-offline
+// tileset.json (no /stream involved), so fall back to sniffing the well-known per-format sample-data
+// path segment (input/LCC/…, output/lcc/…, etc. — case-insensitive covers both).
+function splatFlip(srcFormat, hasNodeMatrix, url) {
+  if (hasNodeMatrix) return YUP_ZUP;
+  const fmt = srcFormat || (/\/lcc\//i.test(url) ? 'lcc' : /\/sog\//i.test(url) ? 'sog' : null);
+  return SPLAT_FLIP_BAKED.has(fmt) ? YUP_ZUP_P90 : YUP_ZUP;
+}
+
 function matMul(a, b) {                       // column-major 4×4, returns a·b
   const o = new Array(16);
   for (let c = 0; c < 4; c++) for (let r = 0; r < 4; r++)
@@ -346,24 +375,10 @@ export async function handleExtract(req, res, u) {
     try {
       const fmt = ['sog', 'glb', 'ply'].includes(u.searchParams.get('format')) ? u.searchParams.get('format') : 'spz';
       const clip = u.searchParams.get('clip') !== '0' && u.searchParams.get('clip') !== 'false';   // per-splat-centroid clip (default ON)
-      // Y-up→Z-up rotation (2026-07-02 fix): the previous auto-pick (hasNodeMatrix ? YUP_ZUP_P90 : YUP_ZUP)
-      // gave third-party tiles (WL Grange etc., node.matrix present) the INVERSE of real Cesium
-      // Y_UP_TO_Z_UP — confirmed by multiplying a real `Cesium.Axis.Y_UP_TO_Z_UP` in Node: it equals the
-      // `YUP_ZUP` constant below, not `YUP_ZUP_P90` (their inline labels were swapped — see the constants'
-      // comment above). That inverse-rotation bug is what produced the "inverted Z instead of Y" WL Grange
-      // export regression. Our own converters without a node.matrix (SOG etc., orientation baked into the
-      // tileset ROOT transform instead) are confirmed working with `YUP_ZUP`.
-      // LCC is the ONE exception: `lccGeoref`'s column layout is [East,−Up,North] (not the plain
-      // [East,North,Up] every other adapter's georef uses) — it bakes the Y-up→Z-up flip INTO root.transform
-      // ON TOP OF the ENU placement, so applying the generic YUP_ZUP here double-flips it (net RX180°).
-      // Empirically verified against a real Guan_Temple tile: its splat centroid landed ~130-190m outside
-      // its own 30×45×30m box with YUP_ZUP, vs ~5-13m off (plausible centroid noise) with YUP_ZUP_P90 — the
-      // "off by a few dozen meters" LCC crop bug. &rx=90|-90 still forces YUP_ZUP_P90/YUP_ZUP for one-off testing.
       const rxForce = u.searchParams.get('rx');
       let srcFormat = null; try { srcFormat = new URL(url).searchParams.get('format'); } catch {}
-      const isLcc = srcFormat === 'lcc' || /\/LCC\//i.test(url);
       const rxPick = (hasNodeMatrix) => rxForce === '90' ? YUP_ZUP_P90 : rxForce === '-90' ? YUP_ZUP
-        : (isLcc ? YUP_ZUP_P90 : YUP_ZUP);
+        : splatFlip(srcFormat, hasNodeMatrix, url);
       // Output frame: a local **Y-up** frame anchored at the SOURCE scene's own origin (not the bbox centre),
       // so every crop of the same source shares ONE coordinate system → multiple boxes line up. Y-up (not
       // ENU Z-up!) because splat-transform's engine/IDENTITY space is PlayCanvas Y-up — emitting Z-up would
