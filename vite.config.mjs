@@ -43,7 +43,9 @@ export default defineConfig({
     fs: { allow: ['.'] },
     // …but DON'T file-watch sample-data: it holds ~100k+ tile files. Watching them makes the dev
     // server crawl on startup and every HMR. They're still served on demand — only watching is off.
-    watch: { ignored: ['**/sample-data/**'] },
+    // Also ignore apps/** (the Fumadocs site, a separate Next.js app in this same monorepo) — its own
+    // .next build output was otherwise triggering spurious page reloads here.
+    watch: { ignored: ['**/sample-data/**', '**/apps/**'] },
   },
   resolve: {
     // `import … from 'three/addons/…'` → three's bundled examples/jsm.

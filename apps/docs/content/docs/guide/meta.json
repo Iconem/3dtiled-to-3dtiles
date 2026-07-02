@@ -1,0 +1,23 @@
+{
+  "title": "Guide (from README.md)",
+  "pages": [
+    "introduction",
+    "ambition",
+    "format-comparison",
+    "related-tilers-prior-art-reference-implementations",
+    "monorepo-usage",
+    "todo-future-work",
+    "architecture-the-materialization-continuum-cache-none-hierar",
+    "converters",
+    "sample-data",
+    "dependencies",
+    "performance-parallelism",
+    "candidate-source-formats-roadmap-not-yet-supported",
+    "documentation",
+    "3d-gaussian-splatting-extension-lineage",
+    "vision-towards-a-titiler-for-3d-now-live-for-every-supported",
+    "known-blockers-how-to-overcome-them",
+    "missing-features-unsupported-code-paths",
+    "appendix-per-format-schema-diagrams"
+  ]
+}

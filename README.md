@@ -18,15 +18,13 @@ tunable per use case (`cache=none|hierarchy|all`). `viewer.html` (CesiumJS + 3DT
 reference client, and doubles as a **bbox + geometric-error-aware crop/extract** tool (`/extract/*`) for
 pulling a sub-region, with user-controlled Geometric Error target precision, of any of these formats back out as LAS/COPC/GLB/SPZ/SOG/PLY.
 
-**Where this is going next.** Two items are concrete and addressable in the near term, not just
-aspirational: **containerizing the server** — a `docker-compose`-runnable `packages/tile-server` (+
-viewer), built and published to **GHCR** by a GitHub Actions workflow on release, so it drops straight
-into a `docker-compose`/**Portainer** stack behind **Traefik** with no manual Node setup — and a
-**Fumadocs** documentation site, which is more tractable than it sounds: almost every format's deep
-findings already live in their own file under [`docs-references/`](docs-references/) (this README
-mostly *links* to them rather than duplicating), so the migration is largely **chunking** the existing
-material (this README foremost, plus a few docs-references files that have grown large in their own
-right) into Fumadocs' page-per-topic model, not writing new docs from scratch. Both are tracked in
+**Where this is going next.** Two items that used to be listed here as "concrete and addressable" are
+now done: **containerizing the server** (`Dockerfile` + `docker-compose.yml` + a GHCR-publishing GitHub
+Actions workflow — `docker compose up --build` runs the whole stack) and a first pass at the
+**Fumadocs** documentation site (`apps/docs`, `pnpm --filter docs dev`) — `README.md`'s sections and
+every [`docs-references/`](docs-references/) file are chunked into it and verified building/rendering,
+though the chunking itself is a first pass (unreviewed page boundaries, no cross-linking yet) and this
+README stays the canonical source until that catches up. Both are tracked in
 [TODO / Future work](#todo--future-work) below.
 
 Further out: a browser/server tiled-splat transcoding UI in the spirit of SuperSplat's splat-transform
@@ -390,11 +388,16 @@ Roughly in the order we're tackling them:
   fixed via `build.rollupOptions.input` + `build.target: 'esnext'` (top-level await) in
   `vite.config.mjs`. Not yet done: an actual Portainer/Traefik reverse-proxy stack — the images publish
   to GHCR, but wiring them into a specific reverse-proxy setup is left to whoever deploys this.
-- [ ] **Fumadocs migration.** This README has grown large enough to want a real table-of-contents /
-  docs-site split (ambition vs. live features vs. format specs vs. raw findings) — see the note at the
-  top of this document. Made more tractable by the fact that most of the deep material already lives
-  in its own file under `docs-references/` — this is largely *chunking* existing docs, not writing new
-  ones.
+- [~] **Fumadocs migration — scaffolded** (2026-07-02), content migration started. `apps/docs`
+  (a proper pnpm workspace member, `pnpm --filter docs dev` on port 3002) is a real, building
+  Fumadocs/Next.js site: `README.md`'s 18 `##` sections and all 25 `docs-references/*.md` files are
+  chunked into `content/docs/guide/*.md` and `content/docs/references/*.md` respectively (mechanical
+  per-file/per-section split, `.md` not `.mdx` so `<SRC>`-style placeholder syntax throughout this repo's
+  prose doesn't get misparsed as JSX) — verified rendering correctly (sidebar nav, in-page TOC, code
+  blocks, checkboxes/strikethrough) via a full `next build` + dev-server check. **Not yet done**: the
+  chunking is a first pass (one page per original heading, unreviewed boundaries — see `apps/docs/README.md`
+  for the concrete next steps), no cross-linking between guide/reference pages, and `README.md` (not the
+  new site) is still the canonical, most-current source until the migration catches up.
 - [ ] **Port the middleware into 3DTilesRendererJS itself.** Today `packages/tile-server` sits in
   front of 3DTilesRendererJS/CesiumJS as an HTTP layer; the longer-term idea is a 3DTilesRendererJS
   **plugin** (in the spirit of its existing `ImplicitTilingPlugin`/`GaussianSplatPlugin`) that lets the

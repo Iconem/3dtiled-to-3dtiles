@@ -1,0 +1,43 @@
+---
+title: "glTF 2.1 — Complex Scenes (plans)"
+description: "A focused, backward-compatible revision of core glTF whose single motivation is making glTF work"
+---
+
+# glTF 2.1 — Complex Scenes (plans)
+
+> Source: Khronos blog, **"Introducing glTF 2.1 with Complex Scenes"**, 2026-06-11 —
+> <https://www.khronos.org/blog/introducing-gltf-2.1-with-complex-scenes>
+> Dedicated 64-bit-indices / GLB-size issue thread: <https://github.com/KhronosGroup/glTF/issues/2594>
+
+A focused, **backward-compatible** revision of core glTF whose single motivation is making glTF work
+as well for **large, composed scenes** as it already does for single assets. Directly relevant to this
+repo (3D Tiles ⇄ glTF, streaming, and the bbox dumper).
+
+## Why it matters here
+- **64-bit GLB (binary version 3)** — length fields go 32-bit → 64-bit, lifting the **4 GiB GLB ceiling**
+  to 8 EiB. This is the future fix for our merged-GLB mesh/point dumps (today bounded by zip32 / the 4 GiB
+  GLB limit). v2 stays valid; 2.1 importers must read both. Adds a reserved chunk-encoding field (future
+  chunk-level compression). → tracked in [glTF#2594](https://github.com/KhronosGroup/glTF/issues/2594).
+- **External Assets + Packaging** — declarative multi-file scene graphs (glTFX folded into core) and a
+  single self-contained package (embedded buffer-views as a virtual FS) — chosen deliberately **over a
+  ZIP container**. Our `/extract/zip` bundle is the pragmatic stand-in until this lands.
+- **Shapes + Bounding Volume Hierarchies** — implicit box/sphere/capsule/cylinder/plane in core + a
+  `boundingVolume` node property → the spatial machinery OGC 3D Tiles already proves (the foundation 2.1
+  cites for progressive streaming, LOD, availability maps).
+- **Unified File References** (`files` array) — one mechanism to discover every external dependency.
+- **Promoted to required**: `EXT_texture_webp`, `KHR_materials_emissive_strength`, `KHR_mesh_quantization`,
+  `KHR_node_visibility`. **Deprecated**: the multiple-scenes pattern (one scene per file).
+- **QoL**: thumbnails; non-sequential `TEXCOORD_n`/`COLOR_n`; expanded accessor component types
+  (`SIGNED_INT`, `DOUBLE`, `HALF_FLOAT`, `(UN)SIGNED_INT64`); Unique IDs.
+
+## Features at a glance
+| Feature | What it does |
+|---|---|
+| External Assets | Reference + instantiate glTF/GLB assets from scene nodes (once or many times) at load |
+| Packaging | Deliver a composed scene + all dependencies as one portable glTF (no ZIP/multi-chunk container) |
+| Shapes | Box / sphere / capsule / cylinder / plane implicit volumes in core |
+| Bounding Volume Hierarchies | `boundingVolume` on any node → cull / stream / query large scenes |
+| Unified File References | `files` array: name/locate/resolve external, embedded, packaged resources |
+| 64-bit GLB (v3) | 4 GiB → 8 EiB chunk size; reserved chunk-encoding field |
+
+Spec/explainers develop openly on the glTF 2.1 GitHub issue; complementary to OpenUSD (delivery vs authoring).

@@ -4,7 +4,8 @@
   "private": true,
   "packageManager": "pnpm@10.20.0",
   "workspaces": [
-    "packages/*"
+    "packages/*",
+    "apps/*"
   ],
   "scripts": {
     "convert": "node packages/convert/cli.js",
@@ -13,7 +14,8 @@
     "build": "vite build",
     "serve": "vite preview --port 3000",
     "serve:tiles": "node packages/tile-server/server.js --port 3001",
-    "serve:live": "node packages/tile-server/server.js --port 3001"
+    "serve:live": "node packages/tile-server/server.js --port 3001",
+    "dev:docs": "pnpm --filter docs dev"
   },
   "dependencies": {
     "3d-tiles-renderer": "0.4.28",
@@ -33,6 +35,7 @@
       "canvas",
       "esbuild",
       "sharp",
+      "unrs-resolver",
       "webgpu"
     ]
   }
