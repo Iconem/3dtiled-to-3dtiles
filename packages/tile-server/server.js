@@ -2,15 +2,19 @@
 /**
  * tile-server — a "TiTiler for 3D": live <format> → OGC 3D Tiles middleware. CORS open.
  *
- * Two complementary modes (see README "Vision: towards a TiTiler for 3D"):
+ * One primary entry point, /tiles, over ONE axis — what the middleware caches (see README
+ * "Architecture: the materialization continuum") — dispatching in-process (no redirect) to whichever
+ * of the two underlying modes the requested cache level needs:
+ *
+ *   GET /tiles/tileset.json?url=<SRC>&format=<fmt>&cache=<none|hierarchy|full>[&prefetch=N][&tiling=…]
  *
  *   TRUE online range-streaming (nothing pre-converted — range-read the hierarchy, then one byte
- *   range per tile). Per-format range adapters, unified under /stream:
- *     GET /stream/tileset.json?url=<SRC>[&format=<fmt>]   (copc, potree today; lcc/rad next)
- *     GET /copc/...   GET /potree/...                     (the adapters directly)
+ *   range per tile), for cache=none|hierarchy. Per-format range adapters, unified under /stream — the
+ *   ONE HTTP surface for these; there is no per-format /copc, /potree, etc. anymore:
+ *     GET /stream/tileset.json?url=<SRC>&format=<fmt>[&cache=none|hierarchy][&prefetch=N]
  *
- *   PREPROCESS + cache (convert the WHOLE dataset once on first hit, then serve static) — works for
- *   EVERY format the meta-converter supports:
+ *   PREPROCESS + cache (convert the WHOLE dataset once on first hit, then serve static), for
+ *   cache=full — works for EVERY format the meta-converter supports:
  *     GET /convert/tileset.json?url=<SRC>[&format=<fmt>][&centroids=1]
  *
  * Run:  PORT=3001 node packages/tile-server/server.js   (npm run serve:tiles | serve:live)
@@ -27,12 +31,6 @@ if (process.env.TLS_REJECT_UNAUTHORIZED !== '1') {
   process.removeAllListeners('warning'); // silence the one-time Node insecure-TLS warning spam
 }
 
-import { handleCopc } from './copc-live.js';
-import { handlePotree } from './potree-live.js';
-import { handleSog } from './sog-live.js';
-import { handleLcc } from './lcc-live.js';
-import { handleRad } from './rad-live.js';
-import { handleI3s } from './i3s-live.js';
 import { handleStream } from './stream-live.js';
 import { handleConvert } from './convert-live.js';
 import { handleSelfContained } from './3dtiles-self-contained.js';
@@ -62,29 +60,23 @@ process.on('unhandledRejection', e => console.error('[tile-server] unhandledReje
 
 // Unified entry over ONE axis — what the middleware caches (see README "Architecture: the
 // materialization continuum"). Point at a source, pick how much to cache:
-//   GET /tiles/tileset.json?url=<SRC>&format=<fmt>&cache=<none|hierarchy|full>[&prefetch=N][&tiling=…]
-//   • cache=none      → nothing cached: live, lazy hierarchy (default)        → /stream (hierarchy=lazy)
-//   • cache=hierarchy → full tree in RAM, tiles per-request                   → /stream (hierarchy=eager)
+//   • cache=none      → nothing cached: live, lazy hierarchy (default)        → /stream
+//   • cache=hierarchy → full tree in RAM, tiles per-request                   → /stream
 //   • cache=full      → whole dataset (tree + all tiles) converted to disk    → /convert
 // (There is no "prebuilt" mode: a tileset built offline is served by pointing the viewer directly at
 //  its output tileset.json — the middleware has no role and can't know the input→output link.)
-// Routed via 307 so child URIs resolve under the real handler's prefix (no rewriting needed).
-function handleTiles(req, res, u) {
+// Dispatches in-process (no redirect) — /stream reads `cache=` itself, so the query string just
+// carries straight through unchanged; only the path prefix is rewritten.
+async function handleTiles(req, res, u) {
   if (!u.pathname.startsWith('/tiles/')) return false;
   const cache = (u.searchParams.get('cache') || 'none').toLowerCase();
-  const rest = u.pathname.slice('/tiles/'.length);
-  const target = new URL(u.href);
-  if (cache === 'full') {
-    target.pathname = `/convert/${rest}`;
-  } else if (cache === 'none' || cache === 'hierarchy') {
-    target.pathname = `/stream/${rest}`;
-    if (!target.searchParams.has('hierarchy')) target.searchParams.set('hierarchy', cache === 'hierarchy' ? 'eager' : 'lazy');
-  } else {
+  if (cache !== 'none' && cache !== 'hierarchy' && cache !== 'full') {
     res.writeHead(400, CORS); res.end(`unknown cache "${cache}" — use none | hierarchy | full`); return true;
   }
-  res.writeHead(307, { Location: target.pathname + target.search, ...CORS });
-  res.end();
-  return true;
+  const rest = u.pathname.slice('/tiles/'.length);
+  const u2 = new URL(u.href);
+  u2.pathname = cache === 'full' ? `/convert/${rest}` : `/stream/${rest}`;
+  return cache === 'full' ? handleConvert(req, res, u2) : handleStream(req, res, u2);
 }
 
 http.createServer(async (req, res) => {
@@ -96,14 +88,8 @@ http.createServer(async (req, res) => {
       res.writeHead(200, { 'Content-Type': 'application/json', ...CORS });
       return res.end(JSON.stringify(snap || { done: 0, total: 0, finished: false }));
     }
-    if (handleTiles(req, res, u)) return;            // unified /tiles?mode= continuum entry
-    if (await handleStream(req, res, u)) return;     // unified true-streaming dispatcher
-    if (await handleCopc(req, res, u)) return;       // COPC → 3D Tiles live (range-streamed)
-    if (await handlePotree(req, res, u)) return;     // Potree 2.0 → 3D Tiles live (range-streamed)
-    if (await handleSog(req, res, u)) return;        // streamed-SOG → 3D Tiles live (chunk-on-demand)
-    if (await handleLcc(req, res, u)) return;        // LCC → 3D Tiles live (grid boxes + range-read runs)
-    if (await handleRad(req, res, u)) return;        // RAD → 3D Tiles live (centers-only tree + on-demand encode)
-    if (await handleI3s(req, res, u)) return;        // I3S/SLPK → 3D Tiles live (loaders.gl; OBB tree + on-demand geometry)
+    if (await handleTiles(req, res, u)) return;      // unified /tiles?cache= continuum entry (in-process, no redirect)
+    if (await handleStream(req, res, u)) return;     // unified true-streaming dispatcher (copc/potree/sog/lcc/rad/i3s)
     if (await handleConvert(req, res, u)) return;    // any <fmt> → 3D Tiles live (preprocess + cache)
     if (await handleSelfContained(req, res, u)) return;   // .3tz / .3dtiles self-contained packages
     if (await handle3dtilesTools(req, res, u)) return;    // /3dtiles-tools?tool=implicit-to-explicit|upgrade
@@ -112,7 +98,7 @@ http.createServer(async (req, res) => {
     if (await handleThreemx(req, res, u)) return;         // /threemx — Bentley/Acute3D 3MX → 3D Tiles
     if (await handleDump(req, res, u)) return;            // /dump/las — bbox crop of a point cloud → LAS
     if (await handleGeoSplats(req, res, u)) return;       // /geosplats — MapTiler GeoSplats → 3D Tiles (server-side key/referer)
-    res.writeHead(404, CORS); res.end('not found — try /stream, /copc, /potree, /sog, /lcc, /convert, /3dtiles-self-contained, or /3dtiles-tools');
+    res.writeHead(404, CORS); res.end('not found — try /tiles, /stream, /convert, /3dtiles-self-contained, or /3dtiles-tools');
   } catch (e) {
     console.error('[tile-server]', e.stack || e.message);
     // A handler may have already started streaming a response — don't double-send headers (that throw
@@ -122,10 +108,8 @@ http.createServer(async (req, res) => {
   }
 }).listen(PORT, () => {
   console.log(`tile-server on http://localhost:${PORT}`);
-  console.log(`  tiles    (unified) /tiles/tileset.json?url=<SRC>&format=<fmt>&cache=<none|hierarchy|full>[&prefetch=N][&tiling=implicit|explicit]`);
-  console.log(`  stream   (cache=none/hierarchy) /stream/tileset.json?url=<SRC>[&format=][&hierarchy=lazy|eager][&prefetch=N]`);
-  console.log(`  copc     /copc/tileset.json?url=<COPC_URL>`);
-  console.log(`  potree   /potree/tileset.json?url=<metadata.json URL>`);
+  console.log(`  tiles    (unified, no redirect) /tiles/tileset.json?url=<SRC>&format=<fmt>&cache=<none|hierarchy|full>[&prefetch=N][&tiling=implicit|explicit]`);
+  console.log(`  stream   (cache=none/hierarchy; copc/potree/sog/lcc/rad/i3s) /stream/tileset.json?url=<SRC>&format=<fmt>[&cache=none|hierarchy][&prefetch=N]`);
   console.log(`  convert  (preprocess+cache, any fmt) /convert/tileset.json?url=<SRC>[&format=<fmt>][&centroids=1]`);
   console.log(`  3dtiles-self-contained  /3dtiles-self-contained/tileset.json?url=<path-or-URL.3tz|.3dtiles>`);
   console.log(`  3dtiles-tools  /3dtiles-tools/tileset.json?tool=implicit-to-explicit|upgrade&dir=<path>[&base=<url>]`);

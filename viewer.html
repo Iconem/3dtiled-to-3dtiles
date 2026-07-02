@@ -704,7 +704,7 @@ function buildMiddlewareUrl(rawSrc, f) {
   const fmt = f ? f.fmt : selectedFormat;
   const enc = encodeURIComponent(rawSrc);
   if (cacheScope === 'all') return `${MW}/convert/tileset.json?format=${fmt}&url=${enc}${streamParams(f)}`;
-  let q = `&hierarchy=${cacheScope === 'hierarchy' ? 'eager' : 'lazy'}`;
+  let q = `&cache=${cacheScope}`;   // 'none' | 'hierarchy' — /stream reads this directly now
   if (cacheScope === 'none') q += `&prefetch=${prefetchN}`;
   if (transformOp) q += `&transform=${transformOp}`;       // per-tile encode (meshopt/draco) or decode (decompress)
   return `${MW}/stream/tileset.json?format=${fmt}&url=${enc}${q}${streamParams(f)}`;
@@ -1543,7 +1543,7 @@ function dumpCrop(kind) {
   let src = (rawUrlMode && !field.startsWith(MW)) ? buildMiddlewareUrl(field) : field;   // need a tileset.json
   if (/\/stream\/tileset\.json/.test(src)) {                 // octree sources must be explicit for the dumper
     src = /tiling=implicit/.test(src) ? src.replace('tiling=implicit', 'tiling=explicit') : (/tiling=/.test(src) ? src : src + '&tiling=explicit');
-    if (!/hierarchy=/.test(src)) src += '&hierarchy=eager';
+    src = /cache=/.test(src) ? src.replace(/cache=\w+/, 'cache=hierarchy') : src + '&cache=hierarchy';
   }
   const bb = _cropBboxNorm();
   if (bb.some(Number.isNaN)) { setStatus('Set the crop box first (⬚ Set box to view).'); return; }
@@ -1687,7 +1687,7 @@ let _progressTimer = null;
 function stopProgressPoll() { if (_progressTimer) { clearInterval(_progressTimer); _progressTimer = null; } }
 function startProgressPoll(loadUrl) {
   stopProgressPoll();
-  if (!/hierarchy=eager/.test(loadUrl) && !/\/convert\//.test(loadUrl)) return;   // only the slow caches
+  if (!/cache=hierarchy/.test(loadUrl) && !/\/convert\//.test(loadUrl)) return;   // only the slow caches
   let inner; try { inner = new URL(loadUrl).searchParams.get('url'); } catch { return; }
   if (!inner) return;
   const key = encodeURIComponent(inner);

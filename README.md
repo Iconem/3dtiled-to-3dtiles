@@ -36,7 +36,7 @@ export/interchange formats of other splat platforms, behind the same 3D Tiles pi
 longer-running goal underneath all of this: be the **fastest** point-cloud — and eventually splat —
 tiler, by reusing the octree-computation principles behind Potree 2.0's converter (see the Potree
 sections throughout this doc, e.g. [`potree-to-3dtiles`](#potree-to-3dtiles) and
-[`/potree`](#potree--live-potree-20--3d-tiles-true-range-streaming)).
+[`/stream`](#copc-and-potree-via-stream-true-range-streaming)).
 
 
 ## Format comparison
@@ -350,16 +350,32 @@ node packages/i3s-to-3dtiles/src/index.js    <extracted-slpk-dir>  sample-data/o
 
 ## TODO / Future work
 
+Roughly in the order we're tackling them:
+
 - [x] ~~`copc-to-3dtiles`: `--explicit` flag (one tile per COPC node instead of 3D Tiles 1.1 implicit
   tiling, for viewers without implicit-tiling support)~~ — **done**: both the offline converter and
-  the live `/copc` endpoint already take `--tiling explicit|implicit` / `?tiling=explicit`, default
+  `/stream?format=copc` already take `--tiling explicit|implicit` / `?tiling=explicit`, default
   implicit. (This item had gone stale in the TODO list after being implemented.)
+- [x] ~~Streaming endpoint consolidation~~ — **done** (2026-07-02): `/stream` reads `cache=none|hierarchy`
+  (not `hierarchy=eager|lazy`); the old per-format aliases (`/copc`, `/potree`, `/sog`, `/lcc`, `/rad`,
+  `/i3s`) are gone (verified redundant with `/stream/tileset.json?format=<fmt>`); `/tiles` dispatches
+  to `/stream`/`/convert` in-process instead of a 307 redirect; Potree 1.x's `tiling=explicit` was
+  simplified to full materialization instead of per-chunk lazy fragments. See "Endpoint rework" above
+  and the CHANGELOG.
+- [ ] **Composable `tiling=explicit`.** The still-open, more invasive half of the item above: route
+  `&tiling=explicit` for COPC/Potree-2.0 (and eventually I3S, if it ever gets an implicit
+  representation) *through* the existing `/3dtiles-tools?tool=implicit-to-explicit` tool against their
+  own implicit `/stream` output, instead of each format's live adapter keeping a bespoke
+  `buildTilesetExplicit`. Deferred until the consolidation above has settled — untested whether
+  `implicit-to-explicit`'s generic walker round-trips cleanly against our own live implicit tilesets.
 - [ ] **Dockerize the server.** A `docker-compose`-runnable `packages/tile-server` (+ viewer), with a
   GitHub Actions workflow building and publishing images to **GHCR** on release, so it can be dropped
   straight into a `docker-compose`/**Portainer** stack behind **Traefik** — no manual Node setup.
 - [ ] **Fumadocs migration.** This README has grown large enough to want a real table-of-contents /
   docs-site split (ambition vs. live features vs. format specs vs. raw findings) — see the note at the
-  top of this document.
+  top of this document. Made more tractable by the fact that most of the deep material already lives
+  in its own file under `docs-references/` — this is largely *chunking* existing docs, not writing new
+  ones.
 - [ ] **Port the middleware into 3DTilesRendererJS itself.** Today `packages/tile-server` sits in
   front of 3DTilesRendererJS/CesiumJS as an HTTP layer; the longer-term idea is a 3DTilesRendererJS
   **plugin** (in the spirit of its existing `ImplicitTilingPlugin`/`GaussianSplatPlugin`) that lets the
@@ -484,21 +500,31 @@ Generic services (core/):
 `prefetch=N` generalizes COPC's fire-and-forget warmup to *every* lazy format and makes it a dial —
 this is the answer to "combine the benefits of lazy and eager."
 
-### Endpoint rework
+### Endpoint rework — **done** (2026-07-02)
 
-One primary endpoint; old paths kept as thin aliases for back-compat:
+One primary endpoint, dispatching **in-process** (no redirect — the old 307 to `/stream`/`/convert`
+this section originally proposed was replaced by a direct call once `/stream` learned to read `cache=`
+itself, so the query string just carries through unchanged):
 
 ```
 GET /tiles/tileset.json?url=<SRC>&format=<auto|copc|potree|sog|lcc|rad|i3s|package>
                          &cache=<none|hierarchy|full>   &prefetch=<N>   &tiling=<implicit|explicit>
 
-cache=none|hierarchy → /stream (hierarchy=lazy|eager)   cache=full → /convert
-/copc /potree … → format-pinned aliases    /3dtiles-tools → stays (a transform, not a converter)
+cache=none|hierarchy → /stream (same cache= param)   cache=full → /convert
 ```
 
-Routed via a 307 redirect so child URIs resolve under the real handler's prefix (no rewriting).
-`tiling=explicit` routes **through** the existing `implicit-to-explicit` tool rather than a separate
-code path — implicit-default + explicit-on-request is one composable pipeline.
+The old format-pinned aliases (`/copc`, `/potree`, `/sog`, `/lcc`, `/rad`, `/i3s`) are **gone** — they
+were a strict subset of what `/stream/tileset.json?format=<fmt>` already did (verified: for COPC/Potree
+they didn't even forward `hierarchy`/`prefetch`, so `cache=hierarchy` was silently unreachable through
+them). `/3dtiles-tools` stays as its own endpoint (a tileset-level *transform*, not a format converter).
+
+**Not yet done** (see [TODO / Future work](#todo--future-work)): `tiling=explicit` routing *through*
+the existing `implicit-to-explicit` tool, so Potree/COPC/I3S share one explicit-tiling code path
+instead of each format's live adapter having its own bespoke `buildTilesetExplicit`. What shipped now
+is more modest — Potree 1.x's `tiling=explicit` was simplified to fully materialize the tree in one
+response (no more per-format lazy-fragment continuation needing its own routes); RAD and I3S's
+lazy-fragment continuation (needed for their core `cache=none` streaming, not just `tiling=explicit`)
+moved under `/stream/rad/subtree/<n>.json` and `/stream/i3s/node|tile/<n>.json|glb` respectively.
 
 ### Factory / composability ideas (future)
 
@@ -606,8 +632,8 @@ Composability goal: `source → convert → [centroids] → [gltf: draco/ktx2 de
 
 > **`centroids` per format** — works for **SOG / LCC / RAD** (the tiled-splat formats). Verified: the
 > tileset omits the splat extension and each tile is a POINTS GLB (SOG 724 B vs 1160 B splat for the same
-> run; LCC, RAD likewise). For RAD the flag rides on the absolute `/rad/subtree/` + `/rad/tile/` URIs the
-> lazy fragments emit (so `handleRad` parses `centroids` directly). COPC/Potree are point clouds already.
+> run; LCC, RAD likewise). For RAD the flag rides on the absolute `/stream/rad/subtree/…` + `/stream/tile/…`
+> URIs the lazy fragments emit. COPC/Potree are point clouds already.
 
 ### Phasing (chosen: Phases 1–3; Phase 4 deferred) — **Phases 1–3 IMPLEMENTED**
 
@@ -620,13 +646,15 @@ Composability goal: `source → convert → [centroids] → [gltf: draco/ktx2 de
    424 B subtrees). *(The explicit-fragment unification for RAD+I3S was left in-place — both verified
    working — to avoid churn; it folds naturally into the driver model when Phase 4 happens.)*
 3. ✅ **Single `cache=none|hierarchy|full` axis + `/tiles` endpoint.** `/tiles/tileset.json?cache=`
-   routes (307): `none`/`hierarchy`→`/stream` (with `hierarchy=lazy`/`eager`), `full`→`/convert`. No
-   `prebuilt` mode (point the viewer directly at an offline-built tileset). `hierarchy=eager` (a real
-   eager-drain into the shared ctx, so warm subtrees reuse it) is wired for **all** live converters with
-   a hierarchy — **COPC, Potree 2.0, Potree 1.x, RAD, I3S** (SOG/LCC are single-index, always-eager).
-   `prefetch=N` warms N levels (COPC). Verified: routing, eager/lazy per format, RAD eager
-   = full 765-tile explicit tree vs lazy fragments, and all coverage harnesses (RAD 765, Potree2 1624,
-   I3S 5882) still pass.
+   dispatches **in-process** to `/stream` (`none`/`hierarchy`) or `/convert` (`full`) — originally a 307
+   redirect translating `cache=` to a separate `hierarchy=` query param on `/stream`; both the redirect
+   and the second vocabulary are gone as of 2026-07-02 (`/stream` reads `cache=` directly, so the query
+   string just carries through). No `prebuilt` mode (point the viewer directly at an offline-built
+   tileset). `cache=hierarchy` (a real eager-drain into the shared ctx, so warm subtrees reuse it) is
+   wired for **all** live converters with a hierarchy — **COPC, Potree 2.0, Potree 1.x, RAD, I3S**
+   (SOG/LCC are single-index, always-eager). `prefetch=N` warms N levels (COPC). Verified: routing,
+   eager/lazy per format, RAD eager = full 765-tile explicit tree vs lazy fragments, and all coverage
+   harnesses (RAD 765, Potree2 1624, I3S 5882) still pass.
 4. *(deferred)* `bake(driver)` to power offline from the same drivers — offline converters stay as-is.
 
 > **Note — offline converters conserved.** Per the push/pull split above, the offline `*-to-3dtiles`
@@ -802,7 +830,7 @@ out-rad/
 > `npx 3d-tiles-tools convert`, both documented under `/package` below.
 
 **Live `/stream` (no pre-conversion)** — `packages/tile-server/rad-live.js`, served at
-`GET /stream/tileset.json?url=<.rad>&format=rad` (or the dedicated `/rad/tileset.json?url=<.rad>`):
+`GET /stream/tileset.json?url=<.rad>&format=rad`:
 
 - **tileset.json** — fetch the `.rad` once (cached in memory), build the node table, and decode
   **only the `center` column** per chunk for bounds — no SPZ encode, no gzip. Reuses the shared
@@ -1516,7 +1544,8 @@ npm run serve:tiles
 - The served **root** tileset has its relative `uri`s rewritten to absolute `/convert/<key>/…` so
   content resolves regardless of how the viewer bases the query-string URL; nested sub-tilesets are
   served at their real paths so their own relative URIs already resolve.
-- For big COPC, prefer `/copc` (true range streaming) over `/convert` (downloads the whole `.laz`).
+- For big COPC, prefer `/stream?format=copc` (true range streaming — this section's `/copc` is that
+  adapter's original name, since folded into `/stream`) over `/convert` (downloads the whole `.laz`).
 
 **Remote source notes / limits:**
 - The **same remote support is shared by the CLI and JS API** (`packages/convert/fetch-source.js`):
@@ -1760,55 +1789,50 @@ A consolidated, honest list of what is **not** handled (and where it would go). 
 
 | Mode | Endpoint | What it does | Formats |
 |---|---|---|---|
-| **Stream** (true online) | **`/stream`** (+ `/copc`, `/potree`) | Range-read the hierarchy → tileset; **one byte range per tile** → GLB. Nothing pre-converted or fully downloaded. | per-format range adapters: **copc, potree, sog, lcc** |
+| **Stream** (true online) | **`/stream`** | Range-read the hierarchy → tileset; **one byte range per tile** → GLB. Nothing pre-converted or fully downloaded. | per-format range adapters: **copc, potree, sog, lcc, rad, i3s** |
 | **Preprocess** (cached) | **`/convert`** | Convert the **whole** dataset once on first hit (cached on disk), then serve static. | **every** format the meta-converter supports |
 | **Package serve** | **`/3dtiles-self-contained`** | Serve `.3tz` (ZIP) or `.3dtiles` (SQLite) packages in-place with random access. Supports local paths and remote URLs. | `.3tz` local only; `.3dtiles` local + remote via sql.js (pure WASM) |
 
 ```sh
 npm run serve:tiles            # alias: npm run serve:live  → http://localhost:3001
-#   GET /stream/tileset.json?url=<SRC>[&format=copc|potree|sog|lcc]  ← unified streaming dispatcher
+#   GET /stream/tileset.json?url=<SRC>&format=<fmt>[&cache=none|hierarchy][&prefetch=N] ← unified streaming dispatcher
 #   GET /convert/tileset.json?url=<SRC>[&format=<fmt>][&centroids=1] ← preprocess+cache, any format
 #   GET /package/tileset.json?url=<local/path.3tz>                   ← serve .3tz/.3dtiles in-place
 ```
 
-`/stream` is the single front-door the user envisioned: it detects the format and delegates to that
-format's range adapter (the range logic is necessarily format-specific — a COPC LAZ chunk vs a Potree
-octree-node byte range — but the entry point is one URL). For a format without an adapter yet it
-returns **501** pointing you at `/convert`. `/copc` and `/potree` remain as the direct adapters.
+`/stream` is the single front-door: it detects the format and delegates to that format's range adapter
+(the range logic is necessarily format-specific — a COPC LAZ chunk vs a Potree octree-node byte range —
+but the entry point is one URL, one namespace: `/stream/tileset.json`, `/stream/tile/…`,
+`/stream/subtrees/…`). For a format without an adapter yet it returns **501** pointing you at
+`/convert`. The old per-format aliases (`/copc`, `/potree`, `/sog`, `/lcc`, `/rad`, `/i3s`) are gone
+(2026-07-02) — verified to be a strict subset of what `/stream` already did.
 
-### `tile-server` — live COPC → 3D Tiles (implemented ✅)
+### COPC and Potree via `/stream` (true range-streaming ✅)
 
-`packages/tile-server` is a working middleware (the TiTiler `/cog/tiles/...` analogue):
+`packages/tile-server` is a working middleware (the TiTiler `/cog/tiles/...` analogue). COPC was the
+first range adapter, Potree the second (the same model generalised) — nothing is pre-converted or
+fully downloaded for either:
 
 ```sh
 npm run serve:tiles      # → http://localhost:3001  (CORS open)
-# then, in viewer.html, the pill "🛰 COPC→3DT (live middleware)" loads:
-#   http://localhost:3001/copc/tileset.json?url=<any COPC url>
+# then, in viewer.html, the pill "☁ Autzen" (COPC) or "🌲 …" (Potree) loads e.g.:
+#   http://localhost:3001/stream/tileset.json?format=copc&url=<any COPC url>
 ```
 
-- `GET /copc/tileset.json?url=<COPC>` — range-reads the COPC header + hierarchy, returns a 3D Tiles 1.1
-  tileset (explicit tree, `ADD` refine, one ENU→ECEF root transform from the COPC WKT CRS via proj4).
-- `GET /copc/tile/<D-X-Y-Z>.glb?url=<COPC>` — range-reads **just that octree node**, decodes its points,
-  returns a POINTS GLB on the fly (`core.buildPointsGlb`).
+- `GET /stream/tileset.json?format=copc&url=<COPC>` — range-reads the COPC header + hierarchy, returns
+  a 3D Tiles 1.1 tileset (implicit octree by default, `&tiling=explicit` opts out; `ADD` refine; one
+  ENU→ECEF root transform from the COPC WKT CRS via proj4).
+- `GET /stream/tile/<D-X-Y-Z>.glb?format=copc&url=<COPC>` — range-reads **just that octree node**,
+  decodes its points, returns a POINTS GLB on the fly (`core.buildPointsGlb`).
+- `GET /stream/tileset.json?format=potree&url=<metadata.json|cloud.js>[&tiling=implicit|explicit]` —
+  for 2.0: `metadata.json` (tiny) + `hierarchy.bin` fetched once to emit the tree, each tile
+  HTTP-**range**-reads its own contiguous block from `octree.bin` (DEFAULT or BROTLI decode); for 1.x:
+  `.hrc` chunks fetched lazily as the tree is walked. Potree's octree → 3D Tiles tree ~1:1 either way.
 
 The COPC octree maps ~1:1 onto the 3D Tiles tree, so no re-tiling. Verified end-to-end: a browser
 viewer (CesiumJS) renders Autzen geo-referenced over Oregon, streamed live from a COPC URL — the
 viewer never sees the COPC, only 3D Tiles. Works with any 3D-Tiles client (CesiumJS, 3DTilesRendererJS,
-cesium-for-unreal). Other formats (RAD/SPZ, Potree, EPT) can be added behind the same endpoint shape.
-
-Formats in scope: **COPC (live ✅)**, RAD/SPZ (3DGS), EPT/Entwine (LiDAR), Potree (LiDAR), 3DTILES (passthrough).
-
-### `/potree` — live **Potree 2.0** → 3D Tiles (true range-streaming ✅)
-
-The second format with a real **range adapter** (the COPC model generalised). Nothing is pre-converted
-or fully downloaded: `metadata.json` (tiny) + `hierarchy.bin` are fetched once to emit the tileset
-tree; each tile request HTTP-**range**-reads just that node's contiguous block from `octree.bin`,
-decodes it (DEFAULT or BROTLI), and returns a glTF POINTS GLB. Potree's octree → 3D Tiles tree ~1:1.
-
-```sh
-#   GET /potree/tileset.json?url=<metadata.json URL>[&tiling=implicit|explicit]  → 3D Tiles 1.1 tileset (ADD refine; implicit by default)
-#   GET /potree/tile/<name>.glb?url=<metadata.json URL>                         → that node's points (one octree.bin range read)
-```
+cesium-for-unreal).
 
 - `url` points at the dataset's `metadata.json` (2.0) or `cloud.js` (1.x); `hierarchy.bin` / `octree.bin`
   (2.0) or `.hrc` chunks (1.x) resolve as siblings.
@@ -1833,19 +1857,24 @@ emitted without decoding any geometry). That's the dividing line:
 
 | Format | Persists tile bounds? | Status |
 |---|---|---|
-| **COPC** | ✅ octree cube → derived boxes; node = LAZ chunk byte range | **live `/copc` + `/stream`** ✅ |
-| **Potree 2.0** | ✅ octree boxes; node = `octree.bin` byte range | **live `/potree` + `/stream`** ✅ |
-| **Potree 1.x** | ✅ octree boxes (.hrc / inline); node = one `.bin`/`.laz` file fetch | **live `/potree` + `/stream`** ✅ |
-| **streamed-SOG** | ✅ `lod-meta.json` tree carries per-node bounds + leaf `[file,offset,count]` runs | **live `/sog` + `/stream`** ✅ (fetch+decode the chunk WebP per leaf) |
-| **LCC** | ✅ grid persisted (`cellLengthX/Y` + index cell x16/y16) → X/Y boxes, Z from scene bounds; unit LOD = `data.bin` byte range | **live `/lcc` + `/stream`** ✅ |
-| **RAD** | ❌ chunk bounds NOT persisted, and **chunks aren't spatial tiles** (a chunk mixes LoD-tree levels — confirmed by the Spark team, see RAD notes) | **not streamed** — use `/convert` |
-| **I3S (REST)** | 🟡 REST node-page tree; multi-resource | larger effort — `/convert` for `.slpk` |
+| **COPC** | ✅ octree cube → derived boxes; node = LAZ chunk byte range | **live `/stream`** ✅ |
+| **Potree 2.0** | ✅ octree boxes; node = `octree.bin` byte range | **live `/stream`** ✅ |
+| **Potree 1.x** | ✅ octree boxes (.hrc / inline); node = one `.bin`/`.laz` file fetch | **live `/stream`** ✅ |
+| **streamed-SOG** | ✅ `lod-meta.json` tree carries per-node bounds + leaf `[file,offset,count]` runs | **live `/stream`** ✅ (fetch+decode the chunk WebP per leaf) |
+| **LCC** | ✅ grid persisted (`cellLengthX/Y` + index cell x16/y16) → X/Y boxes, Z from scene bounds; unit LOD = `data.bin` byte range | **live `/stream`** ✅ |
+| **RAD** | ❌ chunk bounds NOT persisted, and **chunks aren't spatial tiles** (a chunk mixes LoD-tree levels — confirmed by the Spark team, see RAD notes) | **live `/stream`** ✅ — see below, a different trick than the other rows |
+| **I3S (REST)** | 🟡 REST node-page tree; multi-resource | **live `/stream`** ✅ for the common case (see I3S notes); `/convert` for the rest |
 
-Why RAD is excluded: building a 3D-Tiles tree needs spatial tile bounds, but RAD persists neither
-tile bounds nor a spatial tile partition — its "chunks" are 64K-splat **streaming** groups ordered by
-featureSize, spanning multiple LoD-tree levels. So there's nothing to range into as a "tile" without a
-decode pass. `/convert` (preprocess+cache) already serves RAD live; see
-[`docs-references/rad-format-notes.md`](docs-references/rad-format-notes.md) for the full rationale.
+**RAD doesn't fit the "persisted bounds" pattern the other rows use, but it *is* streamed** — no
+per-tile bounds, no spatial partition; its "chunks" are 64K-splat streaming groups ordered by
+featureSize, spanning multiple LoD-tree levels, so there's no bounding box to range into without a
+decode. The adapter (`rad-live.js`) sidesteps this with a cheap **metadata-only pass**: range-fetch
+every chunk **in parallel** decoding just its `center`/`child_count`/`child_start` columns (no SPZ
+encode, no gzip) to build the explicit tree topology + AABBs, then range-fetch + fully decode +
+encode only the ONE chunk a requested tile needs. Cold-start cost is one parallel pass over the whole
+file's chunk headers, not the whole geometry — see
+[`docs-references/rad-format-notes.md`](docs-references/rad-format-notes.md) for the full rationale
+on why RAD chunks aren't spatial tiles in the first place.
 
 Everything not on a range adapter is still fully renderable today via `/convert` (below).
 
@@ -1893,9 +1922,33 @@ for that particular capture, not an error in the scale derivation — the deriva
 exact and matches two independent models to within a few percent already. `&scale=<f>` is the pragmatic
 per-model pin if a specific scene needs it exact.
 
----
+### `/dump` — bbox + geometric-error crop/extract (implemented ✅)
 
-## Appendix: Test Results (run Jun 17 2026)
+Its own endpoint family, **not** a `/convert` specialization — `packages/tile-server/dump-live.js`
+ingests *any* 3D Tiles source (one of this repo's own live/offline outputs, or an external tileset)
+and walks it with the same shared bbox+GE+refine-aware `traverse()` regardless of output kind:
+
+```sh
+GET /dump/{las|glb|copc|tileset|zip|splat}?url=<tileset.json>&bbox=<west,south,minH,east,north,maxH>[&maxGE=<m>][&maxDepth=N]
+```
+
+- `bbox` is **geographic** (lon/lat degrees + ellipsoidal height m) — what you'd draw on the globe;
+  the viewer's "⬚ Set box to view" button fills it from the current camera frustum.
+- `maxGE` picks the LOD to stop at (0 = finest available); traversal honors each tile's own `refine`:
+  **ADD** tiles contribute at every level down to `maxGE` (accumulate), **REPLACE** tiles contribute
+  only at the refinement frontier.
+- Output kind selects the decode path: `las`/`copc` (points, via the shared LAS writer + optional
+  `pdal translate` to COPC LAZ), `glb` (merged mesh), `tileset` (a filtered 3D Tiles tileset
+  referencing only the in-bbox original tile URLs — no re-encode), `zip` (out-of-core streamed bundle
+  of every in-bbox tile + a self-contained tileset.json), `splat` (merge in-bbox Gaussian-splat tiles
+  into one SPZ/GLB/SOG/PLY file via `@playcanvas/splat-transform`, `&format=` picks the output,
+  `&clip=0` disables per-splat centroid clipping).
+- The splat path anchors its output coordinate frame at the **source tileset's own root origin**, not
+  the crop's bbox center, so multiple crops of the same source share one coordinate system — the
+  tradeoff is that a single crop far from the source root can look "off-center" relative to its own
+  bounding box when loaded standalone in a viewer that assumes content sits near its own origin.
+
+viewer.html's "CROP & DUMP" sidebar section drives this directly.
 
 ### COPC — Autzen Stadium, Oregon (10.6M pts)
 

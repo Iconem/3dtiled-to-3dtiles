@@ -10,7 +10,7 @@
  *   GET /copc/tile/<D-X-Y-Z>.glb?url=<COPC_URL>    → that node's points as a POINTS GLB
  */
 import { Copc, Getter } from 'copc';
-import { buildPointsGlb, keyToCoords, coordsToKey, buildSubtreeBuffer, CORS, georefFromCrs, buildImplicitTileset } from '../core/index.js';
+import { buildPointsGlb, keyToCoords, coordsToKey, buildSubtreeBuffer, georefFromCrs, buildImplicitTileset } from '../core/index.js';
 
 const SUBTREE_LEVELS = 3;
 
@@ -193,31 +193,5 @@ export async function copcSubtree(url, key) {
   return buildSubtreeBuffer(key, ctx.nodeMap, SUBTREE_LEVELS);
 }
 
-/** Try to handle a /copc/* request. Returns true iff it owned the response. */
-export async function handleCopc(req, res, u) {
-  if (!u.pathname.startsWith('/copc/')) return false;
-  const url = u.searchParams.get('url');
-  if (!url) { res.writeHead(400, CORS); res.end('missing ?url=<COPC url>'); return true; }
-
-  if (u.pathname === '/copc/tileset.json') {
-    res.writeHead(200, { 'Content-Type': 'application/json', ...CORS });
-    res.end(JSON.stringify(await copcTileset(url, { tiling: u.searchParams.get('tiling') })));
-    return true;
-  }
-  const m = u.pathname.match(/^\/copc\/tile\/(\d+-\d+-\d+-\d+)\.glb$/);
-  if (m) {
-    const glb = await copcTile(url, m[1]);
-    if (!glb) { res.writeHead(404, CORS); res.end('no such node'); return true; }
-    res.writeHead(200, { 'Content-Type': 'model/gltf-binary', ...CORS });
-    res.end(glb);
-    return true;
-  }
-  const s = u.pathname.match(/^\/copc\/subtrees\/(\d+-\d+-\d+-\d+)\.subtree$/);
-  if (s) {
-    res.writeHead(200, { 'Content-Type': 'application/octet-stream', ...CORS });
-    res.end(await copcSubtree(url, s[1]));
-    return true;
-  }
-  res.writeHead(404, CORS); res.end('not found');
-  return true;
-}
+// Direct /copc/* HTTP routes were removed 2026-07-02 — /stream/tileset.json?format=copc&url=<…> (+
+// /stream/tile/…, /stream/subtrees/…) already cover every case these exposed. See CHANGELOG.

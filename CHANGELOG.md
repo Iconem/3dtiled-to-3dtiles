@@ -5,6 +5,39 @@ Format loosely follows [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+### Changed — 2026-07-02 (`main`: streaming endpoint consolidation, no back-compat)
+- **`/stream` now reads `cache=none|hierarchy`**, not `hierarchy=lazy|eager` — matches the `/tiles`
+  vocabulary, which now passes its query string straight through instead of translating it.
+- **`/tiles` dispatches in-process** to `/stream`/`/convert` instead of a 307 redirect.
+- **Removed the direct per-format endpoints** — `/copc`, `/potree`, `/sog`, `/lcc`, `/rad`, `/i3s` are
+  gone. Verified they were a strict subset of `/stream/tileset.json?format=<fmt>` (for COPC/Potree they
+  didn't even forward `hierarchy`/`prefetch`, so `cache=hierarchy` was silently unreachable through
+  them). `viewer.html` and all sample pills updated to call `/stream` directly.
+- **Potree 1.x's `&tiling=explicit` simplified**: now fully materializes the tree in one response
+  (draining every `.hrc` chunk first) instead of lazily fragmenting it across per-chunk
+  `/potree/hrc/<name>.json` continuation requests — one fewer moving part, and the removed direct
+  endpoint would have broken that continuation chain anyway. Fine size-wise since Potree is already
+  well-chunked; implicit tiling (the default) remains the path for genuinely huge datasets.
+- **RAD's and I3S's lazy-fragment continuation** (needed for their core `cache=none` streaming, since
+  neither has a true implicit-tiling representation to range into) moved from `/rad/subtree/<n>.json` /
+  `/i3s/node/<n>.json` to `/stream/rad/subtree/<n>.json` / `/stream/i3s/node/<n>.json` (+
+  `/stream/i3s/tile/<n>.glb`, which needs `&lazy=1` threaded through to hit the right cached context).
+- No backwards-compatibility shims — this project has one user right now. If that changes, the old
+  query param / endpoints would need explicit aliasing back in.
+
+### Docs — 2026-07-02 (`main`: /dump documented, endpoint docs re-synced, ordered TODO)
+- Added a proper `/dump` section (bbox + geometric-error crop/extract) to the README's Vision
+  chapter — previously only mentioned once in passing in the Ambition paragraph despite being a
+  real, separate endpoint family (not a `/convert` specialization).
+- Re-synced the "Endpoint rework", "Two modes", and RAD streaming-roadmap sections to the
+  now-implemented reality above (they'd described this as a "future" proposal, and separately still
+  described RAD as unstreamable — both stale: RAD *is* streamed, just via a metadata-only parallel
+  pass over every chunk rather than persisted per-tile bounds).
+- Reordered `TODO / Future work` per plan: the streaming consolidation above (done) → the deferred,
+  more invasive composable `tiling=explicit` via `/3dtiles-tools?tool=implicit-to-explicit` → Docker/
+  GHCR/Traefik packaging → Fumadocs migration → the 3DTilesRendererJS-native plugin idea → pinned
+  open-data test fixtures.
+
 ### Docs — 2026-07-02 (`main`: broader README staleness pass, 5 parallel audits)
 - **RAD LoD geometric-error doc still described only the legacy `featuresize` basis** as if it were
   current — added a note pointing at the now-default `spatial` basis (kept the detailed writeup, since

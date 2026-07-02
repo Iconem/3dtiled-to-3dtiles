@@ -12,7 +12,7 @@
  * Note: data.bin is a sibling of meta.lcc (named `data.bin`); `index.bin` likewise.
  */
 import { decodeSplats } from '../lcc-to-3dtiles/src/lccDecode.js';
-import { buildSplatTileGlb, computeBounds, CORS, lccGeoref } from '../core/index.js';
+import { buildSplatTileGlb, computeBounds, lccGeoref } from '../core/index.js';
 
 const ROOT_GE_FACTOR = 0.05, DEPTH_RATIO = 0.5;
 
@@ -109,25 +109,5 @@ export const lccTileRe = /^\d+_\d+_\d+$/;
 export async function lccTileset(url, opts = {}) { return buildTileset(await getCtx(url), url, opts.centroids); }
 export async function lccTile(url, key, opts = {}) { const [o, s, p] = key.split('_').map(Number); return serveTileGlb(await getCtx(url), o, s, p, opts.centroids); }
 
-/** Try to handle a /lcc/* request. Returns true iff it owned the response. */
-export async function handleLcc(req, res, u) {
-  if (!u.pathname.startsWith('/lcc/')) return false;
-  const url = u.searchParams.get('url');
-  if (!url) { res.writeHead(400, CORS); res.end('missing ?url=<meta.lcc URL>'); return true; }
-
-  if (u.pathname === '/lcc/tileset.json') {
-    res.writeHead(200, { 'Content-Type': 'application/json', ...CORS });
-    res.end(JSON.stringify(await lccTileset(url)));
-    return true;
-  }
-  const m = u.pathname.match(/^\/lcc\/tile\/(\d+_\d+_\d+)\.glb$/);
-  if (m) {
-    const glb = await lccTile(url, m[1]);
-    if (!glb) { res.writeHead(404, CORS); res.end('no such run'); return true; }
-    res.writeHead(200, { 'Content-Type': 'model/gltf-binary', ...CORS });
-    res.end(glb);
-    return true;
-  }
-  res.writeHead(404, CORS); res.end('not found');
-  return true;
-}
+// Direct /lcc/* HTTP routes were removed 2026-07-02 — /stream/tileset.json?format=lcc&url=<…> (+
+// /stream/tile/…) already cover every case these exposed. See CHANGELOG.

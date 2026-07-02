@@ -12,7 +12,7 @@
  *   GET /potree/tileset.json?url=<metadata.json | cloud.js URL>
  *   GET /potree/tile/<name>.glb?url=<…>                       → that node's points as a POINTS GLB
  */
-import { buildPointsGlb, coordsToKey, keyToCoords, buildSubtreeBuffer, CORS, georefFromCrs, buildImplicitTileset, parallelMap, defaultConcurrency, progressStart, progressTick, progressDone } from '../core/index.js';
+import { buildPointsGlb, coordsToKey, keyToCoords, buildSubtreeBuffer, georefFromCrs, buildImplicitTileset, parallelMap, defaultConcurrency, progressStart, progressTick, progressDone } from '../core/index.js';
 import { preparePotree2Schema, parsePotree2Hierarchy, parsePotree2Chunk, decodePotree2Node } from '../potree-to-3dtiles/src/potree2.js';
 import { loadPotree1 } from '../potree-to-3dtiles/src/potree1.js';
 
@@ -289,13 +289,16 @@ async function serveTileGlb(ctx, name) {
   return Buffer.from(await buildPointsGlb(pos, colors, count));   // core applies the (E,U,−N) Y-up swizzle
 }
 
-// ── LAZY 1.x fragment (one .hrc chunk → a tileset; chunk boundaries reference the next chunk as an
-//    external tileset, so the tree is built on demand as the camera refines — never a full-tree walk).
-//    Uses absolute /potree/... URLs so it resolves identically whether entered via /potree or /stream.
-async function buildLazyFragment(ctx, rootName, urlParam, isRoot) {
+// ── 1.x explicit tree (&tiling=explicit): drains every .hrc chunk up front, then builds one complete
+// tree with plain relative-through-/stream tile URIs — no cross-endpoint fragment continuation. (An
+// earlier version lazily fragmented this the same way the top-level 1.x LAZY tileset's own tree does,
+// with chunk boundaries as external-tileset refs — dropped as unnecessary complexity: full
+// materialization is fine size-wise since Potree is already well-chunked, and implicit tiling, the
+// default, remains the path for genuinely huge datasets.)
+async function buildTilesetExplicit1x(ctx, urlParam) {
   const { src, origin, transform, rootDiag, spacing } = ctx;
   const enc = encodeURIComponent(urlParam);
-  await src.loadChunk(rootName, src.boxOf(rootName));   // populates src.nodes for THIS chunk only
+  await ctx.drainAll();
   const boxOfTile = (b) => {
     const c = [0,1,2].map(k => (b.min[k]+b.max[k])/2 - origin[k]);
     const h = [0,1,2].map(k => Math.max((b.max[k]-b.min[k])/2, 0.01));
@@ -306,24 +309,18 @@ async function buildLazyFragment(ctx, rootName, urlParam, isRoot) {
     const node = src.nodes.get(name);
     if (!node) return null;
     const tile = { boundingVolume: { box: boxOfTile(node.box) }, geometricError: geAt(node.depth), refine: 'ADD' };
-    if (node.numPoints > 0) tile.content = { uri: `/potree/tile/${name}.glb?url=${enc}` };
+    if (node.numPoints > 0) tile.content = { uri: `/stream/tile/${name}.glb?url=${enc}&format=potree` };
     const kids = [];
     for (let c = 0; c < 8; c++) {
       if (!((node.mask >> c) & 1)) continue;            // child doesn't exist
-      const ck = name + c;
-      if (src.nodes.has(ck)) { const t = tileFor(ck); if (t) kids.push(t); }   // in this chunk → inline
-      else kids.push({                                   // boundary → next .hrc chunk, lazily fetched
-        boundingVolume: { box: boxOfTile(src.boxOf(ck)) },
-        geometricError: geAt(ck.length - 1), refine: 'ADD',
-        content: { uri: `/potree/hrc/${ck}.json?url=${enc}` },
-      });
+      const t = tileFor(name + c); if (t) kids.push(t); // drained → every child is resident
     }
     if (kids.length) tile.children = kids;
     return tile;
   };
-  const root = tileFor(rootName) || { boundingVolume: { box: boxOfTile(src.boxOf(rootName)) }, geometricError: geAt(rootName.length-1), refine: 'ADD' };
-  if (isRoot && transform) root.transform = transform;
-  return { asset: { version: '1.1' }, geometricError: isRoot ? rootDiag : root.geometricError, root, extensionsUsed: ['3DTILES_content_gltf'] };
+  const root = tileFor('r') || { boundingVolume: { box: boxOfTile(src.boxOf('r')) }, geometricError: geAt(0), refine: 'ADD' };
+  if (transform) root.transform = transform;
+  return { asset: { version: '1.1' }, geometricError: rootDiag, root, extensionsUsed: ['3DTILES_content_gltf'] };
 }
 
 // Pure builders the /stream dispatcher reuses. Tile token is a Potree name (explicit, "r012") OR a
@@ -345,14 +342,9 @@ export async function potreeTileset(url, opts = {}) {
       else if (ctx.ensureBlock) Promise.resolve().then(() => { try { ctx.ensureBlock('r', 0, SUBTREE_LEVELS * pf); } catch {} });                          // 1.x
     }
   }
-  if (ctx.lazy)   // 1.x .hrc: implicit by default (lazy subtrees), explicit = external-tileset fragments
-    return opts.tiling === 'explicit' ? buildLazyFragment(ctx, 'r', url, true) : buildTilesetImplicit(ctx, url);
+  if (ctx.lazy)   // 1.x .hrc: implicit by default (lazy subtrees); explicit = full materialization (drains every chunk)
+    return opts.tiling === 'explicit' ? buildTilesetExplicit1x(ctx, url) : buildTilesetImplicit(ctx, url);
   return opts.tiling === 'explicit' ? buildTilesetExplicit(ctx, url) : buildTilesetImplicit(ctx, url);
-}
-export async function potreeHrc(url, name) {     // explicit-mode external-tileset fragment (1.x lazy)
-  const ctx = await getCtx(url);
-  if (!ctx.lazy) return null;
-  return buildLazyFragment(ctx, name, url, false);
 }
 export async function potreeTile(url, token) {
   const ctx = await getCtx(url);
@@ -378,39 +370,5 @@ export async function potreeSubtree(url, key) {
 }
 
 /** Try to handle a /potree/* request. Returns true iff it owned the response. */
-export async function handlePotree(req, res, u) {
-  if (!u.pathname.startsWith('/potree/')) return false;
-  const url = u.searchParams.get('url');
-  if (!url) { res.writeHead(400, CORS); res.end('missing ?url=<metadata.json URL>'); return true; }
-  const ctx = await getCtx(url);
-
-  if (u.pathname === '/potree/tileset.json') {
-    res.writeHead(200, { 'Content-Type': 'application/json', ...CORS });
-    res.end(JSON.stringify(await potreeTileset(url, { tiling: u.searchParams.get('tiling') })));
-    return true;
-  }
-  const m = u.pathname.match(/^\/potree\/tile\/([r0-7]+|\d+-\d+-\d+-\d+)\.glb$/);
-  if (m) {
-    const glb = await potreeTile(url, m[1]);
-    if (!glb) { res.writeHead(404, CORS); res.end('no such node'); return true; }
-    res.writeHead(200, { 'Content-Type': 'model/gltf-binary', ...CORS });
-    res.end(glb);
-    return true;
-  }
-  const h = u.pathname.match(/^\/potree\/hrc\/([r0-7]+)\.json$/);
-  if (h) {                                                 // lazy 1.x sub-chunk external tileset
-    const frag = await potreeHrc(url, h[1]);
-    if (!frag) { res.writeHead(404, CORS); res.end('not a lazy potree dataset'); return true; }
-    res.writeHead(200, { 'Content-Type': 'application/json', ...CORS });
-    res.end(JSON.stringify(frag));
-    return true;
-  }
-  const s = u.pathname.match(/^\/potree\/subtrees\/(\d+-\d+-\d+-\d+)\.subtree$/);
-  if (s) {
-    res.writeHead(200, { 'Content-Type': 'application/octet-stream', ...CORS });
-    res.end(await potreeSubtree(url, s[1]));
-    return true;
-  }
-  res.writeHead(404, CORS); res.end('not found');
-  return true;
-}
+// Direct /potree/* HTTP routes were removed 2026-07-02 — /stream/tileset.json?format=potree&url=<…>
+// (and /stream/tile/…, /stream/subtrees/…) already cover every case these exposed; see CHANGELOG.

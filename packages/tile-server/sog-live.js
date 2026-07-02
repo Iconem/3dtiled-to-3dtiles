@@ -13,7 +13,7 @@
 import path from 'node:path';
 import { readFile as readSplatFile, MemoryReadFileSystem } from '@playcanvas/splat-transform';
 import { extractRange } from '../sog-to-3dtiles/src/sogChunk.js';
-import { buildSplatTileGlb, computeBounds, CORS } from '../core/index.js';
+import { buildSplatTileGlb, computeBounds } from '../core/index.js';
 
 // glTF Y-up → 3D Tiles Z-up box (RX +90°): centre (cx,cy,cz)→(cx,−cz,cy); half-extents y↔z.
 function boundToZUpBox(min, max) {
@@ -120,25 +120,5 @@ export const sogTileRe = /^\d+_\d+_\d+$/;
 export async function sogTileset(url, opts = {}) { return buildTileset(await getCtx(url), url, opts.centroids); }
 export async function sogTile(url, key, opts = {}) { const [f, o, c] = key.split('_').map(Number); return serveTileGlb(await getCtx(url), f, o, c, opts.centroids); }
 
-/** Try to handle a /sog/* request. Returns true iff it owned the response. */
-export async function handleSog(req, res, u) {
-  if (!u.pathname.startsWith('/sog/')) return false;
-  const url = u.searchParams.get('url');
-  if (!url) { res.writeHead(400, CORS); res.end('missing ?url=<lod-meta.json URL>'); return true; }
-
-  if (u.pathname === '/sog/tileset.json') {
-    res.writeHead(200, { 'Content-Type': 'application/json', ...CORS });
-    res.end(JSON.stringify(await sogTileset(url)));
-    return true;
-  }
-  const m = u.pathname.match(/^\/sog\/tile\/(\d+_\d+_\d+)\.glb$/);
-  if (m) {
-    const glb = await sogTile(url, m[1]);
-    if (!glb) { res.writeHead(404, CORS); res.end('no such run'); return true; }
-    res.writeHead(200, { 'Content-Type': 'model/gltf-binary', ...CORS });
-    res.end(glb);
-    return true;
-  }
-  res.writeHead(404, CORS); res.end('not found');
-  return true;
-}
+// Direct /sog/* HTTP routes were removed 2026-07-02 — /stream/tileset.json?format=sog&url=<…> (+
+// /stream/tile/…) already cover every case these exposed. See CHANGELOG.

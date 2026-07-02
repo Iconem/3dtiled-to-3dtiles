@@ -21,7 +21,7 @@
  */
 import { chunkBoundsAndTopology, encodeChunkGlb } from '../rad-to-3dtiles/src/index.js';
 import { buildTileset } from '../rad-to-3dtiles/src/tilesetBuilder.js';
-import { parallelMap, defaultConcurrency, CORS, Source } from '../core/index.js';
+import { parallelMap, defaultConcurrency, Source } from '../core/index.js';
 
 const pad8 = (n) => Math.ceil(n / 8) * 8;
 const HEADER_PROBE = 1 << 18;   // 256 KiB — enough for the RAD0 JSON header of large clouds
@@ -167,8 +167,10 @@ async function buildRadLazySubtree(ctx, rootChunkIdx, urlParam, isRoot, centroid
     if (parentGE != null && ge >= parentGE) ge = parentGE * 0.5;   // strict decrease for REPLACE
     const box = radYUpBoxToZUp(node.bounds);
     if (d >= RAD_SUB_DEPTH)                 // boundary → external fragment (no own content here)
-      return { boundingVolume: { box }, geometricError: ge, refine: 'REPLACE', content: { uri: `/rad/subtree/${ci}.json?url=${enc}${cq}` } };
-    const tile = { boundingVolume: { box }, geometricError: ge, refine: 'REPLACE', content: { uri: `tile/${ci}.glb?url=${enc}${cq}` } };
+      return { boundingVolume: { box }, geometricError: ge, refine: 'REPLACE', content: { uri: `/stream/rad/subtree/${ci}.json?url=${enc}${cq}` } };
+    // Absolute (not relative "tile/…"): this tree can be embedded at /stream/tileset.json OR at a
+    // nested /stream/rad/subtree/<n>.json fragment, where a relative ref would resolve wrong.
+    const tile = { boundingVolume: { box }, geometricError: ge, refine: 'REPLACE', content: { uri: `/stream/tile/${ci}.glb?url=${enc}${cq}&format=rad` } };
     if (node.children.length) {
       const kids = node.children.map(c => buildNode(c, d + 1, ge)).filter(Boolean);
       if (kids.length) { tile.children = kids; tile.boundingVolume = { box: radUnionBox(box, kids.map(k => k.boundingVolume.box)) }; }
@@ -205,42 +207,7 @@ export async function radSubtree(url, chunkIdx, opts = {}) {
 }
 export async function radTile(url, key, opts = {}) { return serveTileGlb(await getCtx(url), Number(key), opts.centroids); }
 
-/** Try to handle a /rad/* request. Returns true iff it owned the response. */
-export async function handleRad(req, res, u) {
-  if (!u.pathname.startsWith('/rad/')) return false;
-  const url = u.searchParams.get('url');
-  if (!url) { res.writeHead(400, CORS); res.end('missing ?url=<.rad URL>'); return true; }
-  // centroids rides on the absolute /rad/ fragment + tile URIs the lazy builder emits (it bypasses /stream).
-  const centroids = u.searchParams.get('centroids') === '1' || u.searchParams.get('centroids') === 'true';
-  const hierarchy = u.searchParams.get('hierarchy');
-
-  try {
-    if (u.pathname === '/rad/tileset.json') {
-      res.writeHead(200, { 'Content-Type': 'application/json', ...CORS });
-      res.end(JSON.stringify(await radTileset(url, { centroids, hierarchy })));
-      return true;
-    }
-    const s = u.pathname.match(/^\/rad\/subtree\/(\d+)\.json$/);
-    if (s) {
-      const ts = await radSubtree(url, Number(s[1]), { centroids });
-      if (!ts) { res.writeHead(404, CORS); res.end('not a lazy rad dataset'); return true; }
-      res.writeHead(200, { 'Content-Type': 'application/json', ...CORS });
-      res.end(JSON.stringify(ts));
-      return true;
-    }
-    const m = u.pathname.match(/^\/rad\/tile\/(\d+)\.glb$/);
-    if (m) {
-      const glb = await radTile(url, m[1], { centroids });
-      if (!glb) { res.writeHead(404, CORS); res.end('no such node'); return true; }
-      res.writeHead(200, { 'Content-Type': 'model/gltf-binary', ...CORS });
-      res.end(glb);
-      return true;
-    }
-    res.writeHead(404, CORS); res.end('not found');
-  } catch (e) {
-    console.error('[rad-live]', e.message);
-    if (!res.headersSent) { res.writeHead(500, CORS); res.end(e.message); }
-    else res.end();
-  }
-  return true;
-}
+// Direct /rad/* HTTP routes were removed 2026-07-02 — /stream/tileset.json?format=rad&url=<…> (+
+// /stream/tile/…) already cover tileset/tile serving; the lazy fragment continuation moved to
+// /stream/rad/subtree/<n>.json (handled in stream-live.js, since it needs a dedicated path shape
+// distinct from /stream/tileset.json). See CHANGELOG.

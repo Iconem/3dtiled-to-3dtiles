@@ -26,7 +26,7 @@ import { parseSLPKArchive } from '@loaders.gl/i3s';
 import { DataViewReadableFile } from '@loaders.gl/zip';
 import { decodeDefaultGeometry, geodeticToEcef, obbToBox } from '../i3s-to-3dtiles/src/i3sParse.js';
 import { buildGlb } from '../i3s-to-3dtiles/src/glbBuild.js';
-import { CORS, enuFrame, parallelMap, defaultConcurrency } from '../core/index.js';
+import { enuFrame, parallelMap, defaultConcurrency } from '../core/index.js';
 
 const MESH_TYPES  = new Set(['IntegratedMesh', '3DObject']);
 const POINT_TYPES = new Set(['PointCloud']);
@@ -262,8 +262,9 @@ async function buildI3sFragment(ctx, rootIdx, urlParam, isRoot) {
     const box = obbToEnuBox(ctx, node.obb);
     const diag = 2 * Math.hypot(box[3], box[7], box[11]);
     const tile = { boundingVolume: { box }, geometricError: 0, refine: 'REPLACE' };
-    // Absolute URL (+lazy=1): fragments live under /i3s/node/… so a relative `tile/…` would mis-resolve.
-    if (nodeHasGeometry(node)) tile.content = { uri: `/i3s/tile/${idx}.glb?url=${enc}&lazy=1` };
+    // Absolute URL (+lazy=1): fragments live under /stream/i3s/node/… so a relative `tile/…` would
+    // mis-resolve.
+    if (nodeHasGeometry(node)) tile.content = { uri: `/stream/i3s/tile/${idx}.glb?url=${enc}&lazy=1` };
     const childIds = node.children || [];
     const kids = [];
     if (childIds.length && depth >= I3S_SUB_DEPTH) {
@@ -272,7 +273,7 @@ async function buildI3sFragment(ctx, rootIdx, urlParam, isRoot) {
         const cn = ctx.nodes[ci]; if (!cn) continue;
         const cbox = obbToEnuBox(ctx, cn.obb);
         const cdiag = 2 * Math.hypot(cbox[3], cbox[7], cbox[11]);
-        kids.push({ boundingVolume: { box: cbox }, geometricError: cdiag * 0.5, refine: 'REPLACE', content: { uri: `/i3s/node/${ci}.json?url=${enc}` } });
+        kids.push({ boundingVolume: { box: cbox }, geometricError: cdiag * 0.5, refine: 'REPLACE', content: { uri: `/stream/i3s/node/${ci}.json?url=${enc}` } });
       }
     } else {
       for (const ci of childIds) { const c = build(ci, depth + 1); if (c) kids.push(c); }
@@ -347,40 +348,7 @@ export async function i3sTile(url, key, opts = {}) {
   return serveTileGlb(ctx, Number(key));
 }
 
-/** Try to handle a /i3s/* request. Returns true iff it owned the response. */
-export async function handleI3s(req, res, u) {
-  if (!u.pathname.startsWith('/i3s/')) return false;
-  const url = u.searchParams.get('url');
-  if (!url) { res.writeHead(400, CORS); res.end('missing ?url=<3dSceneLayer.json or .slpk URL>'); return true; }
-  const lazy = u.searchParams.get('lazy') === '1' || u.searchParams.get('lazy') === 'true';
-
-  try {
-    if (u.pathname === '/i3s/tileset.json') {
-      res.writeHead(200, { 'Content-Type': 'application/json', ...CORS });
-      res.end(JSON.stringify(await i3sTileset(url, { lazy })));
-      return true;
-    }
-    const n = u.pathname.match(/^\/i3s\/node\/(\d+)\.json$/);
-    if (n) {                                                    // lazy external fragment
-      const frag = await i3sNode(url, Number(n[1]));
-      if (!frag) { res.writeHead(404, CORS); res.end('no such node'); return true; }
-      res.writeHead(200, { 'Content-Type': 'application/json', ...CORS });
-      res.end(JSON.stringify(frag));
-      return true;
-    }
-    const m = u.pathname.match(/^\/i3s\/tile\/(\d+)\.glb$/);
-    if (m) {
-      const glb = await i3sTile(url, m[1], { lazy });
-      if (!glb) { res.writeHead(404, CORS); res.end('no such node / no geometry'); return true; }
-      res.writeHead(200, { 'Content-Type': 'model/gltf-binary', ...CORS });
-      res.end(glb);
-      return true;
-    }
-    res.writeHead(404, CORS); res.end('not found');
-  } catch (e) {
-    console.error('[i3s-live]', e.message);
-    if (!res.headersSent) { res.writeHead(500, CORS); res.end(e.message); }
-    else res.end();
-  }
-  return true;
-}
+// Direct /i3s/* HTTP routes were removed 2026-07-02 — /stream/tileset.json?format=i3s&url=<…> already
+// covers tileset serving; the lazy fragment continuation (i3sNode) and lazy tile serving (i3sTile,
+// which needs &lazy=1 threaded through to hit the right cached context) moved to
+// /stream/i3s/node/<n>.json and /stream/i3s/tile/<n>.glb (handled in stream-live.js). See CHANGELOG.
