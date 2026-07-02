@@ -372,10 +372,12 @@ Roughly in the order we're tackling them:
   representation worth composing through the tool.) `viewer.html`'s Tools → implicit-to-explicit demo
   now includes a Potree and a COPC example against our own prebuilt output as a stopgap — that's the
   tool working *against* our formats offline, not the live routing described here.
-- [ ] **Migrate `/threemx` and `/geosplats` into `/tiles`.** Both are stale relative to the
-  consolidation above — real streaming adapters with their own bespoke endpoints, not yet wired into
-  `/stream`'s `ADAPTERS` registry or `/tiles`'s dispatch, so they don't get the unified `cache=`
-  vocabulary (or `/tiles`'s single entry point) other formats do.
+- [x] ~~Migrate `/threemx` and `/geosplats` into `/tiles`~~ — **done** (2026-07-02): both are now
+  `/stream`'s `ADAPTERS` registry entries (`format=threemx`/`format=geosplats`), so they get the
+  unified `cache=`/`/tiles` vocabulary like every other format. The old standalone `/threemx`,
+  `/geosplats` endpoints are gone. 3MX keeps its own lazy per-`.3mxb` continuation route
+  (`/stream/threemx/node/<path>.json`) — unlike RAD/I3S, 3MX is a genuine DAG with no persisted
+  spatial index, so eager-scanning the whole tree isn't cheap.
 - [ ] **Dockerize the server.** A `docker-compose`-runnable `packages/tile-server` (+ viewer), with a
   GitHub Actions workflow building and publishing images to **GHCR** on release, so it can be dropped
   straight into a `docker-compose`/**Portainer** stack behind **Traefik** — no manual Node setup.
@@ -636,12 +638,12 @@ Composability goal: `source → convert → [centroids] → [gltf: draco/ktx2 de
 | `/gltf/tileset.json?url=<tileset>&ops=<ops>[&tex=jpg\|png]` (+ `/gltf/tile.glb?url=<glb>&ops=`) | generic per-tile **glTF-Transform** pipeline (proxies an explicit tileset, recurses external refs) | `ops=decompress` (= `draco,meshopt,ktx`) · or any of `draco` · `meshopt` · `ktx` (decode); KTX2 decodes to `tex=jpg` (default, fast/small) or `png` |
 | `/bing/tileset.json?root=<quadkey>&g=<genid>&maxLevel=<L>[&decompress=1]` | Bing Maps 3D (`tf=3dv4`) → 3D Tiles | `root` quadkey, `g` genid (default 15340), `maxLevel`, `decompress` |
 | `/3dtiles-self-contained/tileset.json?url=<path\|URL.3tz\|.3dtiles>` | serve a `.3tz`/`.3dtiles` package in-place, no extraction | local path or `http(s)://`; `.3tz` local-only, `.3dtiles` local + remote via sql.js |
-| `/threemx/tileset.json?url=<Scene.3mx\|root.3mxb>` | Bentley 3MX → 3D Tiles | (georef from SRS+SRSOrigin when present) |
-| `/geosplats/tileset.json?url=<model.json>&lod=<N>` | MapTiler GeoSplats (HLOD SOGS octants) → 3D Tiles | `lod` picks the max octree depth fetched; key/referer handled server-side |
+| `/stream/tileset.json?url=<Scene.3mx\|root.3mxb>&format=threemx` | Bentley 3MX → 3D Tiles | (georef from SRS+SRSOrigin when present); lazy per-`.3mxb` continuation at `/stream/threemx/node/<path>.json` |
+| `/stream/tileset.json?url=<model.json>&format=geosplats&lod=<N>` | MapTiler GeoSplats (HLOD SOGS octants) → 3D Tiles | `lod` picks the max octree depth fetched; key/referer handled server-side |
 
-`/threemx` and `/geosplats` are still their **own** standalone endpoints (like `/copc` etc. used to be)
-— **not yet migrated** into `/stream`'s `ADAPTERS` registry or `/tiles`'s dispatch, so they don't get
-the unified `cache=`/`/tiles` vocabulary the other six formats do. Tracked in TODO / Future work.
+`/threemx` and `/geosplats` (2026-07-02) moved into `/stream`'s `ADAPTERS` registry — same as every
+other format, so they now get the unified `cache=`/`/tiles` vocabulary too. The old standalone
+`/threemx`, `/geosplats` endpoints are gone (no back-compat aliases).
 
 > The `/gltf` pipeline runs per-tile **only on explicit tilesets** (concrete tile URIs — 3MX/Bing/RAD/I3S
 > outputs and external mesh 3D Tiles); it recurses external-tileset refs. **Implicit** COPC/Potree octree
@@ -1256,7 +1258,7 @@ COPC, Potree 1.x/2.0, EPT, I3S/SLPK, streamed-SOG, LCC, RAD, 3D Tiles packages, 
 **Tier 4 — blocked / low ROI:** **Autodesk ReCap `.rcp/.rcs`** — confirmed **no open reader OR writer** (PDAL/CloudCompare/PCL/Open3D none; FME writer-only); can't ingest remote `.rcp`; **and Autodesk can't consume 3D Tiles natively** (Cesium is *Bentley's* now → native import is in MicroStation/iTwin; Autodesk only has a Revit→3D Tiles *exporter*). Realistic bridge is a future **→ E57/LAS export** (formats ReCap ingests), not an `.rcp` writer. · **Bentley 3SM** (closed, no spec).
 
 **Implemented adapters (plans: [streaming-adapter-plans.md](docs-references/streaming-adapter-plans.md)):**
-- ✅ **Bentley 3MX** — `GET /threemx/tileset.json?url=<Scene.3mx | root.3mxb>`. Parses `3MXBO` node trees,
+- ✅ **Bentley 3MX** — `GET /stream/tileset.json?format=threemx&url=<Scene.3mx | root.3mxb>`. Parses `3MXBO` node trees,
   serves lazy external-tileset fragments per `.3mxb`, decodes **OpenCTM (MG1/LZMA)** geometry via vendored
   js-openctm → glTF + JPEG baseColor. Verified live against the colorwlof/Unity-3mxb fixture (textured GLB
   tiles render; decoded bbox matches node bbMin/bbMax). Georef via SRS+SRSOrigin when present.
@@ -1995,8 +1997,8 @@ format with no published byte-spec — everything below was decoded from a real 
 format notes: [`docs-references/maptiler-geosplats.md`](docs-references/maptiler-geosplats.md).
 
 ```sh
-#   GET /geosplats/tileset.json?url=<model.json URL>[&lod=1..8]                        → HLOD tileset
-#   GET /geosplats/tile.glb?url=<model.json>&m=<submodel#>&grid=<1|8|64|512>&oct=<n>&lod=<n> → one octant, KHR_gaussian_splatting GLB
+#   GET /stream/tileset.json?format=geosplats&url=<model.json URL>[&lod=1..8]           → HLOD tileset
+#   GET /stream/tile/<m>-<grid>-<oct>-<lod>.glb?format=geosplats&url=<model.json>       → one octant, KHR_gaussian_splatting GLB
 ```
 
 - **Data primitive = SOGS** — same primitive our own `writeSog`/`readSog` (`@playcanvas/splat-transform`)
