@@ -5,6 +5,21 @@ Format loosely follows [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+### Docs — 2026-07-02 (`main`: README staleness pass)
+- Fixed several stale claims flagged during review: the meta-converter dispatch note and two
+  "Missing features" bullets described converters as not-yet-moved under `packages/<fmt>/` and
+  dispatch as child-process-only — both are already done (in-process `import()` by default,
+  child-process only as an `extraArgs` fallback; workspace `workspace:*` deps already declared, so
+  the old "needs `npm install` first" caveat no longer applies). The `/potree` section described the
+  default tileset as "explicit" and Potree 1.x as not range-served — both wrong: implicit tiling is
+  the default (`&tiling=explicit` opts in), and 1.x's `.hrc` chunks are lazily range-served through
+  the same implicit-subtree machinery as 2.0 (the streaming-roadmap table just below already said so
+  correctly — the prose above it hadn't caught up).
+- Reworked the Ambition section's "where this is going next" paragraph to call out Docker/GHCR/Traefik
+  packaging and a Fumadocs migration as concretely addressable near-term items (not just aspirational),
+  and note that the Fumadocs move is mostly *chunking* material that already exists in
+  `docs-references/*.md` rather than writing new docs.
+
 ### Fixed — 2026-07-02 (`main`: Potree 2.0 hierarchy race, Cesium Local-Frame Z-offset, README overhaul)
 - **Potree 2.0 live streaming (`/potree`, `/stream`) could serve incomplete implicit subtrees on a
   cold cache.** `loadChunk2()` marked a hierarchy chunk as loaded and removed it from the pending set

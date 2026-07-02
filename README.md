@@ -2,37 +2,41 @@
 
 ## Ambition
 
-This started as a set of Node.js CLI **converters**: take a *tiled / LoD source format* — tiled
-point clouds, meshes, or 3D Gaussian splats (COPC, Potree, LCC, RAD, SOG, I3S, GeoSplats, …) — and
+This started as a set of Node.js SDK/CLI, standalone-packaged, **converters**: take a *tiled / LoD source format* — HLOD Hierarchical Level of Detail, tiled point clouds, meshes, or 3D Gaussian splats (COPC, Potree, I3S, stream-SOG, LCC, RAD, 3MX, GeoSplats, …) — and
 turn it into OGC **3D Tiles 1.1** (splats via `KHR_gaussian_splatting` +
 `KHR_gaussian_splatting_compression_spz_2` GLB tiles). The unifying idea behind every converter is
-the same: each source format is already *some spatial tree of pre-tiled, LoD'd content* — so the
-converter just maps that tree onto a 3D Tiles HLOD tree and re-encodes node content into one shared
-output (`spzGlb.js` for splats). The decode differs per format; the output is uniform.
+the same: translate each of the tree-hierarchy and tile-geometry as-is, since each source format is already *some spatial tree of pre-tiled, LoD'd content* — so the
+converter just maps that tree onto a 3D Tiles HLOD tree, implicit (octree/quadtree) or explicit (arbitrary), and re-encodes node content into one shared
+output (standard mesh primitives, TRIANGLES, POINTS, or `spzGlb.js` for splats). The decode differs per format; the output is uniform.
 
 It has since grown into an **on-the-fly streaming middleware** (`packages/tile-server`, the offline
 converters' live counterpart): point it at a `<format>` source URL and it serves a 3D Tiles tileset
 *live*, so any 3D-Tiles-compatible client — browser/JS viewers, CesiumJS or its native plugins
-(Unreal, Unity), GIS software, anything that speaks the OGC standard — can consume any of these tiled
+(Unreal, Unity, Nvidia Omniverse, Open-3d-Engine), GIS software (QGIS, ESRI etc), anything that speaks the OGC standard — can consume any of these tiled
 formats **without a pre-conversion step**, with tile-hierarchy/content **caching** and **prefetching**
 tunable per use case (`cache=none|hierarchy|all`). `viewer.html` (CesiumJS + 3DTilesRendererJS) is the
 reference client, and doubles as a **bbox + geometric-error-aware crop/extract** tool (`/dump/*`) for
-pulling a sub-region of any of these formats back out as LAS/COPC/GLB/SPZ/SOG/PLY.
+pulling a sub-region, with user-controlled Geometric Error target precision, of any of these formats back out as LAS/COPC/GLB/SPZ/SOG/PLY.
 
-**Where this is going next:** a browser/server splat-editing UI in the spirit of SuperSplat's
-splat-transform tooling; a **georeferencing/geolocator** step for splats that don't ship one, along
-the lines of WilliamLiu's `3dtiles-inspector` or MapTiler GeoSplats' `global_position` block (see
-[`/geosplats`](#geosplats--live-maptiler-geosplats--3d-tiles-implemented--reverse-engineered)); and an
-**aggregator** unifying the export/interchange formats of other splat platforms (SuperSplat, Niantic
-Scaniverse, Polycam, …) behind the same 3D Tiles pipeline. A longer-running goal underneath all of
-this: be the **fastest** point-cloud — and eventually splat — tiler, by reusing the octree-computation
-principles behind Potree 2.0's converter (see the Potree sections throughout this doc, e.g.
-[`potree-to-3dtiles`](#potree-to-3dtiles) and [`/potree`](#potree--live-potree-20--3d-tiles-true-range-streaming)).
+**Where this is going next.** Two items are concrete and addressable in the near term, not just
+aspirational: **containerizing the server** — a `docker-compose`-runnable `packages/tile-server` (+
+viewer), built and published to **GHCR** by a GitHub Actions workflow on release, so it drops straight
+into a `docker-compose`/**Portainer** stack behind **Traefik** with no manual Node setup — and a
+**Fumadocs** documentation site, which is more tractable than it sounds: almost every format's deep
+findings already live in their own file under [`docs-references/`](docs-references/) (this README
+mostly *links* to them rather than duplicating), so the migration is largely **chunking** the existing
+material (this README foremost, plus a few docs-references files that have grown large in their own
+right) into Fumadocs' page-per-topic model, not writing new docs from scratch. Both are tracked in
+[TODO / Future work](#todo--future-work) below.
 
-> This README has grown quite large tracking all of that (ambition, live features, format specs,
-> official docs/SDKs, and raw reverse-engineering findings, side by side). A move to a proper docs
-> site (e.g. [Fumadocs](https://fumadocs.dev/), for its table-of-contents component) to split these
-> apart is a planned follow-up — not done yet, flagging it here so it isn't lost.
+Further out: a browser/server tiled-splat transcoding UI in the spirit of SuperSplat's splat-transform
+tooling; a **georeferencing/geolocator** step for splats that don't ship one, along the lines of
+WilliamLiu's `3dtiles-inspector` or MapTiler GeoSplats'; and an **aggregator** unifying the
+export/interchange formats of other splat platforms, behind the same 3D Tiles pipeline. A
+longer-running goal underneath all of this: be the **fastest** point-cloud — and eventually splat —
+tiler, by reusing the octree-computation principles behind Potree 2.0's converter (see the Potree
+sections throughout this doc, e.g. [`potree-to-3dtiles`](#potree-to-3dtiles) and
+[`/potree`](#potree--live-potree-20--3d-tiles-true-range-streaming)).
 
 
 ## Format comparison
@@ -50,8 +54,8 @@ principles behind Potree 2.0's converter (see the Potree sections throughout thi
 
 | Format | Status | Hierarchy / subdivision | Node (leaf) content | Refine | Intermediate nodes | Metadata location | HTTP range | Spec |
 |--------|:------:|-------------------------|---------------------|:------:|--------------------|-------------------|:----------:|------|
-| **COPC** (LiDAR) | 🟢 | **octree** (EPT-style) | LAZ-compressed LAS points | ADD | octree nodes (accumulate) | COPC VLR + hierarchy pages | ✅ designed for range reads | [copc.io](https://copc.io) |
-| **Potree** (point cloud) | 🟢 | **octree** (named `r`/`r0`..`r7`) | points: position int32×3·scale+offset + rgb (2.0 `octree.bin` / 1.x per-node `.bin`) | ADD | octree nodes (accumulate) | 2.0 `metadata.json`+`hierarchy.bin` (22 B/node) · 1.x `cloud.js`+`.hrc` | ✅ (2.0 single octree.bin; 1.x per-node files) | [Potree](https://github.com/potree/PotreeConverter) |
+| **COPC** (Cloud Optimized Pointcloud) | 🟢 | **octree** (EPT-style) | LAZ-compressed LAS points | ADD | octree nodes (accumulate) | COPC VLR + hierarchy pages | ✅ designed for range reads | [copc.io](https://copc.io) |
+| **Potree** (v1 and v2) | 🟢 | **octree** (named `r`/`r0`..`r7`) | points: position int32×3·scale+offset + rgb (2.0 `octree.bin` / 1.x per-node `.bin`) | ADD | octree nodes (accumulate) | 2.0 `metadata.json`+`hierarchy.bin` (22 B/node) · 1.x `cloud.js`+`.hrc` | ✅ (2.0 single octree.bin; 1.x per-node files) | [Potree](https://github.com/potree/PotreeConverter) |
 
 ### Generic tiled formats → 3D Tiles
 
@@ -69,10 +73,10 @@ Formats that carry (or wrap) a general node/mesh hierarchy rather than a point- 
 
 | Format | Status | Hierarchy / subdivision | Node (leaf) content | Refine | Intermediate nodes | Metadata location | HTTP range | Spec |
 |--------|:------:|-------------------------|---------------------|:------:|--------------------|-------------------|:----------:|------|
-| **RAD** (SparkJS) | 🟢 | LoD merge tree, variable fanout (BhattLod ~1.75 / TinyLod ~1.5) | RADC chunk: per-splat columns — `f16`/`oct88r8` **interleaved**, `ln_0r8`/`r8_delta` **planar**, `f32_lebytes` byte-transposed | REPLACE | downsampled **merged** splats | root `RAD0` JSON + per-chunk `RADC` JSON | ✅ chunked `.radc` | [sparkjs.dev](https://sparkjs.dev/docs/lod-getting-started/) |
-| **SOG (streamed)** (PlayCanvas) | 🟢 | **binary** spatial tree (AABB split) | unbundled SOG chunk: WebP textures → `DataTable` (pos/quat-w-first/log-scale/SH-DC/logit-opacity) | REPLACE | empty grouping nodes | `lod-meta.json` + per-chunk `meta.json` | ✅ per-file | [playcanvas](https://developer.playcanvas.com/user-manual/gaussian-splatting/formats/streamed-sog/) |
-| **LCC** (XGRIDS) | 🟢 | **grid of Units** (cellX×Y) × per-cell LODs | `Data.bin` fixed **32 B/splat**: pos `f32×3`, color `rgba8`, scale `u16×3`, rot `10-10-10-2` (+SH `Shcoef.bin` 64 B) | REPLACE | per-cell coarse LODs | `meta.lcc` JSON + `Index.bin` | ✅ `Index.bin` offsets into `Data.bin` | [developer.xgrids.com](https://developer.xgrids.com/#/document?titleId=en-1720509291851) |
-| **GeoSplats** (MapTiler) | 🔬 reverse-eng. | **octree voxel grids** (`grid_1/8/64/512`) × 8 progressive LODs | per-octant **SOGS** (`means_l/u`, `quats`, `scales`, `sh0` WebP) or `octant_<n>.ply` | REPLACE (LOD subset) | coarser-LOD octants | `model.json` (georef) + per-sub-model `metadata.json` (`voxel_grids` + `entries` TOC) | ✅ per-file / range | [maptiler.com/geosplats](https://www.maptiler.com/geosplats/) |
+| **SOG (streamed)** (PlayCanvas) | 🟢 | **binary** spatial tree (AABB split) | unbundled SOG chunk: WebP textures → `DataTable` (pos/quat-w-first/log-scale/SH-DC/logit-opacity) | REPLACE | empty grouping nodes | no geo metadata, `lod-meta.json` + per-chunk `meta.json` | ✅ per-file | [playcanvas](https://developer.playcanvas.com/user-manual/gaussian-splatting/formats/streamed-sog/) |
+| **LCC** (XGRIDS) | 🟢 | **grid of Units** (cellX×Y) × per-cell LODs | `Data.bin` fixed **32 B/splat**: pos `f32×3`, color `rgba8`, scale `u16×3`, rot `10-10-10-2` (+SH `Shcoef.bin` 64 B) | REPLACE | per-cell coarse LODs | georef'ed, `meta.lcc` JSON + `Index.bin` | ✅ `Index.bin` offsets into `Data.bin` | [developer.xgrids.com](https://developer.xgrids.com/#/document?titleId=en-1720509291851) |
+| **RAD** (SparkJS) | 🟢 | LoD merge tree, variable fanout (BhattLod ~1.75 / TinyLod ~1.5) | RADC chunk: per-splat columns — `f16`/`oct88r8` **interleaved**, `ln_0r8`/`r8_delta` **planar**, `f32_lebytes` byte-transposed | REPLACE | downsampled **merged** splats | no geo metadata, root `RAD0` JSON + per-chunk `RADC` JSON | ✅ chunked `.radc` | [sparkjs.dev](https://sparkjs.dev/docs/lod-getting-started/) |
+| **GeoSplats** (MapTiler) | 🟢 | **octree voxel grids** (`grid_1/8/64/512`) × 8 progressive LODs | per-octant **SOGS** (`means_l/u`, `quats`, `scales`, `sh0` WebP) or `octant_<n>.ply` | REPLACE (LOD subset) | coarser-LOD octants | georef'ed,`model.json` (georef) + per-sub-model `metadata.json` (`voxel_grids` + `entries` TOC) | ✅ per-file / range | [maptiler.com/geosplats](https://www.maptiler.com/geosplats/) |
 
 ### Format specifications (canonical sources + local mirrors)
 
@@ -92,40 +96,40 @@ Each source format's authoritative spec, with a distilled local copy under [`doc
 | **glTF 2.1 (complex scenes)** | [Khronos blog](https://www.khronos.org/blog/introducing-gltf-2.1-with-complex-scenes) · [64-bit GLB / indices #2594](https://github.com/KhronosGroup/glTF/issues/2594) | [`gltf-2.1-complex-scenes.md`](docs-references/gltf-2.1-complex-scenes.md) |
 | **GeoSplats** (MapTiler) | [maptiler.com/geosplats](https://www.maptiler.com/geosplats/) · SDK [@maptiler/geosplats](https://www.npmjs.com/package/@maptiler/geosplats) ([CDN .mjs](https://cdn.maptiler.com/maptiler-geosplats/v1.0.4/maptiler-geosplats.mjs)) · [docs.maptiler.com](https://docs.maptiler.com/) · [3D maps](https://www.maptiler.com/3d-maps/) | [`maptiler-geosplats.md`](docs-references/maptiler-geosplats.md) |
 
-**Producing the tiled inputs (offline tilers):** point-cloud tilers (PotreeConverter, py3dtiles,
-gocesiumtiler, PDAL→COPC), splat LoD builders (SparkJS `build-lod`, PlayCanvas `splat-transform`,
-XGRIDS LCC), and a note on **why PotreeConverter 2.0 is so fast** — see [`offline-tilers.md`](docs-references/offline-tilers.md).
 
 (Several spec sites block automated fetching — the `docs-references/` mirrors are hand-distilled from
 the canonical sources above and kept in sync as the converters evolve.)
 
-### Parallelism (per converter)
 
-Per-tile work — decode → SPZ/GLB encode → gzip → write — is **independent per tile**, so it is
-embarrassingly parallel. The shared `core` (`packages/core`) provides the two tiers: **async gzip**
-(`zlib.gzip` on the libuv threadpool) + `parallelMap` (bounded-concurrency = cores−1, no workers), and
-a `WorkerPool` (`worker_threads`) for decode-heavy formats. **All five operational converters now use
-tier 1** (`parallelMap` + async gzip/`buildPointsGlb`), each verified to produce output equivalent to
-its prior serial version. The `WorkerPool` tier (true multicore decode) is not yet wired — it's the
-remaining headroom for the WASM/CPU-bound decoders.
+## Related tilers (prior art / reference implementations)
 
-| Converter | Decode cost (per tile) | Parallel **today**? | Main-thread-bound part | Worker-extractable? |
-|-----------|------------------------|:-------------------:|------------------------|---------------------|
-| **rad** | pure-JS column unpack (interleaved/planar) — CPU-bound | ✅ `parallelMap` + async gzip (byte-identical) | JS decode | ✅ decode per chunk → `WorkerPool` (true multicore) |
-| **sog** | **WebP WASM** decode per chunk | ✅ `parallelMap` + async gzip (content-identical) | WebP decode | ✅ **biggest win** (thousands of tiles); WASM runs in workers as-is |
-| **lcc** | pure-JS `DataView` unpack — fast | ✅ `parallelMap` + async gzip | one ~3 M-splat tile is a serial tail | ✅ worker decode would split that giant tile |
-| **copc** | **LAZ WASM** (`laz-perf`) decode — CPU-bound | ✅ `parallelMap` (byte-identical; ~27% faster) | LAZ decode | ✅ per-node decode → worker pool |
-| **potree** | pure-JS slice (+ **brotli** for 2.0) — many small nodes | ✅ `parallelMap` (byte-identical) | per-node decode + brotli | ✅ many small nodes → ideal worker-pool fan-out |
-| **i3s** (draft) | pure-JS geometry decode | ❌ (draft; serial) | — | ✅ later |
+**Producing the tiled inputs (offline tilers):** point-cloud tilers (PotreeConverter, py3dtiles,
+gocesiumtiler, PDAL→COPC), splat LoD builders (SparkJS `build-lod`, PlayCanvas `splat-transform`,
+XGRIDS LCC), and a note on **why PotreeConverter 2.0 is so fast** — see [`offline-tilers.md`](docs-references/offline-tilers.md).
 
-Measured (cores−1 lanes): copc autzen 23.0→16.9 s, potree lion 6.2→5.0 s — modest now (gzip/decode
-still on the main thread via the libuv pool); the `WorkerPool` tier is where multicore decode lands.
+Tools that tile point clouds, meshes, or splats to 3D Tiles / streaming formats — studied for
+format handling, tree/geometric-error strategy, and parallelism:
 
-**Short answer to "can main-thread work move to workers?"** Yes — for *every* converter. The pure-JS
-decoders (rad, lcc, potree) gain the most (they're single-core-bound today → true multicore via
-`WorkerPool`); the WASM decoders (sog, copc) are already fast per-op but still serialized on the main
-thread, so a worker pool parallelizes them across cores. `core.WorkerPool` is the shared mechanism;
-each converter just needs its tile loop ported (lcc is the worked example).
+**Point clouds**
+- [PDAL](https://pdal.io/en/latest/) for building COPC
+- [Potree / PotreeConverter](https://github.com/potree/PotreeConverter) — the octree format + converter we read.
+- [gocesiumtiler](https://github.com/mfbonfigli/gocesiumtiler) — Go LAS → Cesium 3D Tiles point tiler.
+- [py3dtiles](https://gitlab.com/py3dtiles/py3dtiles) — Python LAS/XYZ → 3D Tiles `pnts` tiler.
+- [yeyan00/potree23dtiles](https://github.com/yeyan00/potree23dtiles) — Potree → 3D Tiles (the
+  closest analogue to our `potree-to-3dtiles`; cross-checked our 2.0 decode against it).
+- [igd-geo/schwarzwald](https://github.com/igd-geo/schwarzwald) — high-throughput point-cloud tiler (3D Tiles).
+
+**Meshes / CAD / GIS**
+- [Gaia3D/mago-3d-tiler](https://github.com/Gaia3D/mago-3d-tiler) — Java OBJ/IFC/GIS → 3D Tiles.
+- [fanvanzh/3dtiles](https://github.com/fanvanzh/3dtiles)
+- [kitware vtk 3d-tiles-generation](https://www.kitware.com/3d-tiles-generation-using-vtk/)
+- [obj2tiles](https://github.com/OpenDroneMap/Obj2Tiles) — OBJ → 3D Tiles (b3dm) with LoD.
+
+**Gaussian splats**
+- [@sparkjsdev/spark `build-lod`](https://sparkjs.dev/docs/lod-getting-started/) — PLY/SPZ → RAD LoD (we consume `.rad`).
+- [playcanvas/splat-transform](https://github.com/playcanvas/splat-transform) — SOG/PLY/SPZ conversion (we use `readSog`).
+- [WilliamLiu-1997/3DGS-PLY-3DTiles-Converter](https://github.com/WilliamLiu-1997/3DGS-PLY-3DTiles-Converter) — PLY → SPZ-GLB 3D Tiles (our cross-validation reference).
+
 
 ### Runtime (Node today / browser-capable?)
 
@@ -161,32 +165,6 @@ flowchart LR
   ENC --> TS["3D Tiles HLOD tree<br/>interior = grouping · leaf chain = REPLACE LODs"]
   TS --> V["viewer.html<br/>CesiumJS + 3DTilesRendererJS/SparkJS"]
 ```
-
-
-## Related tilers (prior art / reference implementations)
-
-Tools that tile point clouds, meshes, or splats to 3D Tiles / streaming formats — studied for
-format handling, tree/geometric-error strategy, and parallelism:
-
-**Point clouds**
-- [PDAL](https://pdal.io/en/latest/) for building COPC
-- [Potree / PotreeConverter](https://github.com/potree/PotreeConverter) — the octree format + converter we read.
-- [gocesiumtiler](https://github.com/mfbonfigli/gocesiumtiler) — Go LAS → Cesium 3D Tiles point tiler.
-- [py3dtiles](https://gitlab.com/py3dtiles/py3dtiles) — Python LAS/XYZ → 3D Tiles `pnts` tiler.
-- [yeyan00/potree23dtiles](https://github.com/yeyan00/potree23dtiles) — Potree → 3D Tiles (the
-  closest analogue to our `potree-to-3dtiles`; cross-checked our 2.0 decode against it).
-- [igd-geo/schwarzwald](https://github.com/igd-geo/schwarzwald) — high-throughput point-cloud tiler (3D Tiles).
-
-**Meshes / CAD / GIS**
-- [Gaia3D/mago-3d-tiler](https://github.com/Gaia3D/mago-3d-tiler) — Java OBJ/IFC/GIS → 3D Tiles.
-- [fanvanzh/3dtiles](https://github.com/fanvanzh/3dtiles)
-- [kitware vtk 3d-tiles-generation](https://www.kitware.com/3d-tiles-generation-using-vtk/)
-- [obj2tiles](https://github.com/OpenDroneMap/Obj2Tiles) — OBJ → 3D Tiles (b3dm) with LoD.
-
-**Gaussian splats**
-- [@sparkjsdev/spark `build-lod`](https://sparkjs.dev/docs/lod-getting-started/) — PLY/SPZ → RAD LoD (we consume `.rad`).
-- [playcanvas/splat-transform](https://github.com/playcanvas/splat-transform) — SOG/PLY/SPZ conversion (we use `readSog`).
-- [WilliamLiu-1997/3DGS-PLY-3DTiles-Converter](https://github.com/WilliamLiu-1997/3DGS-PLY-3DTiles-Converter) — PLY → SPZ-GLB 3D Tiles (our cross-validation reference).
 
 ---
 
@@ -229,10 +207,11 @@ import { convert, detectFormat, supportedFormats } from '3dtiles-convert';
 await convert('path/to/input', 'out/dir', { geScale: 2, onLog: s => process.stdout.write(s) });
 ```
 
-> Today the meta-converter dispatches to each `<fmt>-to-3dtiles/src/index.js` as a child process
-> (non-breaking during migration); as converters move into `packages/<fmt>` and export the uniform
-> `convert()`, the registry flips that entry to an in-process module import — the public API is
-> unchanged. See [ARCHITECTURE.md](ARCHITECTURE.md).
+> Each `<fmt>-to-3dtiles` converter already lives under `packages/<fmt>-to-3dtiles/` and exports a
+> uniform `convert(input, outDir, opts)`; the meta-converter's registry dispatches to it **in-process**
+> (a plain `import`) by default. Child-process spawn is only a fallback for callers passing
+> format-specific CLI flags (`opts.extraArgs`) the in-process options object doesn't model yet — not a
+> sign of an incomplete migration. See [ARCHITECTURE.md](ARCHITECTURE.md).
 
 
 ### `/stream` lazy-loading status (geometry vs hierarchy)
@@ -378,6 +357,9 @@ node packages/i3s-to-3dtiles/src/index.js    <extracted-slpk-dir>  sample-data/o
 - [ ] **Dockerize the server.** A `docker-compose`-runnable `packages/tile-server` (+ viewer), with a
   GitHub Actions workflow building and publishing images to **GHCR** on release, so it can be dropped
   straight into a `docker-compose`/**Portainer** stack behind **Traefik** — no manual Node setup.
+- [ ] **Fumadocs migration.** This README has grown large enough to want a real table-of-contents /
+  docs-site split (ambition vs. live features vs. format specs vs. raw findings) — see the note at the
+  top of this document.
 - [ ] **Port the middleware into 3DTilesRendererJS itself.** Today `packages/tile-server` sits in
   front of 3DTilesRendererJS/CesiumJS as an HTTP layer; the longer-term idea is a 3DTilesRendererJS
   **plugin** (in the spirit of its existing `ImplicitTilingPlugin`/`GaussianSplatPlugin`) that lets the
@@ -388,9 +370,6 @@ node packages/i3s-to-3dtiles/src/index.js    <extracted-slpk-dir>  sample-data/o
   Tastier RAD, Geghard, Tende 3MX, …) as versioned fixtures — either vendored into their own small
   GitHub repo(s) or referenced by stable upstream URL — so CI and new contributors get a reproducible
   test corpus instead of relying on live third-party hosts.
-- [ ] **Fumadocs migration.** This README has grown large enough to want a real table-of-contents /
-  docs-site split (ambition vs. live features vs. format specs vs. raw findings) — see the note at the
-  top of this document.
 
 ---
 
@@ -653,6 +632,37 @@ Composability goal: `source → convert → [centroids] → [gltf: draco/ktx2 de
 > **Note — offline converters conserved.** Per the push/pull split above, the offline `*-to-3dtiles`
 > packages (which walk the format hierarchy top-down and emit the full tree) are deliberately left
 > untouched: they work and are correct. Only the live (pull) path was harmonised.
+
+---
+
+
+### Parallelism (per converter)
+
+Per-tile work — decode → SPZ/GLB encode → gzip → write — is **independent per tile**, so it is
+embarrassingly parallel. The shared `core` (`packages/core`) provides the two tiers: **async gzip**
+(`zlib.gzip` on the libuv threadpool) + `parallelMap` (bounded-concurrency = cores−1, no workers), and
+a `WorkerPool` (`worker_threads`) for decode-heavy formats. **All five operational converters now use
+tier 1** (`parallelMap` + async gzip/`buildPointsGlb`), each verified to produce output equivalent to
+its prior serial version. The `WorkerPool` tier (true multicore decode) is not yet wired — it's the
+remaining headroom for the WASM/CPU-bound decoders.
+
+| Converter | Decode cost (per tile) | Parallel **today**? | Main-thread-bound part | Worker-extractable? |
+|-----------|------------------------|:-------------------:|------------------------|---------------------|
+| **rad** | pure-JS column unpack (interleaved/planar) — CPU-bound | ✅ `parallelMap` + async gzip (byte-identical) | JS decode | ✅ decode per chunk → `WorkerPool` (true multicore) |
+| **sog** | **WebP WASM** decode per chunk | ✅ `parallelMap` + async gzip (content-identical) | WebP decode | ✅ **biggest win** (thousands of tiles); WASM runs in workers as-is |
+| **lcc** | pure-JS `DataView` unpack — fast | ✅ `parallelMap` + async gzip | one ~3 M-splat tile is a serial tail | ✅ worker decode would split that giant tile |
+| **copc** | **LAZ WASM** (`laz-perf`) decode — CPU-bound | ✅ `parallelMap` (byte-identical; ~27% faster) | LAZ decode | ✅ per-node decode → worker pool |
+| **potree** | pure-JS slice (+ **brotli** for 2.0) — many small nodes | ✅ `parallelMap` (byte-identical) | per-node decode + brotli | ✅ many small nodes → ideal worker-pool fan-out |
+| **i3s** (draft) | pure-JS geometry decode | ❌ (draft; serial) | — | ✅ later |
+
+Measured (cores−1 lanes): copc autzen 23.0→16.9 s, potree lion 6.2→5.0 s — modest now (gzip/decode
+still on the main thread via the libuv pool); the `WorkerPool` tier is where multicore decode lands.
+
+**Short answer to "can main-thread work move to workers?"** Yes — for *every* converter. The pure-JS
+decoders (rad, lcc, potree) gain the most (they're single-core-bound today → true multicore via
+`WorkerPool`); the WASM decoders (sog, copc) are already fast per-op but still serialized on the main
+thread, so a worker pool parallelizes them across cores. `core.WorkerPool` is the shared mechanism;
+each converter just needs its tile loop ported (lcc is the worked example).
 
 ---
 
@@ -1439,116 +1449,6 @@ orientation (not scale) still looks off, that conversion is the next thing to ch
 ---
 
 
-## Known blockers & how to overcome them
-
-These are issues localized during a deep cross-check of the converter against the SPZ/SparkJS
-reference and the viewer against both CesiumJS and 3DTilesRendererJS. Each lists the symptom,
-the root cause as far as it could be isolated, and the concrete path to resolve it.
-
-### 1. RAD splats rendered wrong after conversion — RESOLVED: emit SPZ **v2**, not v3
-
-**Symptom.** The same `.rad` file rendered perfectly in SparkJS directly, but once converted to a
-3D-Tiles GLB with an embedded SPZ payload it looked wrong (off scale / falloff / orientation) in
-*both* CesiumJS and 3DTilesRendererJS (whose 3DGS plugin decodes via SparkJS).
-
-**What was verified correct.** Every SPZ field encoder was checked byte-for-byte against SparkJS's
-own `SpzWriter` and the Niantic SPZ reference:
-- **Scale** — `byte = (ln(s) + 10) × 16`; decode yields `ln(s)`, renderer applies `exp` once → `s`. Single exp, correct.
-- **Colour** — SH-DC basis `byte = sh_dc·0.15·255 + 128`. (The "factor 2" you sensed was a *documentation typo* in `spz-format.md`, where the decode divisor read `0.15·128` instead of `0.15·255`; the code was always correct. Now fixed.)
-- **Opacity** — `byte = round(opacity·255)`; the SPZ/KHR sigmoid/inv-sigmoid pair is a net no-op. Correct.
-- **Header / block order** — magic, version, numPoints, shDegree, fractionalBits; planar blocks positions→alpha→rgb→scales→rotations. All correct.
-
-**Root cause — SPZ version. The extension is locked to SPZ v2; we were emitting v3.** Tracing the
-extension's [inception](#3d-gaussian-splatting-extension-lineage) shows
-`KHR_gaussian_splatting_compression_spz_2` is **pinned to SPZ v2** (the `_2` is the SPZ format
-version — a KHR extension cannot float across SPZ versions for IP/portability reasons, so it is
-deliberately fixed). The two SPZ versions differ in the **rotation block**:
-
-| | SPZ v2 (`packQuaternionFirstThree`) | SPZ v3 (`packQuaternionSmallestThree`) |
-|---|---|---|
-| Rotation bytes/splat | **3** — store x,y,z (w≥0 recovered) | 4 — smallest-three packed `uint32` |
-| Per-splat total | 19 bytes | 20 bytes |
-
-We had been writing v3 (4-byte rotations, `version = 3` header) — what SparkJS *writes* by default
-— under the v2 extension. CesiumJS's bundled Niantic decoder reads the v2 layout, so it consumed a
-**4-byte rotation block at a 3-byte stride**, corrupting every rotation (and looking like global
-scale/falloff weirdness). The 3DGS plugin showed the same because the GLB itself was non-conformant.
-
-**The fix (applied).** `rad-to-3dtiles` now emits SPZ **v2**: `SPZ_VERSION = 2`, `encodeQuat` writes
-3 bytes via the first-three scheme (`byte = round(comp·127.5 + 127.5)`, w canonicalised ≥ 0 and
-recovered on decode), and `buildSpzBuffer` uses a 19-byte/splat layout. Verified against the Niantic
-`load-spz.cc` v2 path **and** SparkJS's reader, which version-dispatches and reads the 3-byte branch
-(`comp = byte/127.5 − 1`) — so the same GLB now decodes correctly in CesiumJS *and* the 3DTRJS 3DGS
-plugin. Re-run the converter on your `.rad` files to regenerate v2 tilesets.
-
-> If a future tiler/decoder targets SPZ v3, restore the 4-byte `packQuaternionSmallestThree`
-> encoder (in this file's git history) and set `SPZ_VERSION = 3` — but only under a v3-capable
-> extension, never under `_spz_2`. See the dedicated
-> [3D Gaussian Splatting extension lineage](#3d-gaussian-splatting-extension-lineage) section for
-> the full history and links.
-
-### 2. COPC point clouds look "upside down" in 3DTRJS *Env* controls (fine in *Globe*)
-
-**Symptom.** A georeferenced COPC tileset displays correctly in Globe controls but appears
-rotated/upside-down under EnvironmentControls.
-
-**Root cause — not a converter bug.** `glbWriter.js` stores points as `(East, Up, −North)` so
-that after the renderer's standard glTF→3D-Tiles `RX(+90°)` correction they become the
-right-handed `(East, North, Up)` frame — correct, and confirmed by the flawless Globe render.
-The problem is purely viewer-side: after that correction the data is **Z-up**, but
-`EnvironmentControls` assumes a **Y-up** local ground plane, so a georeferenced tileset viewed
-in Env mode looks tipped over.
-
-**How to overcome it:** use the new **Local orbit** control mode (added to the 3DTRJS toolbar),
-which runs `ReorientationPlugin` to recenter the tileset at the origin with `up = +Y` and then a
-plain Three.js `OrbitControls`. That presents any tileset — ECEF or local — in a clean upright
-orbit, independent of the ECEF root transform, and was also added to verify that the
-world→local matrix concatenation is not what limits fine-detail streaming.
-
----
-
-
-## Missing features & unsupported code-paths
-
-A consolidated, honest list of what is **not** handled (and where it would go). Items marked
-**fast-fail** error out with a clear message rather than producing bad output.
-
-### Format decode coverage
-- **Spherical harmonics (SH)** — every splat converter emits **DC only**. Sources carry more: RAD `sh1`,
-  LCC `Shcoef.bin` (64 B/splat, packed-11, degree-3), SOG higher SH bands. View-dependent color is dropped.
-- **Plain LAS/LAZ** (copc converter, *untiled*) — **flat tiling only** (no native LoD); single-tile path
-  tested, **multi-tile chunking + a genuine non-COPC `.laz` end-to-end are UNTESTED**; whole-file LAZ decode
-  holds the full buffer in RAM (~filesize); only LAS **1.2 / 1.4** headers (the `copc` lib's limit). (For a
-  *tiled* LAZ point cloud, use a Potree LAZ octree — supported, see below.)
-- **I3S** (draft): **Draco-only** geometry (gated), **LEPCC/PCSL** point clouds (gated — Autzen sample hits
-  this), textures/materials (dropped — geometry only), per-feature attributes (dropped), legacy per-node
-  `3dNodeIndexDocument` index (unsupported), **Point** (instance) & **Building** (composite) layers
-  (unsupported), **projected/vertical CRS** (only WGS84-geographic vertex placement is implemented), and
-  per-vertex **normals are left in the source frame** (not re-oriented to ECEF — affects lit shading only).
-- **Nexus** — no converter (doc-referenced only; mesh, niche).
-- *(Resolved this round: Potree 2.0 BROTLI Morton decode, Potree 1.x per-node origin, Potree 1.4
-  inline-hierarchy + tiled LAZ, RAD spatial geometricError, I3S geographic vertex placement.)*
-
-### Parallelism & performance
-- **`WorkerPool` (worker_threads) tier not wired** — all converters use only the async-gzip + `parallelMap`
-  tier (main-thread decode on the libuv pool). True multicore decode (the WASM/CPU-bound decoders) is unused headroom.
-- **RAD `geometricError` undershoots** — featureSize-based GE is ~4× lower than a spatial (tile-diagonal)
-  basis (Elevator: ours 1.22 vs William's 4.66), so renderers under-refine → coarse/"missing" tiles at
-  distance. Workaround `--ge-scale ~4`; no spatial-GE option yet.
-
-### Architecture & runtime
-- **Browser runtime not built** — `fs` / `zlib` / `worker_threads` are Node-only; core's planned `fs-io`
-  abstraction + `CompressionStream`/WASM-brotli paths don't exist yet (decoders are mostly portable; see Runtime table).
-- **Converters not yet moved under `packages/<fmt>/`** — they remain top-level `*-to-3dtiles/` dirs; the
-  meta-converter dispatches via **child process**, not an in-process module import (migration pending).
-- **Meta-converter needs `npm install` first** (to link the `3dtiles-convert-core` workspace symlink); without
-  it the bare import fails with `ERR_MODULE_NOT_FOUND`.
-- **Output not geo-referenced** for Potree & plain-LAS/COPC-without-CRS (local origin; needs a root ENU transform).
-- **`.3tz` packaging / tileset upgrades** are not built in. Use Cesium's
-  [3d-tiles-tools](https://github.com/CesiumGS/3d-tiles-tools) (CLI + JS API) — `npx 3d-tiles-tools createTileset`,
-  `… combine`, `… upgrade` (1.0→1.1), and `… convert tileset.json output.3tz` — which handle `.3tz` zip
-  packaging and tileset upgrades cleanly. (One COPC `.zip` exists in `sample-data/` as an ad-hoc example.)
-
 
 ## Vision: towards a TiTiler for 3D — **now live for EVERY SUPPORTED 3D-TILED FORMAT**
 
@@ -1557,135 +1457,6 @@ formats and streams OGC 3D Tiles 1.1 **on demand** — transcribing the source o
 3D Tiles tree and converting raw node geometry to glTF/GLB, served over HTTP Range so nothing is
 re-encoded or re-sorted. Like TiTiler for COG: zero re-tiling, zero copy.
 
-### Two modes (`packages/tile-server`, one HTTP server, CORS open)
-
-| Mode | Endpoint | What it does | Formats |
-|---|---|---|---|
-| **Stream** (true online) | **`/stream`** (+ `/copc`, `/potree`) | Range-read the hierarchy → tileset; **one byte range per tile** → GLB. Nothing pre-converted or fully downloaded. | per-format range adapters: **copc, potree, sog, lcc** |
-| **Preprocess** (cached) | **`/convert`** | Convert the **whole** dataset once on first hit (cached on disk), then serve static. | **every** format the meta-converter supports |
-| **Package serve** | **`/3dtiles-self-contained`** | Serve `.3tz` (ZIP) or `.3dtiles` (SQLite) packages in-place with random access. Supports local paths and remote URLs. | `.3tz` local only; `.3dtiles` local + remote via sql.js (pure WASM) |
-
-```sh
-npm run serve:tiles            # alias: npm run serve:live  → http://localhost:3001
-#   GET /stream/tileset.json?url=<SRC>[&format=copc|potree|sog|lcc]  ← unified streaming dispatcher
-#   GET /convert/tileset.json?url=<SRC>[&format=<fmt>][&centroids=1] ← preprocess+cache, any format
-#   GET /package/tileset.json?url=<local/path.3tz>                   ← serve .3tz/.3dtiles in-place
-```
-
-`/stream` is the single front-door the user envisioned: it detects the format and delegates to that
-format's range adapter (the range logic is necessarily format-specific — a COPC LAZ chunk vs a Potree
-octree-node byte range — but the entry point is one URL). For a format without an adapter yet it
-returns **501** pointing you at `/convert`. `/copc` and `/potree` remain as the direct adapters.
-
-### `tile-server` — live COPC → 3D Tiles (implemented ✅)
-
-`packages/tile-server` is a working middleware (the TiTiler `/cog/tiles/...` analogue):
-
-```sh
-npm run serve:tiles      # → http://localhost:3001  (CORS open)
-# then, in viewer.html, the pill "🛰 COPC→3DT (live middleware)" loads:
-#   http://localhost:3001/copc/tileset.json?url=<any COPC url>
-```
-
-- `GET /copc/tileset.json?url=<COPC>` — range-reads the COPC header + hierarchy, returns a 3D Tiles 1.1
-  tileset (explicit tree, `ADD` refine, one ENU→ECEF root transform from the COPC WKT CRS via proj4).
-- `GET /copc/tile/<D-X-Y-Z>.glb?url=<COPC>` — range-reads **just that octree node**, decodes its points,
-  returns a POINTS GLB on the fly (`core.buildPointsGlb`).
-
-The COPC octree maps ~1:1 onto the 3D Tiles tree, so no re-tiling. Verified end-to-end: a browser
-viewer (CesiumJS) renders Autzen geo-referenced over Oregon, streamed live from a COPC URL — the
-viewer never sees the COPC, only 3D Tiles. Works with any 3D-Tiles client (CesiumJS, 3DTilesRendererJS,
-cesium-for-unreal). Other formats (RAD/SPZ, Potree, EPT) can be added behind the same endpoint shape.
-
-Formats in scope: **COPC (live ✅)**, RAD/SPZ (3DGS), EPT/Entwine (LiDAR), Potree (LiDAR), 3DTILES (passthrough).
-
-### `/potree` — live **Potree 2.0** → 3D Tiles (true range-streaming ✅)
-
-The second format with a real **range adapter** (the COPC model generalised). Nothing is pre-converted
-or fully downloaded: `metadata.json` (tiny) + `hierarchy.bin` are fetched once to emit the tileset
-tree; each tile request HTTP-**range**-reads just that node's contiguous block from `octree.bin`,
-decodes it (DEFAULT or BROTLI), and returns a glTF POINTS GLB. Potree's octree → 3D Tiles tree ~1:1.
-
-```sh
-#   GET /potree/tileset.json?url=<metadata.json URL>     → 3D Tiles 1.1 tileset (explicit, ADD refine)
-#   GET /potree/tile/<name>.glb?url=<metadata.json URL>  → that node's points (one octree.bin range read)
-```
-
-- `url` points at the dataset's `metadata.json`; `hierarchy.bin` / `octree.bin` resolve as siblings.
-- The source host must serve **HTTP 206** range responses (potree.org, S3, most static hosts do).
-- Geo-referenced if `metadata.json` carries a CRS (`projection`/`crs`/WKT, via proj4); else local origin.
-- Potree **1.x** (cloud.js + per-node files) isn't range-served — use `/convert?format=potree`.
-- Verified end-to-end against **potree.org** (remote, internet) and local data. The decode is the same
-  authoritative code the offline `potree-to-3dtiles` converter uses (shared `potree2.js`).
-
-viewer.html pills: **⚡ Potree→3DT (stream, local)** and **⚡ Potree→3DT (stream, potree.org)**.
-
-#### Streaming roadmap — per-format range adapters
-
-A format can be **streamed** only if it persists **per-tile spatial bounds** (so the tileset tree is
-emitted without decoding any geometry). That's the dividing line:
-
-| Format | Persists tile bounds? | Status |
-|---|---|---|
-| **COPC** | ✅ octree cube → derived boxes; node = LAZ chunk byte range | **live `/copc` + `/stream`** ✅ |
-| **Potree 2.0** | ✅ octree boxes; node = `octree.bin` byte range | **live `/potree` + `/stream`** ✅ |
-| **Potree 1.x** | ✅ octree boxes (.hrc / inline); node = one `.bin`/`.laz` file fetch | **live `/potree` + `/stream`** ✅ |
-| **streamed-SOG** | ✅ `lod-meta.json` tree carries per-node bounds + leaf `[file,offset,count]` runs | **live `/sog` + `/stream`** ✅ (fetch+decode the chunk WebP per leaf) |
-| **LCC** | ✅ grid persisted (`cellLengthX/Y` + index cell x16/y16) → X/Y boxes, Z from scene bounds; unit LOD = `data.bin` byte range | **live `/lcc` + `/stream`** ✅ |
-| **RAD** | ❌ chunk bounds NOT persisted, and **chunks aren't spatial tiles** (a chunk mixes LoD-tree levels — confirmed by the Spark team, see RAD notes) | **not streamed** — use `/convert` |
-| **I3S (REST)** | 🟡 REST node-page tree; multi-resource | larger effort — `/convert` for `.slpk` |
-
-Why RAD is excluded: building a 3D-Tiles tree needs spatial tile bounds, but RAD persists neither
-tile bounds nor a spatial tile partition — its "chunks" are 64K-splat **streaming** groups ordered by
-featureSize, spanning multiple LoD-tree levels. So there's nothing to range into as a "tile" without a
-decode pass. `/convert` (preprocess+cache) already serves RAD live; see
-[`docs-references/rad-format-notes.md`](docs-references/rad-format-notes.md) for the full rationale.
-
-Everything not on a range adapter is still fully renderable today via `/convert` (below).
-
-### `/geosplats` — live **MapTiler GeoSplats** → 3D Tiles (implemented ✅, reverse-engineered)
-
-[MapTiler GeoSplats](https://www.maptiler.com/geosplats/) is a georeferenced HLOD Gaussian-splat
-format with no published byte-spec — everything below was decoded from a real `model.json` +
-`metadata.json` pair and the SDK bundle (`@maptiler/geosplats`, `maptiler-geosplats.mjs`). Full
-format notes: [`docs-references/maptiler-geosplats.md`](docs-references/maptiler-geosplats.md).
-
-```sh
-#   GET /geosplats/tileset.json?url=<model.json URL>[&lod=1..8]                        → HLOD tileset
-#   GET /geosplats/tile.glb?url=<model.json>&m=<submodel#>&grid=<1|8|64>&oct=<n>&lod=<n> → one octant, KHR_gaussian_splatting GLB
-```
-
-- **Data primitive = SOGS** — same primitive our own `writeSog`/`readSog` (`@playcanvas/splat-transform`)
-  already speak, so an octant's `means_l/u`, `quats`, `scales`, `sh0` WebPs decode straight to a
-  `DataTable` and re-encode as an `_spz_2`-compressed glTF splat tile.
-- **HLOD** — each sub-model's `metadata.json` carries a `voxel_grids` octree (`grid_1→8→64`, 8
-  progressive LODs per cell); mapped to a 3D Tiles `REPLACE` octree by spatial containment
-  (child-centre-in-parent-bbox, since the octant-id bit layout isn't trustworthy). `geometricError` =
-  octant diagonal.
-- **Origin-locked API keys** — MapTiler's demo keys only work from `maptiler.com`; the upstream octant
-  fetch happens server-side (`Referer: https://www.maptiler.com/`) so the browser only ever talks to
-  our middleware.
-- Verified end-to-end in both **CesiumJS** and **3DTRJS** (viewer.html "✨ GeoSplats" pills).
-
-**Georeferencing, reverse-engineered from the SDK** (`global_position` in `model.json` → a 3D Tiles
-root `transform`):
-
-| What | Formula | Notes |
-|---|---|---|
-| **Scale** | `S = model_scale · 512·ZOOM_TO_METER[14] · cos(lat)` | `512·ZOOM_TO_METER[14] = 2445.98` is the **equatorial** web-Mercator tile metre; Mercator stretches by `1/cos(lat)` off the equator, so real metres = mercator-metres·`cos(lat)`. Missing the `cos(lat)` term overscales by that same factor (a model at lat 55° came out ~1.7× too big; at lat 26°, ~1.1×) — this is what "latitude correction" fixes. `&scale=<f>` overrides. |
-| **Orientation** | frame `enu2` = `[East, −North, −Up]` | Cesium/3d-tiles-renderer both apply the glTF Y-up→Z-up correction to tile content before the root transform runs; content's "up" ends up at −Z, so a naive ENU `[East,North,Up]` renders flat but **upside-down**. `enu2` is a 180° flip about East that rights it (a proper rotation, not a mirror). `&frame=enu\|enu2\|eun\|e-un\|e-nu` sweeps other candidates. |
-| **Heading** | `yaw = offset.y_rot − 180°` | The per-model `global_position.offset.y_rot` is a compass heading authored in MapLibre's frame; in the `enu2` frame the aligning yaw is `y_rot − 180`. Rotates the ENU (E,N) basis about Up. `&yaw=<deg>` adds a fine-tune on top. |
-| **Altitude** | default **0**, not `global_position.alt` | `alt` is expressed in MapTiler's `model_scale`-normalised MapLibre frame, not our 1:1 ellipsoidal metres — used raw it buries the scene ~300 m underground. 0 (≈ ellipsoid/ground for near-sea-level captures) is the sane default; `&alt=<m>` overrides. |
-
-**Known residual: ~2–4% under-scale on some models, even after the `cos(lat)` fix.** The scale
-formula above is the *inverse of MapTiler's own mercator-tile normalisation* — it recovers "how many
-real metres the model's `model_scale`-normalised units represent at this latitude", not an independent
-ground-truth measurement. Any small mismatch between MapTiler's own scene-capture georeferencing and
-true surveyed scale (which the whole `global_position` block ultimately derives from) carries straight
-through our formula. In other words: this is very likely accuracy in **MapTiler's own source georef**
-for that particular capture, not an error in the scale derivation — the derivation is dimensionally
-exact and matches two independent models to within a few percent already. `&scale=<f>` is the pragmatic
-per-model pin if a specific scene needs it exact.
 
 ### `/convert` — live **any-format** → 3D Tiles (implemented ✅)
 
@@ -1873,10 +1644,248 @@ decode-only; `copc.js` is read-only). Realistic paths: compile a Rust crate
 with `laz-rs`) to **WASM**, or shell out to [PDAL `writers.copc`](https://pdal.io/en/stable/stages/writers.copc.html)
 / [copc-lib](https://github.com/RockRobotic/copc-lib). Deferred until a JS/WASM LAZ writer is wired.
 
+
+# Appendix: Findings
+
+## Known blockers & how to overcome them
+
+These are issues localized during a deep cross-check of the converter against the SPZ/SparkJS
+reference and the viewer against both CesiumJS and 3DTilesRendererJS. Each lists the symptom,
+the root cause as far as it could be isolated, and the concrete path to resolve it.
+
+### 1. RAD splats rendered wrong after conversion — RESOLVED: emit SPZ **v2**, not v3
+
+**Symptom.** The same `.rad` file rendered perfectly in SparkJS directly, but once converted to a
+3D-Tiles GLB with an embedded SPZ payload it looked wrong (off scale / falloff / orientation) in
+*both* CesiumJS and 3DTilesRendererJS (whose 3DGS plugin decodes via SparkJS).
+
+**What was verified correct.** Every SPZ field encoder was checked byte-for-byte against SparkJS's
+own `SpzWriter` and the Niantic SPZ reference:
+- **Scale** — `byte = (ln(s) + 10) × 16`; decode yields `ln(s)`, renderer applies `exp` once → `s`. Single exp, correct.
+- **Colour** — SH-DC basis `byte = sh_dc·0.15·255 + 128`. (The "factor 2" you sensed was a *documentation typo* in `spz-format.md`, where the decode divisor read `0.15·128` instead of `0.15·255`; the code was always correct. Now fixed.)
+- **Opacity** — `byte = round(opacity·255)`; the SPZ/KHR sigmoid/inv-sigmoid pair is a net no-op. Correct.
+- **Header / block order** — magic, version, numPoints, shDegree, fractionalBits; planar blocks positions→alpha→rgb→scales→rotations. All correct.
+
+**Root cause — SPZ version. The extension is locked to SPZ v2; we were emitting v3.** Tracing the
+extension's [inception](#3d-gaussian-splatting-extension-lineage) shows
+`KHR_gaussian_splatting_compression_spz_2` is **pinned to SPZ v2** (the `_2` is the SPZ format
+version — a KHR extension cannot float across SPZ versions for IP/portability reasons, so it is
+deliberately fixed). The two SPZ versions differ in the **rotation block**:
+
+| | SPZ v2 (`packQuaternionFirstThree`) | SPZ v3 (`packQuaternionSmallestThree`) |
+|---|---|---|
+| Rotation bytes/splat | **3** — store x,y,z (w≥0 recovered) | 4 — smallest-three packed `uint32` |
+| Per-splat total | 19 bytes | 20 bytes |
+
+We had been writing v3 (4-byte rotations, `version = 3` header) — what SparkJS *writes* by default
+— under the v2 extension. CesiumJS's bundled Niantic decoder reads the v2 layout, so it consumed a
+**4-byte rotation block at a 3-byte stride**, corrupting every rotation (and looking like global
+scale/falloff weirdness). The 3DGS plugin showed the same because the GLB itself was non-conformant.
+
+**The fix (applied).** `rad-to-3dtiles` now emits SPZ **v2**: `SPZ_VERSION = 2`, `encodeQuat` writes
+3 bytes via the first-three scheme (`byte = round(comp·127.5 + 127.5)`, w canonicalised ≥ 0 and
+recovered on decode), and `buildSpzBuffer` uses a 19-byte/splat layout. Verified against the Niantic
+`load-spz.cc` v2 path **and** SparkJS's reader, which version-dispatches and reads the 3-byte branch
+(`comp = byte/127.5 − 1`) — so the same GLB now decodes correctly in CesiumJS *and* the 3DTRJS 3DGS
+plugin. Re-run the converter on your `.rad` files to regenerate v2 tilesets.
+
+> If a future tiler/decoder targets SPZ v3, restore the 4-byte `packQuaternionSmallestThree`
+> encoder (in this file's git history) and set `SPZ_VERSION = 3` — but only under a v3-capable
+> extension, never under `_spz_2`. See the dedicated
+> [3D Gaussian Splatting extension lineage](#3d-gaussian-splatting-extension-lineage) section for
+> the full history and links.
+
+### 2. COPC point clouds look "upside down" in 3DTRJS *Env* controls (fine in *Globe*)
+
+**Symptom.** A georeferenced COPC tileset displays correctly in Globe controls but appears
+rotated/upside-down under EnvironmentControls.
+
+**Root cause — not a converter bug.** `glbWriter.js` stores points as `(East, Up, −North)` so
+that after the renderer's standard glTF→3D-Tiles `RX(+90°)` correction they become the
+right-handed `(East, North, Up)` frame — correct, and confirmed by the flawless Globe render.
+The problem is purely viewer-side: after that correction the data is **Z-up**, but
+`EnvironmentControls` assumes a **Y-up** local ground plane, so a georeferenced tileset viewed
+in Env mode looks tipped over.
+
+**How to overcome it:** use the new **Local orbit** control mode (added to the 3DTRJS toolbar),
+which runs `ReorientationPlugin` to recenter the tileset at the origin with `up = +Y` and then a
+plain Three.js `OrbitControls`. That presents any tileset — ECEF or local — in a clean upright
+orbit, independent of the ECEF root transform, and was also added to verify that the
+world→local matrix concatenation is not what limits fine-detail streaming.
+
 ---
 
 
-## Test Results (run Jun 17 2026)
+## Missing features & unsupported code-paths
+
+A consolidated, honest list of what is **not** handled (and where it would go). Items marked
+**fast-fail** error out with a clear message rather than producing bad output.
+
+### Format decode coverage
+- **Spherical harmonics (SH)** — every splat converter emits **DC only**. Sources carry more: RAD `sh1`,
+  LCC `Shcoef.bin` (64 B/splat, packed-11, degree-3), SOG higher SH bands. View-dependent color is dropped.
+- **I3S** (draft): **Draco-only** geometry (gated), **LEPCC/PCSL** point clouds (gated — Autzen sample hits
+  this), textures/materials (dropped — geometry only), per-feature attributes (dropped), legacy per-node
+  `3dNodeIndexDocument` index (unsupported), **Point** (instance) & **Building** (composite) layers
+  (unsupported), **projected/vertical CRS** (only WGS84-geographic vertex placement is implemented), and
+  per-vertex **normals are left in the source frame** (not re-oriented to ECEF — affects lit shading only).
+
+### Parallelism & performance
+- **`WorkerPool` (worker_threads) tier not wired** — all converters use only the async-gzip + `parallelMap`
+  tier (main-thread decode on the libuv pool). True multicore decode (the WASM/CPU-bound decoders) is unused headroom.
+- **RAD `geometricError` undershoots** — featureSize-based GE is ~4× lower than a spatial (tile-diagonal)
+  basis (Elevator: ours 1.22 vs William's 4.66), so renderers under-refine → coarse/"missing" tiles at
+  distance. Workaround `--ge-scale ~4`; no spatial-GE option yet.
+
+### Architecture & runtime
+- **Browser runtime not built** — `fs` / `zlib` / `worker_threads` are Node-only; core's planned `fs-io`
+  abstraction + `CompressionStream`/WASM-brotli paths don't exist yet (decoders are mostly portable; see Runtime table).
+- **`.3tz` packaging / tileset upgrades** are not built in. Use Cesium's
+  [3d-tiles-tools](https://github.com/CesiumGS/3d-tiles-tools) (CLI + JS API) — `npx 3d-tiles-tools createTileset`,
+  `… combine`, `… upgrade` (1.0→1.1), and `… convert tileset.json output.3tz` — which handle `.3tz` zip
+  packaging and tileset upgrades cleanly. (One COPC `.zip` exists in `sample-data/` as an ad-hoc example.)
+
+
+### Two modes (`packages/tile-server`, one HTTP server, CORS open)
+
+| Mode | Endpoint | What it does | Formats |
+|---|---|---|---|
+| **Stream** (true online) | **`/stream`** (+ `/copc`, `/potree`) | Range-read the hierarchy → tileset; **one byte range per tile** → GLB. Nothing pre-converted or fully downloaded. | per-format range adapters: **copc, potree, sog, lcc** |
+| **Preprocess** (cached) | **`/convert`** | Convert the **whole** dataset once on first hit (cached on disk), then serve static. | **every** format the meta-converter supports |
+| **Package serve** | **`/3dtiles-self-contained`** | Serve `.3tz` (ZIP) or `.3dtiles` (SQLite) packages in-place with random access. Supports local paths and remote URLs. | `.3tz` local only; `.3dtiles` local + remote via sql.js (pure WASM) |
+
+```sh
+npm run serve:tiles            # alias: npm run serve:live  → http://localhost:3001
+#   GET /stream/tileset.json?url=<SRC>[&format=copc|potree|sog|lcc]  ← unified streaming dispatcher
+#   GET /convert/tileset.json?url=<SRC>[&format=<fmt>][&centroids=1] ← preprocess+cache, any format
+#   GET /package/tileset.json?url=<local/path.3tz>                   ← serve .3tz/.3dtiles in-place
+```
+
+`/stream` is the single front-door the user envisioned: it detects the format and delegates to that
+format's range adapter (the range logic is necessarily format-specific — a COPC LAZ chunk vs a Potree
+octree-node byte range — but the entry point is one URL). For a format without an adapter yet it
+returns **501** pointing you at `/convert`. `/copc` and `/potree` remain as the direct adapters.
+
+### `tile-server` — live COPC → 3D Tiles (implemented ✅)
+
+`packages/tile-server` is a working middleware (the TiTiler `/cog/tiles/...` analogue):
+
+```sh
+npm run serve:tiles      # → http://localhost:3001  (CORS open)
+# then, in viewer.html, the pill "🛰 COPC→3DT (live middleware)" loads:
+#   http://localhost:3001/copc/tileset.json?url=<any COPC url>
+```
+
+- `GET /copc/tileset.json?url=<COPC>` — range-reads the COPC header + hierarchy, returns a 3D Tiles 1.1
+  tileset (explicit tree, `ADD` refine, one ENU→ECEF root transform from the COPC WKT CRS via proj4).
+- `GET /copc/tile/<D-X-Y-Z>.glb?url=<COPC>` — range-reads **just that octree node**, decodes its points,
+  returns a POINTS GLB on the fly (`core.buildPointsGlb`).
+
+The COPC octree maps ~1:1 onto the 3D Tiles tree, so no re-tiling. Verified end-to-end: a browser
+viewer (CesiumJS) renders Autzen geo-referenced over Oregon, streamed live from a COPC URL — the
+viewer never sees the COPC, only 3D Tiles. Works with any 3D-Tiles client (CesiumJS, 3DTilesRendererJS,
+cesium-for-unreal). Other formats (RAD/SPZ, Potree, EPT) can be added behind the same endpoint shape.
+
+Formats in scope: **COPC (live ✅)**, RAD/SPZ (3DGS), EPT/Entwine (LiDAR), Potree (LiDAR), 3DTILES (passthrough).
+
+### `/potree` — live **Potree 2.0** → 3D Tiles (true range-streaming ✅)
+
+The second format with a real **range adapter** (the COPC model generalised). Nothing is pre-converted
+or fully downloaded: `metadata.json` (tiny) + `hierarchy.bin` are fetched once to emit the tileset
+tree; each tile request HTTP-**range**-reads just that node's contiguous block from `octree.bin`,
+decodes it (DEFAULT or BROTLI), and returns a glTF POINTS GLB. Potree's octree → 3D Tiles tree ~1:1.
+
+```sh
+#   GET /potree/tileset.json?url=<metadata.json URL>[&tiling=implicit|explicit]  → 3D Tiles 1.1 tileset (ADD refine; implicit by default)
+#   GET /potree/tile/<name>.glb?url=<metadata.json URL>                         → that node's points (one octree.bin range read)
+```
+
+- `url` points at the dataset's `metadata.json` (2.0) or `cloud.js` (1.x); `hierarchy.bin` / `octree.bin`
+  (2.0) or `.hrc` chunks (1.x) resolve as siblings.
+- **Implicit tiling by default** (a 3D Tiles 1.1 tree whose subtrees are generated on the fly from the
+  live availability set) — `&tiling=explicit` emits an explicit tree instead, for clients without
+  implicit-tiling support.
+- The source host must serve **HTTP 206** range responses (potree.org, S3, most static hosts do).
+- Geo-referenced if `metadata.json` carries a CRS (`projection`/`crs`/WKT, via proj4); else local origin.
+- **Potree 1.x** (`cloud.js` + `.hrc`) is range/lazy-served too: `.hrc` chunks are fetched only for the
+  octree region actually being requested (no full-tree walk), and folded into the same implicit-subtree
+  machinery as 2.0. (Potree 1.4's older *inline* `cloud.js` — the whole tiny hierarchy embedded in one
+  file — is read eagerly since there's nothing to range into.)
+- Verified end-to-end against **potree.org** (remote, internet) and local data. The decode is the same
+  authoritative code the offline `potree-to-3dtiles` converter uses (shared `potree2.js`).
+
+viewer.html pills: **⚡ Potree→3DT (stream, local)** and **⚡ Potree→3DT (stream, potree.org)**.
+
+#### Streaming roadmap — per-format range adapters
+
+A format can be **streamed** only if it persists **per-tile spatial bounds** (so the tileset tree is
+emitted without decoding any geometry). That's the dividing line:
+
+| Format | Persists tile bounds? | Status |
+|---|---|---|
+| **COPC** | ✅ octree cube → derived boxes; node = LAZ chunk byte range | **live `/copc` + `/stream`** ✅ |
+| **Potree 2.0** | ✅ octree boxes; node = `octree.bin` byte range | **live `/potree` + `/stream`** ✅ |
+| **Potree 1.x** | ✅ octree boxes (.hrc / inline); node = one `.bin`/`.laz` file fetch | **live `/potree` + `/stream`** ✅ |
+| **streamed-SOG** | ✅ `lod-meta.json` tree carries per-node bounds + leaf `[file,offset,count]` runs | **live `/sog` + `/stream`** ✅ (fetch+decode the chunk WebP per leaf) |
+| **LCC** | ✅ grid persisted (`cellLengthX/Y` + index cell x16/y16) → X/Y boxes, Z from scene bounds; unit LOD = `data.bin` byte range | **live `/lcc` + `/stream`** ✅ |
+| **RAD** | ❌ chunk bounds NOT persisted, and **chunks aren't spatial tiles** (a chunk mixes LoD-tree levels — confirmed by the Spark team, see RAD notes) | **not streamed** — use `/convert` |
+| **I3S (REST)** | 🟡 REST node-page tree; multi-resource | larger effort — `/convert` for `.slpk` |
+
+Why RAD is excluded: building a 3D-Tiles tree needs spatial tile bounds, but RAD persists neither
+tile bounds nor a spatial tile partition — its "chunks" are 64K-splat **streaming** groups ordered by
+featureSize, spanning multiple LoD-tree levels. So there's nothing to range into as a "tile" without a
+decode pass. `/convert` (preprocess+cache) already serves RAD live; see
+[`docs-references/rad-format-notes.md`](docs-references/rad-format-notes.md) for the full rationale.
+
+Everything not on a range adapter is still fully renderable today via `/convert` (below).
+
+### `/geosplats` — live **MapTiler GeoSplats** → 3D Tiles (implemented ✅, reverse-engineered)
+
+[MapTiler GeoSplats](https://www.maptiler.com/geosplats/) is a georeferenced HLOD Gaussian-splat
+format with no published byte-spec — everything below was decoded from a real `model.json` +
+`metadata.json` pair and the SDK bundle (`@maptiler/geosplats`, `maptiler-geosplats.mjs`). Full
+format notes: [`docs-references/maptiler-geosplats.md`](docs-references/maptiler-geosplats.md).
+
+```sh
+#   GET /geosplats/tileset.json?url=<model.json URL>[&lod=1..8]                        → HLOD tileset
+#   GET /geosplats/tile.glb?url=<model.json>&m=<submodel#>&grid=<1|8|64>&oct=<n>&lod=<n> → one octant, KHR_gaussian_splatting GLB
+```
+
+- **Data primitive = SOGS** — same primitive our own `writeSog`/`readSog` (`@playcanvas/splat-transform`)
+  already speak, so an octant's `means_l/u`, `quats`, `scales`, `sh0` WebPs decode straight to a
+  `DataTable` and re-encode as an `_spz_2`-compressed glTF splat tile.
+- **HLOD** — each sub-model's `metadata.json` carries a `voxel_grids` octree (`grid_1→8→64`, 8
+  progressive LODs per cell); mapped to a 3D Tiles `REPLACE` octree by spatial containment
+  (child-centre-in-parent-bbox, since the octant-id bit layout isn't trustworthy). `geometricError` =
+  octant diagonal.
+- **Origin-locked API keys** — MapTiler's demo keys only work from `maptiler.com`; the upstream octant
+  fetch happens server-side (`Referer: https://www.maptiler.com/`) so the browser only ever talks to
+  our middleware.
+- Verified end-to-end in both **CesiumJS** and **3DTRJS** (viewer.html "✨ GeoSplats" pills).
+
+**Georeferencing, reverse-engineered from the SDK** (`global_position` in `model.json` → a 3D Tiles
+root `transform`):
+
+| What | Formula | Notes |
+|---|---|---|
+| **Scale** | `S = model_scale · 512·ZOOM_TO_METER[14] · cos(lat)` | `512·ZOOM_TO_METER[14] = 2445.98` is the **equatorial** web-Mercator tile metre; Mercator stretches by `1/cos(lat)` off the equator, so real metres = mercator-metres·`cos(lat)`. Missing the `cos(lat)` term overscales by that same factor (a model at lat 55° came out ~1.7× too big; at lat 26°, ~1.1×) — this is what "latitude correction" fixes. `&scale=<f>` overrides. |
+| **Orientation** | frame `enu2` = `[East, −North, −Up]` | Cesium/3d-tiles-renderer both apply the glTF Y-up→Z-up correction to tile content before the root transform runs; content's "up" ends up at −Z, so a naive ENU `[East,North,Up]` renders flat but **upside-down**. `enu2` is a 180° flip about East that rights it (a proper rotation, not a mirror). `&frame=enu\|enu2\|eun\|e-un\|e-nu` sweeps other candidates. |
+| **Heading** | `yaw = offset.y_rot − 180°` | The per-model `global_position.offset.y_rot` is a compass heading authored in MapLibre's frame; in the `enu2` frame the aligning yaw is `y_rot − 180`. Rotates the ENU (E,N) basis about Up. `&yaw=<deg>` adds a fine-tune on top. |
+| **Altitude** | default **0**, not `global_position.alt` | `alt` is expressed in MapTiler's `model_scale`-normalised MapLibre frame, not our 1:1 ellipsoidal metres — used raw it buries the scene ~300 m underground. 0 (≈ ellipsoid/ground for near-sea-level captures) is the sane default; `&alt=<m>` overrides. |
+
+**Known residual: ~2–4% under-scale on some models, even after the `cos(lat)` fix.** The scale
+formula above is the *inverse of MapTiler's own mercator-tile normalisation* — it recovers "how many
+real metres the model's `model_scale`-normalised units represent at this latitude", not an independent
+ground-truth measurement. Any small mismatch between MapTiler's own scene-capture georeferencing and
+true surveyed scale (which the whole `global_position` block ultimately derives from) carries straight
+through our formula. In other words: this is very likely accuracy in **MapTiler's own source georef**
+for that particular capture, not an error in the scale derivation — the derivation is dimensionally
+exact and matches two independent models to within a few percent already. `&scale=<f>` is the pragmatic
+per-model pin if a specific scene needs it exact.
+
+---
+
+## Appendix: Test Results (run Jun 17 2026)
 
 ### COPC — Autzen Stadium, Oregon (10.6M pts)
 
@@ -1981,4 +1990,4 @@ flowchart TD
 ```
 </details>
 
----
+---
