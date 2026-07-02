@@ -406,9 +406,13 @@ splat or generic point/mesh format worth adding an adapter for — none surfaced
 independently researched (a web-search-depth pass, not a spec audit like the sources in
 `docs-references/`), so treat as a starting point, not a verdict:
 - **Niantic Scaniverse** — exports single-file GLB/USDZ/OBJ/PLY splat or mesh scans; no multi-file tiled
-  hierarchy format found.
-- **ESRI tiled data** beyond I3S (already supported) — didn't find another ESRI *tiled* format distinct
-  from I3S worth a separate adapter.
+  hierarchy format found *today*. Worth revisiting: SPZ's own roadmap (see "SPZ v4/v5 roadmap" below)
+  states v5 aims to add **spatial chunking and LOD** — Scaniverse is SPZ's reference exporter, so a
+  future Scaniverse export could plausibly become tiled once v5 ships.
+- **ESRI tiled data** beyond I3S (already supported) — didn't find another ESRI *tiled point-cloud/mesh*
+  format distinct from I3S worth a separate adapter. Note ESRI's **3D Tiles Server** product (distinct
+  from I3S) *does* publish Gaussian-splat 3D Tiles directly — see the I3S section above; that's not a
+  new format to adapt, it's already OGC 3D Tiles.
 - **Bentley/other Bentley services** — ContextCapture emits **3MX** (already supported); didn't find a
   second Bentley tiled format beyond that and standard **Cesium 3D Tiles** (already the target format).
 - **Autodesk ReCap `.rcp`/`.rcs`** — already tracked as blocked (see the point-cloud adapter tiers
@@ -418,6 +422,23 @@ independently researched (a web-search-depth pass, not a spec audit like the sou
   *tiled* multi-LOD format surfaced for any of the three.
 - **Gauzilla Pro** — a Gaussian-splat viewer/tool, not a distinct tiled storage format of its own (reads/
   writes standard PLY/SPZ-family splat files as far as could be found).
+- **DJI Terra / DJI Reality** — DJI's photogrammetry/splat reconstruction software; ships a web viewer
+  at `3dviewer.dji.com` (the specific link checked was **stale/unreachable**, so this couldn't be
+  confirmed directly). Plausibly a *tiled HLOD* splat format given DJI Reality targets large drone-scale
+  captures (the same scale problem GeoSplats/RAD/LCC solve with HLOD), but unverified — flagged here as
+  a format worth investigating once a live viewer link is found, not a confirmed adapter target.
+
+**SPZ v4/v5 roadmap** (from [Niantic Spatial's own announcement](https://radiancefields.com/niantic-spatial-releases-spz-v4.0),
+2026): SPZ v4 shipped with **Scaniverse v4-export support landing within months**, and **Adobe extended
+its Babylon.js SPZ integration** to read v4. The stated **v5 roadmap**: **streaming and progressive
+loading, spatial chunking and LOD** (the "tiled Scaniverse" possibility noted above), **better SH
+quantization**, and **additional vendor extensions** — i.e. SPZ is explicitly moving toward the same
+problem this repo's HLOD/tiled-splat adapters (GeoSplats, RAD, LCC, streamed-SOG) already solve, just
+as a single-vendor-defined *file* format rather than a 3D-Tiles-hierarchy adapter. Worth re-checking
+once v5 actually ships. The article notes SPZ encoding is now "fast enough for production scale,
+flexible enough for vendor-specific data without forking, and stable enough that 800,000 new files a
+month is a low baseline" — i.e. SPZ is a genuinely widely-adopted interchange format at this point, not
+a niche one.
 
 ---
 
@@ -1025,6 +1046,24 @@ genuinely hard parts — and why this stays a draft — are **Draco** geometry, 
 **per-feature attributes** (→ `EXT_mesh_features`/metadata), and the **CRS/ECEF vertex placement**
 nuances. A mesh-or-points-only, uncompressed, explicit-tree converter (this draft) is **moderate**;
 full-fidelity I3S is **high** effort and overlaps mature tools (loaders.gl, Cesium ion).
+
+> **ESRI also publishes Gaussian splats as 3D Tiles directly**, not through I3S: ArcGIS's
+> **3D Tiles Server** hosts `KHR_gaussian_splatting`/SPZ GLB tilesets alongside its regular
+> `IntegratedMesh` output (see the `esri-mantes`/`esri-portcoast` pills in `viewer.html`, and ESRI's
+> [3D Tiles samples experience](https://experience.arcgis.com/experience/e2e1e497d13b41cab368c894fd9b3df7))
+> — so "does ESRI do splats" is really two separate answers: **I3S itself** has no splat layer type
+> (mesh/points/instances only, per above); ArcGIS's **3D Tiles Server** product does, as plain OGC
+> 3D Tiles, sitting entirely outside I3S's own format.
+
+**I3S open-data samples** (beyond `Buildings_NewYork_v18.slpk`, mesh-only) — SLPK + hosted-service
+pairs for both integrated mesh and point-cloud layers, from Esri's own [`i3s-spec` sample data
+readme](https://github.com/Esri/i3s-spec/blob/master/docs/2.1/pcsl_ReadMe.md) and the [ArcGIS JS SDK
+3D-object sample gallery](https://developers.arcgis.com/javascript/latest/sample-code/?tagged=3dobject)
+(ArcGIS portal items — open each `item.html` link and use its "Download" button for the SLPK, or the
+REST service URL directly for streaming):
+- Integrated mesh — SLPK: [item `95a427c7a6ec4789b03c1a177366b54c`](https://3dcities.maps.arcgis.com/home/item.html?id=95a427c7a6ec4789b03c1a177366b54c) · service: [item `01eff699c8404a27a65e0877201136b4`](https://3dcities.maps.arcgis.com/home/item.html?id=01eff699c8404a27a65e0877201136b4)
+- Point cloud — SLPK: [item `496552d059644b4892c51ad06bdba8e2`](https://www.arcgis.com/home/item.html?id=496552d059644b4892c51ad06bdba8e2) · service: [item `908d6b986f314d51b1ff50b3bc321dfd`](https://www.arcgis.com/home/item.html?id=908d6b986f314d51b1ff50b3bc321dfd)
+- Also referenced: portal item `fc3f4a4919394808830cd11df4631a54` (point cloud) and `001bb7ee3ce44ae5a8a15bef72f4404a` (integrated mesh) — not yet run against `i3s-to-3dtiles`/`/stream?format=i3s`, listed here as further samples to pull in.
 
 > **Reference — bidirectional I3S ⇄ 3D Tiles converter:** loaders.gl's
 > **[`@loaders.gl/tile-converter`](https://github.com/visgl/loaders.gl/tree/master/modules/tile-converter)**
