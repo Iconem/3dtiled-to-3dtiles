@@ -2610,7 +2610,11 @@ function setOrtho(on) {
   const target = (controls && controls.target) ? controls.target.clone() : new Vector3();
   if (on) {
     _persCam = camera;
-    const dist = Math.max(1e-3, camera.position.distanceTo(target));
+    // Size the ortho frustum from the distance to the SCENE, not controls.target (which in globe mode is
+    // ~earth-centre → an earth-sized frustum). Prefer the loaded tileset's world centre; fall back to target.
+    let focus = target; const _sph = new Sphere();
+    if (tiles && tiles.getBoundingSphere(_sph)) focus = _sph.center.clone().applyMatrix4(tiles.group.matrixWorld);
+    const dist = Math.max(1e-3, camera.position.distanceTo(focus));
     const halfH = dist * Math.tan((camera.fov * Math.PI / 180) / 2);
     const halfW = halfH * camera.aspect;
     const oc = new OrthographicCamera(-halfW, halfW, halfH, -halfH, camera.near, camera.far);
@@ -2618,9 +2622,20 @@ function setOrtho(on) {
     oc.updateProjectionMatrix(); oc.updateMatrixWorld(true);
     camera = oc;
   } else {
-    if (_persCam) { _persCam.position.copy(camera.position); _persCam.quaternion.copy(camera.quaternion); _persCam.up.copy(camera.up);
-      _persCam.aspect = camera.right ? (camera.right - camera.left) / (camera.top - camera.bottom) : _persCam.aspect;
-      _persCam.updateProjectionMatrix(); _persCam.updateMatrixWorld(true); camera = _persCam; }
+    if (_persCam) {
+      // GlobeControls repositions the ortho camera far along its forward axis (near=0), so its position is
+      // NOT a usable perspective eye. Reconstruct: place the perspective eye at the scene focus, backed off
+      // by the distance that reproduces the ortho zoom (halfH = d·tan(fov/2) → d = halfH/tan(fov/2)).
+      const dir = new Vector3(0, 0, -1).applyQuaternion(camera.quaternion).normalize();
+      let focus = target; const _sph = new Sphere();
+      if (tiles && tiles.getBoundingSphere(_sph)) focus = _sph.center.clone().applyMatrix4(tiles.group.matrixWorld);
+      const halfH = camera.top || 1;
+      const d = halfH / Math.tan((_persCam.fov * Math.PI / 180) / 2);
+      _persCam.quaternion.copy(camera.quaternion); _persCam.up.copy(camera.up);
+      _persCam.position.copy(focus).addScaledVector(dir, -d);
+      _persCam.updateProjectionMatrix(); _persCam.updateMatrixWorld(true); camera = _persCam;
+      if (controls && controls.target) controls.target.copy(focus);
+    }
   }
   _orthoOn = !!on;
   // Rebind the current-mode controller to the new camera (constructors capture the camera by reference).

@@ -5,6 +5,17 @@ Format loosely follows [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+### Fixed — 2026-07-02 (`main`: 3DTRJS orthographic camera)
+- **3DTRJS orthographic toggle now works.** The ortho frustum was sized from `controls.target`, which in globe
+  mode is ~earth-centre → an earth-sized frustum (whole continent in view). Now sized from the distance to the
+  loaded tileset's world centre. Returning to perspective reconstructs the eye from the scene focus + ortho
+  zoom (GlobeControls moves the ortho camera far along its forward axis, so its position isn't a usable
+  perspective eye). Splats DO render under 3DTRJS ortho (unlike Cesium). Transition is an instant cut — a
+  smooth 1 s persp↔ortho via `CameraTransitionManager` is a possible future enhancement.
+- **Cesium ortho + splats: documented Cesium limitation.** `PrimitiveGaussianSplatVS.glsl` computes the EWA
+  covariance Jacobian as `focal / t.z` (perspective-only), so splat quads collapse under an ortho frustum and
+  nothing draws. Ortho works for basemap/mesh/points in Cesium; use 3DTRJS for ortho splat comparison.
+
 ### Added — 2026-07-02 (`main`: viewer show/hide + orthographic camera)
 - **"Show asset" toggle** in the sidebar — hide/show the loaded 3D asset (splat / mesh / point cloud) without
   unloading, to compare its footprint against the basemap. Works in CesiumJS (`tileset.show`) and 3DTRJS
