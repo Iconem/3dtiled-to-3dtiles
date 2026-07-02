@@ -59,10 +59,14 @@ produce — so an octant's components can be decoded to a `DataTable` and re-enc
 the local model frame on the globe — analogous to our ENU-anchored splat-dump output. Local splat
 data is Y-up-ish; the Euler offset reconciles it with the map frame.
 
-## Converter status (GeoSplats → OGC 3D Tiles)
-Decoded & tractable: the **georeferencing** (`global_position` → ECEF root transform) and the
-**octree + LOD → tileset tree** (`voxel_grids` → boundingVolumes + per-level geometricError). The
-**per-tile content fetch** is the open item: for API-proxy-hosted models the `/64/6/6` octant URL
-scheme must be traced out of the SDK, and the origin-locked key requires a referer-spoofing proxy.
-A converter for **statically-hosted** GeoSplats exports (`delta_data/…` paths) is the cleaner first
-target. See `packages/tile-server/` (`/stream` adapters) for where this would live.
+## Converter status (GeoSplats → OGC 3D Tiles) — **implemented ✅**, `packages/tile-server/geosplats-live.js`
+
+`GET /geosplats/tileset.json?url=<model.json>` / `GET /geosplats/tile.glb?...` — live, per-octant
+conversion (fetch → `readSog` → `_spz_2`-compressed KHR_gaussian_splatting GLB), HLOD octree from
+`voxel_grids`, georeferenced root transform from `global_position`. The API-proxy octant URL scheme
+(`/<modelId>/<baseurl>/<grid>/<octant>/<lod>`) is traced and the origin-locked key is handled
+server-side (`Referer: https://www.maptiler.com/`) — the browser only talks to our middleware.
+Verified end-to-end in CesiumJS and 3DTRJS. Full georeferencing math (scale/orientation/heading/
+altitude, reverse-engineered from the SDK) is documented in the README's
+[`/geosplats`](../README.md#geosplats--live-maptiler-geosplats--3d-tiles-implemented--reverse-engineered)
+section rather than duplicated here.

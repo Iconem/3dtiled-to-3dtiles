@@ -755,8 +755,8 @@ function currentPresets() {
   if (selectedFormat === 'geosplats') {
     const gs = (mdl) => `${MW}/geosplats/tileset.json?url=${encodeURIComponent(mdl)}&lod=5`;
     return [
-      { id: 'gs-1', label: '✨ GeoSplats — model A (Baltic)', type: 'splat', url: gs('https://api.maptiler.com/splats/019e67bf-b89b-743d-91dd-79f7f4b4bd4e/model.json?key=GKF1QdQ4MpjgqtKiQuxR') },
-      { id: 'gs-2', label: '✨ GeoSplats — model B', type: 'splat', url: gs('https://api.maptiler.com/splats/019e5ff3-e23b-7063-bed2-c385d3e96d99/model.json?key=mNLmXyaTH4gRlwJHSYWp') },
+      { id: 'gs-1', label: '✨ GeoSplats — Jastrzębia Góra, Poland', type: 'splat', url: gs('https://api.maptiler.com/splats/019e67bf-b89b-743d-91dd-79f7f4b4bd4e/model.json?key=GKF1QdQ4MpjgqtKiQuxR') },
+      { id: 'gs-2', label: '✨ GeoSplats — Biltmore Hotel, Miami', type: 'splat', url: gs('https://api.maptiler.com/splats/019e5ff3-e23b-7063-bed2-c385d3e96d99/model.json?key=mNLmXyaTH4gRlwJHSYWp') },
     ];
   }
   const f = fmtMeta(selectedFormat);
@@ -1277,6 +1277,13 @@ function applyZOffset() {
           || Cesium.Cartesian3.normalize(c, new Cesium.Cartesian3());
   const t = Cesium.Cartesian3.multiplyByScalar(up, dz, new Cesium.Cartesian3());
   currentTileset.modelMatrix = Cesium.Matrix4.fromTranslation(t);
+  // Gaussian-splat content (GeoSplats) is drawn by a separate native primitive
+  // (Cesium3DTileset.gaussianSplatPrimitive) that caches its own ENU anchor (_rootTransform) and only
+  // rebuilds it after ~2 stable selected-tile frames, or a ~30-frame stall fallback for a still-streaming
+  // tileset — up to ~0.5s of visible lag, or "did nothing" if the user doesn't wait. Force an immediate
+  // rebuild on the next update so the nudge is visible right away. Internal/undocumented API — guarded.
+  const gsp = currentTileset.gaussianSplatPrimitive;
+  if (gsp) { gsp._rootTransform = undefined; gsp._dirty = true; }
   setStatus(`Vertical Z offset: ${dz} m along local up (georef preserved).`);
 }
 
@@ -1916,6 +1923,13 @@ function useGlobeControls(resetCamera = false) {
   controls.enableDamping = true;
   controls.minDistance = 1;          // no real zoom-in barrier
   controls.maxDistance = Infinity;   // no zoom-out barrier
+  // GlobeControls defaults maxZoom to 0.01 — calibrated for ITS OWN earth-scale ortho camera setup.
+  // Our ortho camera (setOrtho()) is sized from the loaded tileset instead (camera.zoom starts at the
+  // three.js default of 1, ~100x above that cap), so every zoom-IN tick got silently rejected
+  // (EnvironmentControls._updateZoom: `if (maxZoom < camera.zoom*scaleFactor) scaleFactor = 1`) —
+  // ortho could only ever zoom OUT. Remove the cap so ortho zoom works at our own scale.
+  controls.minZoom = 0;
+  controls.maxZoom = Infinity;
   controlMode = 'globe';
   if (resetCamera) {
     camera.near = 1;
@@ -1937,7 +1951,11 @@ function useEnvControls(center, radius) {
   controls.minAltitude = -Infinity;  // allow looking from any tilt (no fight)
   controls.maxAltitude = Infinity;
   controlMode = 'env';
-  if (globe) globe.group.visible = false;
+  // Show the globe as a ground/basemap reference under georeferenced content (tiles sitting in real
+  // ECEF space under ecefRoot) — it also gives EnvironmentControls' ground-raycast something to hug
+  // instead of falling through to infinity. Non-georeferenced (local) content has no earth position to
+  // show a globe under, so keep it hidden there.
+  if (globe) globe.group.visible = tilesIsEcef;
   if (center) {
     const dist = Math.max(radius * 2.5, 0.01);
     camera.near = dist * 0.001;
@@ -2117,9 +2135,25 @@ function _makeTiles(url, isSplat, fetchOptions) {
   // Parent under ecefRoot in globe mode; under the scene directly for orbit/env.
   // (_tryFraming reparents once the bounds reveal whether the tileset is ECEF.)
   (controlMode === 'globe' ? ecefRoot : scene).add(t.group);
-  t.addEventListener('load-error', ev => console.error('[3DTRJS] Tile error:', ev?.url ?? ev));
+  t.addEventListener('load-error', ev => {
+    console.error('[3DTRJS] Tile error:', ev?.url ?? ev);
+    tlog(`⚠ tile failed: ${(ev?.error?.message || ev?.url || '').toString().slice(0, 40)}`);
+  });
   // Apply the current point size to each POINTS tile as it streams in (size persists across tiles).
-  t.addEventListener('load-model', ev => _applyPointSizeTo(ev?.scene));
+  // Also surface load progress the same way the Cesium path does — without this, a big/slow HLOD
+  // tileset (e.g. GeoSplats' live-converted octree) streams in total silence and looks "stuck".
+  let _firstTile3dt = false;
+  t.addEventListener('load-model', ev => {
+    _applyPointSizeTo(ev?.scene);
+    if (!_firstTile3dt) { _firstTile3dt = true; tlog('first tile loaded'); }
+    tlogProgress(`streaming… ${t.stats.loaded} tiles ready`);
+  });
+  t.addEventListener('tiles-load-end', () => {
+    const n = t.stats.loaded;
+    setStatus(`Tiles ready: ${n}  —  ${url}`);
+    tlog(`✓ tiles ready: ${n}`);
+    stopProgressPoll();
+  });
   return t;
 }
 
@@ -2329,6 +2363,16 @@ function animate() {
     catch (e) { if (!_tilesUpdateErrLogged) { console.warn('[3DTRJS] tiles.update() threw (continuing):', e.message); _tilesUpdateErrLogged = true; } }
     if (debugOn) _dimDebugBoxes();
     applySparkLodSettings();   // applies once the shared SparkRenderer exists
+  }
+  if (_projTween) {
+    if (_projTween.cam !== camera) { _projTween = null; }   // camera swapped again mid-tween — abort
+    else {
+      const p = _projTween, t = Math.min(1, (performance.now() - p.t0) / _PROJ_TWEEN_MS);
+      const e = camera.projectionMatrix.elements, a = p.from.elements, b = p.to.elements;
+      for (let i = 0; i < 16; i++) e[i] = a[i] + (b[i] - a[i]) * t;
+      camera.projectionMatrixInverse.copy(camera.projectionMatrix).invert();
+      if (t >= 1) { camera.projectionMatrix.copy(p.to); camera.projectionMatrixInverse.copy(p.to).invert(); _projTween = null; }
+    }
   }
   renderer.render(scene, camera);
 }
@@ -2605,8 +2649,18 @@ function setVisible(show) { if (tiles) tiles.group.visible = !!show; }
 // current distance-to-target so the on-screen scale matches, then rebinds controls + tiles + globe to the
 // new camera (recreating the current-mode controller, which reads the global `camera`).
 let _persCam = null, _orthoOn = false;
+// Perspective↔ortho is a hard cut in the camera OBJECT (the two projection types can't share one
+// instance), but visually crossfading the outgoing/incoming projectionMatrix over a short tween reads
+// as an animated transition instead of an instant pop. Not physically exact mid-blend, but both ends
+// are exact and it only runs for _PROJ_TWEEN_MS.
+const _PROJ_TWEEN_MS = 350;
+let _projTween = null;
+function _startProjTween(fromMatrix, cam) {
+  _projTween = { from: fromMatrix.clone(), to: cam.projectionMatrix.clone(), t0: performance.now(), cam };
+}
 function setOrtho(on) {
   if (!camera || !!on === _orthoOn) return;
+  const _oldProj = camera.projectionMatrix.clone();
   const target = (controls && controls.target) ? controls.target.clone() : new Vector3();
   if (on) {
     _persCam = camera;
@@ -2644,6 +2698,7 @@ function setOrtho(on) {
   else useEnvControls();
   if (tiles) { tiles.setCamera(camera); tiles.setResolutionFromRenderer(camera, renderer); }
   if (globe) { globe.setCamera(camera); globe.setResolutionFromRenderer(camera, renderer); }
+  _startProjTween(_oldProj, camera);
 }
 
 window.__3dtrjs = { init, load, loadIon, pause, setControlMode, setZOffset, getDumpMatrix, setBasemap, setDebug, setErrorTarget, setPointSize, getPointSize, setFov, setVisible, setOrtho, frameTileset, flyToCarto, setCropToView: cropToView3D, showCropGizmo, hideCropGizmo, syncCropGizmo: _syncCropGizmo, _cropGizmoInfo, _debug, _pump };

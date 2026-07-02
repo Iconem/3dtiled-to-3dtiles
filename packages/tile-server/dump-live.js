@@ -87,8 +87,12 @@ function nodeMatrix(json) {
 
 const IDENT = [1,0,0,0, 0,1,0,0, 0,0,1,0, 0,0,0,1];
 // 3D Tiles glTF content is Y-up; Cesium applies RX(+90): (x,y,z)→(x,−z,y). Bake it so our ECEF matches.
-const YUP_ZUP    = [1,0,0,0, 0,0,1,0, 0,-1,0,0, 0,0,0,1];   // RX(−90): (x,y,z)→(x,z,−y)  [historical default]
-const YUP_ZUP_P90= [1,0,0,0, 0,0,-1,0, 0,1,0,0, 0,0,0,1];   // RX(+90): (x,y,z)→(x,−z,y)  [Cesium Y_UP_TO_Z_UP]
+// NOTE (2026-07-02 fix): these two constants' inline labels were SWAPPED relative to what the arrays
+// actually compute — verified against a real `Cesium.Axis.Y_UP_TO_Z_UP` matrix multiply in Node:
+// `YUP_ZUP` below (despite its old "RX(−90)" label) IS the real Cesium Y_UP_TO_Z_UP, (x,y,z)→(x,−z,y).
+// `YUP_ZUP_P90` (despite its old "[Cesium Y_UP_TO_Z_UP]" label) is its INVERSE, (x,y,z)→(x,z,−y).
+const YUP_ZUP    = [1,0,0,0, 0,0,1,0, 0,-1,0,0, 0,0,0,1];   // (x,y,z)→(x,−z,y) — real Cesium Y_UP_TO_Z_UP
+const YUP_ZUP_P90= [1,0,0,0, 0,0,-1,0, 0,1,0,0, 0,0,0,1];   // (x,y,z)→(x,z,−y) — its inverse
 function matMul(a, b) {                       // column-major 4×4, returns a·b
   const o = new Array(16);
   for (let c = 0; c < 4; c++) for (let r = 0; r < 4; r++)
@@ -342,16 +346,18 @@ export async function handleDump(req, res, u) {
     try {
       const fmt = ['sog', 'glb', 'ply'].includes(u.searchParams.get('format')) ? u.searchParams.get('format') : 'spz';
       const clip = u.searchParams.get('clip') !== '0' && u.searchParams.get('clip') !== 'false';   // per-splat-centroid clip (default ON)
-      // Y-up→Z-up rotation is source-dependent (verified WL vs LCC, 2026-07-01):
-      //  • standard/third-party splat tilesets bake per-tile placement into an explicit glb node.matrix and
-      //    are authored Y-up per the glTF spec → need Cesium's RX(+90) (Y_UP_TO_Z_UP), else the export is
-      //    vertically flipped (poles point away from the ground).
-      //  • OUR converters (buildSpzGlb) emit a bare {mesh:0} node (no matrix) and bake orientation into the
-      //    tileset root transform (lccGeoref [East,−Up,North]) → need RX(−90), else they flip.
-      // Detect per-tile from node.matrix presence; &rx=90|-90 forces it.
+      // Y-up→Z-up rotation (2026-07-02 fix): the previous auto-pick (hasNodeMatrix ? YUP_ZUP_P90 : YUP_ZUP)
+      // gave third-party tiles (WL Grange etc., node.matrix present) the INVERSE of real Cesium
+      // Y_UP_TO_Z_UP — confirmed by multiplying a real `Cesium.Axis.Y_UP_TO_Z_UP` in Node: it equals the
+      // `YUP_ZUP` constant below, not `YUP_ZUP_P90` (their inline labels were swapped — see the constants'
+      // comment above). That inverse-rotation bug is what produced the "inverted Z instead of Y" WL Grange
+      // export regression. Our own converters (LCC etc., no node.matrix, orientation baked into the
+      // tileset ROOT transform instead) are confirmed working with `YUP_ZUP` — so default BOTH cases to
+      // `YUP_ZUP` (real Cesium Y_UP_TO_Z_UP) until a source is found that genuinely needs the inverse.
+      // &rx=90|-90 still forces YUP_ZUP_P90 / YUP_ZUP respectively for one-off testing.
       const rxForce = u.searchParams.get('rx');
       const rxPick = (hasNodeMatrix) => rxForce === '90' ? YUP_ZUP_P90 : rxForce === '-90' ? YUP_ZUP
-        : (hasNodeMatrix ? YUP_ZUP_P90 : YUP_ZUP);
+        : YUP_ZUP;
       // Output frame: a local **Y-up** frame anchored at the SOURCE scene's own origin (not the bbox centre),
       // so every crop of the same source shares ONE coordinate system → multiple boxes line up. Y-up (not
       // ENU Z-up!) because splat-transform's engine/IDENTITY space is PlayCanvas Y-up — emitting Z-up would

@@ -1,12 +1,38 @@
 # 3dtiled-to-3dtiles
 
-Node.js CLI tools that convert **tiled / LoD splat & point-cloud formats** → OGC **3D Tiles 1.1**
-(Gaussian splats via `KHR_gaussian_splatting` + `KHR_gaussian_splatting_compression_spz_2` GLB
-tiles), plus a self-contained CesiumJS + 3DTilesRendererJS viewer (`viewer.html`).
+## Ambition
 
-The unifying idea: every source format is some *spatial tree of pre-tiled, LoD'd splats* (or points)
-— so each converter just maps that tree onto a 3D Tiles HLOD tree and re-encodes node content to
-SPZ-v2 GLB (one shared encoder, `spzGlb.js`). The decode differs per format; the output is uniform.
+This started as a set of Node.js CLI **converters**: take a *tiled / LoD source format* — tiled
+point clouds, meshes, or 3D Gaussian splats (COPC, Potree, LCC, RAD, SOG, I3S, GeoSplats, …) — and
+turn it into OGC **3D Tiles 1.1** (splats via `KHR_gaussian_splatting` +
+`KHR_gaussian_splatting_compression_spz_2` GLB tiles). The unifying idea behind every converter is
+the same: each source format is already *some spatial tree of pre-tiled, LoD'd content* — so the
+converter just maps that tree onto a 3D Tiles HLOD tree and re-encodes node content into one shared
+output (`spzGlb.js` for splats). The decode differs per format; the output is uniform.
+
+It has since grown into an **on-the-fly streaming middleware** (`packages/tile-server`, the offline
+converters' live counterpart): point it at a `<format>` source URL and it serves a 3D Tiles tileset
+*live*, so any 3D-Tiles-compatible client — browser/JS viewers, CesiumJS or its native plugins
+(Unreal, Unity), GIS software, anything that speaks the OGC standard — can consume any of these tiled
+formats **without a pre-conversion step**, with tile-hierarchy/content **caching** and **prefetching**
+tunable per use case (`cache=none|hierarchy|all`). `viewer.html` (CesiumJS + 3DTilesRendererJS) is the
+reference client, and doubles as a **bbox + geometric-error-aware crop/extract** tool (`/dump/*`) for
+pulling a sub-region of any of these formats back out as LAS/COPC/GLB/SPZ/SOG/PLY.
+
+**Where this is going next:** a browser/server splat-editing UI in the spirit of SuperSplat's
+splat-transform tooling; a **georeferencing/geolocator** step for splats that don't ship one, along
+the lines of WilliamLiu's `3dtiles-inspector` or MapTiler GeoSplats' `global_position` block (see
+[`/geosplats`](#geosplats--live-maptiler-geosplats--3d-tiles-implemented--reverse-engineered)); and an
+**aggregator** unifying the export/interchange formats of other splat platforms (SuperSplat, Niantic
+Scaniverse, Polycam, …) behind the same 3D Tiles pipeline. A longer-running goal underneath all of
+this: be the **fastest** point-cloud — and eventually splat — tiler, by reusing the octree-computation
+principles behind Potree 2.0's converter (see the Potree sections throughout this doc, e.g.
+[`potree-to-3dtiles`](#potree-to-3dtiles) and [`/potree`](#potree--live-potree-20--3d-tiles-true-range-streaming)).
+
+> This README has grown quite large tracking all of that (ambition, live features, format specs,
+> official docs/SDKs, and raw reverse-engineering findings, side by side). A move to a proper docs
+> site (e.g. [Fumadocs](https://fumadocs.dev/), for its table-of-contents component) to split these
+> apart is a planned follow-up — not done yet, flagging it here so it isn't lost.
 
 ## Format comparison
 
@@ -1639,6 +1665,50 @@ decode pass. `/convert` (preprocess+cache) already serves RAD live; see
 [`docs-references/rad-format-notes.md`](docs-references/rad-format-notes.md) for the full rationale.
 
 Everything not on a range adapter is still fully renderable today via `/convert` (below).
+
+### `/geosplats` — live **MapTiler GeoSplats** → 3D Tiles (implemented ✅, reverse-engineered)
+
+[MapTiler GeoSplats](https://www.maptiler.com/geosplats/) is a georeferenced HLOD Gaussian-splat
+format with no published byte-spec — everything below was decoded from a real `model.json` +
+`metadata.json` pair and the SDK bundle (`@maptiler/geosplats`, `maptiler-geosplats.mjs`). Full
+format notes: [`docs-references/maptiler-geosplats.md`](docs-references/maptiler-geosplats.md).
+
+```sh
+#   GET /geosplats/tileset.json?url=<model.json URL>[&lod=1..8]                        → HLOD tileset
+#   GET /geosplats/tile.glb?url=<model.json>&m=<submodel#>&grid=<1|8|64>&oct=<n>&lod=<n> → one octant, KHR_gaussian_splatting GLB
+```
+
+- **Data primitive = SOGS** — same primitive our own `writeSog`/`readSog` (`@playcanvas/splat-transform`)
+  already speak, so an octant's `means_l/u`, `quats`, `scales`, `sh0` WebPs decode straight to a
+  `DataTable` and re-encode as an `_spz_2`-compressed glTF splat tile.
+- **HLOD** — each sub-model's `metadata.json` carries a `voxel_grids` octree (`grid_1→8→64`, 8
+  progressive LODs per cell); mapped to a 3D Tiles `REPLACE` octree by spatial containment
+  (child-centre-in-parent-bbox, since the octant-id bit layout isn't trustworthy). `geometricError` =
+  octant diagonal.
+- **Origin-locked API keys** — MapTiler's demo keys only work from `maptiler.com`; the upstream octant
+  fetch happens server-side (`Referer: https://www.maptiler.com/`) so the browser only ever talks to
+  our middleware.
+- Verified end-to-end in both **CesiumJS** and **3DTRJS** (viewer.html "✨ GeoSplats" pills).
+
+**Georeferencing, reverse-engineered from the SDK** (`global_position` in `model.json` → a 3D Tiles
+root `transform`):
+
+| What | Formula | Notes |
+|---|---|---|
+| **Scale** | `S = model_scale · 512·ZOOM_TO_METER[14] · cos(lat)` | `512·ZOOM_TO_METER[14] = 2445.98` is the **equatorial** web-Mercator tile metre; Mercator stretches by `1/cos(lat)` off the equator, so real metres = mercator-metres·`cos(lat)`. Missing the `cos(lat)` term overscales by that same factor (a model at lat 55° came out ~1.7× too big; at lat 26°, ~1.1×) — this is what "latitude correction" fixes. `&scale=<f>` overrides. |
+| **Orientation** | frame `enu2` = `[East, −North, −Up]` | Cesium/3d-tiles-renderer both apply the glTF Y-up→Z-up correction to tile content before the root transform runs; content's "up" ends up at −Z, so a naive ENU `[East,North,Up]` renders flat but **upside-down**. `enu2` is a 180° flip about East that rights it (a proper rotation, not a mirror). `&frame=enu\|enu2\|eun\|e-un\|e-nu` sweeps other candidates. |
+| **Heading** | `yaw = offset.y_rot − 180°` | The per-model `global_position.offset.y_rot` is a compass heading authored in MapLibre's frame; in the `enu2` frame the aligning yaw is `y_rot − 180`. Rotates the ENU (E,N) basis about Up. `&yaw=<deg>` adds a fine-tune on top. |
+| **Altitude** | default **0**, not `global_position.alt` | `alt` is expressed in MapTiler's `model_scale`-normalised MapLibre frame, not our 1:1 ellipsoidal metres — used raw it buries the scene ~300 m underground. 0 (≈ ellipsoid/ground for near-sea-level captures) is the sane default; `&alt=<m>` overrides. |
+
+**Known residual: ~2–4% under-scale on some models, even after the `cos(lat)` fix.** The scale
+formula above is the *inverse of MapTiler's own mercator-tile normalisation* — it recovers "how many
+real metres the model's `model_scale`-normalised units represent at this latitude", not an independent
+ground-truth measurement. Any small mismatch between MapTiler's own scene-capture georeferencing and
+true surveyed scale (which the whole `global_position` block ultimately derives from) carries straight
+through our formula. In other words: this is very likely accuracy in **MapTiler's own source georef**
+for that particular capture, not an error in the scale derivation — the derivation is dimensionally
+exact and matches two independent models to within a few percent already. `&scale=<f>` is the pragmatic
+per-model pin if a specific scene needs it exact.
 
 ### `/convert` — live **any-format** → 3D Tiles (implemented ✅)
 

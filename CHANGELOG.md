@@ -5,6 +5,44 @@ Format loosely follows [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+### Fixed — 2026-07-02 (`main`: splat/GeoSplats export & viewer follow-ups)
+- **`/dump/splat` Y-up→Z-up regression on third-party tiles (WL Grange) fixed.** The 2026-07-01 auto-pick
+  (`hasNodeMatrix ? YUP_ZUP_P90 : YUP_ZUP`) meant to give node-matrix-authored tiles real Cesium
+  `Y_UP_TO_Z_UP` — but the two constants' inline labels were swapped (verified against a real
+  `Cesium.Axis.Y_UP_TO_Z_UP` multiply in Node): `YUP_ZUP` is the one that equals it, not `YUP_ZUP_P90`. So
+  third-party tiles got the inverse rotation — fixed the earlier vertical flip (a Y-histogram only checks
+  up/down) but silently inverted the horizontal/depth axis instead. Both branches now default to `YUP_ZUP`;
+  `&rx=90|-90` still forces either for one-off testing. Confirmed unaffected: every `/dump/*` export kind
+  (las/copc/glb/zip/splat/tileset) shares one `traverse()` bbox+GE+refine walker — this was isolated to the
+  splat content-decode step, not a codepath divergence.
+- **GeoSplats Cesium Z-offset (`⊕ Local Frame → Z offset`) lag on splat tiles.** Cesium's native Gaussian-splat
+  primitive caches its own ENU anchor and only rebuilds it after ~2 stable frames (or a ~30-frame/~0.5s stall
+  fallback while a tileset is still streaming) — up to half a second of apparent "did nothing". `applyZOffset()`
+  now also resets the primitive's internal anchor so the nudge is visible on the next frame.
+- **3DTRJS large/slow tilesets (e.g. GeoSplats' aerial model) looked stuck.** Only the Cesium load path had
+  tile-load progress feedback (`tlog`/`setStatus`); the 3DTRJS path set a status message once and then went
+  silent for the whole (potentially multi-minute, single-threaded live-conversion) stream. Added the same
+  first-tile/streaming-count/tiles-ready feedback used by Cesium.
+- **3DTRJS globe mode: ortho could only zoom out, and mousewheel felt like it rotated instead of zoomed.**
+  `GlobeControls` defaults `maxZoom` to `0.01`, calibrated for its own earth-scale ortho camera; our ortho
+  camera is sized from the loaded tileset instead and starts at three.js's default `zoom=1` (~100× over that
+  cap), so every zoom-IN tick was silently rejected — leaving only the incidental "tilt towards centre while
+  zooming out near the surface" behaviour visible, which read as "wheel controls orientation". Removed the cap
+  (`minZoom=0`, `maxZoom=Infinity`).
+- **3DTRJS ortho↔perspective toggle was an instant cut.** Perspective and ortho can't share one camera object,
+  but the outgoing/incoming projection matrices are now cross-faded over ~350ms so the switch reads as an
+  animated transition instead of a pop.
+- **3DTRJS "env" control mode hid the globe entirely**, even under georeferenced content where it's a useful
+  ground/basemap reference (and gives `EnvironmentControls`' ground-raycast something to hug). Now shown
+  whenever the loaded tiles are actually ECEF-placed; still hidden for local/non-georeferenced content.
+- **GeoSplats pills renamed** from generic "model A (Baltic)"/"model B" to their actual place names —
+  "Jastrzębia Góra, Poland" and "Biltmore Hotel, Miami".
+- **README**: restated the project's ambition (converter → live streaming middleware → crop/export tool →
+  planned splat-editor UI / geolocator / cross-platform aggregator), documented the GeoSplats SDK
+  reverse-engineering findings (scale formula incl. the `cos(lat)` latitude correction, orientation frame,
+  heading, altitude) in a new `/geosplats` section, and noted a Fumadocs migration as a follow-up (this file
+  has grown large enough to want a real table-of-contents).
+
 ### Fixed — 2026-07-02 (`main`: 3DTRJS orthographic camera)
 - **3DTRJS orthographic toggle now works.** The ortho frustum was sized from `controls.target`, which in globe
   mode is ~earth-centre → an earth-sized frustum (whole continent in view). Now sized from the distance to the
