@@ -1059,12 +1059,16 @@ full-fidelity I3S is **high** effort and overlaps mature tools (loaders.gl, Cesi
 
 **I3S open-data samples** (beyond `Buildings_NewYork_v18.slpk`, mesh-only) — SLPK + hosted-service
 pairs for both integrated mesh and point-cloud layers, from Esri's own [`i3s-spec` sample data
-readme](https://github.com/Esri/i3s-spec/blob/master/docs/2.1/pcsl_ReadMe.md) and the [ArcGIS JS SDK
-3D-object sample gallery](https://developers.arcgis.com/javascript/latest/sample-code/?tagged=3dobject)
+readme](https://github.com/Esri/i3s-spec/blob/master/docs/2.1/pcsl_ReadMe.md), the [ArcGIS JS SDK
+3D-object sample gallery](https://developers.arcgis.com/javascript/latest/sample-code/?tagged=3dobject),
+and the [ArcGIS 3D Tiles samples experience](https://experience.arcgis.com/experience/e2e1e497d13b41cab368c894fd9b3df7)
 (ArcGIS portal items — open each `item.html` link and use its "Download" button for the SLPK, or the
-REST service URL directly for streaming):
-- Integrated mesh — SLPK: [item `95a427c7a6ec4789b03c1a177366b54c`](https://3dcities.maps.arcgis.com/home/item.html?id=95a427c7a6ec4789b03c1a177366b54c) · service: [item `01eff699c8404a27a65e0877201136b4`](https://3dcities.maps.arcgis.com/home/item.html?id=01eff699c8404a27a65e0877201136b4)
-- Point cloud — SLPK: [item `496552d059644b4892c51ad06bdba8e2`](https://www.arcgis.com/home/item.html?id=496552d059644b4892c51ad06bdba8e2) · service: [item `908d6b986f314d51b1ff50b3bc321dfd`](https://www.arcgis.com/home/item.html?id=908d6b986f314d51b1ff50b3bc321dfd)
+REST service URL directly for streaming). All four verified live against `/stream?format=i3s`:
+- Integrated mesh (**works**) — SLPK: [item `95a427c7a6ec4789b03c1a177366b54c`](https://3dcities.maps.arcgis.com/home/item.html?id=95a427c7a6ec4789b03c1a177366b54c) (`Rancho_Mesh_v18.slpk`, 285 MB) · service: [item `01eff699c8404a27a65e0877201136b4`](https://3dcities.maps.arcgis.com/home/item.html?id=01eff699c8404a27a65e0877201136b4) → `https://tiles.arcgis.com/tiles/z2tnIkrLQ2BRzr6P/arcgis/rest/services/Rancho_Mesh_v18/SceneServer`
+- Point cloud (**LEPCC-compressed — unsupported**, same gap as the Autzen sample) — SLPK: [item `496552d059644b4892c51ad06bdba8e2`](https://www.arcgis.com/home/item.html?id=496552d059644b4892c51ad06bdba8e2) (`Moro_Bay_LiDAR.slpk`, 578 MB) · service: [item `908d6b986f314d51b1ff50b3bc321dfd`](https://www.arcgis.com/home/item.html?id=908d6b986f314d51b1ff50b3bc321dfd) → `https://tiles.arcgis.com/tiles/z2tnIkrLQ2BRzr6P/arcgis/rest/services/Moro_Bay_LiDAR/SceneServer`. A second point-cloud sample (item `fc3f4a4919394808830cd11df4631a54`, `BARNEGAT_BAY_LiDAR_UTM`) is also LEPCC — every real ArcGIS point-cloud SceneServer sample found so far uses it, since it's Esri's own default point-cloud codec.
+- **Live ArcGIS SceneServer REST support added** (2026-07-02) to test the "service" URLs above directly
+  (previously the adapter only read a static `3dSceneLayer.json`/SLPK tree, not the REST API's
+  `?f=json`-based resource paths) — see `arcgisSceneServerReader()` in `i3s-live.js`.
 - Also referenced: portal item `fc3f4a4919394808830cd11df4631a54` (point cloud) and `001bb7ee3ce44ae5a8a15bef72f4404a` (integrated mesh) — not yet run against `i3s-to-3dtiles`/`/stream?format=i3s`, listed here as further samples to pull in.
 
 > **Reference — bidirectional I3S ⇄ 3D Tiles converter:** loaders.gl's

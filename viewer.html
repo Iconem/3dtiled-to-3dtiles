@@ -656,6 +656,16 @@ const FORMATS = [
   ]},
   { fmt: 'i3s', icon: '🧱', label: 'I3S', type: 'mesh', octree: false, stream: true, assets: [
       { id: 'nyc',    label: 'NYC Buildings', src: 'input/I3S-SLPK/Buildings_NewYork_v18.slpk', streamSrc: 'input/I3S-SLPK/Buildings_NewYork_v18/3dSceneLayer.json.gz', out: 'output/i3s/Buildings_NewYork_v18' },
+      // Real ArcGIS-hosted samples (esri/i3s-spec sample-data readme + ArcGIS JS SDK sample gallery) —
+      // both the .slpk (downloaded once, read via loaders.gl) and the LIVE SceneServer REST endpoint,
+      // for the two layer types our adapter supports (IntegratedMesh, PointCloud). Remote, stream-only.
+      { id: 'arcgis-mesh-slpk', label: 'ArcGIS Rancho Mesh (.slpk)', src: 'https://www.arcgis.com/sharing/rest/content/items/95a427c7a6ec4789b03c1a177366b54c/data' },
+      { id: 'arcgis-mesh-svc',  label: 'ArcGIS Rancho Mesh (SceneServer)', src: 'https://tiles.arcgis.com/tiles/z2tnIkrLQ2BRzr6P/arcgis/rest/services/Rancho_Mesh_v18/SceneServer' },
+      // Both real ArcGIS point-cloud items we could find are LEPCC-compressed — same unsupported codec
+      // that made us drop the Autzen pill (no Draco/LEPCC decoder here). Kept visible (not silently
+      // dropped) so the gap is documented in the UI, not just the README.
+      { id: 'arcgis-pts-slpk', label: 'ArcGIS Moro Bay LiDAR .slpk (LEPCC — unsupported)', src: 'https://www.arcgis.com/sharing/rest/content/items/496552d059644b4892c51ad06bdba8e2/data' },
+      { id: 'arcgis-pts-svc',  label: 'ArcGIS Moro Bay LiDAR SceneServer (LEPCC — unsupported)', src: 'https://tiles.arcgis.com/tiles/z2tnIkrLQ2BRzr6P/arcgis/rest/services/Moro_Bay_LiDAR/SceneServer' },
   ]},
 ];
 

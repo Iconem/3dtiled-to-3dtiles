@@ -11,15 +11,17 @@
  *   tile/<i>.glb  → fetch ONE node's uncompressed DefaultGeometrySchema buffer, decode it, place
  *                   vertices in the shared ENU frame, and build a glTF (TRIANGLES / POINTS) on demand.
  *
- * Two source modes (auto-detected from the URL):
+ * Three source modes (auto-detected from the URL):
+ *   • Live ArcGIS SceneServer  — url = …/SceneServer[/layers/<id>]; resources come from the REST API
+ *     (`?f=json` for JSON, plain binary for geometry) — never a static `3dSceneLayer.json` file.
  *   • REST / extracted-SLPK dir — url = …/3dSceneLayer.json[.gz]; resources fetched file-by-file
  *     (best for large layers like NYC — we never pull the whole dataset).
  *   • SLPK archive             — url = ….slpk; the zip is fetched once and read via loaders.gl.
  *
  * Scope matches the offline draft: uncompressed geometry only (Draco/LEPCC gated out), no textures.
  *
- *   GET /i3s/tileset.json?url=<3dSceneLayer.json | .slpk URL>
- *   GET /i3s/tile/<nodeIndex>.glb?url=<same URL>
+ *   GET /stream/tileset.json?format=i3s&url=<3dSceneLayer.json | .slpk | SceneServer URL>
+ *   GET /stream/tile/<nodeIndex>.glb?format=i3s&url=<same URL>
  */
 import zlib from 'node:zlib';
 import { parseSLPKArchive } from '@loaders.gl/i3s';
@@ -39,8 +41,27 @@ async function fetchBuf(url) {
   return Buffer.from(await r.arrayBuffer());
 }
 
-// Build a uniform getFile(relPath) → Buffer (gunzipped) over either an SLPK archive or HTTP base dir.
+// A live ArcGIS SceneServer (not a pre-extracted local mirror) uses REST resource paths + `?f=json`
+// for JSON, not a static-file tree — `nodepages/<p>.json` doesn't exist as a URL; the real endpoint is
+// `.../layers/<id>/nodepages/<p>?f=json`. Binary resources (geometry) drop both the `?f=json` and the
+// `.bin`/`.json` suffix our generic `rel` naming carries. Verified live against a real ArcGIS-hosted
+// IntegratedMesh SceneServer (root node + nodepages/0 both confirmed reachable this way).
+function arcgisSceneServerReader(url) {
+  const m = url.match(/^(.*\/SceneServer)(?:\/layers\/(\d+))?/i);
+  const base = m[1], layerId = m[2] || '0';
+  return async (rel) => {
+    const isJson = rel.endsWith('.json');
+    const restPath = rel === '3dSceneLayer.json' ? `layers/${layerId}` : `layers/${layerId}/${rel.replace(/\.(json|bin)$/, '')}`;
+    const r = await fetch(`${base}/${restPath}${isJson ? '?f=json' : ''}`);
+    if (!r.ok) throw new Error(`ArcGIS SceneServer getFile ${rel} → ${r.status}`);
+    return Buffer.from(await r.arrayBuffer());
+  };
+}
+
+// Build a uniform getFile(relPath) → Buffer (gunzipped) over an SLPK archive, a live ArcGIS SceneServer,
+// or a plain HTTP base dir (extracted SLPK mirror).
 async function makeFileReader(url) {
+  if (/\/SceneServer(\/|$|\?)/i.test(url)) return arcgisSceneServerReader(url);
   if (/\.slpk(\?|$)/i.test(url)) {
     const buf = await fetchBuf(url);
     const ab = buf.buffer.slice(buf.byteOffset, buf.byteOffset + buf.byteLength);
