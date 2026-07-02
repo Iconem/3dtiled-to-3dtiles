@@ -2,6 +2,7 @@
   "name": "3dtiled-to-3dtiles",
   "version": "0.1.0",
   "private": true,
+  "packageManager": "pnpm@10.20.0",
   "workspaces": [
     "packages/*"
   ],
@@ -26,5 +27,13 @@
     "concurrently": "^9.1.0",
     "vite": "^6.0.0",
     "vite-plugin-cesium": "^1.2.23"
+  },
+  "pnpm": {
+    "onlyBuiltDependencies": [
+      "canvas",
+      "esbuild",
+      "sharp",
+      "webgpu"
+    ]
   }
 }

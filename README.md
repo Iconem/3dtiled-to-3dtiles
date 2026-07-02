@@ -378,9 +378,18 @@ Roughly in the order we're tackling them:
   `/geosplats` endpoints are gone. 3MX keeps its own lazy per-`.3mxb` continuation route
   (`/stream/threemx/node/<path>.json`) — unlike RAD/I3S, 3MX is a genuine DAG with no persisted
   spatial index, so eager-scanning the whole tree isn't cheap.
-- [ ] **Dockerize the server.** A `docker-compose`-runnable `packages/tile-server` (+ viewer), with a
-  GitHub Actions workflow building and publishing images to **GHCR** on release, so it can be dropped
-  straight into a `docker-compose`/**Portainer** stack behind **Traefik** — no manual Node setup.
+- [x] ~~Dockerize the server~~ — **done** (2026-07-02): `Dockerfile` (multi-stage: `tile-server` +
+  `viewer`), `docker-compose.yml`, and `.github/workflows/docker-publish.yml` (builds + pushes both to
+  **GHCR** on release, plus a `:main` tag on every push). `docker compose up --build` runs the whole
+  stack. Verified end-to-end (both images build, both containers serve real traffic — including a live
+  ArcGIS SceneServer tileset through the containerized tile-server). Building this surfaced three
+  real, pre-existing bugs, all fixed alongside it: `pnpm-lock.yaml` was out of sync with
+  `copc-to-3dtiles/package.json` (see the `@cesium/3d-tiles-tools` note above), Docker builds ignored
+  `.npmrc`'s `node-linker=hoisted` (which the converters' cross-package imports depend on), and
+  `vite build` silently never bundled `viewer.html` at all (only its own `index.html` redirect stub) —
+  fixed via `build.rollupOptions.input` + `build.target: 'esnext'` (top-level await) in
+  `vite.config.mjs`. Not yet done: an actual Portainer/Traefik reverse-proxy stack — the images publish
+  to GHCR, but wiring them into a specific reverse-proxy setup is left to whoever deploys this.
 - [ ] **Fumadocs migration.** This README has grown large enough to want a real table-of-contents /
   docs-site split (ambition vs. live features vs. format specs vs. raw findings) — see the note at the
   top of this document. Made more tractable by the fact that most of the deep material already lives
@@ -638,12 +647,6 @@ Composability goal: `source → convert → [centroids] → [gltf: draco/ktx2 de
 | `/gltf/tileset.json?url=<tileset>&ops=<ops>[&tex=jpg\|png]` (+ `/gltf/tile.glb?url=<glb>&ops=`) | generic per-tile **glTF-Transform** pipeline (proxies an explicit tileset, recurses external refs) | `ops=decompress` (= `draco,meshopt,ktx`) · or any of `draco` · `meshopt` · `ktx` (decode); KTX2 decodes to `tex=jpg` (default, fast/small) or `png` |
 | `/bing/tileset.json?root=<quadkey>&g=<genid>&maxLevel=<L>[&decompress=1]` | Bing Maps 3D (`tf=3dv4`) → 3D Tiles | `root` quadkey, `g` genid (default 15340), `maxLevel`, `decompress` |
 | `/3dtiles-self-contained/tileset.json?url=<path\|URL.3tz\|.3dtiles>` | serve a `.3tz`/`.3dtiles` package in-place, no extraction | local path or `http(s)://`; `.3tz` local-only, `.3dtiles` local + remote via sql.js |
-| `/stream/tileset.json?url=<Scene.3mx\|root.3mxb>&format=threemx` | Bentley 3MX → 3D Tiles | (georef from SRS+SRSOrigin when present); lazy per-`.3mxb` continuation at `/stream/threemx/node/<path>.json` |
-| `/stream/tileset.json?url=<model.json>&format=geosplats&lod=<N>` | MapTiler GeoSplats (HLOD SOGS octants) → 3D Tiles | `lod` picks the max octree depth fetched; key/referer handled server-side |
-
-`/threemx` and `/geosplats` (2026-07-02) moved into `/stream`'s `ADAPTERS` registry — same as every
-other format, so they now get the unified `cache=`/`/tiles` vocabulary too. The old standalone
-`/threemx`, `/geosplats` endpoints are gone (no back-compat aliases).
 
 > The `/gltf` pipeline runs per-tile **only on explicit tilesets** (concrete tile URIs — 3MX/Bing/RAD/I3S
 > outputs and external mesh 3D Tiles); it recurses external-tileset refs. **Implicit** COPC/Potree octree
@@ -892,11 +895,14 @@ out-rad/
   tiles/node_<index>.glb    KHR_gaussian_splatting GLB (POINTS)
 ```
 
-> **Note:** `rad-to-3dtiles` (and `copc-to-3dtiles`) list
-> [`@cesium/3d-tiles-tools`](https://github.com/CesiumGS/3d-tiles-tools) as an **optional dependency**,
-> but no `--3tz`/`--3dtiles` CLI flag actually exists yet to use it for packaging — for `.3tz`/`.3dtiles`
-> today, convert to a plain tileset dir then use the in-repo packer (`scripts/pack-3dtiles.mjs`) or
-> `npx 3d-tiles-tools convert`, both documented under `/3dtiles-self-contained` below.
+> **Note:** `rad-to-3dtiles` and `copc-to-3dtiles` used to list a package-name-typo'd
+> `@cesium/3d-tiles-tools` (no such npm package — 404; the real one is plain
+> [`3d-tiles-tools`](https://github.com/CesiumGS/3d-tiles-tools)) as an optional dependency that was
+> never wired to any CLI flag and never actually installable — removed 2026-07-02 (it was silently
+> breaking `pnpm install --frozen-lockfile`, since pnpm can't reconcile an unresolvable optional dep
+> against the lockfile). For `.3tz`/`.3dtiles` today, convert to a plain tileset dir then use the
+> in-repo packer (`scripts/pack-3dtiles.mjs`) or `npx 3d-tiles-tools convert`, both documented under
+> `/3dtiles-self-contained` below.
 
 **Live `/stream` (no pre-conversion)** — `packages/tile-server/rad-live.js`, served at
 `GET /stream/tileset.json?url=<.rad>&format=rad`:
@@ -1215,7 +1221,6 @@ curl -L "https://data.geopf.fr/telechargement/download/LiDARHD-NUALID/NUALHD_1-0
 | `@gltf-transform/core` ^4 | both |
 | `proj4` | copc-to-3dtiles |
 | `@sparkjsdev/spark` | rad-to-3dtiles |
-| `@cesium/3d-tiles-tools` (optional) | both — declared for future `.3tz`/`.3dtiles` packaging; not wired to a CLI flag yet (use `scripts/pack-3dtiles.mjs` or `npx 3d-tiles-tools convert` today, see `/3dtiles-self-contained`) |
 
 ---
 

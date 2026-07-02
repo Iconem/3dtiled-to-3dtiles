@@ -1,0 +1,10 @@
+node_modules
+**/node_modules
+sample-data
+dist
+.git
+.github
+.claude
+*.md
+CHANGELOG.md
+docs-references

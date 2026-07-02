@@ -1,0 +1,22 @@
+services:
+  tile-server:
+    build:
+      context: .
+      target: tile-server
+    ports:
+      - "3001:3001"
+    restart: unless-stopped
+
+  viewer:
+    build:
+      context: .
+      target: viewer
+    ports:
+      - "3000:3000"
+    restart: unless-stopped
+    depends_on:
+      - tile-server
+    # Optional: drop your own datasets in ./sample-data on the host to reach them from the viewer's
+    # format pills (they build /sample-data/... URLs) — the image ships with none (gitignored, local-only).
+    volumes:
+      - ./sample-data:/app/dist/sample-data:ro

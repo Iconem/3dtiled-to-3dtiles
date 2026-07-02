@@ -51,4 +51,14 @@ export default defineConfig({
     dedupe: ['three'],   // single THREE instance (replaces the esm.sh ?external=three trick)
   },
   optimizeDeps: { include: ['three', '3d-tiles-renderer', '@sparkjsdev/spark'] },
+  build: {
+    // Without this, `vite build` only bundles index.html (Rollup's implicit default entry) — the
+    // actual app, viewer.html, silently never made it into dist/ (only its own redirect stub did).
+    // Never caught before because `npm run dev` serves the whole repo tree directly, no build step.
+    rollupOptions: { input: { index: 'index.html', viewer: 'viewer.html' } },
+    // Default esbuild target predates top-level await (viewer.html's dynamic SparkJS/GaussianSplat
+    // import uses it) — Cesium/WebGL2/splat rendering already needs a modern browser, so esnext costs
+    // nothing real here.
+    target: 'esnext',
+  },
 });
