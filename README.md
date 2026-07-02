@@ -75,7 +75,7 @@ Formats that carry (or wrap) a general node/mesh hierarchy rather than a point- 
 |--------|:------:|-------------------------|---------------------|:------:|--------------------|-------------------|:----------:|------|
 | **SOG (streamed)** (PlayCanvas) | 🟢 | **binary** spatial tree (AABB split) | unbundled SOG chunk: WebP textures → `DataTable` (pos/quat-w-first/log-scale/SH-DC/logit-opacity) | REPLACE | empty grouping nodes | no geo metadata, `lod-meta.json` + per-chunk `meta.json` | ✅ per-file | [playcanvas](https://developer.playcanvas.com/user-manual/gaussian-splatting/formats/streamed-sog/) |
 | **LCC** (XGRIDS) | 🟢 | **grid of Units** (cellX×Y) × per-cell LODs | `Data.bin` fixed **32 B/splat**: pos `f32×3`, color `rgba8`, scale `u16×3`, rot `10-10-10-2` (+SH `Shcoef.bin` 64 B) | REPLACE | per-cell coarse LODs | georef'ed, `meta.lcc` JSON + `Index.bin` | ✅ `Index.bin` offsets into `Data.bin` | [developer.xgrids.com](https://developer.xgrids.com/#/document?titleId=en-1720509291851) |
-| **RAD** (SparkJS) | 🟢 | LoD merge tree, variable fanout (BhattLod ~1.75 / TinyLod ~1.5) | RADC chunk: per-splat columns — `f16`/`oct88r8` **interleaved**, `ln_0r8`/`r8_delta` **planar**, `f32_lebytes` byte-transposed | REPLACE | downsampled **merged** splats | no geo metadata, root `RAD0` JSON + per-chunk `RADC` JSON | ✅ chunked `.radc` | [sparkjs.dev](https://sparkjs.dev/docs/lod-getting-started/) |
+| **RAD** (SparkJS) | 🟢 | LoD merge tree, variable fanout (Tiny-LoD base β≈1.75; Bhatt-LoD unspecified, our converter observes ~1.5 in practice) | RADC chunk: per-splat columns — `f16`/`oct88r8` **interleaved**, `ln_0r8`/`r8_delta` **planar**, `f32_lebytes` byte-transposed | REPLACE | downsampled **merged** splats | no geo metadata, root `RAD0` JSON + per-chunk `RADC` JSON | ✅ chunked `.radc` | [sparkjs.dev](https://sparkjs.dev/docs/lod-getting-started/) |
 | **GeoSplats** (MapTiler) | 🟢 | **octree voxel grids** (`grid_1/8/64/512`) × 8 progressive LODs | per-octant **SOGS** (`means_l/u`, `quats`, `scales`, `sh0` WebP) or `octant_<n>.ply` | REPLACE (LOD subset) | coarser-LOD octants | georef'ed,`model.json` (georef) + per-sub-model `metadata.json` (`voxel_grids` + `entries` TOC) | ✅ per-file / range | [maptiler.com/geosplats](https://www.maptiler.com/geosplats/) |
 
 ### Format specifications (canonical sources + local mirrors)
@@ -623,8 +623,8 @@ Composability goal: `source → convert → [centroids] → [gltf: draco/ktx2 de
    routes (307): `none`/`hierarchy`→`/stream` (with `hierarchy=lazy`/`eager`), `full`→`/convert`. No
    `prebuilt` mode (point the viewer directly at an offline-built tileset). `hierarchy=eager` (a real
    eager-drain into the shared ctx, so warm subtrees reuse it) is wired for **all** live converters with
-   a hierarchy — **COPC, Potree 2.0, RAD, I3S** (SOG/LCC are single-index, always-eager; Potree 1.x
-   always lazy). `prefetch=N` warms N levels (COPC). Verified: routing, eager/lazy per format, RAD eager
+   a hierarchy — **COPC, Potree 2.0, Potree 1.x, RAD, I3S** (SOG/LCC are single-index, always-eager).
+   `prefetch=N` warms N levels (COPC). Verified: routing, eager/lazy per format, RAD eager
    = full 765-tile explicit tree vs lazy fragments, and all coverage harnesses (RAD 765, Potree2 1624,
    I3S 5882) still pass.
 4. *(deferred)* `bake(driver)` to power offline from the same drivers — offline converters stay as-is.
@@ -795,10 +795,11 @@ out-rad/
   tiles/node_<index>.glb    KHR_gaussian_splatting GLB (POINTS)
 ```
 
-> **Note:** `--3tz` / `--3dtiles` packaging requires
-> [`@cesium/3d-tiles-tools`](https://github.com/CesiumGS/3d-tiles-tools) installed.
-> `npm install @cesium/3d-tiles-tools` in the `rad-to-3dtiles` directory, then pass the flag.
-> Plan to eventually promote this to a first-class dependency.
+> **Note:** `rad-to-3dtiles` (and `copc-to-3dtiles`) list
+> [`@cesium/3d-tiles-tools`](https://github.com/CesiumGS/3d-tiles-tools) as an **optional dependency**,
+> but no `--3tz`/`--3dtiles` CLI flag actually exists yet to use it for packaging — for `.3tz`/`.3dtiles`
+> today, convert to a plain tileset dir then use the in-repo packer (`scripts/pack-3dtiles.mjs`) or
+> `npx 3d-tiles-tools convert`, both documented under `/package` below.
 
 **Live `/stream` (no pre-conversion)** — `packages/tile-server/rad-live.js`, served at
 `GET /stream/tileset.json?url=<.rad>&format=rad` (or the dedicated `/rad/tileset.json?url=<.rad>`):
@@ -1088,7 +1089,7 @@ curl -L "https://data.geopf.fr/telechargement/download/LiDARHD-NUALID/NUALHD_1-0
 | `@gltf-transform/core` ^4 | both |
 | `proj4` | copc-to-3dtiles |
 | `@sparkjsdev/spark` | rad-to-3dtiles |
-| `@cesium/3d-tiles-tools` (optional) | both — `.3tz`/`.3dtiles` packaging via `--3tz`/`--3dtiles` flag |
+| `@cesium/3d-tiles-tools` (optional) | both — declared for future `.3tz`/`.3dtiles` packaging; not wired to a CLI flag yet (use `scripts/pack-3dtiles.mjs` or `npx 3d-tiles-tools convert` today, see `/package`) |
 
 ---
 
@@ -1226,7 +1227,10 @@ How `rad-to-3dtiles` builds a tile hierarchy that selects levels correctly in bo
 CesiumJS and 3DTilesRendererJS:
 
 - **Geometric error = uniform per depth, anchored to a rendering-error proxy — then scaled to
-  match renderer expectations.** Each tile records a feature size =
+  match renderer expectations.** *(This describes the original **`--ge-basis=featuresize`** approach,
+  kept below for the design rationale. The undershoot noted at the end of this bullet is why the
+  **default basis is now `spatial`** — `bboxDiag/∛splatCount` — instead; `featuresize` is opt-in
+  legacy. See "Missing features" above.)* Each tile records a feature size =
   `mean over splats of max(scaleₓ,scaleᵧ,scale_z) × 3` (≈ SparkJS BhattLod `featureSize`),
   then the builder collapses these to **one error per LoD level** (mean featureSize at each depth,
   forced strictly decreasing). This mirrors the
@@ -1744,10 +1748,12 @@ A consolidated, honest list of what is **not** handled (and where it would go). 
 ### Architecture & runtime
 - **Browser runtime not built** — `fs` / `zlib` / `worker_threads` are Node-only; core's planned `fs-io`
   abstraction + `CompressionStream`/WASM-brotli paths don't exist yet (decoders are mostly portable; see Runtime table).
-- **`.3tz` packaging / tileset upgrades** are not built in. Use Cesium's
-  [3d-tiles-tools](https://github.com/CesiumGS/3d-tiles-tools) (CLI + JS API) — `npx 3d-tiles-tools createTileset`,
-  `… combine`, `… upgrade` (1.0→1.1), and `… convert tileset.json output.3tz` — which handle `.3tz` zip
-  packaging and tileset upgrades cleanly. (One COPC `.zip` exists in `sample-data/` as an ad-hoc example.)
+- **`.3tz`/`.3dtiles` packaging IS built in** (`scripts/pack-3dtiles.mjs`, dependency-free) and serving
+  packages in-place is too (`/package`, `/3dtiles-self-contained`) — see the `/package` section below.
+  **Tileset-level transforms** (version `upgrade` 1.0→1.1, `combine` multiple tilesets, content-format
+  transcodes) are **not** built in; use Cesium's
+  [3d-tiles-tools](https://github.com/CesiumGS/3d-tiles-tools) (CLI + JS API) for those — `npx
+  3d-tiles-tools upgrade`, `… combine`, etc.
 
 
 ### Two modes (`packages/tile-server`, one HTTP server, CORS open)
@@ -1852,7 +1858,7 @@ format notes: [`docs-references/maptiler-geosplats.md`](docs-references/maptiler
 
 ```sh
 #   GET /geosplats/tileset.json?url=<model.json URL>[&lod=1..8]                        → HLOD tileset
-#   GET /geosplats/tile.glb?url=<model.json>&m=<submodel#>&grid=<1|8|64>&oct=<n>&lod=<n> → one octant, KHR_gaussian_splatting GLB
+#   GET /geosplats/tile.glb?url=<model.json>&m=<submodel#>&grid=<1|8|64|512>&oct=<n>&lod=<n> → one octant, KHR_gaussian_splatting GLB
 ```
 
 - **Data primitive = SOGS** — same primitive our own `writeSog`/`readSog` (`@playcanvas/splat-transform`)

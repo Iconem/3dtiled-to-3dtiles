@@ -5,6 +5,27 @@ Format loosely follows [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+### Docs — 2026-07-02 (`main`: broader README staleness pass, 5 parallel audits)
+- **RAD LoD geometric-error doc still described only the legacy `featuresize` basis** as if it were
+  current — added a note pointing at the now-default `spatial` basis (kept the detailed writeup, since
+  `--ge-basis=featuresize` still exists and behaves exactly as described).
+- **`.3tz` packaging vs tileset-upgrade claims contradicted each other**: one section said packaging
+  "is not built in," another correctly documented the in-repo packer (`scripts/pack-3dtiles.mjs`) and
+  `/package` serving. Split the claim: packaging *is* built in; tileset-level transforms (`upgrade`,
+  `combine`) still aren't, and still point at `3d-tiles-tools`.
+- **`/geosplats/tile.glb`'s documented `grid=` values were missing `512`** (the endpoint accepts
+  `1|8|64|512`; the HLOD tileset builder just doesn't request 512 automatically) — fixed.
+- **"Potree 1.x always lazy" was wrong** — it supports `hierarchy=eager` (`drainAll`) exactly like
+  every other converter with a hierarchy; fixed the "wired for" list to include it.
+- **A `--3tz`/`--3dtiles` CLI flag was documented for `rad-to-3dtiles`/`copc-to-3dtiles` that doesn't
+  exist** — `@cesium/3d-tiles-tools` is an optional dependency but isn't wired to any flag. Reworded
+  in both the converter note and the Dependencies table to point at what actually works today
+  (`scripts/pack-3dtiles.mjs` / `npx 3d-tiles-tools convert`).
+- **RAD's LoD fanout numbers were swapped and one was fabricated** — the source spec gives Tiny-LoD a
+  base β≈1.75 and leaves Bhatt-LoD's fanout unspecified; the README had them backwards ("BhattLod
+  ~1.75 / TinyLod ~1.5"). Corrected and noted the ~1.5 as our converter's own observed value, not a
+  spec'd number.
+
 ### Docs — 2026-07-02 (`main`: second README staleness pass)
 - **`i3s-to-3dtiles` mislabeled "UNTESTED"** in the docs-references summary table while its own
   dedicated section already documents it as validated on `Buildings_NewYork_v18.slpk` (5882 tiles,
