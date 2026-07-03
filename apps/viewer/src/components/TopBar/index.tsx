@@ -1,8 +1,6 @@
 import { useEffect, useRef } from 'react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
-import { Checkbox } from '@/components/ui/checkbox';
-import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { useUrlState } from '@/state/urlState';
 import { useViewerStore } from '@/state/store';
@@ -31,19 +29,38 @@ const TILING_PILLS: [string, string][] = [
   ['explicit', '⬢ explicit'],
 ];
 
-function Pill({ active, onClick, title, children }: { active: boolean; onClick: () => void; title?: string; children: React.ReactNode }) {
+type Tint = 'blue' | 'amber' | 'emerald' | 'fuchsia';
+
+// Group container tint: a faint wash (instead of vertical dividers) so groups stay visually
+// distinguishable, and each group becomes a single flex-wrap unit that wraps as a whole rather
+// than splitting mid-group on narrow screens.
+const GROUP_TINT: Record<Tint, string> = {
+  blue: 'bg-blue-500/10',
+  amber: 'bg-amber-500/10',
+  emerald: 'bg-emerald-500/10',
+  fuchsia: 'bg-fuchsia-500/10',
+};
+
+// Active-pill tint: a stronger wash of the SAME hue rather than the default variant's full-contrast
+// white-on-dark fill — keeps the active state legible as belonging to its group instead of just
+// "loudest element on the page".
+const ACTIVE_TINT: Record<Tint, string> = {
+  blue: 'bg-blue-500/30 border-blue-400/40 text-blue-50 hover:bg-blue-500/35',
+  amber: 'bg-amber-500/30 border-amber-400/40 text-amber-50 hover:bg-amber-500/35',
+  emerald: 'bg-emerald-500/30 border-emerald-400/40 text-emerald-50 hover:bg-emerald-500/35',
+  fuchsia: 'bg-fuchsia-500/30 border-fuchsia-400/40 text-fuchsia-50 hover:bg-fuchsia-500/35',
+};
+
+function Pill({ active, onClick, title, tint, children }: { active: boolean; onClick: () => void; title?: string; tint: Tint; children: React.ReactNode }) {
   return (
-    <Button size="sm" variant={active ? 'default' : 'outline'} onClick={onClick} title={title} className="h-7 px-2 text-xs">
+    <Button size="sm" variant="outline" onClick={onClick} title={title} className={cn('h-7 px-2 text-xs', active && ACTIVE_TINT[tint])}>
       {children}
     </Button>
   );
 }
 
-// Each pill group gets a faint per-category tint (instead of vertical dividers) so groups stay
-// visually distinguishable — and each becomes a single flex-wrap unit that wraps as a whole rather
-// than splitting mid-group on narrow screens.
-function PillGroup({ tint, className, children }: { tint: string; className?: string; children: React.ReactNode }) {
-  return <div className={cn('flex flex-wrap items-center gap-1 rounded-md p-1', tint, className)}>{children}</div>;
+function PillGroup({ tint, className, children }: { tint: Tint; className?: string; children: React.ReactNode }) {
+  return <div className={cn('flex flex-wrap items-center gap-1 rounded-md p-1', GROUP_TINT[tint], className)}>{children}</div>;
 }
 
 export default function TopBar({ activeHandleRef }: { activeHandleRef: React.RefObject<ViewerHandle | null> }) {
@@ -110,18 +127,18 @@ export default function TopBar({ activeHandleRef }: { activeHandleRef: React.Ref
   return (
     <header className="flex flex-col gap-2 border-b bg-background/95 p-2">
       <div className="flex flex-wrap items-center gap-2">
-        <h1 className="mr-1 shrink-0 text-sm font-semibold">3D Tiles</h1>
+        <h1 className="mr-1 shrink-0 text-sm font-semibold">3D Tiled</h1>
 
-        <PillGroup tint="bg-blue-500/10">
+        <PillGroup tint="blue">
           {MODE_PILLS.map(([v, l]) => (
-            <Pill key={v} active={url.mode === v} onClick={() => setUrl({ mode: v as any })}>{l}</Pill>
+            <Pill key={v} tint="blue" active={url.mode === v} onClick={() => setUrl({ mode: v as any })}>{l}</Pill>
           ))}
         </PillGroup>
 
         {url.mode === 'stream' && (
-          <PillGroup tint="bg-amber-500/10">
+          <PillGroup tint="amber">
             {CACHE_PILLS.map(([v, l]) => (
-              <Pill key={v} active={url.cache === v} onClick={() => setUrl({ cache: v as any })}>{l}</Pill>
+              <Pill key={v} tint="amber" active={url.cache === v} onClick={() => setUrl({ cache: v as any })}>{l}</Pill>
             ))}
             {url.cache === 'none' && (
               <span className="flex items-center gap-1 text-xs text-muted-foreground">
@@ -141,53 +158,52 @@ export default function TopBar({ activeHandleRef }: { activeHandleRef: React.Ref
           </PillGroup>
         )}
 
-        <PillGroup tint="bg-emerald-500/10">
+        <PillGroup tint="emerald">
           {url.mode === 'tools' ? (
             TOOL_PILLS.map(([v, l]) => (
-              <Pill key={v} active={url.tool === v} onClick={() => setUrl({ tool: v as any, preset: '' })}>{l}</Pill>
+              <Pill key={v} tint="emerald" active={url.tool === v} onClick={() => setUrl({ tool: v as any, preset: '' })}>{l}</Pill>
             ))
           ) : (
             <>
               {FORMATS.map((f) => (
-                <Pill key={f.fmt} active={url.format === f.fmt} onClick={() => setUrl({ format: f.fmt, preset: '' })}>{f.icon} {f.label}</Pill>
+                <Pill key={f.fmt} tint="emerald" active={url.format === f.fmt} onClick={() => setUrl({ format: f.fmt, preset: '' })}>{f.icon} {f.label}</Pill>
               ))}
               {url.mode !== 'offline' &&
                 PSEUDO_FORMATS.map(([v, l]) => (
-                  <Pill key={v} active={url.format === v} onClick={() => setUrl({ format: v, preset: '' })}>{l}</Pill>
+                  <Pill key={v} tint="emerald" active={url.format === v} onClick={() => setUrl({ format: v, preset: '' })}>{l}</Pill>
                 ))}
               {url.mode === 'stream' && fmtOfSelected?.octree &&
                 TILING_PILLS.map(([v, l]) => (
-                  <Pill key={v} active={url.tiling === v} onClick={() => setUrl({ tiling: v as any })}>{l}</Pill>
+                  <Pill key={v} tint="emerald" active={url.tiling === v} onClick={() => setUrl({ tiling: v as any })}>{l}</Pill>
                 ))}
               {url.mode === 'stream' && canCentroids(url.format) && (
-                <Pill active={url.centroids} onClick={() => setUrl({ centroids: !url.centroids })} title="Render splat centres as glTF POINTS instead of full gaussians">◦ centroids</Pill>
+                <Pill tint="emerald" active={url.centroids} onClick={() => setUrl({ centroids: !url.centroids })} title="Render splat centres as glTF POINTS instead of full gaussians">◦ centroids</Pill>
               )}
             </>
           )}
         </PillGroup>
-
-        <PillGroup tint="bg-fuchsia-500/10" className="min-w-0 flex-1">
-          {presets.map((p) => (
-            <Button
-              key={p.id}
-              size="sm"
-              variant={url.preset === p.id ? 'default' : 'outline'}
-              disabled={!p.url}
-              onClick={() => selectPreset(p)}
-              className={cn('h-7 px-2 text-xs', !p.url && 'opacity-40')}
-              title={!p.url ? `${url.format} has no ${url.mode} adapter` : undefined}
-            >
-              {p.label}
-            </Button>
-          ))}
-        </PillGroup>
       </div>
 
+      <PillGroup tint="fuchsia">
+        {presets.map((p) => (
+          <Button
+            key={p.id}
+            size="sm"
+            variant="outline"
+            disabled={!p.url}
+            onClick={() => selectPreset(p)}
+            className={cn('h-7 px-2 text-xs', url.preset === p.id && ACTIVE_TINT.fuchsia, !p.url && 'opacity-40')}
+            title={!p.url ? `${url.format} has no ${url.mode} adapter` : undefined}
+          >
+            {p.label}
+          </Button>
+        ))}
+      </PillGroup>
+
       <div className="flex flex-wrap items-center gap-2">
-        <Label className="flex shrink-0 items-center gap-1.5 text-xs text-muted-foreground" title="ON: field holds the RAW dataset URL — wrapped with the current format+cache+params. OFF: a ready middleware/tileset URL, loaded as-is.">
-          <Checkbox checked={rawUrlMode} onCheckedChange={(v) => store.getState().setRawUrlMode(!!v)} />
+        <Pill tint="blue" active={rawUrlMode} onClick={() => store.getState().setRawUrlMode(!rawUrlMode)} title="ON: field holds the RAW dataset URL — wrapped with the current format+cache+params. OFF: a ready middleware/tileset URL, loaded as-is.">
           raw url
-        </Label>
+        </Pill>
         <Input
           ref={inputRef}
           value={urlField}

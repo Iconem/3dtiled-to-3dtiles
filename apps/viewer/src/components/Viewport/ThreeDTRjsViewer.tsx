@@ -1,4 +1,4 @@
-import { forwardRef, useEffect, useImperativeHandle, useMemo, useRef, useState } from 'react';
+import { forwardRef, useCallback, useEffect, useImperativeHandle, useRef, useState } from 'react';
 import { Canvas, useThree } from '@react-three/fiber';
 import { OrbitControls, TransformControls } from '@react-three/drei';
 import {
@@ -90,6 +90,35 @@ const Scene = forwardRef<ViewerHandle, { loadArgs: LoadArgs }>(function Scene({ 
   useEffect(() => {
     if (tilesRef.current) tilesRef.current.group.visible = assetVisible;
   }, [assetVisible]);
+
+  // Nothing flies the camera to the loaded content otherwise — the Canvas camera starts at a fixed
+  // deep-space default (see the `camera` prop below) and stays there, so any tileset not centered
+  // exactly under that default view direction never appears (reported as "3DTRJS shows nothing").
+  // Frame the camera on the root tile's bounding sphere as soon as it's known, and sync whichever
+  // controls are active (orbit target, or globe/environment controls' internal state) to match.
+  const frameToTileset = useCallback((tiles: TilesRendererImpl | null) => {
+    if (!tiles) return;
+    const sphere = new THREE.Sphere();
+    if (!(tiles as any).getBoundingSphere(sphere)) return;
+    tiles.group.updateWorldMatrix(true, false);
+    sphere.applyMatrix4(tiles.group.matrixWorld);
+    const fovRad = THREE.MathUtils.degToRad((camera as THREE.PerspectiveCamera).fov ?? fov);
+    const dist = (sphere.radius / Math.sin(fovRad / 2)) * 1.5;
+    const dir = camera.position.clone().sub(sphere.center);
+    if (dir.lengthSq() < 1e-6) dir.set(0, 0, 1);
+    dir.normalize();
+    camera.position.copy(sphere.center).addScaledVector(dir, dist);
+    camera.near = Math.max(dist * 0.01, 0.1);
+    camera.far = dist + sphere.radius * 4;
+    camera.lookAt(sphere.center);
+    (camera as THREE.PerspectiveCamera).updateProjectionMatrix?.();
+    if (controlsRef.current) {
+      controlsRef.current.target.copy(sphere.center);
+      controlsRef.current.update?.();
+    }
+    invalidate();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [camera, invalidate]);
 
   const isSplat = loadArgs?.type === 'splat';
   const isPoints = loadArgs?.type === 'pointcloud';
@@ -219,7 +248,12 @@ const Scene = forwardRef<ViewerHandle, { loadArgs: LoadArgs }>(function Scene({ 
         <meshBasicMaterial color="#1a2a3a" wireframe />
       </mesh>
       {loadArgs && (
-        <TilesRendererR3F ref={tilesRef as any} url={loadArgs.url} errorTarget={errorTarget}>
+        <TilesRendererR3F
+          ref={tilesRef as any}
+          url={loadArgs.url}
+          errorTarget={errorTarget}
+          onLoadRootTileset={() => frameToTileset(tilesRef.current)}
+        >
           {isSplat && <TilesPlugin plugin={GaussianSplatPlugin as any} args={{ renderer: gl, scene } as any} />}
           {debugTiles && <TilesPlugin plugin={DebugTilesPlugin as any} displayBoxBounds colorMode={7} />}
           {controlMode === 'globe' && <GlobeControls enableDamping />}

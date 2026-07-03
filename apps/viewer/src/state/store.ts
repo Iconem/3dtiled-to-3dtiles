@@ -9,6 +9,16 @@ export interface CropBbox {
 }
 
 interface ViewerStore {
+  // Light/dark — persisted to localStorage under the same key index.html's inline script reads
+  // synchronously before first paint (see index.html), so toggling here and reloading never flashes
+  // the other theme.
+  theme: 'light' | 'dark';
+  setTheme: (v: 'light' | 'dark') => void;
+
+  // Sidebar fold — UI-only, not persisted; resets open each session.
+  sidebarCollapsed: boolean;
+  setSidebarCollapsed: (v: boolean) => void;
+
   // The type of the currently-loaded asset (mesh/pointcloud/splat) — drives per-type SSE defaults and
   // renderer behavior (e.g. Cesium's splat vs. point-cloud shading paths). Set on preset selection.
   currentType: AssetType;
@@ -97,7 +107,20 @@ interface ViewerStore {
 
 let tlogT0 = 0;
 
+const THEME_KEY = '3d-tiled-theme';
+
+function applyTheme(theme: 'light' | 'dark') {
+  document.documentElement.classList.toggle('dark', theme === 'dark');
+  localStorage.setItem(THEME_KEY, theme);
+}
+
 export const useViewerStore = create<ViewerStore>((set, get) => ({
+  theme: (localStorage.getItem(THEME_KEY) as 'light' | 'dark' | null) ?? 'dark',
+  setTheme: (v) => { applyTheme(v); set({ theme: v }); },
+
+  sidebarCollapsed: false,
+  setSidebarCollapsed: (v) => set({ sidebarCollapsed: v }),
+
   currentType: 'pointcloud',
   setCurrentType: (v) => set({ currentType: v }),
 

@@ -881,11 +881,11 @@ draws bounding volumes coloured by octree depth in both renderers. The preset ba
 demo data (PLY→3D Tiles). For deeper tileset inspection (tree, bounds, per-tile stats) alongside
 this viewer, see [3DTiles-Inspector](https://github.com/WilliamLiu-1997/3DTiles-Inspector).
 
-### Standalone React viewer (`apps/viewer`) — shadcn/ui, R3F, one push, WIP first pass
+### 3D Tiled — standalone React viewer (`apps/viewer`), shadcn/ui, R3F, one push, WIP first pass
 
-A ground-up port of `viewer.html` into a real React app — **`viewer.html` stays as-is**, unaffected,
-this is a new, separate app. `pnpm --filter viewer dev` → `http://localhost:3003` (added to
-`.claude/launch.json` as `"viewer"`, `dev:viewer` root script). Stack: Vite + React 19 + TypeScript +
+A ground-up port of `viewer.html` into a real React app, named **3D Tiled** — **`viewer.html` stays
+as-is**, unaffected, this is a new, separate app. `pnpm --filter 3d-tiled dev` → `http://localhost:3003`
+(added to `.claude/launch.json` as `"viewer"`, `dev:viewer` root script). Stack: Vite + React 19 + TypeScript +
 Tailwind v4, shadcn/ui (hand-vendored `src/components/ui/*`, default dark theme, not a port of
 viewer.html's own hand-tuned palette), **nuqs** for the shareable URL-param slice (format/mode/cache/
 prefetch/transform/tiling/renderer/preset — the address bar is a bookmarkable link to a given view;

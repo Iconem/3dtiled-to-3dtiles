@@ -200,9 +200,15 @@ const CesiumViewer = forwardRef<ViewerHandle, Props>(function CesiumViewer({ vis
     const { shadeless, brightness } = store.getState();
     try {
       if (!shadeless && brightness === 1) { (tileset as any).customShader = undefined; return; }
+      // Point clouds are frequently uncolored (LAS/COPC with no RGB channel stores black), so
+      // multiplying a near-zero diffuse by brightness still renders black — shadeless on a point
+      // cloud instead forces a flat white so the geometry actually becomes visible.
+      const fragmentShaderText = currentTypeRef.current === 'pointcloud' && shadeless
+        ? `void fragmentMain(FragmentInput fsInput, inout czm_modelMaterial material){ material.diffuse = vec3(${brightness.toFixed(2)}); }`
+        : `void fragmentMain(FragmentInput fsInput, inout czm_modelMaterial material){ material.diffuse *= ${brightness.toFixed(2)}; }`;
       (tileset as any).customShader = new Cesium.CustomShader({
         lightingModel: shadeless ? Cesium.LightingModel.UNLIT : undefined,
-        fragmentShaderText: `void fragmentMain(FragmentInput fsInput, inout czm_modelMaterial material){ material.diffuse *= ${brightness.toFixed(2)}; }`,
+        fragmentShaderText,
       });
     } catch (e) {
       console.warn('[shading]', (e as Error).message);
