@@ -43,17 +43,27 @@ const GROUP_TINT: Record<Tint, string> = {
 
 // Active-pill tint: a stronger wash of the SAME hue rather than the default variant's full-contrast
 // white-on-dark fill — keeps the active state legible as belonging to its group instead of just
-// "loudest element on the page".
+// "loudest element on the page". Text is dark by default (readable against the light tint the wash
+// produces over a light-mode white page) and switches to a light shade in dark mode.
 const ACTIVE_TINT: Record<Tint, string> = {
-  blue: 'bg-blue-500/30 border-blue-400/40 text-blue-50 hover:bg-blue-500/35',
-  amber: 'bg-amber-500/30 border-amber-400/40 text-amber-50 hover:bg-amber-500/35',
-  emerald: 'bg-emerald-500/30 border-emerald-400/40 text-emerald-50 hover:bg-emerald-500/35',
-  fuchsia: 'bg-fuchsia-500/30 border-fuchsia-400/40 text-fuchsia-50 hover:bg-fuchsia-500/35',
+  blue: 'bg-blue-500/30 border-blue-400/40 text-blue-950 hover:bg-blue-500/35 dark:text-blue-50',
+  amber: 'bg-amber-500/30 border-amber-400/40 text-amber-950 hover:bg-amber-500/35 dark:text-amber-50',
+  emerald: 'bg-emerald-500/30 border-emerald-400/40 text-emerald-950 hover:bg-emerald-500/35 dark:text-emerald-50',
+  fuchsia: 'bg-fuchsia-500/30 border-fuchsia-400/40 text-fuchsia-950 hover:bg-fuchsia-500/35 dark:text-fuchsia-50',
+};
+
+// Inactive-pill hover: a light wash of the group's own hue instead of the default variant's neutral
+// accent — keeps hover feedback consistent with each group's color instead of a generic grey flash.
+const HOVER_TINT: Record<Tint, string> = {
+  blue: 'hover:bg-blue-500/15 hover:text-foreground',
+  amber: 'hover:bg-amber-500/15 hover:text-foreground',
+  emerald: 'hover:bg-emerald-500/15 hover:text-foreground',
+  fuchsia: 'hover:bg-fuchsia-500/15 hover:text-foreground',
 };
 
 function Pill({ active, onClick, title, tint, children }: { active: boolean; onClick: () => void; title?: string; tint: Tint; children: React.ReactNode }) {
   return (
-    <Button size="sm" variant="outline" onClick={onClick} title={title} className={cn('h-7 px-2 text-xs', active && ACTIVE_TINT[tint])}>
+    <Button size="sm" variant="outline" onClick={onClick} title={title} className={cn('h-7 px-2 text-xs', active ? ACTIVE_TINT[tint] : HOVER_TINT[tint])}>
       {children}
     </Button>
   );
@@ -192,7 +202,7 @@ export default function TopBar({ activeHandleRef }: { activeHandleRef: React.Ref
             variant="outline"
             disabled={!p.url}
             onClick={() => selectPreset(p)}
-            className={cn('h-7 px-2 text-xs', url.preset === p.id && ACTIVE_TINT.fuchsia, !p.url && 'opacity-40')}
+            className={cn('h-7 px-2 text-xs', url.preset === p.id ? ACTIVE_TINT.fuchsia : HOVER_TINT.fuchsia, !p.url && 'opacity-40')}
             title={!p.url ? `${url.format} has no ${url.mode} adapter` : undefined}
           >
             {p.label}

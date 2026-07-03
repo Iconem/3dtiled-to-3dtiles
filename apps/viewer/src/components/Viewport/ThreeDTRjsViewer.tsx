@@ -80,6 +80,9 @@ const Scene = forwardRef<ViewerHandle, { loadArgs: LoadArgs }>(function Scene({ 
   const maxSSE = useViewerStore((s) => s.maxSSE);
   const assetVisible = useViewerStore((s) => s.assetVisible);
   const pointSize = useViewerStore((s) => s.pointSize);
+  // Whether the WGS84-radius wireframe globe is meaningful to show at all — see frameToTileset below.
+  const [showGlobe, setShowGlobe] = useState(true);
+  useEffect(() => { if (!loadArgs) setShowGlobe(true); }, [loadArgs]);
 
   useEffect(() => {
     if ('fov' in camera) (camera as THREE.PerspectiveCamera).fov = fov;
@@ -102,6 +105,17 @@ const Scene = forwardRef<ViewerHandle, { loadArgs: LoadArgs }>(function Scene({ 
     if (!(tiles as any).getBoundingSphere(sphere)) return;
     tiles.group.updateWorldMatrix(true, false);
     sphere.applyMatrix4(tiles.group.matrixWorld);
+    // A tileset with no real geographic placement loads with its own local origin near (0,0,0) — its
+    // group transform is never moved onto the WGS84 ellipsoid (that's what 3d-tiles-renderer's
+    // ReorientationPlugin is for, and we intentionally don't register it: it would also recenter — and
+    // thus visually relocate — the many already-correctly-georeferenced presets this app tests against).
+    // Showing the real-scale Earth sphere next to such local-only content is what read as "the globe
+    // misplaced vs. the tileset": the tiny content sits deep inside a 6,378 km sphere it has no real
+    // relationship to, invisible once the camera below auto-frames tightly on the small local content.
+    // Only draw the globe when the bounding sphere is actually far enough from the origin to plausibly
+    // BE a point on Earth's surface — the same heuristic ReorientationPlugin itself uses internally.
+    const geoReferenced = sphere.center.length() > 6378137 * 0.5;
+    setShowGlobe(geoReferenced);
     const fovRad = THREE.MathUtils.degToRad((camera as THREE.PerspectiveCamera).fov ?? fov);
     const dist = (sphere.radius / Math.sin(fovRad / 2)) * 1.5;
     const dir = camera.position.clone().sub(sphere.center);
@@ -109,7 +123,12 @@ const Scene = forwardRef<ViewerHandle, { loadArgs: LoadArgs }>(function Scene({ 
     dir.normalize();
     camera.position.copy(sphere.center).addScaledVector(dir, dist);
     camera.near = Math.max(dist * 0.01, 0.1);
-    camera.far = dist + sphere.radius * 4;
+    // The far plane must also reach back to the globe sphere (always centered at world origin) when
+    // it's shown — basing it purely on the local content's own size (as below) clipped the globe out
+    // of view entirely for real georeferenced content sitting millions of meters from world origin.
+    camera.far = geoReferenced
+      ? Math.max(dist + sphere.radius * 4, camera.position.length() + 6378137 * 1.5)
+      : dist + sphere.radius * 4;
     camera.lookAt(sphere.center);
     (camera as THREE.PerspectiveCamera).updateProjectionMatrix?.();
     if (controlsRef.current) {
@@ -242,11 +261,14 @@ const Scene = forwardRef<ViewerHandle, { loadArgs: LoadArgs }>(function Scene({ 
       <directionalLight position={[1, 1, 1]} intensity={0.6} />
       {/* Base globe surface — a plain WGS84-radius sphere for visual ground reference (first pass: no
           imagery overlay; 3d-tiles-renderer's GeneratedSurfacePlugin, which viewer.html's buildGlobe()
-          used for this, isn't part of the package's public/typed export surface). */}
-      <mesh>
-        <sphereGeometry args={[6378137, 64, 64]} />
-        <meshBasicMaterial color="#1a2a3a" wireframe />
-      </mesh>
+          used for this, isn't part of the package's public/typed export surface). Hidden for tilesets
+          with no real geographic placement — see the comment in frameToTileset above for why. */}
+      {showGlobe && (
+        <mesh>
+          <sphereGeometry args={[6378137, 64, 64]} />
+          <meshBasicMaterial color="#1a2a3a" wireframe />
+        </mesh>
+      )}
       {loadArgs && (
         <TilesRendererR3F
           ref={tilesRef as any}
