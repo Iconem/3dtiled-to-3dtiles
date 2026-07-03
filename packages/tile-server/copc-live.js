@@ -33,12 +33,17 @@ async function readWkt(getter, copc) {
 const ctxCache = new Map();
 async function getCtx(url) {
   if (ctxCache.has(url)) return ctxCache.get(url);
-  const getter = Getter.http(url);
-  // Cheap guard: every LAS/COPC file starts with "LASF". Without this, pointing /copc at a non-LAS
-  // resource (e.g. a JSON metadata.json / meta.lcc by mistake) makes copc + laz-perf hang and can
-  // abort the whole process. Fail fast with a clear error instead.
-  const magic = Buffer.from(await getter(0, 4)).toString('latin1');
+  const rawGetter = Getter.http(url);
+  // Cold-load latency fix: this used to do a SEPARATE 4-byte range request just to check the "LASF"
+  // magic before handing off to Copc.create(), which then issues its OWN first range read (the LAS
+  // header + VLR block, ~64KB) — two round-trips where one suffices. Fetch that head block ourselves,
+  // check the magic from it directly, and wrap the getter so Copc.create()'s own header/VLR reads (which
+  // fall well within this same range) are served from memory instead of hitting the network again.
+  const HEAD_BYTES = 65536;
+  const head = Buffer.from(await rawGetter(0, HEAD_BYTES));
+  const magic = head.toString('latin1', 0, 4);
   if (magic !== 'LASF') throw new Error(`not a LAS/COPC file (got "${magic}" not "LASF") — is this the right URL for /copc?`);
+  const getter = async (begin, end) => (end <= head.length ? head.subarray(begin, end) : rawGetter(begin, end));
   const copc = await Copc.create(getter);
   const nodeMap = new Map();
   const pendingPages = new Map();    // key → pageRef (known but not yet loaded)

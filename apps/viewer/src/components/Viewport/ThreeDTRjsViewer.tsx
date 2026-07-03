@@ -1,6 +1,6 @@
 import { forwardRef, useCallback, useEffect, useImperativeHandle, useRef, useState } from 'react';
 import { Canvas, useThree } from '@react-three/fiber';
-import { OrbitControls, TransformControls } from '@react-three/drei';
+import { OrbitControls, TransformControls, GizmoHelper, GizmoViewport, useTexture } from '@react-three/drei';
 import {
   TilesRenderer as TilesRendererR3F,
   TilesPlugin,
@@ -31,6 +31,22 @@ import { useViewerStore } from '@/state/store';
 interface Props { visible: boolean }
 
 type LoadArgs = { url: string; type: AssetType; sseOverride?: number | null } | null;
+
+// A single low-res whole-earth photo (the same public-domain NASA Blue Marble mosaic used in most
+// three.js globe demos) — not live OSM/Google slippy tiles (that would need a whole quadtree tile
+// fetch-and-stitch renderer, well beyond a wireframe-vs-imagery fix), but real imagery instead of a
+// flat wireframe, which is what was actually asked for.
+const EARTH_TEXTURE_URL = 'https://threejs.org/examples/textures/planets/earth_atmos_2048.jpg';
+
+function Globe() {
+  const texture = useTexture(EARTH_TEXTURE_URL);
+  return (
+    <mesh rotation={[0, -Math.PI / 2, 0]}>
+      <sphereGeometry args={[6378137, 96, 96]} />
+      <meshBasicMaterial map={texture} />
+    </mesh>
+  );
+}
 
 function CropGizmo({ tilesRef }: { tilesRef: React.MutableRefObject<TilesRendererImpl | null> }) {
   const boxRef = useRef<THREE.Mesh>(null);
@@ -80,6 +96,7 @@ const Scene = forwardRef<ViewerHandle, { loadArgs: LoadArgs }>(function Scene({ 
   const maxSSE = useViewerStore((s) => s.maxSSE);
   const assetVisible = useViewerStore((s) => s.assetVisible);
   const pointSize = useViewerStore((s) => s.pointSize);
+  const basemap = useViewerStore((s) => s.basemap);
   // Whether the WGS84-radius wireframe globe is meaningful to show at all — see frameToTileset below.
   const [showGlobe, setShowGlobe] = useState(true);
   useEffect(() => { if (!loadArgs) setShowGlobe(true); }, [loadArgs]);
@@ -93,6 +110,20 @@ const Scene = forwardRef<ViewerHandle, { loadArgs: LoadArgs }>(function Scene({ 
   useEffect(() => {
     if (tilesRef.current) tilesRef.current.group.visible = assetVisible;
   }, [assetVisible]);
+
+  // OrbitControls (drei) orbits around `.target`; GlobeControls/EnvironmentControls (3d-tiles-renderer)
+  // orbit around `.pivotPoint`/`.zoomPoint` instead — neither has a dblclick-to-pivot built in, and
+  // <CameraTransition>'s ortho↔perspective swap also reads whichever of these is set to decide what
+  // point in space should stay visually fixed during the transition (see onBeforeToggle below), so
+  // keeping this in sync is what fixes BOTH "double-click doesn't re-pivot" and the ortho zoom jump.
+  const setControlsPivot = useCallback((point: THREE.Vector3) => {
+    const controls = controlsRef.current;
+    if (!controls) return;
+    if (controls.target) controls.target.copy(point);
+    if (controls.pivotPoint) controls.pivotPoint.copy(point);
+    if ('zoomPoint' in controls) { controls.zoomPoint.copy(point); controls.zoomPointSet = true; }
+    controls.update?.();
+  }, []);
 
   // Nothing flies the camera to the loaded content otherwise — the Canvas camera starts at a fixed
   // deep-space default (see the `camera` prop below) and stays there, so any tileset not centered
@@ -129,15 +160,45 @@ const Scene = forwardRef<ViewerHandle, { loadArgs: LoadArgs }>(function Scene({ 
     camera.far = geoReferenced
       ? Math.max(dist + sphere.radius * 4, camera.position.length() + 6378137 * 1.5)
       : dist + sphere.radius * 4;
+    // EnvironmentControls assumes world +Y is "up", which is only true for local/non-georeferenced
+    // content — real Earth-surface content needs the actual ellipsoid normal at that point instead, or
+    // orbiting tilts the camera against the true horizon ("env mode has the wrong up" without this).
+    // GlobeControls already derives this itself; setting it here too is harmless (same value either way).
+    if (geoReferenced) {
+      const ellipsoid = (tiles as any).ellipsoid;
+      if (ellipsoid) camera.up.copy(ellipsoid.getPositionToNormal(sphere.center, new THREE.Vector3()));
+    }
     camera.lookAt(sphere.center);
     (camera as THREE.PerspectiveCamera).updateProjectionMatrix?.();
-    if (controlsRef.current) {
-      controlsRef.current.target.copy(sphere.center);
-      controlsRef.current.update?.();
-    }
+    setControlsPivot(sphere.center);
     invalidate();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [camera, invalidate]);
+  }, [camera, invalidate, setControlsPivot]);
+
+  // Double-click to re-pivot + zoom halfway toward the clicked point — mirrors CesiumViewer's own
+  // LEFT_DOUBLE_CLICK handler (same 50%-lerp-toward-the-pick behavior) for consistency between renderers.
+  useEffect(() => {
+    const dom = gl.domElement;
+    function onDblClick(e: MouseEvent) {
+      const tiles = tilesRef.current;
+      if (!tiles) return;
+      const rect = dom.getBoundingClientRect();
+      const ndc = new THREE.Vector2(
+        ((e.clientX - rect.left) / rect.width) * 2 - 1,
+        -((e.clientY - rect.top) / rect.height) * 2 + 1,
+      );
+      const raycaster = new THREE.Raycaster();
+      raycaster.setFromCamera(ndc, camera);
+      const hit = raycaster.intersectObject(tiles.group, true)[0];
+      if (!hit) return;
+      camera.position.lerp(hit.point, 0.5);
+      camera.lookAt(hit.point);
+      setControlsPivot(hit.point);
+      invalidate();
+    }
+    dom.addEventListener('dblclick', onDblClick);
+    return () => dom.removeEventListener('dblclick', onDblClick);
+  }, [gl, camera, invalidate, setControlsPivot]);
 
   const isSplat = loadArgs?.type === 'splat';
   const isPoints = loadArgs?.type === 'pointcloud';
@@ -156,7 +217,7 @@ const Scene = forwardRef<ViewerHandle, { loadArgs: LoadArgs }>(function Scene({ 
   useImperativeHandle(ref, (): ViewerHandle => ({
     load() { /* handled via loadArgs prop from the outer component (URL change remounts TilesRenderer) */ },
     setBasemap() { /* the globe surface TilesRenderer below is always mounted; no per-provider imagery yet (first pass) */ },
-    toggleTerrain() {},
+    setTerrainMode() { /* Cesium-only (Ion World Terrain / Google Photorealistic 3D Tiles) — no-op here */ },
     setMaxSSE(v) { store.getState().setMaxSSE(v); },
     toggleAssetVisible(show) { store.getState().setAssetVisible(show); },
     setOrtho(on) { store.getState().setOrtho(on); },
@@ -198,24 +259,47 @@ const Scene = forwardRef<ViewerHandle, { loadArgs: LoadArgs }>(function Scene({ 
     setCropToView() {
       const tiles = tilesRef.current;
       const ellipsoid = (tiles as any)?.ellipsoid;
-      if (!tiles || !ellipsoid) { store.getState().setStatus('Load a georeferenced tileset in 3DTRJS to set the crop box from view.'); return null; }
+      if (!tiles || !ellipsoid) { store.getState().setStatus('Load a tileset in 3DTRJS to set the crop box from view.'); return null; }
+      // Raycast a handful of NDC points against the loaded content — tighter margins (±0.5, plus dead
+      // center) than before (±0.8) since the auto-frame-on-load fit doesn't always leave content
+      // reaching all the way to the far viewport corners, which made every ray miss and this silently
+      // no-op ("not working").
       const raycaster = new THREE.Raycaster();
       const corners: THREE.Vector3[] = [];
-      for (const [nx, ny] of [[-0.8, -0.8], [0.8, -0.8], [-0.8, 0.8], [0.8, 0.8]]) {
+      for (const [nx, ny] of [[0, 0], [-0.5, -0.5], [0.5, -0.5], [-0.5, 0.5], [0.5, 0.5]]) {
         raycaster.setFromCamera(new THREE.Vector2(nx, ny), camera);
         const hit = raycaster.intersectObject(tiles.group, true)[0];
         if (hit) corners.push(hit.point);
       }
-      if (!corners.length) { store.getState().setStatus('Point the 3DTRJS camera at the tileset, then retry.'); return null; }
-      const lons: number[] = [], lats: number[] = [];
-      for (const c of corners) {
-        const carto: any = {};
-        ellipsoid.getPositionToCartographic(c, carto);
-        lons.push(THREE.MathUtils.radToDeg(carto.lon));
-        lats.push(THREE.MathUtils.radToDeg(carto.lat));
+      let w: number, e: number, s: number, n: number, minH: number, maxH: number;
+      if (corners.length) {
+        const lons: number[] = [], lats: number[] = [], heights: number[] = [];
+        for (const c of corners) {
+          const carto: any = {};
+          ellipsoid.getPositionToCartographic(c, carto);
+          lons.push(THREE.MathUtils.radToDeg(carto.lon));
+          lats.push(THREE.MathUtils.radToDeg(carto.lat));
+          heights.push(carto.height);
+        }
+        w = Math.min(...lons); e = Math.max(...lons); s = Math.min(...lats); n = Math.max(...lats);
+        minH = Math.min(...heights); maxH = Math.max(...heights);
+      } else {
+        // No ray hit anything visible (e.g. camera framing content too loosely) — fall back to the
+        // tileset's own bounding sphere so this always produces a usable box instead of no-oping.
+        const sphere = new THREE.Sphere();
+        if (!(tiles as any).getBoundingSphere(sphere)) { store.getState().setStatus('Point the 3DTRJS camera at the tileset, then retry.'); return null; }
+        tiles.group.updateWorldMatrix(true, false);
+        sphere.applyMatrix4(tiles.group.matrixWorld);
+        const centerCarto: any = {};
+        ellipsoid.getPositionToCartographic(sphere.center, centerCarto);
+        const dLat = THREE.MathUtils.radToDeg(sphere.radius / 6378137);
+        const dLon = dLat / Math.max(0.1, Math.cos(centerCarto.lat));
+        const centerLat = THREE.MathUtils.radToDeg(centerCarto.lat);
+        const centerLon = THREE.MathUtils.radToDeg(centerCarto.lon);
+        w = centerLon - dLon; e = centerLon + dLon; s = centerLat - dLat; n = centerLat + dLat;
+        minH = centerCarto.height - sphere.radius; maxH = centerCarto.height + sphere.radius;
       }
-      const w = Math.min(...lons), e = Math.max(...lons), s = Math.min(...lats), n = Math.max(...lats);
-      store.getState().setCrop({ w, s, e, n });
+      store.getState().setCrop({ w, s, e, n, minH: Math.round(minH), maxH: Math.round(maxH) });
       return [w, s, store.getState().crop.minH, e, n, store.getState().crop.maxH];
     },
     getExtractMatrix() {
@@ -225,16 +309,12 @@ const Scene = forwardRef<ViewerHandle, { loadArgs: LoadArgs }>(function Scene({ 
       return Array.from(m.elements);
     },
     flyToCity(lon, lat, height) { setPendingFlyTo({ lon, lat, height }); },
-    flyToOrigin() {
-      camera.position.set(0, Math.max(camera.position.length(), 100), 0);
-      camera.lookAt(0, 0, 0);
-      invalidate();
-    },
+    autoZoomToTileset() { frameToTileset(tilesRef.current); },
     setControlMode(mode) { store.getState().setControlMode(mode); },
     setPointSize(px) { store.getState().setPointSize(px); },
     showCropGizmo() { store.getState().setCropGizmoOn(true); return true; },
     hideCropGizmo() { store.getState().setCropGizmoOn(false); },
-  }), [camera, invalidate]);
+  }), [camera, invalidate, frameToTileset]);
 
   function flyToLocalFrameInternal(lon: number, lat: number, alt: number, range: number) {
     const tiles = tilesRef.current;
@@ -259,16 +339,18 @@ const Scene = forwardRef<ViewerHandle, { loadArgs: LoadArgs }>(function Scene({ 
     <>
       <ambientLight intensity={1.2} />
       <directionalLight position={[1, 1, 1]} intensity={0.6} />
-      {/* Base globe surface — a plain WGS84-radius sphere for visual ground reference (first pass: no
-          imagery overlay; 3d-tiles-renderer's GeneratedSurfacePlugin, which viewer.html's buildGlobe()
-          used for this, isn't part of the package's public/typed export surface). Hidden for tilesets
-          with no real geographic placement — see the comment in frameToTileset above for why. */}
-      {showGlobe && (
+      {/* Base globe surface — WGS84-radius sphere. Hidden for tilesets with no real geographic
+          placement (see the comment in frameToTileset above), else textured with a static whole-earth
+          photo instead of a bare wireframe (real live OSM/Google slippy tiles would need a full
+          quadtree tile fetch-and-stitch renderer — out of scope here), unless imagery is off entirely. */}
+      {showGlobe && (basemap === 'none' ? (
         <mesh>
           <sphereGeometry args={[6378137, 64, 64]} />
           <meshBasicMaterial color="#1a2a3a" wireframe />
         </mesh>
-      )}
+      ) : (
+        <Globe />
+      ))}
       {loadArgs && (
         <TilesRendererR3F
           ref={tilesRef as any}
@@ -278,13 +360,31 @@ const Scene = forwardRef<ViewerHandle, { loadArgs: LoadArgs }>(function Scene({ 
         >
           {isSplat && <TilesPlugin plugin={GaussianSplatPlugin as any} args={{ renderer: gl, scene } as any} />}
           {debugTiles && <TilesPlugin plugin={DebugTilesPlugin as any} displayBoxBounds colorMode={7} />}
-          {controlMode === 'globe' && <GlobeControls enableDamping />}
-          {controlMode === 'env' && <EnvironmentControls enableDamping />}
+          {controlMode === 'globe' && <GlobeControls ref={controlsRef} enableDamping dampingFactor={0.05} minDistance={1} />}
+          {controlMode === 'env' && <EnvironmentControls ref={controlsRef} enableDamping dampingFactor={0.05} minDistance={1} />}
         </TilesRendererR3F>
       )}
-      {controlMode === 'orbit' && <OrbitControls ref={controlsRef} enableDamping />}
-      <CameraTransition mode={ortho ? 'orthographic' : 'perspective'} />
+      {controlMode === 'orbit' && <OrbitControls ref={controlsRef} enableDamping dampingFactor={0.05} />}
+      <CameraTransition
+        mode={ortho ? 'orthographic' : 'perspective'}
+        onBeforeToggle={(manager: any) => {
+          // The library's own default fallback (used when the active controls aren't
+          // EnvironmentControls-like — i.e. drei's plain OrbitControls) assumes whatever the camera is
+          // looking at sits a fixed 50 units in front of it, which is wildly wrong for content we've
+          // auto-framed at real-world (often kilometers-to-millions-of-meters) scale — that's what
+          // produced the dramatic zoom jump switching in/out of orthographic. Use our own tracked pivot
+          // (kept in sync by frameToTileset and double-click, for whichever controls are active) instead.
+          const controls = controlsRef.current;
+          const pivot = controls?.target ?? controls?.pivotPoint;
+          if (pivot) manager.fixedPoint.copy(pivot);
+          else manager.fixedPoint.set(0, 0, -1).transformDirection(camera.matrixWorld).multiplyScalar(50).add(camera.position);
+          manager.syncCameras();
+        }}
+      />
       <CropGizmo tilesRef={tilesRef} />
+      <GizmoHelper alignment="bottom-right" margin={[60, 60]}>
+        <GizmoViewport />
+      </GizmoHelper>
     </>
   );
 });
@@ -296,7 +396,7 @@ const ThreeDTRjsViewer = forwardRef<ViewerHandle, Props>(function ThreeDTRjsView
   useImperativeHandle(ref, (): ViewerHandle => ({
     load(url, type, opts) { setLoadArgs({ url, type, sseOverride: opts?.sseOverride }); },
     setBasemap: (...a) => sceneRef.current?.setBasemap(...a),
-    toggleTerrain: (...a) => sceneRef.current?.toggleTerrain(...a),
+    setTerrainMode: (...a) => sceneRef.current?.setTerrainMode(...a),
     setMaxSSE: (...a) => sceneRef.current?.setMaxSSE(...a),
     toggleAssetVisible: (...a) => sceneRef.current?.toggleAssetVisible(...a),
     setOrtho: (...a) => sceneRef.current?.setOrtho(...a),
@@ -312,7 +412,7 @@ const ThreeDTRjsViewer = forwardRef<ViewerHandle, Props>(function ThreeDTRjsView
     setCropToView: () => sceneRef.current?.setCropToView() ?? null,
     getExtractMatrix: () => sceneRef.current?.getExtractMatrix() ?? null,
     flyToCity: (...a) => sceneRef.current?.flyToCity(...a),
-    flyToOrigin: () => sceneRef.current?.flyToOrigin(),
+    autoZoomToTileset: () => sceneRef.current?.autoZoomToTileset(),
     setControlMode: (...a) => sceneRef.current?.setControlMode?.(...a),
     setPointSize: (...a) => sceneRef.current?.setPointSize?.(...a),
     showCropGizmo: () => sceneRef.current?.showCropGizmo?.() ?? false,

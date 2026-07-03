@@ -40,9 +40,11 @@ interface ViewerStore {
 
   // Basemap / terrain
   basemap: 'google' | 'osm' | 'none';
-  terrain: boolean;
+  // 'wgs84' = flat ellipsoid (no elevation), 'cesium' = Cesium World Terrain (Ion), 'google' = Google
+  // Photorealistic 3D Tiles (a textured mesh that embeds its own terrain — Cesium-only, no-op on 3DTRJS).
+  terrainMode: 'wgs84' | 'cesium' | 'google';
   setBasemap: (v: ViewerStore['basemap']) => void;
-  setTerrain: (v: boolean) => void;
+  setTerrainMode: (v: ViewerStore['terrainMode']) => void;
 
   // Tileset & LOD
   maxSSE: number | null; // null = per-type default
@@ -139,9 +141,9 @@ export const useViewerStore = create<ViewerStore>((set, get) => ({
   // public tile service that doesn't do this. 'google' stays selectable in the Basemap dropdown for
   // when you want it — this only changes the safe DEFAULT.
   basemap: 'osm',
-  terrain: false,
+  terrainMode: 'wgs84',
   setBasemap: (v) => set({ basemap: v }),
-  setTerrain: (v) => set({ terrain: v }),
+  setTerrainMode: (v) => set({ terrainMode: v }),
 
   maxSSE: null,
   assetVisible: true,

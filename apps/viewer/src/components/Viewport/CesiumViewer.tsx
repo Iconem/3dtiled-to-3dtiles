@@ -31,6 +31,7 @@ const CesiumViewer = forwardRef<ViewerHandle, Props>(function CesiumViewer({ vis
   const cropHandlesRef = useRef<Cesium.Entity[]>([]);
   const cropDragRef = useRef<{ axis: 'lon' | 'lat' | 'height'; set: (v: number) => void } | null>(null);
   const cropDragHandlerRef = useRef<Cesium.ScreenSpaceEventHandler | null>(null);
+  const googleTilesetRef = useRef<Cesium.Cesium3DTileset | null>(null);
 
   const store = useViewerStore;
   const cleanupRef = useRef<(() => void) | null>(null);
@@ -142,7 +143,10 @@ const CesiumViewer = forwardRef<ViewerHandle, Props>(function CesiumViewer({ vis
   }, []);
 
   function initViewer(container: HTMLDivElement) {
-    Cesium.Ion.defaultAccessToken = '';
+    // A personal Cesium Ion token — required for Cesium World Terrain and Google Photorealistic 3D
+    // Tiles (see setTerrainMode below). Ships client-side like any Ion demo token; rotate it in the
+    // Cesium ion console if this repo's exposure of it in a public history becomes a concern.
+    Cesium.Ion.defaultAccessToken = 'REMOVED_CESIUM_ION_TOKEN';
     const v = new Cesium.Viewer(container, {
       animation: false,
       baseLayerPicker: false,
@@ -332,19 +336,38 @@ const CesiumViewer = forwardRef<ViewerHandle, Props>(function CesiumViewer({ vis
         layers.addImageryProvider(new Cesium.OpenStreetMapImageryProvider({ url: 'https://tile.openstreetmap.org/' }));
       }
     },
-    async toggleTerrain(enabled) {
+    async setTerrainMode(mode) {
       const v = getViewer();
       if (!v) return;
-      if (enabled) {
+      if (googleTilesetRef.current) {
+        v.scene.primitives.remove(googleTilesetRef.current);
+        googleTilesetRef.current = null;
+      }
+      if (mode === 'wgs84') {
+        v.terrainProvider = new Cesium.EllipsoidTerrainProvider();
+        return;
+      }
+      if (mode === 'cesium') {
         try {
           v.terrainProvider = await Cesium.createWorldTerrainAsync();
-        } catch {
+        } catch (e) {
           v.terrainProvider = new Cesium.EllipsoidTerrainProvider();
-          store.getState().setTerrain(false);
-          store.getState().setStatus('World terrain requires a Cesium Ion token.\nFalling back to ellipsoid.');
+          store.getState().setTerrainMode('wgs84');
+          store.getState().setStatus(`Cesium World Terrain failed to load:\n${(e as Error).message}`);
         }
-      } else {
-        v.terrainProvider = new Cesium.EllipsoidTerrainProvider();
+        return;
+      }
+      // 'google': a photorealistic textured mesh that embeds its own ground — no separate terrain
+      // provider needed (leave whatever elevation provider was active; the tileset sits on top of it).
+      try {
+        store.getState().setStatus('Loading Google Photorealistic 3D Tiles…');
+        const tileset = await Cesium.createGooglePhotorealistic3DTileset();
+        googleTilesetRef.current = tileset;
+        v.scene.primitives.add(tileset);
+        store.getState().setStatus('Google Photorealistic 3D Tiles loaded.');
+      } catch (e) {
+        store.getState().setTerrainMode('wgs84');
+        store.getState().setStatus(`Google Photorealistic 3D Tiles failed to load:\n${(e as Error).message}`);
       }
     },
     setMaxSSE(v) {
@@ -462,7 +485,20 @@ const CesiumViewer = forwardRef<ViewerHandle, Props>(function CesiumViewer({ vis
       const cLat = ((s + n) / 2) * Math.PI / 180;
       const spanM = Math.max((e - w) * 111320 * Math.cos(cLat), (n - s) * 111320);
       const ge = spanM > 0 ? Math.pow(10, Math.round(Math.log10(spanM / 100))) : store.getState().maxGE;
-      store.getState().setCrop({ w, s, e, n });
+      // Default the height range to the loaded tileset's own extent (its bounding sphere already
+      // reflects any root transform + local-frame placement) instead of leaving whatever minH/maxH
+      // happened to be in the fields — those defaults (-50/800) rarely match the actual asset.
+      const tileset = currentTilesetRef.current;
+      let { minH, maxH } = store.getState().crop;
+      if (tileset) {
+        const bs = tileset.boundingSphere;
+        const centerCarto = Cesium.Cartographic.fromCartesian(bs.center);
+        if (centerCarto) {
+          minH = Math.round(centerCarto.height - bs.radius);
+          maxH = Math.round(centerCarto.height + bs.radius);
+        }
+      }
+      store.getState().setCrop({ w, s, e, n, minH, maxH });
       store.getState().setMaxGE(ge);
       updateCropBoxInternal();
       return [w, s, store.getState().crop.minH, e, n, store.getState().crop.maxH];
@@ -479,9 +515,18 @@ const CesiumViewer = forwardRef<ViewerHandle, Props>(function CesiumViewer({ vis
       if (!v) return;
       v.camera.flyTo({ destination: Cesium.Cartesian3.fromDegrees(lon, lat, height), orientation: { heading: 0, pitch: Cesium.Math.toRadians(-45), roll: 0 }, duration: 2 });
     },
-    flyToOrigin() {
+    autoZoomToTileset() {
       const v = getViewer();
       if (!v) return;
+      const tileset = currentTilesetRef.current;
+      if (tileset) {
+        const bs = tileset.boundingSphere;
+        v.camera.flyToBoundingSphere(bs, {
+          offset: new Cesium.HeadingPitchRange(Cesium.Math.toRadians(-30), Cesium.Math.toRadians(-25), Math.max(50, bs.radius * 2.5)),
+          duration: 1.5,
+        });
+        return;
+      }
       v.scene.screenSpaceCameraController.enableCollisionDetection = false;
       store.getState().setCollisionEnabled(true);
       v.camera.flyTo({ destination: Cesium.Cartesian3.ZERO, orientation: { heading: 0, pitch: -Cesium.Math.PI_OVER_TWO, roll: 0 }, duration: 2 });

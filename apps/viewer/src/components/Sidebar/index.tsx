@@ -2,7 +2,6 @@ import { Moon, Sun, PanelRightClose, PanelRightOpen } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { useViewerStore } from '@/state/store';
-import RendererSection from './RendererSection';
 import BasemapSection from './BasemapSection';
 import TilesetLodSection from './TilesetLodSection';
 import CropExtractSection from './CropExtractSection';
@@ -38,7 +37,6 @@ export default function Sidebar({ activeHandleRef }: { activeHandleRef: React.Re
       </div>
       <ScrollArea className="min-h-0 flex-1">
         <div className="flex flex-col divide-y divide-border">
-          <RendererSection />
           <BasemapSection activeHandleRef={activeHandleRef} />
           <TilesetLodSection activeHandleRef={activeHandleRef} />
           <CropExtractSection activeHandleRef={activeHandleRef} />

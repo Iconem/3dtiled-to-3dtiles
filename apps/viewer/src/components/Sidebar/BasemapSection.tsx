@@ -9,13 +9,14 @@ import { SidebarSection } from './SidebarSection';
 
 export default function BasemapSection({ activeHandleRef }: { activeHandleRef: React.RefObject<ViewerHandle | null> }) {
   const basemap = useViewerStore((s) => s.basemap);
-  const terrain = useViewerStore((s) => s.terrain);
+  const terrainMode = useViewerStore((s) => s.terrainMode);
   const setBasemap = useViewerStore((s) => s.setBasemap);
-  const setTerrain = useViewerStore((s) => s.setTerrain);
+  const setTerrainMode = useViewerStore((s) => s.setTerrainMode);
   const collisionEnabled = useViewerStore((s) => s.collisionEnabled);
   const setCollisionEnabled = useViewerStore((s) => s.setCollisionEnabled);
 
   useEffect(() => { activeHandleRef.current?.setBasemap(basemap); }, [basemap, activeHandleRef]);
+  useEffect(() => { activeHandleRef.current?.setTerrainMode(terrainMode); }, [terrainMode, activeHandleRef]);
 
   return (
     <SidebarSection title="Basemap & Navigation">
@@ -30,15 +31,22 @@ export default function BasemapSection({ activeHandleRef }: { activeHandleRef: R
           </SelectContent>
         </Select>
       </div>
-      <Label className="text-xs">
-        <Checkbox checked={terrain} onCheckedChange={(v) => { setTerrain(!!v); activeHandleRef.current?.toggleTerrain(!!v); }} />
-        Terrain (Ion)
-      </Label>
+      <div className="flex items-center justify-between">
+        <Label className="text-xs">Terrain</Label>
+        <Select value={terrainMode} onValueChange={(v) => setTerrainMode(v as any)}>
+          <SelectTrigger size="sm"><SelectValue /></SelectTrigger>
+          <SelectContent>
+            <SelectItem value="wgs84">WGS84 (none)</SelectItem>
+            <SelectItem value="cesium">Cesium World Terrain</SelectItem>
+            <SelectItem value="google">Google Photorealistic 3D Tiles</SelectItem>
+          </SelectContent>
+        </Select>
+      </div>
       <Label className="text-xs">
         <Checkbox checked={!collisionEnabled} onCheckedChange={(v) => { const disable = !!v; setCollisionEnabled(!disable); activeHandleRef.current?.toggleCollision(!disable); }} />
         Disable collision
       </Label>
-      <Button size="sm" variant="outline" onClick={() => activeHandleRef.current?.flyToOrigin()}>⊙ Fly to origin</Button>
+      <Button size="sm" variant="outline" onClick={() => activeHandleRef.current?.autoZoomToTileset()}>⊙ Auto-zoom to tileset</Button>
     </SidebarSection>
   );
 }

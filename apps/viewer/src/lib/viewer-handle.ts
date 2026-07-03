@@ -8,7 +8,7 @@ import type { AssetType } from './formats';
 export interface ViewerHandle {
   load(url: string, type: AssetType, opts?: { sseOverride?: number | null }): void;
   setBasemap(id: string): void;
-  toggleTerrain(on: boolean): void;
+  setTerrainMode(mode: 'wgs84' | 'cesium' | 'google'): void;
   setMaxSSE(v: number | null): void;
   toggleAssetVisible(show: boolean): void;
   setOrtho(on: boolean): void;
@@ -24,7 +24,7 @@ export interface ViewerHandle {
   setCropToView(): [number, number, number, number, number, number] | null; // w,s,minH,e,n,maxH
   getExtractMatrix(): number[] | null;
   flyToCity(lon: number, lat: number, height: number): void;
-  flyToOrigin(): void;
+  autoZoomToTileset(): void;
   // 3DTRJS-only — no-ops on CesiumViewer.
   setControlMode?(mode: 'globe' | 'orbit' | 'env'): void;
   setPointSize?(px: number): void;
