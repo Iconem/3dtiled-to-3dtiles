@@ -16,7 +16,8 @@
     "serve:tiles": "node packages/tile-server/server.js --port 3001",
     "serve:live": "node packages/tile-server/server.js --port 3001",
     "dev:docs": "pnpm --filter docs dev",
-    "dev:viewer": "pnpm --filter 3d-tiled dev"
+    "dev:viewer": "pnpm --filter 3d-tiled dev",
+    "dev:app": "concurrently -n viewer,docs,tiles -c cyan,yellow,magenta \"npm:dev:viewer\" \"npm:dev:docs\" \"npm:serve:tiles\""
   },
   "dependencies": {
     "3d-tiles-renderer": "0.4.28",
