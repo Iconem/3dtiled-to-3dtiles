@@ -8,7 +8,7 @@ import {
   EnvironmentControls,
   CameraTransition,
 } from '3d-tiles-renderer/r3f';
-import { DebugTilesPlugin, XYZTilesOverlay } from '3d-tiles-renderer/plugins';
+import { DebugTilesPlugin, XYZTilesOverlay, QuantizedMeshPlugin, CesiumIonAuthPlugin, ImageOverlayPlugin } from '3d-tiles-renderer/plugins';
 // GeneratedSurfacePlugin is exported at runtime (3d-tiles-renderer/src/three/plugins/index.js) but
 // missing from this package's .d.ts — imported via the namespace + cast to dodge the stale types.
 import * as ThreeTilesPlugins from '3d-tiles-renderer/plugins';
@@ -16,10 +16,34 @@ const GeneratedSurfacePlugin = (ThreeTilesPlugins as any).GeneratedSurfacePlugin
 import type { TilesRenderer as TilesRendererImpl } from '3d-tiles-renderer';
 import { GaussianSplatPlugin } from '3d-tiles-rendererjs-3dgs-plugin';
 import * as THREE from 'three';
+import { acceleratedRaycast, computeBoundsTree, disposeBoundsTree } from 'three-mesh-bvh';
 import type { ViewerHandle } from '@/lib/viewer-handle';
 import type { AssetType } from '@/lib/formats';
 import { MW } from '@/lib/formats';
+import { CESIUM_ION_TOKEN } from '@/lib/ion';
 import { useViewerStore } from '@/state/store';
+
+// GlobeControls/EnvironmentControls raycast the loaded scene on every drag/zoom interaction to find
+// the point under the cursor to orbit/zoom around (so does our own double-click-to-pivot handler and
+// "set crop box to view"), and three.js's DEFAULT Mesh.raycast checks every triangle brute-force —
+// for a real-sized mesh/point-cloud tileset this is the actual per-frame cost behind "orbiting feels
+// slow", not anything the frameloop="demand" switch above touches (that only helps the IDLE case).
+// Patched once, globally: geometries opt in via `computeBoundsTree()` in onLoadModel below.
+THREE.BufferGeometry.prototype.computeBoundsTree = computeBoundsTree;
+THREE.BufferGeometry.prototype.disposeBoundsTree = disposeBoundsTree;
+THREE.Mesh.prototype.raycast = acceleratedRaycast;
+
+// Build a BVH for every mesh in a freshly-loaded tile so the raycasts above hit it instead of falling
+// back to brute force. Points/Lines aren't meshes (no-op there — three-mesh-bvh is triangle-only).
+// try/catch: a handful of malformed/degenerate tile geometries (zero triangles, no position attribute)
+// throw inside computeBoundsTree rather than no-op — one bad tile shouldn't break the whole scene.
+function buildBoundsTrees(scene: THREE.Object3D) {
+  scene.traverse((o: any) => {
+    if (o.isMesh && o.geometry && !o.geometry.boundsTree) {
+      try { o.geometry.computeBoundsTree(); } catch { /* leave unaccelerated for this one tile */ }
+    }
+  });
+}
 
 // R3F port of viewer.html's 3DTilesRendererJS section (lines ~1838-2753). Uses 3d-tiles-renderer's
 // OFFICIAL /r3f components (<TilesRenderer>, <TilesPlugin>, <GlobeControls>, <EnvironmentControls>,
@@ -64,8 +88,28 @@ function Globe({ basemap }: { basemap: 'google' | 'osm' | 'none' }) {
   }, [basemap]);
   if (!pluginArgs) return null;
   return (
-    <TilesRendererR3F>
+    <TilesRendererR3F onLoadModel={(e: any) => buildBoundsTrees(e.scene)}>
       <TilesPlugin plugin={GeneratedSurfacePlugin as any} args={pluginArgs as any} />
+    </TilesRendererR3F>
+  );
+}
+
+// Real Cesium World Terrain (Ion asset 1) via QuantizedMeshPlugin — actual elevation mesh, not the flat
+// ellipsoid Globe above. CesiumIonAuthPlugin resolves the asset + attaches the token; QuantizedMeshPlugin
+// fetches layer.json + per-tile quantized-mesh buffers and turns them into real geometry.
+// ImageOverlayPlugin (NOT GeneratedSurfacePlugin — that one generates its own ellipsoid, which would
+// fight with QuantizedMeshPlugin's real one) drapes the SAME basemap imagery on top of that real
+// geometry when a basemap is selected; terrain itself still renders (bare, Cesium's own material) with
+// basemap 'none'. This is the 3DTRJS equivalent of CesiumViewer's terrainMode==='cesium'.
+function TerrainGlobe({ basemap, gl }: { basemap: 'google' | 'osm' | 'none'; gl: THREE.WebGLRenderer }) {
+  const overlay = useMemo(() => (basemap === 'none' ? null : new XYZTilesOverlay({ url: BASEMAP_URL[basemap] })),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [basemap]);
+  return (
+    <TilesRendererR3F onLoadModel={(e: any) => buildBoundsTrees(e.scene)}>
+      <TilesPlugin plugin={CesiumIonAuthPlugin as any} args={{ apiToken: CESIUM_ION_TOKEN, assetId: '1', autoRefreshToken: true } as any} />
+      <TilesPlugin plugin={QuantizedMeshPlugin as any} />
+      {overlay && <TilesPlugin plugin={ImageOverlayPlugin as any} args={{ renderer: gl, overlays: [overlay] } as any} />}
     </TilesRendererR3F>
   );
 }
@@ -135,6 +179,7 @@ const Scene = forwardRef<ViewerHandle, { loadArgs: LoadArgs }>(function Scene({ 
   const assetVisible = useViewerStore((s) => s.assetVisible);
   const pointSize = useViewerStore((s) => s.pointSize);
   const basemap = useViewerStore((s) => s.basemap);
+  const terrainMode = useViewerStore((s) => s.terrainMode);
   // Whether the WGS84-radius wireframe globe is meaningful to show at all — see frameToTileset below.
   const [showGlobe, setShowGlobe] = useState(true);
   useEffect(() => { if (!loadArgs) setShowGlobe(true); }, [loadArgs]);
@@ -193,9 +238,32 @@ const Scene = forwardRef<ViewerHandle, { loadArgs: LoadArgs }>(function Scene({ 
     setShowGlobe(geoReferenced);
     const fovRad = THREE.MathUtils.degToRad((camera as THREE.PerspectiveCamera).fov ?? fov);
     const dist = (sphere.radius / Math.sin(fovRad / 2)) * 1.5;
-    const dir = camera.position.clone().sub(sphere.center);
-    if (dir.lengthSq() < 1e-6) dir.set(0, 0, 1);
-    dir.normalize();
+    // EnvironmentControls assumes world +Y is "up", which is only true for local/non-georeferenced
+    // content — real Earth-surface content needs the actual ellipsoid normal at that point instead, or
+    // orbiting tilts the camera against the true horizon ("env mode has the wrong up" without this).
+    // GlobeControls already derives this itself; setting it here too is harmless (same value either way).
+    const ellipsoid = geoReferenced ? (tiles as any).ellipsoid : null;
+    const surfaceUp = ellipsoid ? ellipsoid.getPositionToNormal(sphere.center, new THREE.Vector3()) : null;
+    let dir: THREE.Vector3;
+    if (surfaceUp) {
+      // For georeferenced content, `camera.position - sphere.center` trends toward the SAME direction
+      // as the surface normal itself for any far-off camera default (the world-origin term dominates) —
+      // i.e. the naive approach direction is nearly always straight down from directly overhead. That's
+      // fine for the DISTANCE, but camera.up gets set to that same surface normal a few lines down, and
+      // lookAt() degenerates (cross(up, forward) ≈ 0) when the approach direction is parallel to up —
+      // producing a garbage view matrix, which is exactly "auto-zoom often can't see the tileset" from a
+      // top-down start. Approach from a fixed 35° pitch above the local horizon instead — a normal
+      // "3/4 aerial" angle that's never parallel to up, so lookAt() always has a well-defined orientation.
+      const helper = Math.abs(surfaceUp.y) < 0.99 ? new THREE.Vector3(0, 1, 0) : new THREE.Vector3(1, 0, 0);
+      const east = new THREE.Vector3().crossVectors(helper, surfaceUp).normalize();
+      const north = new THREE.Vector3().crossVectors(surfaceUp, east).normalize();
+      const pitch = THREE.MathUtils.degToRad(35);
+      dir = surfaceUp.clone().multiplyScalar(Math.sin(pitch)).addScaledVector(north, Math.cos(pitch)).normalize();
+    } else {
+      dir = camera.position.clone().sub(sphere.center);
+      if (dir.lengthSq() < 1e-6) dir.set(0, 0, 1);
+      dir.normalize();
+    }
     camera.position.copy(sphere.center).addScaledVector(dir, dist);
     camera.near = Math.max(dist * 0.01, 0.1);
     // The far plane must also reach back to the globe sphere (always centered at world origin) when
@@ -204,14 +272,7 @@ const Scene = forwardRef<ViewerHandle, { loadArgs: LoadArgs }>(function Scene({ 
     camera.far = geoReferenced
       ? Math.max(dist + sphere.radius * 4, camera.position.length() + 6378137 * 1.5)
       : dist + sphere.radius * 4;
-    // EnvironmentControls assumes world +Y is "up", which is only true for local/non-georeferenced
-    // content — real Earth-surface content needs the actual ellipsoid normal at that point instead, or
-    // orbiting tilts the camera against the true horizon ("env mode has the wrong up" without this).
-    // GlobeControls already derives this itself; setting it here too is harmless (same value either way).
-    if (geoReferenced) {
-      const ellipsoid = (tiles as any).ellipsoid;
-      if (ellipsoid) camera.up.copy(ellipsoid.getPositionToNormal(sphere.center, new THREE.Vector3()));
-    }
+    if (surfaceUp) camera.up.copy(surfaceUp);
     camera.lookAt(sphere.center);
     (camera as THREE.PerspectiveCamera).updateProjectionMatrix?.();
     setControlsPivot(sphere.center);
@@ -253,7 +314,7 @@ const Scene = forwardRef<ViewerHandle, { loadArgs: LoadArgs }>(function Scene({ 
   // themselves on their own 'change'/'needs-update' events, but a bare controls/plugin remount (switching
   // globe/orbit/env, toggling debug tiles, changing basemap or LOD target) has nothing queued yet, so it'd
   // otherwise sit frozen until the next interaction.
-  useEffect(() => { invalidate(); }, [controlMode, debugTiles, basemap, errorTarget, invalidate]);
+  useEffect(() => { invalidate(); }, [controlMode, debugTiles, basemap, terrainMode, errorTarget, invalidate]);
 
   const applyPointSize = () => {
     const tiles = tilesRef.current;
@@ -393,10 +454,16 @@ const Scene = forwardRef<ViewerHandle, { loadArgs: LoadArgs }>(function Scene({ 
       <ambientLight intensity={1.2} />
       <directionalLight position={[1, 1, 1]} intensity={0.6} />
       {/* Base globe surface. Hidden entirely for tilesets with no real geographic placement (see the
-          comment in frameToTileset above). Otherwise a real OSM/Google-tile-draped WGS84 ellipsoid
-          (see Globe above) when imagery is on, or a plain wireframe sphere as a ground reference when
-          imagery is explicitly off. */}
-      {showGlobe && (basemap === 'none' ? (
+          comment in frameToTileset above). terrainMode 'cesium' gets REAL elevation (Cesium World
+          Terrain via QuantizedMeshPlugin, TerrainGlobe above) with imagery draped on top as an optional
+          overlay layer; otherwise a real OSM/Google-tile-draped WGS84 ellipsoid (Globe above) when
+          imagery is on, or a plain wireframe sphere as a ground reference when imagery is off.
+          terrainMode 'google' has no 3DTRJS equivalent yet — Google's Photorealistic 3D Tiles need a
+          Google Maps Platform API key, which only CesiumViewer's Ion-brokered path has; falls back to
+          the same wgs84 behavior here. */}
+      {showGlobe && (terrainMode === 'cesium' ? (
+        <TerrainGlobe basemap={basemap} gl={gl} />
+      ) : basemap === 'none' ? (
         <mesh>
           <sphereGeometry args={[6378137, 64, 64]} />
           <meshBasicMaterial color="#1a2a3a" wireframe />
@@ -410,6 +477,7 @@ const Scene = forwardRef<ViewerHandle, { loadArgs: LoadArgs }>(function Scene({ 
           url={loadArgs.url}
           errorTarget={errorTarget}
           onLoadRootTileset={() => frameToTileset(tilesRef.current)}
+          onLoadModel={(e: any) => buildBoundsTrees(e.scene)}
         >
           {isSplat && <TilesPlugin plugin={GaussianSplatPlugin as any} args={{ renderer: gl, scene } as any} />}
           {debugTiles && <TilesPlugin plugin={DebugTilesPlugin as any} displayBoxBounds colorMode={7} />}

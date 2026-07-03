@@ -13,7 +13,9 @@
  *      splat-transform `readSog` → DataTable, re-encode as a KHR_gaussian_splatting GLB (`writeGlb`);
  *   2. georeference via `global_position` (lat/lon/alt + model_scale + Euler offset) → 3D Tiles transform.
  *
- * MVP: one tile per sub-model (grid_1 / octant_0 / LOD=lod). HLOD over the voxel_grids octree is a TODO.
+ * HLOD over the voxel_grids octree (grid_1→8→64, REPLACE refine, per-level LOD auto-picked — see
+ * LOD_FOR_GRID below) is the normal path; the flat single-tile-per-sub-model mode (`&lod=1..8`) is
+ * only a FALLBACK for a sub-model missing voxel_grids metadata, not a user-facing quality toggle.
  *
  * KEYS: MapTiler keys are origin-restricted — the upstream fetch is done HERE with a
  * `Referer: https://www.maptiler.com/` (server-side); the browser only ever talks to this middleware.

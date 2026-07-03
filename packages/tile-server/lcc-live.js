@@ -39,10 +39,15 @@ const ctxCache = new Map();
 async function getCtx(url) {
   if (ctxCache.has(url)) return ctxCache.get(url);
   const base = url.slice(0, url.lastIndexOf('/') + 1);
-  const meta = JSON.parse((await fetchBuf(url)).toString('utf8'));
+  // index.bin's URL only depends on `url` itself, not on meta.lcc's PARSED contents — fetching it
+  // sequentially after meta.lcc (as if it were a dependency) just adds meta.lcc's own round-trip to
+  // every cold cache=none load for no reason. index.bin has no partial-read path (need the whole
+  // thing up front to know where every Unit's LOD chunks live in data.bin — see the file header
+  // above), so this concurrent fetch is the only real lever on that part of first-load latency.
+  const [metaBuf, indexBuf] = await Promise.all([fetchBuf(url), fetchBuf(base + 'index.bin')]);
+  const meta = JSON.parse(metaBuf.toString('utf8'));
   const scaleAttr = (meta.attributes || []).find(a => a.name === 'scale');
   if (!scaleAttr) throw new Error('meta.lcc missing attributes.scale min/max');
-  const indexBuf = await fetchBuf(base + 'index.bin');
   const { indexDataSize } = meta, levelsInIndex = (indexDataSize - 4) / 16;
   const numUnits = indexBuf.length / indexDataSize;
   const bb = meta.boundingBox, cellX = meta.cellLengthX, cellY = meta.cellLengthY;

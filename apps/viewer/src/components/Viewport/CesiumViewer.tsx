@@ -2,6 +2,7 @@ import { forwardRef, useEffect, useImperativeHandle, useRef } from 'react';
 import * as Cesium from 'cesium';
 import type { ViewerHandle } from '@/lib/viewer-handle';
 import type { AssetType } from '@/lib/formats';
+import { CESIUM_ION_TOKEN } from '@/lib/ion';
 import { useViewerStore } from '@/state/store';
 
 // Ported from viewer.html's Cesium section (lines ~855-1675), near-verbatim: a plain `Cesium.Viewer`
@@ -151,7 +152,7 @@ const CesiumViewer = forwardRef<ViewerHandle, Props>(function CesiumViewer({ vis
     // A personal Cesium Ion token — required for Cesium World Terrain and Google Photorealistic 3D
     // Tiles (see setTerrainMode below). Ships client-side like any Ion demo token; rotate it in the
     // Cesium ion console if this repo's exposure of it in a public history becomes a concern.
-    Cesium.Ion.defaultAccessToken = 'REMOVED_CESIUM_ION_TOKEN';
+    Cesium.Ion.defaultAccessToken = CESIUM_ION_TOKEN;
     const v = new Cesium.Viewer(container, {
       animation: false,
       baseLayerPicker: false,
