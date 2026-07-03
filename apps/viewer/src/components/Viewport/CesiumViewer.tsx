@@ -99,6 +99,11 @@ const CesiumViewer = forwardRef<ViewerHandle, Props>(function CesiumViewer({ vis
           }
           store.getState().setStatus(`Loaded: ${url}`);
         }
+        // Z offset is per-tileset (it composes onto whatever placement transform is now current), so a
+        // freshly-loaded tileset needs it (re-)applied immediately — previously it only took effect the
+        // next time the user actually edited the Z-offset field on an already-loaded tileset.
+        const zOffset = store.getState().localFrame.zOffset;
+        if (zOffset) applyZOffsetInternal(zOffset);
         let firstTile = false;
         tileset.allTilesLoaded.addEventListener(() => {
           const n = (tileset as any).statistics.numberOfTilesWithContentReady;
@@ -191,6 +196,19 @@ const CesiumViewer = forwardRef<ViewerHandle, Props>(function CesiumViewer({ vis
       pendingLoadRef.current = null;
       loadTilesetInternal(url, type, opts);
     }
+  }
+
+  function applyZOffsetInternal(dz: number) {
+    const tileset = currentTilesetRef.current;
+    if (!tileset) { store.getState().setStatus('Load a georeferenced tileset first, then set a Z offset.'); return; }
+    const c = tileset.boundingSphere.center;
+    const up = Cesium.Ellipsoid.WGS84.geodeticSurfaceNormal(c, new Cesium.Cartesian3()) || Cesium.Cartesian3.normalize(c, new Cesium.Cartesian3());
+    const t = Cesium.Cartesian3.multiplyByScalar(up, dz, new Cesium.Cartesian3());
+    const base = placementBaseRef.current || Cesium.Matrix4.IDENTITY;
+    tileset.modelMatrix = Cesium.Matrix4.multiply(Cesium.Matrix4.fromTranslation(t), base, new Cesium.Matrix4());
+    const gsp = (tileset as any).gaussianSplatPrimitive;
+    if (gsp) { gsp._rootTransform = undefined; gsp._dirty = true; }
+    store.getState().setStatus(`Vertical Z offset: ${dz} m along local up (georef preserved).`);
   }
 
   function applyShadingInternal() {
@@ -409,18 +427,7 @@ const CesiumViewer = forwardRef<ViewerHandle, Props>(function CesiumViewer({ vis
       });
     },
     applyLocalFrame(lon, lat, alt, range) { applyLocalFrameInternal(lon, lat, alt, range); },
-    applyZOffset(dz) {
-      const tileset = currentTilesetRef.current;
-      if (!tileset) { store.getState().setStatus('Load a georeferenced tileset first, then set a Z offset.'); return; }
-      const c = tileset.boundingSphere.center;
-      const up = Cesium.Ellipsoid.WGS84.geodeticSurfaceNormal(c, new Cesium.Cartesian3()) || Cesium.Cartesian3.normalize(c, new Cesium.Cartesian3());
-      const t = Cesium.Cartesian3.multiplyByScalar(up, dz, new Cesium.Cartesian3());
-      const base = placementBaseRef.current || Cesium.Matrix4.IDENTITY;
-      tileset.modelMatrix = Cesium.Matrix4.multiply(Cesium.Matrix4.fromTranslation(t), base, new Cesium.Matrix4());
-      const gsp = (tileset as any).gaussianSplatPrimitive;
-      if (gsp) { gsp._rootTransform = undefined; gsp._dirty = true; }
-      store.getState().setStatus(`Vertical Z offset: ${dz} m along local up (georef preserved).`);
-    },
+    applyZOffset(dz) { applyZOffsetInternal(dz); },
     async loadIonAsset(assetId, token, _isSplat) {
       const v = getViewer();
       if (!v) { store.getState().setStatus('Cesium not ready.'); return; }

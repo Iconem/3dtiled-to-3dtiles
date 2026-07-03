@@ -1,6 +1,6 @@
-import { forwardRef, useCallback, useEffect, useImperativeHandle, useRef, useState } from 'react';
+import { forwardRef, useCallback, useEffect, useImperativeHandle, useMemo, useRef, useState } from 'react';
 import { Canvas, useThree } from '@react-three/fiber';
-import { OrbitControls, TransformControls, GizmoHelper, GizmoViewport, useTexture } from '@react-three/drei';
+import { OrbitControls, TransformControls, GizmoHelper, GizmoViewport } from '@react-three/drei';
 import {
   TilesRenderer as TilesRendererR3F,
   TilesPlugin,
@@ -8,7 +8,11 @@ import {
   EnvironmentControls,
   CameraTransition,
 } from '3d-tiles-renderer/r3f';
-import { DebugTilesPlugin } from '3d-tiles-renderer/plugins';
+import { DebugTilesPlugin, XYZTilesOverlay } from '3d-tiles-renderer/plugins';
+// GeneratedSurfacePlugin is exported at runtime (3d-tiles-renderer/src/three/plugins/index.js) but
+// missing from this package's .d.ts — imported via the namespace + cast to dodge the stale types.
+import * as ThreeTilesPlugins from '3d-tiles-renderer/plugins';
+const GeneratedSurfacePlugin = (ThreeTilesPlugins as any).GeneratedSurfacePlugin;
 import type { TilesRenderer as TilesRendererImpl } from '3d-tiles-renderer';
 import { GaussianSplatPlugin } from '3d-tiles-rendererjs-3dgs-plugin';
 import * as THREE from 'three';
@@ -32,19 +36,27 @@ interface Props { visible: boolean }
 
 type LoadArgs = { url: string; type: AssetType; sseOverride?: number | null } | null;
 
-// A single low-res whole-earth photo (the same public-domain NASA Blue Marble mosaic used in most
-// three.js globe demos) — not live OSM/Google slippy tiles (that would need a whole quadtree tile
-// fetch-and-stitch renderer, well beyond a wireframe-vs-imagery fix), but real imagery instead of a
-// flat wireframe, which is what was actually asked for.
-const EARTH_TEXTURE_URL = 'https://threejs.org/examples/textures/planets/earth_atmos_2048.jpg';
+const BASEMAP_URL: Record<'osm' | 'google', string> = {
+  osm: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
+  google: 'https://mt1.google.com/vt/lyrs=y&x={x}&y={y}&z={z}',
+};
 
-function Globe() {
-  const texture = useTexture(EARTH_TEXTURE_URL);
+// Real slippy-map (XYZ) tile draping over a procedurally-generated WGS84 ellipsoid — no real terrain
+// tileset needed. GeneratedSurfacePlugin (its own, SEPARATE TilesRenderer, independent of whatever
+// content-tileset is loaded below) generates the ellipsoid mesh itself and textures it directly from
+// the overlay (`applyOverlayTexture: true`); ImageOverlayPlugin, by contrast, only textures EXISTING
+// tile geometry, so it can't be used here on its own for a basemap-with-no-real-terrain case.
+function Globe({ basemap }: { basemap: 'google' | 'osm' | 'none' }) {
+  const pluginArgs = useMemo(() => {
+    if (basemap === 'none') return null;
+    return { overlay: new XYZTilesOverlay({ url: BASEMAP_URL[basemap] }), shape: 'ellipsoid' as const, applyOverlayTexture: true };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [basemap]);
+  if (!pluginArgs) return null;
   return (
-    <mesh rotation={[0, -Math.PI / 2, 0]}>
-      <sphereGeometry args={[6378137, 96, 96]} />
-      <meshBasicMaterial map={texture} />
-    </mesh>
+    <TilesRendererR3F>
+      <TilesPlugin plugin={GeneratedSurfacePlugin as any} args={pluginArgs as any} />
+    </TilesRendererR3F>
   );
 }
 
@@ -93,7 +105,14 @@ function CropGizmo({ tilesRef }: { tilesRef: React.MutableRefObject<TilesRendere
 
 const Scene = forwardRef<ViewerHandle, { loadArgs: LoadArgs }>(function Scene({ loadArgs }, ref) {
   const tilesRef = useRef<TilesRendererImpl | null>(null);
-  const { camera, gl, scene, invalidate } = useThree();
+  // Individually-selected (not `const {...} = useThree()`, which subscribes to the ENTIRE R3F root
+  // state — including `pointer`/`viewport`, which update on every mouse move) — that pattern was
+  // re-rendering this whole component, and everything it computes, dozens of times a second while
+  // dragging to orbit, which is very likely most of what read as "3DTRJS is slow".
+  const camera = useThree((s) => s.camera);
+  const gl = useThree((s) => s.gl);
+  const scene = useThree((s) => s.scene);
+  const invalidate = useThree((s) => s.invalidate);
   const store = useViewerStore;
   const [pendingFlyTo, setPendingFlyTo] = useState<{ lon: number; lat: number; height: number } | null>(null);
   const controlsRef = useRef<any>(null);
@@ -141,6 +160,11 @@ const Scene = forwardRef<ViewerHandle, { loadArgs: LoadArgs }>(function Scene({ 
   // controls are active (orbit target, or globe/environment controls' internal state) to match.
   const frameToTileset = useCallback((tiles: TilesRendererImpl | null) => {
     if (!tiles) return;
+    // Z offset composes onto the tileset's own transform, so a freshly-loaded tileset needs it applied
+    // before we frame the camera on it — previously it only took effect the next time the user actually
+    // edited the Z-offset field on an already-loaded tileset.
+    const zOffset = store.getState().localFrame.zOffset;
+    if (zOffset) tiles.group.position.y = zOffset;
     const sphere = new THREE.Sphere();
     if (!(tiles as any).getBoundingSphere(sphere)) return;
     tiles.group.updateWorldMatrix(true, false);
@@ -350,17 +374,17 @@ const Scene = forwardRef<ViewerHandle, { loadArgs: LoadArgs }>(function Scene({ 
     <>
       <ambientLight intensity={1.2} />
       <directionalLight position={[1, 1, 1]} intensity={0.6} />
-      {/* Base globe surface — WGS84-radius sphere. Hidden for tilesets with no real geographic
-          placement (see the comment in frameToTileset above), else textured with a static whole-earth
-          photo instead of a bare wireframe (real live OSM/Google slippy tiles would need a full
-          quadtree tile fetch-and-stitch renderer — out of scope here), unless imagery is off entirely. */}
+      {/* Base globe surface. Hidden entirely for tilesets with no real geographic placement (see the
+          comment in frameToTileset above). Otherwise a real OSM/Google-tile-draped WGS84 ellipsoid
+          (see Globe above) when imagery is on, or a plain wireframe sphere as a ground reference when
+          imagery is explicitly off. */}
       {showGlobe && (basemap === 'none' ? (
         <mesh>
           <sphereGeometry args={[6378137, 64, 64]} />
           <meshBasicMaterial color="#1a2a3a" wireframe />
         </mesh>
       ) : (
-        <Globe />
+        <Globe basemap={basemap} />
       ))}
       {loadArgs && (
         <TilesRendererR3F
@@ -379,15 +403,25 @@ const Scene = forwardRef<ViewerHandle, { loadArgs: LoadArgs }>(function Scene({ 
       <CameraTransition
         mode={ortho ? 'orthographic' : 'perspective'}
         onBeforeToggle={(manager: any) => {
-          // The library's own default fallback (used when the active controls aren't
-          // EnvironmentControls-like — i.e. drei's plain OrbitControls) assumes whatever the camera is
-          // looking at sits a fixed 50 units in front of it, which is wildly wrong for content we've
-          // auto-framed at real-world (often kilometers-to-millions-of-meters) scale — that's what
-          // produced the dramatic zoom jump switching in/out of orthographic. Use our own tracked pivot
-          // (kept in sync by frameToTileset and double-click, for whichever controls are active) instead.
           const controls = controlsRef.current;
-          const pivot = controls?.target ?? controls?.pivotPoint;
-          if (pivot) manager.fixedPoint.copy(pivot);
+          if (controls?.isEnvironmentControls) {
+            // GlobeControls/EnvironmentControls already do the right thing by default (this mirrors
+            // CameraTransition's own built-in EnvironmentControls-aware branch) — getPivotPoint() reads
+            // their real navigation focus, and adjustCamera() is what actually keeps the transition from
+            // clipping/jumping. Our EARLIER attempt at this only set fixedPoint and skipped adjustCamera
+            // entirely, which is very likely why the transition still looked wrong even with a pivot set.
+            controls.getPivotPoint(manager.fixedPoint);
+            manager.syncCameras();
+            controls.adjustCamera(manager.perspectiveCamera);
+            controls.adjustCamera(manager.orthographicCamera);
+            return;
+          }
+          // OrbitControls has no such awareness, and the library's OWN fallback for this branch assumes
+          // whatever the camera is looking at sits a fixed 50 units in front of it — wildly wrong for
+          // content auto-framed at real-world (often kilometers-to-millions-of-meters) scale, which
+          // produced the dramatic zoom jump switching in/out of orthographic. Use its tracked `.target`
+          // (kept in sync by frameToTileset and double-click) instead.
+          if (controls?.target) manager.fixedPoint.copy(controls.target);
           else manager.fixedPoint.set(0, 0, -1).transformDirection(camera.matrixWorld).multiplyScalar(50).add(camera.position);
           manager.syncCameras();
         }}

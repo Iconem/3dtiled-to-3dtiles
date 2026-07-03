@@ -29,7 +29,7 @@ const TILING_PILLS: [string, string][] = [
   ['explicit', '⬢ explicit'],
 ];
 
-type Tint = 'blue' | 'amber' | 'emerald' | 'fuchsia' | 'violet';
+type Tint = 'blue' | 'amber' | 'emerald' | 'fuchsia';
 
 // Group container tint: a faint wash (instead of vertical dividers) so groups stay visually
 // distinguishable, and each group becomes a single flex-wrap unit that wraps as a whole rather
@@ -39,7 +39,6 @@ const GROUP_TINT: Record<Tint, string> = {
   amber: 'bg-amber-500/10',
   emerald: 'bg-emerald-500/10',
   fuchsia: 'bg-fuchsia-500/10',
-  violet: 'bg-violet-500/10',
 };
 
 // Active-pill tint: a stronger wash of the SAME hue rather than the default variant's full-contrast
@@ -51,7 +50,6 @@ const ACTIVE_TINT: Record<Tint, string> = {
   amber: 'bg-amber-500/30 border-amber-400/40 text-amber-950 hover:bg-amber-500/35 dark:text-amber-50',
   emerald: 'bg-emerald-500/30 border-emerald-400/40 text-emerald-950 hover:bg-emerald-500/35 dark:text-emerald-50',
   fuchsia: 'bg-fuchsia-500/30 border-fuchsia-400/40 text-fuchsia-950 hover:bg-fuchsia-500/35 dark:text-fuchsia-50',
-  violet: 'bg-violet-500/30 border-violet-400/40 text-violet-950 hover:bg-violet-500/35 dark:text-violet-50',
 };
 
 // Inactive-pill hover: a light wash of the group's own hue instead of the default variant's neutral
@@ -61,13 +59,7 @@ const HOVER_TINT: Record<Tint, string> = {
   amber: 'hover:bg-amber-500/15 hover:text-foreground',
   emerald: 'hover:bg-emerald-500/15 hover:text-foreground',
   fuchsia: 'hover:bg-fuchsia-500/15 hover:text-foreground',
-  violet: 'hover:bg-violet-500/15 hover:text-foreground',
 };
-
-const RENDERER_PILLS: [string, string][] = [
-  ['cesium', 'CesiumJS'],
-  ['3dtrjs', '3DTRJS'],
-];
 
 function Pill({ active, onClick, title, tint, children }: { active: boolean; onClick: () => void; title?: string; tint: Tint; children: React.ReactNode }) {
   return (
@@ -147,12 +139,6 @@ export default function TopBar({ activeHandleRef }: { activeHandleRef: React.Ref
       <div className="flex flex-wrap items-center gap-2">
         <h1 className="mr-1 shrink-0 text-sm font-semibold">3D Tiled</h1>
 
-        <PillGroup tint="violet">
-          {RENDERER_PILLS.map(([v, l]) => (
-            <Pill key={v} tint="violet" active={url.renderer === v} onClick={() => setUrl({ renderer: v as any })}>{l}</Pill>
-          ))}
-        </PillGroup>
-
         <PillGroup tint="blue">
           {MODE_PILLS.map(([v, l]) => (
             <Pill key={v} tint="blue" active={url.mode === v} onClick={() => setUrl({ mode: v as any })}>{l}</Pill>
@@ -208,7 +194,7 @@ export default function TopBar({ activeHandleRef }: { activeHandleRef: React.Ref
         </PillGroup>
       </div>
 
-      <PillGroup tint="fuchsia">
+      <PillGroup tint="fuchsia" className="self-start">
         {presets.map((p) => (
           <Button
             key={p.id}
