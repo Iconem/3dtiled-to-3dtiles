@@ -881,6 +881,57 @@ draws bounding volumes coloured by octree depth in both renderers. The preset ba
 demo data (PLY→3D Tiles). For deeper tileset inspection (tree, bounds, per-tile stats) alongside
 this viewer, see [3DTiles-Inspector](https://github.com/WilliamLiu-1997/3DTiles-Inspector).
 
+### Standalone React viewer (`apps/viewer`) — shadcn/ui, R3F, one push, WIP first pass
+
+A ground-up port of `viewer.html` into a real React app — **`viewer.html` stays as-is**, unaffected,
+this is a new, separate app. `pnpm --filter viewer dev` → `http://localhost:3003` (added to
+`.claude/launch.json` as `"viewer"`, `dev:viewer` root script). Stack: Vite + React 19 + TypeScript +
+Tailwind v4, shadcn/ui (hand-vendored `src/components/ui/*`, default dark theme, not a port of
+viewer.html's own hand-tuned palette), **nuqs** for the shareable URL-param slice (format/mode/cache/
+prefetch/transform/tiling/renderer/preset — the address bar is a bookmarkable link to a given view;
+the fully-resolved tileset URL itself deliberately stays out of it, see `state/urlState.ts`'s comment
+for why), **Zustand** for everything else (crop bbox, camera-derived readouts, status/timing log).
+
+- **CesiumJS side** (`components/Viewport/CesiumViewer.tsx`): plain imperative `Cesium.Viewer` in a
+  `useEffect`, functionally identical to viewer.html's `initCesium()`. Resium was tried first per the
+  original plan; dropped in favor of this — see the file's own comment.
+- **3DTRJS side** (`components/Viewport/ThreeDTRjsViewer.tsx`): uses `3d-tiles-renderer`'s **official
+  `/r3f` export** (`<TilesRenderer>`, `<TilesPlugin>`, `<GlobeControls>`, `<EnvironmentControls>`,
+  `<CameraTransition>`) instead of hand-rolled three.js — a real capability of the upstream package,
+  not previously used anywhere in this repo. `GaussianSplatPlugin` registers only for splat assets.
+  drei's `<TransformControls>` on a box mesh is the crop-box gizmo (first pass: translate mode,
+  approximate — see the file's `CropGizmo` comment). No imagery overlay on the background globe yet
+  (a plain wireframe sphere placeholder) and no auto-fly-to-loaded-content — both documented gaps.
+- Both renderers stay mounted (CSS-hidden, not unmounted) when you switch the RENDERER pill — matches
+  viewer.html's `#cesium-container`/`#three-container` behavior — and the last-loaded tileset URL
+  replays into whichever one you switch to (`App.tsx`'s `url.renderer` effect).
+
+**Real bugs found and fixed while building this** (all upstream/tooling issues, not React-port
+artifacts — kept here since they'd bite anyone doing the equivalent Vite+Cesium+pnpm-monorepo setup):
+- `vite-plugin-cesium`'s default `cesiumBuildRootPath` is the **relative** path
+  `node_modules/cesium/Build`, resolved against the dev server's cwd. Works for the root app (cesium
+  is right there) but not a nested `apps/*` package under pnpm's hoisting (cesium lives in the
+  **monorepo root**'s `node_modules`, not `apps/viewer/node_modules`) — every Cesium static asset
+  (`Widgets/widgets.css`, the skybox JPGs, `approximateTerrainHeights.json`, …) 404'd. Worse: Vite's
+  default SPA fallback served `index.html` (200, `text/html`) instead of a real 404, and Cesium's
+  WebGL texture pipeline tried to decode that HTML as an image — crashing the **entire render loop**
+  with an opaque `InvalidStateError: the source image could not be decoded`, not a per-asset failure.
+  Fixed by pointing the plugin at cesium's actual resolved location (`vite.config.ts`) and adding
+  `appType: 'mpa'` (same fix the root app's `vite.config.mjs` already documents for a related
+  tile-server gotcha) so a real 404 surfaces instead of being masked.
+- The raw `mt1.google.com` "Google Hybrid" tile hotlink used as the default basemap sometimes answers
+  with an HTML error page instead of image bytes, hitting the exact same Cesium crash independently —
+  default basemap changed to OSM (a properly public tile service); Google stays selectable.
+- TopBar's mount effect only auto-loaded a preset when the URL had **none** selected — meaning a
+  reloaded/shared link (which always has `?preset=…` from the previous session) silently never
+  fired the actual tileset load, since the resolved URL is deliberately not persisted (see above).
+
+**Not yet done** (first-pass, tracked as follow-up, not attempted to fully match viewer.html feature-
+for-feature in one pass): 3DTRJS auto-fly-to-content on load, 3DTRJS basemap imagery overlay, Ion
+asset loading on the 3DTRJS side, Cesium `shadeless`/brightness shading ported but not yet re-verified
+against baked-lighting photogrammetry content, crop-gizmo precision (approximate ENU conversion, no
+face-handle resize yet — translate only).
+
 ---
 
 ### copc-to-3dtiles
