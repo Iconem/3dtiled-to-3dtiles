@@ -46,8 +46,8 @@ The RAD storage encodings for `coit.rad` are:
 - `rgb: r8_delta` — delta-encoded uint8 (matches PackedSplats)
 - `orientation: oct88r8` — shared by both formats
 
-See `docs-references/sparkjs-packed-splats.md` and `docs-references/sparkjs-ext-splats.md` for
-full layout specs.
+See [`sparkjs-packed-splats.md`](/docs/references/sparkjs-packed-splats) and
+[`sparkjs-ext-splats.md`](/docs/references/sparkjs-ext-splats) for full layout specs.
 
 ### REPLACE vs ADD refinement
 
@@ -219,8 +219,8 @@ trees on disk — the converter reads those directly, no unzip). Mix of `3DObjec
 
 **PlayCanvas SOG / Streamed SOG (used by `sog-to-3dtiles`)**
 - [playcanvas/splat-transform](https://github.com/playcanvas/splat-transform) — SplatTransform: PlayCanvas's splat conversion library/CLI. `sog-to-3dtiles` uses its `readSog` (CPU `webp.wasm` decode) to turn each SOG chunk into a `DataTable`. Authors Streamed SOG datasets too.
-- [SOG format spec](https://developer.playcanvas.com/user-manual/gaussian-splatting/formats/sog/) — local notes: [`docs-references/sog.md`](docs-references/sog.md).
-- [Streamed SOG (LOD) spec](https://developer.playcanvas.com/user-manual/gaussian-splatting/formats/streamed-sog/) — local notes: [`docs-references/streamed-sog.md`](docs-references/streamed-sog.md).
+- [SOG format spec](https://developer.playcanvas.com/user-manual/gaussian-splatting/formats/sog/) — local notes: [`sog.md`](/docs/references/sog).
+- [Streamed SOG (LOD) spec](https://developer.playcanvas.com/user-manual/gaussian-splatting/formats/streamed-sog/) — local notes: [`streamed-sog.md`](/docs/references/streamed-sog).
 
 **3DTilesRendererJS Gaussian-splat ecosystem (WilliamLiu-1997)** — closest reference implementations to this repo's RAD path; studied to improve tiling:
 - [3DTilesRendererJS-3DGS-Plugin](https://github.com/WilliamLiu-1997/3DTilesRendererJS-3DGS-Plugin) — the `3d-tiles-rendererjs-3dgs-plugin` this viewer uses to render splats in 3DTRJS (parses `KHR_gaussian_splatting` + `_spz_2`, renders via SparkJS, one shared Spark renderer per scene/renderer, camera-relative rebasing, `sparkRendererOptions`, WebXR-aware). Its `data/gaussianSplat1` & `gaussianSplat2` are wired into this viewer's preset bar (**◈ GSplat 1/2**). Note its rendering tip: keep the globe in the **opaque** pass so it doesn't object-sort against transparent splats at the horizon.

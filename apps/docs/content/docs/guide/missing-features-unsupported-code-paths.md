@@ -122,7 +122,7 @@ every chunk **in parallel** decoding just its `center`/`child_count`/`child_star
 encode, no gzip) to build the explicit tree topology + AABBs, then range-fetch + fully decode +
 encode only the ONE chunk a requested tile needs. Cold-start cost is one parallel pass over the whole
 file's chunk headers, not the whole geometry — see
-[`docs-references/rad-format-notes.md`](docs-references/rad-format-notes.md) for the full rationale
+[`rad-format-notes.md`](/docs/references/rad-format-notes) for the full rationale
 on why RAD chunks aren't spatial tiles in the first place.
 
 Everything not on a range adapter is still fully renderable today via `/convert` (below).
@@ -132,7 +132,7 @@ Everything not on a range adapter is still fully renderable today via `/convert`
 [MapTiler GeoSplats](https://www.maptiler.com/geosplats/) is a georeferenced HLOD Gaussian-splat
 format with no published byte-spec — everything below was decoded from a real `model.json` +
 `metadata.json` pair and the SDK bundle (`@maptiler/geosplats`, `maptiler-geosplats.mjs`). Full
-format notes: [`docs-references/maptiler-geosplats.md`](docs-references/maptiler-geosplats.md).
+format notes: [`maptiler-geosplats.md`](/docs/references/maptiler-geosplats).
 
 ```sh
 #   GET /stream/tileset.json?format=geosplats&url=<model.json URL>[&lod=1..8]           → HLOD tileset

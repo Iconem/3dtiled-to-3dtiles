@@ -5,7 +5,7 @@ description: "Producing the tiled inputs (offline tilers): point-cloud tilers (P
 
 **Producing the tiled inputs (offline tilers):** point-cloud tilers (PotreeConverter, py3dtiles,
 gocesiumtiler, PDAL→COPC), splat LoD builders (SparkJS `build-lod`, PlayCanvas `splat-transform`,
-XGRIDS LCC), and a note on **why PotreeConverter 2.0 is so fast** — see [`offline-tilers.md`](docs-references/offline-tilers.md).
+XGRIDS LCC), and a note on **why PotreeConverter 2.0 is so fast** — see [`offline-tilers.md`](/docs/references/offline-tilers).
 
 Tools that tile point clouds, meshes, or splats to 3D Tiles / streaming formats — studied for
 format handling, tree/geometric-error strategy, and parallelism:

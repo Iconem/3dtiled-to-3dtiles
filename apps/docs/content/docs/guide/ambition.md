@@ -24,7 +24,7 @@ aspirational: **containerizing the server** — a `docker-compose`-runnable `pac
 viewer), built and published to **GHCR** by a GitHub Actions workflow on release, so it drops straight
 into a `docker-compose`/**Portainer** stack behind **Traefik** with no manual Node setup — and a
 **Fumadocs** documentation site, which is more tractable than it sounds: almost every format's deep
-findings already live in their own file under [`docs-references/`](docs-references/) (this README
+findings already live in their own file under [`docs/references/`](/docs/guide/documentation) (this README
 mostly *links* to them rather than duplicating), so the migration is largely **chunking** the existing
 material (this README foremost, plus a few docs-references files that have grown large in their own
 right) into Fumadocs' page-per-topic model, not writing new docs from scratch. Both are tracked in

@@ -23,9 +23,9 @@ COPC, Potree 1.x/2.0, EPT, I3S/SLPK, streamed-SOG, LCC, RAD, 3D Tiles packages, 
 
 **Tier 3 — integrate, don't build:** **Bentley iModel/iTwin** (use the [Mesh Export API](https://developer.bentley.com/apis/mesh-export/overview/) → already 3D Tiles) · **Cesium ion** & **Google Photorealistic 3D Tiles** (already 3D Tiles — consume/target; Google ToS forbids re-serving/caching).
 
-**Tier 4 — blocked / low ROI:** **Autodesk ReCap `.rcp/.rcs`** — confirmed **no open reader OR writer** (PDAL/CloudCompare/PCL/Open3D none; FME writer-only); can't ingest remote `.rcp`; **and Autodesk can't consume 3D Tiles natively** (Cesium is *Bentley's* now → native import is in MicroStation/iTwin; Autodesk only has a Revit→3D Tiles *exporter*). Realistic bridge is a future **→ E57/LAS export** (formats ReCap ingests), not an `.rcp` writer. · **Bentley 3SM** (closed, no spec).
+**Tier 4 — blocked / low ROI:** **Autodesk ReCap `.rcp/.rcs`** — confirmed **no open reader OR writer** (PDAL/CloudCompare/PCL/Open3D none; FME writer-only); can't ingest remote `.rcp`; **and Autodesk can't consume 3D Tiles natively** (Cesium is *Bentley's* now → native import is in MicroStation/iTwin; Autodesk only has a Revit→3D Tiles *exporter*). Realistic bridge is a future **→ E57/LAS export** (formats ReCap ingests), not an `.rcp` writer. · **Bentley 3SM** (closed, no spec). · **Splatter (splatter.app)** — hosted Gaussian-splat viewer, **not a file format**: content is addressed by an opaque ID against a private backend, so there's nothing a converter could parse. Tracked as a rendering-technique reference, not a source format — see [`splatter-app.md`](/docs/references/splatter-app) for the full status writeup and observed API surface.
 
-**Implemented adapters (plans: [streaming-adapter-plans.md](docs-references/streaming-adapter-plans.md)):**
+**Implemented adapters (plans: [streaming-adapter-plans.md](/docs/references/streaming-adapter-plans)):**
 - ✅ **Bentley 3MX** — `GET /stream/tileset.json?format=threemx&url=<Scene.3mx | root.3mxb>`. Parses `3MXBO` node trees,
   serves lazy external-tileset fragments per `.3mxb`, decodes **OpenCTM (MG1/LZMA)** geometry via vendored
   js-openctm → glTF + JPEG baseColor. Verified live against the colorwlof/Unity-3mxb fixture (textured GLB

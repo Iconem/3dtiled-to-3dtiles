@@ -150,7 +150,7 @@ tastier RAD splat tileset) — open it via `GET /3dtiles-self-contained/tileset.
 
 Tooling & discussion: [`3d-tiles-tools convert`](https://github.com/CesiumGS/3d-tiles-tools#convert) ·
 [extended package server — CesiumGS/3d-tiles-tools#86](https://github.com/CesiumGS/3d-tiles-tools/pull/86).
-Local notes: [`docs-references/3tz-3dtiles-packages.md`](docs-references/3tz-3dtiles-packages.md).
+Local notes: [`3tz-3dtiles-packages.md`](/docs/references/3tz-3dtiles-packages).
 
 ### 3D Tiles → 3D Tiles transcodes
 

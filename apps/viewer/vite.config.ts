@@ -1,5 +1,7 @@
 import { fileURLToPath, URL } from 'node:url';
 import path from 'node:path';
+import { createReadStream } from 'node:fs';
+import { stat } from 'node:fs/promises';
 import { defineConfig } from 'vite';
 import react from '@vitejs/plugin-react';
 import cesium from 'vite-plugin-cesium';
@@ -13,6 +15,9 @@ import cesium from 'vite-plugin-cesium';
 // image could not be decoded"). Fixed two ways: `appType: 'mpa'` below (so a REAL 404 surfaces instead
 // of being masked) and pointing this plugin at cesium's actual resolved location.
 const cesiumBuildRoot = path.dirname(fileURLToPath(new URL('../../node_modules/cesium/Build/package.json', import.meta.url)));
+
+// The monorepo root, two levels up from apps/viewer — sample-data/ lives there, not under this package.
+const repoRoot = fileURLToPath(new URL('../../', import.meta.url));
 
 // Standalone React viewer — see ../../README.md "Vision: towards a TiTiler for 3D" and
 // C:\Users\jonathan\.claude\plans\cuddly-jingling-rabbit.md for the full port plan. Talks to the
@@ -30,17 +35,63 @@ export default defineConfig({
   plugins: [
     react(),
     cesium({ cesiumBuildRootPath: cesiumBuildRoot, cesiumBuildPath: path.join(cesiumBuildRoot, 'Cesium') + path.sep }),
+    // This app is now THE single dev/build entry point (viewer + vanilla-viewer + docs, one port +
+    // the tile-server's 3001 — see the port-consolidation note on `server` below). Its project root is
+    // apps/viewer/, not the monorepo root, so — unlike the OLD root-level vite.config.mjs, where
+    // `/sample-data/**` was served automatically by Vite's own default static handler because its
+    // project root WAS the repo root — sample-data needs an explicit static passthrough here.
+    {
+      name: 'sample-data-static',
+      configureServer(server) {
+        server.middlewares.use(async (req, res, next) => {
+          const url = req.url || '';
+          if (!url.startsWith('/sample-data/')) return next();
+          const filePath = path.resolve(repoRoot, '.' + decodeURIComponent(url.split('?')[0]));
+          if (!filePath.startsWith(repoRoot)) return next();
+          try { await stat(filePath); }
+          catch { return next(); }
+          const ext = path.extname(filePath).toLowerCase();
+          // Potree 1.x's tree descriptor is cloud.js — pure JSON with a .js extension. Vite's normal
+          // module pipeline would append an HMR/sourcemap footer, corrupting JSON.parse tile-server-side
+          // — that's why .js needs to be force-served as data here instead of falling through to Vite.
+          const mime: Record<string, string> = {
+            '.js': 'application/json', '.json': 'application/json', '.gltf': 'model/gltf+json',
+            '.glb': 'model/gltf-binary', '.b3dm': 'application/octet-stream', '.pnts': 'application/octet-stream',
+            '.laz': 'application/octet-stream', '.las': 'application/octet-stream', '.bin': 'application/octet-stream',
+            '.ply': 'application/octet-stream', '.webp': 'image/webp', '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg',
+            '.png': 'image/png', '.ktx2': 'image/ktx2',
+          };
+          res.setHeader('Content-Type', mime[ext] ?? 'application/octet-stream');
+          res.setHeader('Access-Control-Allow-Origin', '*');
+          createReadStream(filePath).pipe(res);
+        });
+      },
+    },
+    {
+      // Extension-less `/vanilla-viewer` (matching the plain `/docs` link's style) instead of forcing
+      // `/vanilla-viewer.html` — `serve.json`'s `rewrites` covers the same alias for the production build.
+      name: 'vanilla-viewer-alias',
+      configureServer(server) {
+        server.middlewares.use((req, res, next) => {
+          if (req.url === '/vanilla-viewer') req.url = '/vanilla-viewer.html';
+          next();
+        });
+      },
+    },
   ],
   server: {
-    port: 3003,
-    // apps/docs (Fumadocs/Next) keeps running as its own dev server (`pnpm dev:docs`, port 3002) — this
-    // just makes it reachable through the SAME front-door port as the viewer app + legacy viewer.html,
-    // so day-to-day browsing only needs one "app" port plus the tile-server's middleware port (3001).
-    // `/docs` alone covers all real page navigation (its content routes already live at /docs/... — see
-    // apps/docs/next.config.mjs's comment on why it does NOT also set `basePath: '/docs'`). The rest are
-    // the root-absolute paths Next's OWN dev server emits for that content (`/_next/...` JS/CSS/HMR
-    // chunks, the fumadocs search API, og-image/llms.txt routes) — without proxying these too, the
-    // browser requests them straight off port 3003 (no /docs prefix to route on) and 404s.
+    // The ONE port this whole repo's front end needs day-to-day (paired with the tile-server
+    // middleware's 3001) — this app now folds in everything that used to need its own port: the
+    // legacy standalone page (`/vanilla-viewer`, was the root-level vite.config.mjs on :3000) and
+    // Fumadocs (`/docs`, was its own `next dev` on :3002 — that process still runs, just no longer
+    // something you navigate to directly, see the proxy rules below).
+    port: 3000,
+    // Serve sample-data/output/** (repo root) too, same as the old root-level app — the built-in
+    // presets point at `http://localhost:3000/sample-data/...`.
+    fs: { allow: [repoRoot] },
+    // Don't file-watch sample-data (~100k+ tile files — crawls on startup/every HMR) or apps/docs'
+    // own .next build output (spurious reloads here) — still served on demand, only watching is off.
+    watch: { ignored: ['**/sample-data/**', '**/*.next/**'] },
     proxy: {
       '/docs': { target: 'http://localhost:3002', changeOrigin: true },
       '/_next': { target: 'http://localhost:3002', changeOrigin: true, ws: true },
@@ -56,19 +107,17 @@ export default defineConfig({
     alias: { '@': fileURLToPath(new URL('./src', import.meta.url)) },
   },
   optimizeDeps: { include: ['three', '3d-tiles-renderer', '@sparkjsdev/spark'] },
-  // viewer.html is the legacy standalone page (still the fallback/reference implementation — see
-  // README) copied in from the repo root so it's served — and, via this entry, included in `dist/` on
-  // build — by this app's own dev server instead of needing a separate one just for it. It still
-  // resolves sample-data/middleware URLs against their own absolute localhost:3000/3001 origins, so
-  // moving which port serves the HTML itself doesn't affect it.
+  // vanilla-viewer.html is the legacy standalone page (still the fallback/reference implementation —
+  // see README) copied in from the repo root's viewer.html so it's served — and, via this entry,
+  // included in `dist/` on build — by this app's own dev server instead of needing a separate one.
   build: {
-    // Default esbuild target predates top-level await (viewer.html's dynamic SparkJS/GaussianSplat
-    // plugin loading uses it) — same fix as the root app's own vite.config.mjs.
+    // Default esbuild target predates top-level await (vanilla-viewer.html's dynamic SparkJS/
+    // GaussianSplat plugin loading uses it) — same fix as the root app's own vite.config.mjs.
     target: 'esnext',
     rollupOptions: {
       input: {
         main: fileURLToPath(new URL('./index.html', import.meta.url)),
-        viewer: fileURLToPath(new URL('./viewer.html', import.meta.url)),
+        'vanilla-viewer': fileURLToPath(new URL('./vanilla-viewer.html', import.meta.url)),
       },
     },
   },

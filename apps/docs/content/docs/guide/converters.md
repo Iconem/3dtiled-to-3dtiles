@@ -155,8 +155,8 @@ stream (a streaming-manifest `.rad` has no embedded chunk data); `/convert` prod
 
 ### sog-to-3dtiles
 
-Converts a PlayCanvas **[Streamed SOG](docs-references/streamed-sog.md)** dataset (`lod-meta.json`
-+ per-chunk unbundled [SOG](docs-references/sog.md) dirs) to 3D Tiles 1.1 with the same
+Converts a PlayCanvas **[Streamed SOG](/docs/references/streamed-sog)** dataset (`lod-meta.json`
++ per-chunk unbundled [SOG](/docs/references/sog) dirs) to 3D Tiles 1.1 with the same
 `KHR_gaussian_splatting` + `_compression_spz_2` GLB tiles as the RAD path.
 
 > **Arrival.Space `.lod` uses this same streamed-SOG format.** An Arrival entity's `lodParameter.glbUrl`
@@ -216,7 +216,7 @@ out-sog/
 
 ### lcc-to-3dtiles
 
-Converts an XGRIDS **[LCC](docs-references/lcc-format.md)** dataset (`meta.lcc` + `Index.bin` +
+Converts an XGRIDS **[LCC](/docs/references/lcc-format)** dataset (`meta.lcc` + `Index.bin` +
 `Data.bin` [+ `Shcoef.bin`]) to 3D Tiles with the same `KHR_gaussian_splatting` + `_spz_2` GLB tiles.
 
 ```sh
@@ -255,7 +255,7 @@ required per its White Paper (see the doc).
 
 ### i3s-to-3dtiles  🟡 **DRAFT — mesh validated on real data**
 
-Converts the **supported subset** of Esri **[I3S](docs-references/i3s-spec.md)** (Indexed 3D Scene
+Converts the **supported subset** of Esri **[I3S](/docs/references/i3s-spec)** (Indexed 3D Scene
 Layer) → 3D Tiles 1.1. Validated on `Buildings_NewYork_v18.slpk` → **5882 glTF TRIANGLES tiles** that
 place correctly in NYC: I3S geographic-layer vertices are `(Δlon°, Δlat°, Δheight_m)` relative to the
 node OBB centre, converted per-vertex to ECEF (stored relative to the centre for float32 precision,

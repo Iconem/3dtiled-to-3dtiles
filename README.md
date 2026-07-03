@@ -824,15 +824,34 @@ each converter just needs its tile loop ported (lcc is the worked example).
 
 ## Converters
 
-### Viewer (`viewer.html`) — offline, self-contained via Vite
-
-All viewer deps (Cesium, three, 3d-tiles-renderer, @sparkjsdev/spark, the 3DGS plugin) are **npm
-dependencies bundled by Vite — no CDN, works fully offline**:
+### Running this repo day-to-day: two ports
 
 ```sh
-pnpm install         # (or npm install) — installs cesium/three/3d-tiles-renderer/spark/vite
-pnpm run dev         # vite dev server → http://localhost:3000/ (redirects to viewer.html; serves sample-data/)
-# pnpm run build     # static offline bundle in dist/
+pnpm install    # installs the whole workspace
+pnpm dev        # http://localhost:3000  (3D Tiled — the React app, + /vanilla-viewer + /docs folded in)
+                # http://localhost:3001  (tile-server middleware — the only other port you need)
+```
+
+`pnpm dev` runs `apps/viewer`'s own Vite dev server (`dev:viewer`) alongside the tile-server
+(`serve:tiles`) and the Fumadocs site's own Next dev server (`dev:docs`, port 3002 — that process still
+runs, it's just no longer something you navigate to directly: `apps/viewer`'s Vite config proxies
+`/docs` and its asset/API routes through to it). `apps/viewer`'s own build also folds in the legacy
+standalone `vanilla-viewer.html` (below) as a second page at `/vanilla-viewer`, so it ships in the same
+`dist/` and needs no separate server either. See [3D Tiled](#3d-tiled-standalone-react-viewer-appsviewer-shadcnui-r3f-one-push-wip-first-pass)
+below for the app itself.
+
+### `vanilla-viewer.html` — offline, self-contained via Vite, no React/build tooling needed
+
+The **original**, pre-React reference viewer — kept as a from-scratch fallback that needs nothing but
+Vite (no Node backend beyond the tile-server, no component framework). All its deps (Cesium, three,
+3d-tiles-renderer, @sparkjsdev/spark, the 3DGS plugin) are **npm dependencies bundled by Vite — no CDN,
+works fully offline**. Served at `/vanilla-viewer` by `apps/viewer`'s own dev server/build (above) — the
+repo-root copy of the same file (`viewer.html`) also still runs completely standalone via a separate,
+untouched legacy path if you want zero dependency on `apps/viewer` even existing:
+
+```sh
+pnpm run dev:legacy    # vite dev server → http://localhost:3000/ (redirects to viewer.html; serves sample-data/)
+# pnpm run build:legacy  # static offline bundle in dist/
 ```
 
 pnpm uses `pnpm-workspace.yaml` + `.npmrc` (`node-linker=hoisted`, so the meta-converter's
@@ -883,9 +902,11 @@ this viewer, see [3DTiles-Inspector](https://github.com/WilliamLiu-1997/3DTiles-
 
 ### 3D Tiled — standalone React viewer (`apps/viewer`), shadcn/ui, R3F, one push, WIP first pass
 
-A ground-up port of `viewer.html` into a real React app, named **3D Tiled** — **`viewer.html` stays
-as-is**, unaffected, this is a new, separate app. `pnpm --filter 3d-tiled dev` → `http://localhost:3003`
-(added to `.claude/launch.json` as `"viewer"`, `dev:viewer` root script). Stack: Vite + React 19 + TypeScript +
+A ground-up port of `viewer.html` into a real React app, named **3D Tiled** — the repo-root `viewer.html`
+stays as-is, unaffected; this app carries its own copy (`vanilla-viewer.html`, served at `/vanilla-viewer`)
+instead of depending on the legacy path. `pnpm --filter 3d-tiled dev` → `http://localhost:3000` — this
+IS `pnpm dev` now (added to `.claude/launch.json` as `"viewer"`, `dev:viewer` root script; see "Running
+this repo day-to-day" above). Stack: Vite + React 19 + TypeScript +
 Tailwind v4, shadcn/ui (hand-vendored `src/components/ui/*`, default dark theme, not a port of
 viewer.html's own hand-tuned palette), **nuqs** for the shareable URL-param slice (format/mode/cache/
 prefetch/transform/tiling/renderer/preset — the address bar is a bookmarkable link to a given view;
