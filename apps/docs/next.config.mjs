@@ -5,11 +5,13 @@ const withMDX = createMDX();
 /** @type {import('next').NextConfig} */
 const config = {
   reactStrictMode: true,
-  // Served behind apps/viewer's dev-server proxy at /docs (see apps/viewer/vite.config.ts) — without
-  // this, Next emits absolute /_next/... and /api/... asset/route references that don't carry the
-  // /docs prefix the proxy is keyed on, 404ing every JS/CSS chunk and the search API in the browser
-  // even though the initial HTML page itself proxies through fine.
-  basePath: '/docs',
+  // NOT `basePath: '/docs'` — this app's OWN content routes already live under /docs (see
+  // src/app/docs/[[...slug]]/page.tsx + src/lib/shared.ts's `docsRoute`), so a Next basePath would stack
+  // a SECOND /docs on top of that (https://…/docs/docs/…, and /docs/docs/references 404ing) instead of
+  // just fixing the asset-path problem it was added for. That problem — Next emitting root-absolute
+  // /_next/... and /api/... references that don't carry the /docs prefix the viewer's proxy is keyed on
+  // — is fixed on the OTHER side instead: apps/viewer/vite.config.ts proxies those specific root paths
+  // (_next, api/search, og, llms*) to this same dev server, verbatim, no rewrite needed.
   images: { unoptimized: true },
 };
 

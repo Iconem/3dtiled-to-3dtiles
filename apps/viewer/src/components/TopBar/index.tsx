@@ -123,6 +123,24 @@ export default function TopBar({ activeHandleRef }: { activeHandleRef: React.Ref
     doLoad(loadUrl, store.getState().currentType);
   }
 
+  // Toggling the pill alone used to leave the field showing whatever selectPreset()/handleLoadClick()
+  // last wrote — flip it, and the text box wouldn't change, so there was no visible sign the toggle did
+  // anything. Re-derive the field for whichever preset is currently selected (raw src vs wrapped
+  // middleware URL) so the switch is immediately visible; doesn't re-trigger a network load (the two
+  // forms resolve to the same content — only how it's *displayed/pasted* changes).
+  function toggleRawUrlMode() {
+    const next = !rawUrlMode;
+    store.getState().setRawUrlMode(next);
+    const current = presets.find((p) => p.id === url.preset);
+    if (!current) return;
+    if (current.custom) {
+      store.getState().setStatus(next ? `Custom · paste a RAW ${url.format} dataset URL, then Load.` : 'Custom · paste a full middleware/tileset URL, then Load.');
+      return;
+    }
+    if (!current.url) return;
+    store.getState().setUrlField(next && current.rawSrc ? current.rawSrc : current.url);
+  }
+
   // Whenever mode/format/tool changes (including the very first mount, where `url.preset` may
   // already be populated from a shared/bookmarked link — the actual tileset URL is deliberately NOT
   // persisted, see urlState.ts, so it must be re-derived and reloaded here, not skipped), load the
@@ -211,7 +229,7 @@ export default function TopBar({ activeHandleRef }: { activeHandleRef: React.Ref
       </PillGroup>
 
       <div className="flex flex-wrap items-center gap-2">
-        <Pill tint="blue" active={rawUrlMode} onClick={() => store.getState().setRawUrlMode(!rawUrlMode)} title="ON: field holds the RAW dataset URL — wrapped with the current format+cache+params. OFF: a ready middleware/tileset URL, loaded as-is.">
+        <Pill tint="blue" active={rawUrlMode} onClick={toggleRawUrlMode} title="ON: field holds the RAW dataset URL — wrapped with the current format+cache+params. OFF: a ready middleware/tileset URL, loaded as-is.">
           raw url
         </Pill>
         <Input

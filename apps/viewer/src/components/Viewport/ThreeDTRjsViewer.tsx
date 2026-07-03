@@ -18,6 +18,7 @@ import { GaussianSplatPlugin } from '3d-tiles-rendererjs-3dgs-plugin';
 import * as THREE from 'three';
 import type { ViewerHandle } from '@/lib/viewer-handle';
 import type { AssetType } from '@/lib/formats';
+import { MW } from '@/lib/formats';
 import { useViewerStore } from '@/state/store';
 
 // R3F port of viewer.html's 3DTilesRendererJS section (lines ~1838-2753). Uses 3d-tiles-renderer's
@@ -36,9 +37,18 @@ interface Props { visible: boolean }
 
 type LoadArgs = { url: string; type: AssetType; sseOverride?: number | null } | null;
 
+// Google's raw mt1.google.com tile hotlink sends no Access-Control-Allow-Origin header at all (unlike
+// OSM's tile server, which does) — Cesium's <img>-based imagery pipeline can get away with that (it never
+// reads pixels back), but XYZTilesOverlay uploads the fetched bytes straight into a WebGL texture, which
+// the browser blocks outright for a cross-origin response with no CORS header. Routed through the
+// tile-server's already-existing generic byte-passthrough proxy (adds Access-Control-Allow-Origin: *)
+// instead of fetching mt1.google.com directly. {x}/{y}/{z} must stay LITERAL (not percent-encoded) since
+// XYZTilesOverlay substitutes them by plain string replacement on the whole URL, proxy prefix included.
+const proxied = (raw: string) => `${MW}/proxy?url=${encodeURIComponent(raw).replace('%7Bx%7D', '{x}').replace('%7By%7D', '{y}').replace('%7Bz%7D', '{z}')}`;
+
 const BASEMAP_URL: Record<'osm' | 'google', string> = {
   osm: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
-  google: 'https://mt1.google.com/vt/lyrs=y&x={x}&y={y}&z={z}',
+  google: proxied('https://mt1.google.com/vt/lyrs=y&x={x}&y={y}&z={z}'),
 };
 
 // Real slippy-map (XYZ) tile draping over a procedurally-generated WGS84 ellipsoid — no real terrain
@@ -137,7 +147,8 @@ const Scene = forwardRef<ViewerHandle, { loadArgs: LoadArgs }>(function Scene({ 
 
   useEffect(() => {
     if (tilesRef.current) tilesRef.current.group.visible = assetVisible;
-  }, [assetVisible]);
+    invalidate();
+  }, [assetVisible, invalidate]);
 
   // OrbitControls (drei) orbits around `.target`; GlobeControls/EnvironmentControls (3d-tiles-renderer)
   // orbit around `.pivotPoint`/`.zoomPoint` instead — neither has a dblclick-to-pivot built in, and
@@ -238,14 +249,21 @@ const Scene = forwardRef<ViewerHandle, { loadArgs: LoadArgs }>(function Scene({ 
   const defaultSSE = isSplat ? 0.5 : loadArgs?.type === 'mesh' ? 16 : 4;
   const errorTarget = loadArgs?.sseOverride ?? maxSSE ?? defaultSSE;
 
+  // Canvas runs frameloop="demand" (see below) — controls/TilesRenderer/CameraTransition all invalidate()
+  // themselves on their own 'change'/'needs-update' events, but a bare controls/plugin remount (switching
+  // globe/orbit/env, toggling debug tiles, changing basemap or LOD target) has nothing queued yet, so it'd
+  // otherwise sit frozen until the next interaction.
+  useEffect(() => { invalidate(); }, [controlMode, debugTiles, basemap, errorTarget, invalidate]);
+
   const applyPointSize = () => {
     const tiles = tilesRef.current;
     if (!tiles || !isPoints) return;
     tiles.group.traverse((o: any) => {
       if (o.isPoints && o.material) o.material.size = pointSize;
     });
+    invalidate();
   };
-  useEffect(applyPointSize, [pointSize, loadArgs]);
+  useEffect(applyPointSize, [pointSize, loadArgs]); // eslint-disable-line react-hooks/exhaustive-deps
 
   useImperativeHandle(ref, (): ViewerHandle => ({
     load() { /* handled via loadArgs prop from the outer component (URL change remounts TilesRenderer) */ },
@@ -469,7 +487,14 @@ const ThreeDTRjsViewer = forwardRef<ViewerHandle, Props>(function ThreeDTRjsView
 
   return (
     <div style={{ position: 'absolute', inset: 0, visibility: visible ? 'visible' : 'hidden' }}>
-      <Canvas camera={{ fov: 60, near: 0.1, far: 1e8, position: [0, 0, 1e7] }} gl={{ logarithmicDepthBuffer: true }}>
+      {/* frameloop="demand": R3F's default ('always') redraws every single display refresh forever,
+          whether or not anything changed — the actual source of the "constantly slow" feeling, not
+          React re-renders (already fixed via useThree selectors above). Every piece in this scene
+          (TilesRenderer's 'needs-render'/'needs-update' events, GlobeControls/EnvironmentControls/
+          OrbitControls' 'change'/'start'/'end' events, CameraTransition's own animation loop) already
+          calls invalidate() itself when it has something new to draw — that's what makes demand mode
+          safe here instead of freezing mid-load or mid-orbit. */}
+      <Canvas frameloop="demand" camera={{ fov: 60, near: 0.1, far: 1e8, position: [0, 0, 1e7] }} gl={{ logarithmicDepthBuffer: true }}>
         <Scene ref={sceneRef} loadArgs={loadArgs} />
       </Canvas>
     </div>

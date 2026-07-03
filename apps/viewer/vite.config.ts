@@ -36,7 +36,20 @@ export default defineConfig({
     // apps/docs (Fumadocs/Next) keeps running as its own dev server (`pnpm dev:docs`, port 3002) — this
     // just makes it reachable through the SAME front-door port as the viewer app + legacy viewer.html,
     // so day-to-day browsing only needs one "app" port plus the tile-server's middleware port (3001).
-    proxy: { '/docs': { target: 'http://localhost:3002', changeOrigin: true } },
+    // `/docs` alone covers all real page navigation (its content routes already live at /docs/... — see
+    // apps/docs/next.config.mjs's comment on why it does NOT also set `basePath: '/docs'`). The rest are
+    // the root-absolute paths Next's OWN dev server emits for that content (`/_next/...` JS/CSS/HMR
+    // chunks, the fumadocs search API, og-image/llms.txt routes) — without proxying these too, the
+    // browser requests them straight off port 3003 (no /docs prefix to route on) and 404s.
+    proxy: {
+      '/docs': { target: 'http://localhost:3002', changeOrigin: true },
+      '/_next': { target: 'http://localhost:3002', changeOrigin: true, ws: true },
+      '/api/search': { target: 'http://localhost:3002', changeOrigin: true },
+      '/og': { target: 'http://localhost:3002', changeOrigin: true },
+      '/llms.txt': { target: 'http://localhost:3002', changeOrigin: true },
+      '/llms-full.txt': { target: 'http://localhost:3002', changeOrigin: true },
+      '/llms.mdx': { target: 'http://localhost:3002', changeOrigin: true },
+    },
   },
   resolve: {
     dedupe: ['three'],
