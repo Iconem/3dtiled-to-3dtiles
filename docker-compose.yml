@@ -1,22 +1,73 @@
+name: 3dtiled
 services:
   tile-server:
+    container_name: 3dtiled-tile-server
     build:
       context: .
       target: tile-server
+    restart: unless-stopped
+    # Local/dev access without Traefik in front (matches the pre-Traefik compose file):
     ports:
       - "3001:3001"
-    restart: unless-stopped
+    labels:
+      traefik.enable: true
+      # Guessed subdomain — the user's ask only named domains for the viewer ("3dtiled.../3dtiled-demo...");
+      # pick whatever fits the actual DNS/cert setup, this is just following the "maps" stack's own
+      # one-service-one-subdomain convention (stac-manager./martin./nextgis-web....prod.heritagewatch.ai).
+      traefik.http.routers.tile-server.rule: Host(`3dtiled-tiles.prod.heritagewatch.ai`)
+      traefik.http.routers.tile-server.entrypoints: websecure
+      traefik.http.routers.tile-server.tls.certresolver: leresolver
+      traefik.http.services.tile-server.loadbalancer.server.port: 3001
+    networks:
+      - traefik_proxy
 
   viewer:
+    container_name: 3dtiled-viewer
     build:
       context: .
       target: viewer
-    ports:
-      - "3000:3000"
     restart: unless-stopped
     depends_on:
       - tile-server
+    ports:
+      - "3000:3000"
     # Optional: drop your own datasets in ./sample-data on the host to reach them from the viewer's
     # format pills (they build /sample-data/... URLs) — the image ships with none (gitignored, local-only).
     volumes:
       - ./sample-data:/app/dist/sample-data:ro
+    labels:
+      traefik.enable: true
+      traefik.http.routers.viewer.rule: Host(`3dtiled.prod.heritagewatch.ai`) || Host(`3dtiled-demo.prod.heritagewatch.ai`)
+      traefik.http.routers.viewer.entrypoints: websecure
+      traefik.http.routers.viewer.tls.certresolver: leresolver
+      traefik.http.services.viewer.loadbalancer.server.port: 3000
+    networks:
+      - traefik_proxy
+
+  docs:
+    container_name: 3dtiled-docs
+    build:
+      context: .
+      target: docs
+    restart: unless-stopped
+    ports:
+      - "3002:3002"
+    labels:
+      traefik.enable: true
+      # Same host(s) as the viewer but scoped to /docs (+ the root-absolute paths Next's own dev
+      # server emits for that content — /_next chunks, the fumadocs search API, og-image/llms.txt —
+      # same set apps/viewer/vite.config.ts's dev-only proxy rules forward, see its comment) — a
+      # router matching Host AND PathPrefix is more specific (longer rule) than the viewer's bare
+      # Host rule, so Traefik prefers it for these paths without needing an explicit priority. There
+      # is no in-app reverse proxy in production (that vite proxy is dev-server-only) — Traefik's
+      # path routing IS what folds docs into the same public host in front of two separate containers.
+      traefik.http.routers.docs.rule: (Host(`3dtiled.prod.heritagewatch.ai`) || Host(`3dtiled-demo.prod.heritagewatch.ai`)) && PathPrefix(`/docs`, `/_next`, `/api/search`, `/og`, `/llms.txt`, `/llms-full.txt`, `/llms.mdx`)
+      traefik.http.routers.docs.entrypoints: websecure
+      traefik.http.routers.docs.tls.certresolver: leresolver
+      traefik.http.services.docs.loadbalancer.server.port: 3002
+    networks:
+      - traefik_proxy
+
+networks:
+  traefik_proxy:
+    external: true

@@ -1,8 +1,8 @@
 name: Publish Docker images
 
-# Builds both images (tile-server, viewer) and pushes them to GHCR on every GitHub release, plus a
-# `:main` tag on every push to main so `docker compose pull` always has something runnable without
-# needing a tagged release.
+# Builds all three images (tile-server, viewer, docs) and pushes them to GHCR on every GitHub
+# release, plus a `:main` tag on every push to main so `docker compose pull` always has something
+# runnable without needing a tagged release.
 on:
   release:
     types: [published]
@@ -18,7 +18,7 @@ jobs:
     runs-on: ubuntu-latest
     strategy:
       matrix:
-        target: [tile-server, viewer]
+        target: [tile-server, viewer, docs]
     steps:
       - uses: actions/checkout@v4
 

@@ -376,18 +376,30 @@ Roughly in the order we're tackling them:
   `/geosplats` endpoints are gone. 3MX keeps its own lazy per-`.3mxb` continuation route
   (`/stream/threemx/node/<path>.json`) — unlike RAD/I3S, 3MX is a genuine DAG with no persisted
   spatial index, so eager-scanning the whole tree isn't cheap.
-- [x] ~~Dockerize the server~~ — **done** (2026-07-02): `Dockerfile` (multi-stage: `tile-server` +
-  `viewer`), `docker-compose.yml`, and `.github/workflows/docker-publish.yml` (builds + pushes both to
-  **GHCR** on release, plus a `:main` tag on every push). `docker compose up --build` runs the whole
-  stack. Verified end-to-end (both images build, both containers serve real traffic — including a live
-  ArcGIS SceneServer tileset through the containerized tile-server). Building this surfaced three
-  real, pre-existing bugs, all fixed alongside it: `pnpm-lock.yaml` was out of sync with
-  `copc-to-3dtiles/package.json` (see the `@cesium/3d-tiles-tools` note above), Docker builds ignored
-  `.npmrc`'s `node-linker=hoisted` (which the converters' cross-package imports depend on), and
-  `vite build` silently never bundled `viewer.html` at all (only its own `index.html` redirect stub) —
-  fixed via `build.rollupOptions.input` + `build.target: 'esnext'` (top-level await) in
-  `vite.config.mjs`. Not yet done: an actual Portainer/Traefik reverse-proxy stack — the images publish
-  to GHCR, but wiring them into a specific reverse-proxy setup is left to whoever deploys this.
+- [x] ~~Dockerize the server~~ — **done** (2026-07-02, extended 2026-07-03): `Dockerfile` (multi-stage:
+  `tile-server` + `viewer` + `docs`), `docker-compose.yml`, and `.github/workflows/docker-publish.yml`
+  (builds + pushes all three to **GHCR** on release, plus a `:main` tag on every push).
+  `docker compose up --build` runs the whole stack. Verified end-to-end (all three
+  images build, all three containers serve real traffic — including a live ArcGIS SceneServer tileset
+  through the containerized tile-server, and real Fumadocs pages through the `docs` container). Building
+  this surfaced four real, pre-existing bugs, all fixed alongside it: `pnpm-lock.yaml` was out of sync
+  with `copc-to-3dtiles/package.json` (see the `@cesium/3d-tiles-tools` note above), Docker builds
+  ignored `.npmrc`'s `node-linker=hoisted` (which the converters' cross-package imports depend on),
+  `vite build` silently never bundled `viewer.html`/`vanilla-viewer.html` at all (only its own
+  `index.html` redirect stub) — fixed via `build.rollupOptions.input` + `build.target: 'esnext'`
+  (top-level await) in `vite.config.mjs`/`vite.config.ts` — and (2026-07-03) `apps/docs`'s
+  `next start` couldn't find its own `next` binary in the final runtime stage (hoisted node-linker puts
+  it in the ROOT `node_modules/.bin`, not `apps/docs/node_modules/.bin`, and that stage never copies
+  `pnpm-workspace.yaml` for `pnpm run start` to resolve the workspace root either) — fixed by putting
+  the root `.bin` on `PATH` and invoking `next` directly, skipping pnpm in that stage. **Traefik**:
+  `docker-compose.yml` now carries real `traefik.*` labels (Host-based routing for `viewer`, a more
+  specific `Host && PathPrefix` router for `docs` so it wins for `/docs` + its asset/API routes,
+  `Host` for `tile-server` on a separate subdomain) modeled on the ops team's own Portainer-stack
+  convention (one service per subdomain, `leresolver` certresolver, `traefik_proxy` external network) —
+  domains are best-effort guesses (only two were specified), swap in whatever the real DNS is. The
+  actual Traefik *routing* (as opposed to each image running/serving correctly, which IS verified) could
+  not be end-to-end tested in this environment — Docker Desktop's Windows/WSL2 docker.sock passthrough
+  into a nested Traefik container failed here for reasons unrelated to this repo's own compose file.
 - [~] **Fumadocs migration — scaffolded** (2026-07-02), content migration started. `apps/docs`
   (a proper pnpm workspace member, `pnpm --filter docs dev` on port 3002) is a real, building
   Fumadocs/Next.js site: `README.md`'s 18 `##` sections and all 25 `docs-references/*.md` files are
