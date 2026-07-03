@@ -1641,6 +1641,28 @@ trees on disk — the converter reads those directly, no unzip). Mix of `3DObjec
   ```
   Each command starts a localhost HTTP server and opens the inspector in your default browser. Its `Geometric Error` / `Layer Multiplier` sliders are the runtime analogue of this converter's uniform-per-depth error model — handy for confirming LoD behaviour without re-tiling.
 
+**Splatter (splatter.app, Jakub Červený)** — a hosted Gaussian-splat viewer/host (tested against a
+103M-splat scene). Its `splatter-three` library's actual source lives in [`splatter-app/splatter-three`]
+(https://github.com/splatter-app/splatter-three), a **private** repo — nothing beyond its published,
+intentionally-public consumer demo is reverse-engineered or reproduced here. From [`splatter-app/
+three-demo`](https://github.com/splatter-app/three-demo)'s `main.js` (the only public source), the
+observable public API surface:
+- `new Splatter(renderer, { splatId })` — content addressed by an opaque ID, loaded/streamed
+  independent of the Three.js scene graph; `renderer.render(scene, camera)` and
+  `splatter.render(camera, controls.target)` are called separately per frame.
+- Progressive loading via `'update'` (redraw on each streamed chunk) and `'loaded'(totalLoaded,
+  numDisplayed)` events — their own demo hides a loading spinner once `numDisplayed > 1e6`, well
+  before `totalLoaded` finishes, i.e. partial-scene display while still streaming (conceptually close
+  to this repo's own SOG octree LOD, though the wire format itself isn't public).
+- `splatter.setTransform(matrix)` positions the splat cloud independent of the rest of the scene.
+- `splatter.addUniform(type, name)` + `splatter.setShaderEffect(glsl)` — a small GLSL-injection point
+  operating on per-splat `position`/`scale` (their demo uses it for a radial reveal-on-load animation)
+  without needing to fork the splat renderer itself.
+- `splatter.hitTest(camera, [x, y], { alphaThreshold })` — screen-space picking weighted by actual
+  rendered alpha, not just geometry — used for a recenter-on-double-click interaction.
+- Requires an explicit WebGL2 context (`canvas.getContext('webgl2', options)`), passed into
+  `new THREE.WebGLRenderer({ canvas, context })`.
+
 ---
 
 

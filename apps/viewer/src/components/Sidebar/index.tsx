@@ -1,4 +1,4 @@
-import { Moon, Sun, PanelRightClose, PanelRightOpen } from 'lucide-react';
+import { Moon, Sun, PanelRightClose, PanelRightOpen, BookOpen } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { useViewerStore } from '@/state/store';
@@ -28,9 +28,15 @@ export default function Sidebar({ activeHandleRef }: { activeHandleRef: React.Re
   return (
     <div className="flex h-full w-64 shrink-0 flex-col border-l">
       <div className="flex items-center justify-between border-b px-2 py-1.5">
-        <Button size="icon" variant="ghost" className="size-7" title={theme === 'dark' ? 'Switch to light theme' : 'Switch to dark theme'} onClick={() => setTheme(theme === 'dark' ? 'light' : 'dark')}>
-          {theme === 'dark' ? <Sun className="size-4" /> : <Moon className="size-4" />}
-        </Button>
+        <div className="flex items-center gap-1">
+          <Button size="icon" variant="ghost" className="size-7" title={theme === 'dark' ? 'Switch to light theme' : 'Switch to dark theme'} onClick={() => setTheme(theme === 'dark' ? 'light' : 'dark')}>
+            {theme === 'dark' ? <Sun className="size-4" /> : <Moon className="size-4" />}
+          </Button>
+          {/* /docs is proxied to apps/docs' own dev server by this app's vite.config.ts — see there. */}
+          <Button size="icon" variant="ghost" className="size-7" title="Docs" asChild>
+            <a href="/docs" target="_blank" rel="noopener noreferrer"><BookOpen className="size-4" /></a>
+          </Button>
+        </div>
         <Button size="icon" variant="ghost" className="size-7" title="Collapse sidebar" onClick={() => setCollapsed(true)}>
           <PanelRightClose className="size-4" />
         </Button>

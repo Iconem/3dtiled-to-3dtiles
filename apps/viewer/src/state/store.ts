@@ -89,6 +89,10 @@ interface ViewerStore {
   // Local frame
   localFrame: { lon: number; lat: number; alt: number; range: number; zOffset: number };
   setLocalFrame: (v: Partial<ViewerStore['localFrame']>) => void;
+  // 3DTRJS only — shows a translate/rotate/scale gizmo (drag, or W/E/R keys) on the loaded tileset's
+  // own transform, for manually positioning non-georeferenced content instead of typing lon/lat/alt.
+  tilesetGizmoOn: boolean;
+  setTilesetGizmoOn: (v: boolean) => void;
 
   // Cesium Ion
   ionAssetId: number;
@@ -184,6 +188,8 @@ export const useViewerStore = create<ViewerStore>((set, get) => ({
 
   localFrame: { lon: -122.4194, lat: 37.7749, alt: 0, range: 200, zOffset: 0 },
   setLocalFrame: (v) => set((s) => ({ localFrame: { ...s.localFrame, ...v } })),
+  tilesetGizmoOn: false,
+  setTilesetGizmoOn: (v) => set({ tilesetGizmoOn: v }),
 
   ionAssetId: 4547222,
   ionToken: '',

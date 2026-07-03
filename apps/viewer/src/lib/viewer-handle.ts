@@ -30,4 +30,6 @@ export interface ViewerHandle {
   setPointSize?(px: number): void;
   showCropGizmo?(): boolean;
   hideCropGizmo?(): void;
+  showTilesetGizmo?(): void;
+  hideTilesetGizmo?(): void;
 }

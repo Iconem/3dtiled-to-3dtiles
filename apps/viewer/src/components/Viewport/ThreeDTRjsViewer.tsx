@@ -48,6 +48,15 @@ function Globe() {
   );
 }
 
+// Drag (or press W/E/R to switch translate/rotate/scale, drei/three.js's standard TransformControls
+// shortcuts) directly on the loaded tileset's own root group — a manual alternative to typing lon/lat/
+// alt for tilesets with no geographic locator.
+function TilesetGizmo({ tilesRef }: { tilesRef: React.MutableRefObject<TilesRendererImpl | null> }) {
+  const on = useViewerStore((s) => s.tilesetGizmoOn);
+  if (!on || !tilesRef.current) return null;
+  return <TransformControls object={tilesRef.current.group} mode="translate" />;
+}
+
 function CropGizmo({ tilesRef }: { tilesRef: React.MutableRefObject<TilesRendererImpl | null> }) {
   const boxRef = useRef<THREE.Mesh>(null);
   const store = useViewerStore;
@@ -314,6 +323,8 @@ const Scene = forwardRef<ViewerHandle, { loadArgs: LoadArgs }>(function Scene({ 
     setPointSize(px) { store.getState().setPointSize(px); },
     showCropGizmo() { store.getState().setCropGizmoOn(true); return true; },
     hideCropGizmo() { store.getState().setCropGizmoOn(false); },
+    showTilesetGizmo() { store.getState().setTilesetGizmoOn(true); },
+    hideTilesetGizmo() { store.getState().setTilesetGizmoOn(false); },
   }), [camera, invalidate, frameToTileset]);
 
   function flyToLocalFrameInternal(lon: number, lat: number, alt: number, range: number) {
@@ -382,6 +393,7 @@ const Scene = forwardRef<ViewerHandle, { loadArgs: LoadArgs }>(function Scene({ 
         }}
       />
       <CropGizmo tilesRef={tilesRef} />
+      <TilesetGizmo tilesRef={tilesRef} />
       <GizmoHelper alignment="bottom-right" margin={[60, 60]}>
         <GizmoViewport />
       </GizmoHelper>
@@ -417,6 +429,8 @@ const ThreeDTRjsViewer = forwardRef<ViewerHandle, Props>(function ThreeDTRjsView
     setPointSize: (...a) => sceneRef.current?.setPointSize?.(...a),
     showCropGizmo: () => sceneRef.current?.showCropGizmo?.() ?? false,
     hideCropGizmo: () => sceneRef.current?.hideCropGizmo?.(),
+    showTilesetGizmo: () => sceneRef.current?.showTilesetGizmo?.(),
+    hideTilesetGizmo: () => sceneRef.current?.hideTilesetGizmo?.(),
   }), []);
 
   return (
