@@ -1,4 +1,3 @@
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Checkbox } from '@/components/ui/checkbox';
@@ -10,6 +9,7 @@ import { extractCrop, type ExtractKind } from '@/lib/extract';
 import { buildMiddlewareUrl, type MiddlewareParams } from '@/lib/middleware';
 import { MW } from '@/lib/formats';
 import type { ViewerHandle } from '@/lib/viewer-handle';
+import { SidebarSection } from './SidebarSection';
 
 export default function CropExtractSection({ activeHandleRef }: { activeHandleRef: React.RefObject<ViewerHandle | null> }) {
   const [url] = useUrlState();
@@ -47,9 +47,7 @@ export default function CropExtractSection({ activeHandleRef }: { activeHandleRe
   }
 
   return (
-    <Card>
-      <CardHeader><CardTitle>Crop & Extract</CardTitle></CardHeader>
-      <CardContent>
+    <SidebarSection title="Crop & Extract">
         <Button size="sm" variant="outline" onClick={setToView}>⬚ Set box to view (80%)</Button>
         <div className="flex items-center justify-between gap-1">
           <Label className="w-16 text-xs">W / E (°)</Label>
@@ -106,7 +104,6 @@ export default function CropExtractSection({ activeHandleRef }: { activeHandleRe
           </Button>
         )}
         <p className="text-xs text-muted-foreground">Extracts the loaded tileset within the box. Octree sources are fetched as explicit tiling.</p>
-      </CardContent>
-    </Card>
+    </SidebarSection>
   );
 }

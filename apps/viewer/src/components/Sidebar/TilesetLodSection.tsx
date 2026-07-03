@@ -1,4 +1,3 @@
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Checkbox } from '@/components/ui/checkbox';
 import { Label } from '@/components/ui/label';
 import { Input } from '@/components/ui/input';
@@ -7,6 +6,7 @@ import { Slider } from '@/components/ui/slider';
 import { useViewerStore } from '@/state/store';
 import { useUrlState } from '@/state/urlState';
 import type { ViewerHandle } from '@/lib/viewer-handle';
+import { SidebarSection } from './SidebarSection';
 
 export default function TilesetLodSection({ activeHandleRef }: { activeHandleRef: React.RefObject<ViewerHandle | null> }) {
   const [url] = useUrlState();
@@ -14,9 +14,7 @@ export default function TilesetLodSection({ activeHandleRef }: { activeHandleRef
   const h = () => activeHandleRef.current;
 
   return (
-    <Card>
-      <CardHeader><CardTitle>Tileset & LOD</CardTitle></CardHeader>
-      <CardContent>
+    <SidebarSection title="Tileset & LOD">
         <div className="flex items-center justify-between">
           <Label className="text-xs">Max SSE (px)</Label>
           <Input type="number" className="h-7 w-20" value={s.maxSSE ?? ''} placeholder="auto"
@@ -74,7 +72,6 @@ export default function TilesetLodSection({ activeHandleRef }: { activeHandleRef
             </div>
           </>
         )}
-      </CardContent>
-    </Card>
+    </SidebarSection>
   );
 }

@@ -4,7 +4,6 @@ import { Input } from '@/components/ui/input';
 import { Checkbox } from '@/components/ui/checkbox';
 import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { Separator } from '@/components/ui/separator';
 import { useUrlState } from '@/state/urlState';
 import { useViewerStore } from '@/state/store';
 import { FORMATS, PSEUDO_FORMATS, fmtMeta, canCentroids, MW } from '@/lib/formats';
@@ -38,6 +37,13 @@ function Pill({ active, onClick, title, children }: { active: boolean; onClick: 
       {children}
     </Button>
   );
+}
+
+// Each pill group gets a faint per-category tint (instead of vertical dividers) so groups stay
+// visually distinguishable — and each becomes a single flex-wrap unit that wraps as a whole rather
+// than splitting mid-group on narrow screens.
+function PillGroup({ tint, className, children }: { tint: string; className?: string; children: React.ReactNode }) {
+  return <div className={cn('flex flex-wrap items-center gap-1 rounded-md p-1', tint, className)}>{children}</div>;
 }
 
 export default function TopBar({ activeHandleRef }: { activeHandleRef: React.RefObject<ViewerHandle | null> }) {
@@ -103,16 +109,17 @@ export default function TopBar({ activeHandleRef }: { activeHandleRef: React.Ref
 
   return (
     <header className="flex flex-col gap-2 border-b bg-background/95 p-2">
-      <div className="flex flex-wrap items-center gap-1.5">
-        <h1 className="mr-2 text-sm font-semibold">3D Tiles</h1>
+      <div className="flex flex-wrap items-center gap-2">
+        <h1 className="mr-1 shrink-0 text-sm font-semibold">3D Tiles</h1>
 
-        {MODE_PILLS.map(([v, l]) => (
-          <Pill key={v} active={url.mode === v} onClick={() => setUrl({ mode: v as any })}>{l}</Pill>
-        ))}
-        <Separator orientation="vertical" className="h-5" />
+        <PillGroup tint="bg-blue-500/10">
+          {MODE_PILLS.map(([v, l]) => (
+            <Pill key={v} active={url.mode === v} onClick={() => setUrl({ mode: v as any })}>{l}</Pill>
+          ))}
+        </PillGroup>
 
         {url.mode === 'stream' && (
-          <>
+          <PillGroup tint="bg-amber-500/10">
             {CACHE_PILLS.map(([v, l]) => (
               <Pill key={v} active={url.cache === v} onClick={() => setUrl({ cache: v as any })}>{l}</Pill>
             ))}
@@ -131,54 +138,53 @@ export default function TopBar({ activeHandleRef }: { activeHandleRef: React.Ref
                 <SelectItem value="decompress">decompress ↑</SelectItem>
               </SelectContent>
             </Select>
-            <Separator orientation="vertical" className="h-5" />
-          </>
+          </PillGroup>
         )}
 
-        {url.mode === 'tools' ? (
-          TOOL_PILLS.map(([v, l]) => (
-            <Pill key={v} active={url.tool === v} onClick={() => setUrl({ tool: v as any, preset: '' })}>{l}</Pill>
-          ))
-        ) : (
-          <>
-            {FORMATS.map((f) => (
-              <Pill key={f.fmt} active={url.format === f.fmt} onClick={() => setUrl({ format: f.fmt, preset: '' })}>{f.icon} {f.label}</Pill>
-            ))}
-            {url.mode !== 'offline' &&
-              PSEUDO_FORMATS.map(([v, l]) => (
-                <Pill key={v} active={url.format === v} onClick={() => setUrl({ format: v, preset: '' })}>{l}</Pill>
+        <PillGroup tint="bg-emerald-500/10">
+          {url.mode === 'tools' ? (
+            TOOL_PILLS.map(([v, l]) => (
+              <Pill key={v} active={url.tool === v} onClick={() => setUrl({ tool: v as any, preset: '' })}>{l}</Pill>
+            ))
+          ) : (
+            <>
+              {FORMATS.map((f) => (
+                <Pill key={f.fmt} active={url.format === f.fmt} onClick={() => setUrl({ format: f.fmt, preset: '' })}>{f.icon} {f.label}</Pill>
               ))}
-            {url.mode === 'stream' && fmtOfSelected?.octree && (
-              <>
-                {TILING_PILLS.map(([v, l]) => (
+              {url.mode !== 'offline' &&
+                PSEUDO_FORMATS.map(([v, l]) => (
+                  <Pill key={v} active={url.format === v} onClick={() => setUrl({ format: v, preset: '' })}>{l}</Pill>
+                ))}
+              {url.mode === 'stream' && fmtOfSelected?.octree &&
+                TILING_PILLS.map(([v, l]) => (
                   <Pill key={v} active={url.tiling === v} onClick={() => setUrl({ tiling: v as any })}>{l}</Pill>
                 ))}
-              </>
-            )}
-            {url.mode === 'stream' && canCentroids(url.format) && (
-              <Pill active={url.centroids} onClick={() => setUrl({ centroids: !url.centroids })} title="Render splat centres as glTF POINTS instead of full gaussians">◦ centroids</Pill>
-            )}
-          </>
-        )}
-        <Separator orientation="vertical" className="h-5" />
+              {url.mode === 'stream' && canCentroids(url.format) && (
+                <Pill active={url.centroids} onClick={() => setUrl({ centroids: !url.centroids })} title="Render splat centres as glTF POINTS instead of full gaussians">◦ centroids</Pill>
+              )}
+            </>
+          )}
+        </PillGroup>
 
-        {presets.map((p) => (
-          <Button
-            key={p.id}
-            size="sm"
-            variant={url.preset === p.id ? 'default' : 'outline'}
-            disabled={!p.url}
-            onClick={() => selectPreset(p)}
-            className={cn('h-7 px-2 text-xs', !p.url && 'opacity-40')}
-            title={!p.url ? `${url.format} has no ${url.mode} adapter` : undefined}
-          >
-            {p.label}
-          </Button>
-        ))}
+        <PillGroup tint="bg-fuchsia-500/10" className="min-w-0 flex-1">
+          {presets.map((p) => (
+            <Button
+              key={p.id}
+              size="sm"
+              variant={url.preset === p.id ? 'default' : 'outline'}
+              disabled={!p.url}
+              onClick={() => selectPreset(p)}
+              className={cn('h-7 px-2 text-xs', !p.url && 'opacity-40')}
+              title={!p.url ? `${url.format} has no ${url.mode} adapter` : undefined}
+            >
+              {p.label}
+            </Button>
+          ))}
+        </PillGroup>
       </div>
 
-      <div className="flex items-center gap-2">
-        <Label className="flex items-center gap-1.5 text-xs text-muted-foreground" title="ON: field holds the RAW dataset URL — wrapped with the current format+cache+params. OFF: a ready middleware/tileset URL, loaded as-is.">
+      <div className="flex flex-wrap items-center gap-2">
+        <Label className="flex shrink-0 items-center gap-1.5 text-xs text-muted-foreground" title="ON: field holds the RAW dataset URL — wrapped with the current format+cache+params. OFF: a ready middleware/tileset URL, loaded as-is.">
           <Checkbox checked={rawUrlMode} onCheckedChange={(v) => store.getState().setRawUrlMode(!!v)} />
           raw url
         </Label>
@@ -188,7 +194,7 @@ export default function TopBar({ activeHandleRef }: { activeHandleRef: React.Ref
           onChange={(e) => store.getState().setUrlField(e.target.value)}
           onKeyDown={(e) => { if (e.key === 'Enter') handleLoadClick(); }}
           placeholder={rawUrlMode ? 'raw dataset URL (e.g. https://host/cloud.copc.laz) — wrapped with current format + cache' : 'http://localhost:3001/…/tileset.json'}
-          className="flex-1 font-mono text-xs"
+          className="min-w-[240px] flex-1 font-mono text-xs"
         />
         <Button size="sm" onClick={handleLoadClick}>Load</Button>
       </div>

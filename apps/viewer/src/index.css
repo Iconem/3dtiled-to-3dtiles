@@ -49,28 +49,28 @@
   --ring: oklch(0.708 0 0);
 }
 
-/* Default theme for this app is dark (see index.html's <html class="dark">) — shadcn's stock zinc
-   dark palette, unmodified. viewer.html's own hand-tuned dark theme lives separately; this app
-   intentionally starts from shadcn's own defaults rather than porting that palette. */
+/* Default theme for this app is dark (see index.html's <html class="dark">). Started from shadcn's
+   stock zinc dark palette but raised background/card/popover/border lightness a step — the stock
+   near-black background read as too dark for a panel-heavy layout (inputs/groups blended into it). */
 .dark {
-  --background: oklch(0.145 0 0);
-  --foreground: oklch(0.985 0 0);
-  --card: oklch(0.205 0 0);
-  --card-foreground: oklch(0.985 0 0);
-  --popover: oklch(0.205 0 0);
-  --popover-foreground: oklch(0.985 0 0);
-  --primary: oklch(0.922 0 0);
-  --primary-foreground: oklch(0.205 0 0);
-  --secondary: oklch(0.269 0 0);
-  --secondary-foreground: oklch(0.985 0 0);
-  --muted: oklch(0.269 0 0);
-  --muted-foreground: oklch(0.708 0 0);
-  --accent: oklch(0.269 0 0);
-  --accent-foreground: oklch(0.985 0 0);
+  --background: oklch(0.19 0 0);
+  --foreground: oklch(0.97 0 0);
+  --card: oklch(0.24 0 0);
+  --card-foreground: oklch(0.97 0 0);
+  --popover: oklch(0.24 0 0);
+  --popover-foreground: oklch(0.97 0 0);
+  --primary: oklch(0.88 0 0);
+  --primary-foreground: oklch(0.2 0 0);
+  --secondary: oklch(0.3 0 0);
+  --secondary-foreground: oklch(0.97 0 0);
+  --muted: oklch(0.28 0 0);
+  --muted-foreground: oklch(0.72 0 0);
+  --accent: oklch(0.32 0 0);
+  --accent-foreground: oklch(0.97 0 0);
   --destructive: oklch(0.704 0.191 22.216);
-  --border: oklch(1 0 0 / 10%);
-  --input: oklch(1 0 0 / 15%);
-  --ring: oklch(0.556 0 0);
+  --border: oklch(1 0 0 / 14%);
+  --input: oklch(1 0 0 / 20%);
+  --ring: oklch(0.6 0 0);
 }
 
 @layer base {
