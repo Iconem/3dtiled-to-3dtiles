@@ -47,6 +47,19 @@ function rewriteContentUris(node, rewrite) {
 /** Determine if a URI should be converted (b3dm/pnts) vs passed through. */
 const needsConvert = (uri) => /\.(b3dm|pnts)$/i.test(uri.split('?')[0]);
 
+// Wrap an original (possibly query-string-carrying) content URI as a single opaque path segment for
+// our own /3dtiles-tools/tile/<...> route, then OUR query string (?tool=&url=/dir=) after it. Several
+// real tilesets (Clermont among them) put x/y/z/id params directly on leaf content URIs
+// (`mesh_21.b3dm?id=21&x=...`) — naively doing `tile/${uri}?tool=...` produced a URL with TWO `?`
+// characters. A client resolving that via `new URL()` treats everything from the FIRST `?` onward as
+// ONE query string, so `tool=` ends up folded into the ORIGINAL uri's last param value instead of
+// being its own param — `tool` then reads as missing server-side, this tool's tile route 400s, and
+// (worse) the tile can end up resolving against the wrong base entirely, delivering the RAW upstream
+// b3dm/pnts straight to the glTF loader instead of our converted glb (exactly "tileset upgrade still
+// tries to load b3dm"). encodeURIComponent the whole original URI into one path segment instead — it
+// can never be reinterpreted as a query boundary — and decode it back in serveI2ETile/serveUpgradeTile.
+const wrapTileUri = (uri, toolParams) => `tile/${encodeURIComponent(uri)}?${toolParams}`;
+
 // ── implicit-to-explicit ──────────────────────────────────────────────────────
 
 async function getCachedExplicit(cacheKey, builder) {
@@ -98,16 +111,19 @@ async function serveI2ETileset(u, res) {
   const baseParam = url ? `url=${encBase}` : `dir=${encBase}`;
 
   rewriteContentUris(out.root, (uri) =>
-    `tile/${uri}?tool=implicit-to-explicit&${baseParam}`
+    wrapTileUri(uri, `tool=implicit-to-explicit&${baseParam}`)
   );
 
   res.writeHead(200, CORS_JSON);
   res.end(JSON.stringify(out));
 }
 
-async function serveI2ETile(relPath, u, res) {
+async function serveI2ETile(relPathRaw, u, res) {
   const dir = u.searchParams.get('dir');
   const url = u.searchParams.get('url');
+  // relPathRaw is the encodeURIComponent'd ORIGINAL content uri (see wrapTileUri) — decode it back to
+  // the real relative path/query before resolving, instead of a raw uri that may carry its OWN `?`.
+  const relPath = decodeURIComponent(relPathRaw);
 
   const ext = path.extname(relPath.split('?')[0]).toLowerCase();
 
@@ -183,15 +199,17 @@ async function serveUpgradeTileset(u, res) {
   const baseParam = url ? `url=${encBase}` : `dir=${encBase}`;
 
   rewriteContentUris(out.root, (uri) =>
-    `tile/${uri}?tool=upgrade&${baseParam}`
+    wrapTileUri(uri, `tool=upgrade&${baseParam}`)
   );
 
   res.writeHead(200, CORS_JSON); res.end(JSON.stringify(out));
 }
 
-async function serveUpgradeTile(relPath, u, res) {
+async function serveUpgradeTile(relPathRaw, u, res) {
   const dir = u.searchParams.get('dir');
   const url = u.searchParams.get('url');
+  // See the matching comment in serveI2ETile — relPathRaw is encodeURIComponent'd (wrapTileUri).
+  const relPath = decodeURIComponent(relPathRaw);
   const ext = path.extname(relPath.split('?')[0]).toLowerCase();
 
   if (url) {
