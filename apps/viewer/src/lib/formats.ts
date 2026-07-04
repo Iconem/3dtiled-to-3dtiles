@@ -85,8 +85,12 @@ export const FORMATS: FormatMeta[] = [
   ] },
   { fmt: 'i3s', icon: '🧱', label: 'I3S', type: 'mesh', octree: false, stream: true, assets: [
     { id: 'nyc', label: 'NYC Buildings', src: 'input/I3S-SLPK/Buildings_NewYork_v18.slpk', streamSrc: 'input/I3S-SLPK/Buildings_NewYork_v18/3dSceneLayer.json.gz', out: 'output/i3s/Buildings_NewYork_v18' },
-    { id: 'arcgis-mesh-slpk', label: 'ArcGIS Rancho Mesh (.slpk)', src: 'https://www.arcgis.com/sharing/rest/content/items/95a427c7a6ec4789b03c1a177366b54c/data' },
-    { id: 'arcgis-mesh-svc', label: 'ArcGIS Rancho Mesh (SceneServer)', src: 'https://tiles.arcgis.com/tiles/z2tnIkrLQ2BRzr6P/arcgis/rest/services/Rancho_Mesh_v18/SceneServer' },
+    // v17, not v18 — v17 is the one ESRI's own Scene Viewer showcases publicly (Fire Station No. 3,
+    // https://www.arcgis.com/home/webscene/viewer.html?layers=4028eb46e12e42f7889367bafcd6866d), with
+    // known-good textures. v18 (same org, different item) may just be a different/less-maintained
+    // dataset — swapped to the one actually verified end-to-end against a real reference render.
+    { id: 'arcgis-mesh-slpk', label: 'ArcGIS Rancho Mesh v17 (.slpk)', src: 'https://www.arcgis.com/sharing/rest/content/items/e0dfde9f11054aac8e15edbb8aa1631d/data' },
+    { id: 'arcgis-mesh-svc', label: 'ArcGIS Rancho Mesh v17 (SceneServer)', src: 'https://tiles.arcgis.com/tiles/z2tnIkrLQ2BRzr6P/arcgis/rest/services/Rancho_Mesh_v17/SceneServer' },
     { id: 'arcgis-pts-slpk', label: 'ArcGIS Moro Bay LiDAR .slpk (LEPCC — unsupported)', src: 'https://www.arcgis.com/sharing/rest/content/items/496552d059644b4892c51ad06bdba8e2/data' },
     { id: 'arcgis-pts-svc', label: 'ArcGIS Moro Bay LiDAR SceneServer (LEPCC — unsupported)', src: 'https://tiles.arcgis.com/tiles/z2tnIkrLQ2BRzr6P/arcgis/rest/services/Moro_Bay_LiDAR/SceneServer' },
   ] },
