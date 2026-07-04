@@ -8,7 +8,7 @@ import {
   EnvironmentControls,
   CameraTransition,
 } from '3d-tiles-renderer/r3f';
-import { DebugTilesPlugin, XYZTilesOverlay, QuantizedMeshPlugin, CesiumIonAuthPlugin, ImageOverlayPlugin, GoogleCloudAuthPlugin } from '3d-tiles-renderer/plugins';
+import { DebugTilesPlugin, XYZTilesOverlay, QuantizedMeshPlugin, CesiumIonAuthPlugin, ImageOverlayPlugin, GoogleCloudAuthPlugin, ImplicitTilingPlugin } from '3d-tiles-renderer/plugins';
 // GeneratedSurfacePlugin is exported at runtime (3d-tiles-renderer/src/three/plugins/index.js) but
 // missing from this package's .d.ts — imported via the namespace + cast to dodge the stale types.
 import * as ThreeTilesPlugins from '3d-tiles-renderer/plugins';
@@ -507,6 +507,12 @@ const Scene = forwardRef<ViewerHandle, { loadArgs: LoadArgs }>(function Scene({ 
           onLoadRootTileset={() => frameToTileset(tilesRef.current)}
           onLoadModel={(e: any) => buildBoundsTrees(e.scene)}
         >
+          {/* 3D Tiles 1.1 implicit tiling (OCTREE/QUADTREE `.subtree` expansion) — unlike Cesium, 3DTRJS
+              has no built-in support for `implicitTiling` root nodes; without this plugin a tileset that
+              streams with tiling=implicit (COPC/Potree's default, and any 3D Tiles 1.1 source that ships
+              implicit roots) never expands past the root tile. Plug-and-play, no options, and a no-op on
+              explicit tilesets (only triggers on nodes that actually carry `implicitTiling`). */}
+          <TilesPlugin plugin={ImplicitTilingPlugin as any} />
           {isSplat && <TilesPlugin plugin={GaussianSplatPlugin as any} args={{ renderer: gl, scene } as any} />}
           {debugTiles && <TilesPlugin plugin={DebugTilesPlugin as any} displayBoxBounds colorMode={7} />}
           {controlMode === 'globe' && <GlobeControls ref={controlsRef} enableDamping dampingFactor={0.05} minDistance={1} />}

@@ -141,16 +141,22 @@ export default function TopBar({ activeHandleRef }: { activeHandleRef: React.Ref
     store.getState().setUrlField(next && current.rawSrc ? current.rawSrc : current.url);
   }
 
-  // Whenever mode/format/tool changes (including the very first mount, where `url.preset` may
-  // already be populated from a shared/bookmarked link — the actual tileset URL is deliberately NOT
-  // persisted, see urlState.ts, so it must be re-derived and reloaded here, not skipped), load the
-  // preset the URL already names, or fall back to the first available one.
+  // Whenever mode/format/tool/tilesetOp changes (including the very first mount, where `url.preset`
+  // may already be populated from a shared/bookmarked link — the actual tileset URL is deliberately
+  // NOT persisted, see urlState.ts, so it must be re-derived and reloaded here, not skipped), OR any
+  // param that changes what buildMiddlewareUrl/currentPresets actually BUILDS for the current preset
+  // (cache scope, the tiling pill, centroids-only, the per-tile transform) — load the preset the URL
+  // already names, or fall back to the first available one. Missing cache/tiling/centroids/transform
+  // here was a real bug: e.g. flipping the implicit/explicit tiling pill on a loaded COPC/Potree preset
+  // updated the URL state but never re-triggered `doLoad`, so the viewport kept showing the stale tree.
+  // `prefetch` is deliberately excluded — it's a free-typed number input, and reloading on every
+  // keystroke would be jarring; its value is just read fresh the next time something else reloads.
   useEffect(() => {
     const wanted = url.preset && presets.find((p) => p.id === url.preset && p.url);
     const target = wanted || presets.find((p) => p.url);
     if (target) selectPreset(target);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [url.mode, url.format, url.tool, url.tilesetOp]);
+  }, [url.mode, url.format, url.tool, url.tilesetOp, url.cache, url.tiling, url.centroids, url.transform]);
 
   return (
     <header className="flex flex-col gap-2 border-b bg-background/95 p-2">
