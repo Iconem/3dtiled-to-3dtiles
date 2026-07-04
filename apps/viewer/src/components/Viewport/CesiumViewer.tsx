@@ -187,6 +187,17 @@ const CesiumViewer = forwardRef<ViewerHandle, Props>(function CesiumViewer({ vis
     // with 3DTRJS active" — Cesium was still fully rendering in the background the whole time). Stop its
     // loop outright while hidden; the `visible`-keyed effect below resumes it when switched back.
     v.useDefaultRenderLoop = visibleRef.current;
+    // Cesium's default is to render EVERY frame unconditionally, even with a static camera and no
+    // scene changes — this (not any stray rAF loop) is the actual gap vs. 3DTRJS's R3F Canvas, which
+    // already runs `frameloop="demand"` and only re-renders on an explicit `invalidate()`. Cesium's own
+    // built-in triggers (camera movement/flights, tile-load progress, imagery/terrain updates, entity
+    // property changes) already call `scene.requestRender()` internally when this is on — camera drags,
+    // flyTo animations, and streaming tile loads keep working exactly as before. The one thing that does
+    // NOT auto-trigger a render is one of OUR OWN direct mutations made outside those built-in paths
+    // (toggling shading/debug/visibility, changing basemap, moving the crop box, etc.) — every one of
+    // those goes through the `ViewerHandle` returned below, which is wrapped to call requestRender()
+    // after every call (sync or async) specifically to cover this.
+    v.scene.requestRenderMode = true;
     v.scene.backgroundColor = Cesium.Color.fromCssColorString('#0a0a0f');
     (window as any).viewer = v;
     const initialBasemap = store.getState().basemap;
@@ -355,7 +366,8 @@ const CesiumViewer = forwardRef<ViewerHandle, Props>(function CesiumViewer({ vis
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  useImperativeHandle(ref, (): ViewerHandle => ({
+  useImperativeHandle(ref, (): ViewerHandle => {
+    const raw: ViewerHandle = {
     load(url, type, opts) {
       // The viewer is constructed one rAF after mount (see the mount effect) — a caller (TopBar's
       // auto-load-on-mount effect) can easily race ahead of that and call load() before getViewer()
@@ -557,8 +569,28 @@ const CesiumViewer = forwardRef<ViewerHandle, Props>(function CesiumViewer({ vis
       v.scene.screenSpaceCameraController.enableCollisionDetection = false;
       store.getState().setCollisionEnabled(true);
       v.camera.flyTo({ destination: Cesium.Cartesian3.ZERO, orientation: { heading: 0, pitch: -Cesium.Math.PI_OVER_TWO, roll: 0 }, duration: 2 });
-    },
-  }), []);
+      },
+    };
+
+    // scene.requestRenderMode (set in initViewer) means a render only happens on Cesium's own built-in
+    // triggers (camera movement, tile loads, …) or an explicit requestRender() call — every method above
+    // mutates scene state OUTSIDE those triggers (visibility/shading/debug toggles, basemap swaps, crop
+    // box moves, etc.), so without this wrapper those changes would sit invisible until the next camera
+    // drag. Wrapping once here covers every handle method (sync or async) instead of hand-adding a
+    // requestRender() call at the end of each one individually.
+    const rr = () => { const v = getViewer(); if (v && !v.isDestroyed()) v.scene.requestRender(); };
+    const wrapped: any = {};
+    for (const key of Object.keys(raw) as (keyof ViewerHandle)[]) {
+      const fn = (raw as any)[key];
+      wrapped[key] = (...args: any[]) => {
+        const result = fn(...args);
+        rr();
+        if (result && typeof result.then === 'function') result.then(rr, rr);
+        return result;
+      };
+    }
+    return wrapped as ViewerHandle;
+  }, []);
 
   function applyLocalFrameInternal(lon: number, lat: number, alt: number, range: number) {
     const v = getViewer();
