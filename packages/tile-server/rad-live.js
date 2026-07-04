@@ -29,16 +29,19 @@
  */
 import { chunkBoundsAndTopology, encodeChunkGlb } from '../rad-to-3dtiles/src/index.js';
 import { buildTileset } from '../rad-to-3dtiles/src/tilesetBuilder.js';
-import { parallelMap, defaultConcurrency, Source } from '../core/index.js';
+import { parallelMap, defaultConcurrency, Source, memoizeAsync } from '../core/index.js';
 
 const pad8 = (n) => Math.ceil(n / 8) * 8;
 const HEADER_PROBE = 1 << 18;   // 256 KiB — enough for the RAD0 JSON header of large clouds
 
 // Per-URL context: parsed header + node table with bounds/topology. Cached forever (.rad is immutable).
 // Tiles are NOT cached (range-fetched + encoded fresh; the HTTP client caches via response headers).
-const ctxCache = new Map();
-async function getCtx(url) {
-  if (ctxCache.has(url)) return ctxCache.get(url);
+// memoizeAsync caches FAILURES too — without that, a client retrying a broken RAD source (corrupt
+// chunk, non-RAD file, streaming-manifest RAD, ...) re-launches the WHOLE expensive parallel
+// range-fetch+decode pass — up to 16 concurrent range workers over a multi-GB file — on every single
+// retry, only to fail at the same chunk again. That repeated-work pattern is what actually exhausted
+// resources and took the middleware down, not any one request.
+const getCtx = memoizeAsync(async (url) => {
   const src = new Source(url);
 
   // 1) Probe the header region with a ranged GET — also tells us file size + range support.
@@ -79,12 +82,10 @@ async function getCtx(url) {
     nodes[ci] = { nodeIndex: ci, chunkIndex: ci, children, bounds, splatCount: count };
   }, { concurrency: Math.min(defaultConcurrency(), 16) });
 
-  const ctx = { url, header, payloadBase, chunkSize, rangeSupported, fileBuf, nodes, readChunk };
-  ctxCache.set(url, ctx);
   console.log(`[rad-live] ${url} → ${nodes.length} chunks, ${(header.count/1e6).toFixed(2)}M splats, `
     + `${rangeSupported ? 'range' : 'full-download'} pass in ${((Date.now()-t0)/1000).toFixed(1)}s`);
-  return ctx;
-}
+  return { url, header, payloadBase, chunkSize, rangeSupported, fileBuf, nodes, readChunk };
+});
 
 function makeTileset(ctx, urlParam, centroids = false) {
   const enc = encodeURIComponent(urlParam);

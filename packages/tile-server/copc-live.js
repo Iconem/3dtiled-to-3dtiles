@@ -10,7 +10,7 @@
  *   GET /copc/tile/<D-X-Y-Z>.glb?url=<COPC_URL>    → that node's points as a POINTS GLB
  */
 import { Copc, Getter } from 'copc';
-import { buildPointsGlb, keyToCoords, coordsToKey, buildSubtreeBuffer, georefFromCrs, buildImplicitTileset } from '../core/index.js';
+import { buildPointsGlb, keyToCoords, coordsToKey, buildSubtreeBuffer, georefFromCrs, buildImplicitTileset, memoizeAsync } from '../core/index.js';
 
 const SUBTREE_LEVELS = 3;
 
@@ -30,9 +30,9 @@ async function readWkt(getter, copc) {
 }
 
 // Per-URL context (COPC header + full node hierarchy + georef), cached.
-const ctxCache = new Map();
-async function getCtx(url) {
-  if (ctxCache.has(url)) return ctxCache.get(url);
+// memoizeAsync caches FAILURES too — a broken source (bad LAS header, unreachable URL, ...) fails
+// fast on retry instead of redoing the full range-read pass every time (see cache.js's own comment).
+const getCtx = memoizeAsync(async (url) => {
   const rawGetter = Getter.http(url);
   // Cold-load latency fix: this used to do a SEPARATE 4-byte range request just to check the "LASF"
   // magic before handing off to Copc.create(), which then issues its OWN first range read (the LAS
@@ -103,12 +103,10 @@ async function getCtx(url) {
   };
 
   let warmed = false;   // guard so background prefetch fires at most once per ctx
-  const ctx = { getter, copc, nodeMap, origin, transform, rootDiag, cube, ensureForSubtree, drainAll,
-                get warmed() { return warmed; }, set warmed(v) { warmed = v; } };
-  ctxCache.set(url, ctx);
   console.log(`[copc-live] ${url} → root page loaded (${nodeMap.size} nodes), pending=${pendingPages.size} child pages, georef=${!!transform}`);
-  return ctx;
-}
+  return { getter, copc, nodeMap, origin, transform, rootDiag, cube, ensureForSubtree, drainAll,
+                get warmed() { return warmed; }, set warmed(v) { warmed = v; } };
+});
 
 const subCube = (cube, level, x, y, z) => {
   const n = 2**level, dx = (cube[3]-cube[0])/n, dy = (cube[4]-cube[1])/n, dz = (cube[5]-cube[2])/n;

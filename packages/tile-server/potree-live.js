@@ -12,7 +12,7 @@
  *   GET /potree/tileset.json?url=<metadata.json | cloud.js URL>
  *   GET /potree/tile/<name>.glb?url=<…>                       → that node's points as a POINTS GLB
  */
-import { buildPointsGlb, coordsToKey, keyToCoords, buildSubtreeBuffer, georefFromCrs, buildImplicitTileset, parallelMap, defaultConcurrency, progressStart, progressTick, progressDone } from '../core/index.js';
+import { buildPointsGlb, coordsToKey, keyToCoords, buildSubtreeBuffer, georefFromCrs, buildImplicitTileset, parallelMap, defaultConcurrency, progressStart, progressTick, progressDone, memoizeAsync } from '../core/index.js';
 import { preparePotree2Schema, parsePotree2Hierarchy, parsePotree2Chunk, decodePotree2Node } from '../potree-to-3dtiles/src/potree2.js';
 import { loadPotree1 } from '../potree-to-3dtiles/src/potree1.js';
 
@@ -56,9 +56,9 @@ const finishCtx = (nodes, rootBox, crs, spacingMeta, readTile) => {
 
 // Per-URL context (hierarchy + georef + a readTile(name) closure), cached. 2.0 → range reads of
 // octree.bin; 1.x → whole-file fetch per node through loadPotree1's injectable reader.
-const ctxCache = new Map();
-async function getCtx(url) {
-  if (ctxCache.has(url)) return ctxCache.get(url);
+// memoizeAsync caches FAILURES too — a broken source fails fast on retry instead of redoing the
+// full metadata/hierarchy read every time (see cache.js's own comment).
+const getCtx = memoizeAsync(async (url) => {
   const base = url.slice(0, url.lastIndexOf('/') + 1);
   let ctx;
 
@@ -235,9 +235,8 @@ async function getCtx(url) {
             readTile };
     console.log(`[potree-live] (2.0 lazy) ${url} → first chunk loaded (${nodes.size} nodes), pending=${pendingChunks2.size} proxy chunks`);
   }
-  ctxCache.set(url, ctx);
   return ctx;
-}
+});
 
 // Explicit 3D Tiles tree from the Potree octree. Box = node AABB relative to the dataset origin
 // (≈ ENU near the origin); geometric error = point spacing at that depth; ADD refine (children densify).

@@ -13,7 +13,7 @@
 import path from 'node:path';
 import { readFile as readSplatFile, MemoryReadFileSystem } from '@playcanvas/splat-transform';
 import { extractRange } from '../sog-to-3dtiles/src/sogChunk.js';
-import { buildSplatTileGlb, computeBounds } from '../core/index.js';
+import { buildSplatTileGlb, computeBounds, memoizeAsync } from '../core/index.js';
 
 // glTF Y-up → 3D Tiles Z-up box (RX +90°): centre (cx,cy,cz)→(cx,−cz,cy); half-extents y↔z.
 function boundToZUpBox(min, max) {
@@ -30,18 +30,15 @@ async function fetchBuf(url) {
   return Buffer.from(await r.arrayBuffer());
 }
 
-// Per-URL context (just the lod-meta + a small decoded-chunk LRU), cached.
-const ctxCache = new Map();
-async function getCtx(url) {
-  if (ctxCache.has(url)) return ctxCache.get(url);
+// Per-URL context (just the lod-meta + a small decoded-chunk LRU), cached. memoizeAsync caches
+// FAILURES too — a broken source fails fast on retry (see cache.js's own comment).
+const getCtx = memoizeAsync(async (url) => {
   const base = url.slice(0, url.lastIndexOf('/') + 1);
   const lod = JSON.parse((await fetchBuf(url)).toString('utf8'));
   if (lod.version != null && lod.version > 1) throw new Error(`Unsupported streamed-SOG version ${lod.version} (v1 only)`);
-  const ctx = { base, lod, chunks: new Map() };           // chunks: fileIdx → decoded DataTable (LRU)
-  ctxCache.set(url, ctx);
   console.log(`[sog-live] ${url} → ${lod.filenames.length} chunks`);
-  return ctx;
-}
+  return { base, lod, chunks: new Map() };           // chunks: fileIdx → decoded DataTable (LRU)
+});
 
 // Decode one chunk SOG (meta.json + WebPs) fetched into an in-memory FS — mirrors sogChunk.decodeChunk
 // but over HTTP. Cached per ctx with a small cap so repeated runs of the same chunk decode once.

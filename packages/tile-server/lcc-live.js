@@ -12,7 +12,7 @@
  * Note: data.bin is a sibling of meta.lcc (named `data.bin`); `index.bin` likewise.
  */
 import { decodeSplats } from '../lcc-to-3dtiles/src/lccDecode.js';
-import { buildSplatTileGlb, computeBounds, lccGeoref, LCC_LOCAL_UPRIGHT } from '../core/index.js';
+import { buildSplatTileGlb, computeBounds, lccGeoref, LCC_LOCAL_UPRIGHT, memoizeAsync } from '../core/index.js';
 
 const ROOT_GE_FACTOR = 0.05, DEPTH_RATIO = 0.5;
 
@@ -34,10 +34,9 @@ async function rangeGet(url, begin, length) {
   return Buffer.from(await r.arrayBuffer());
 }
 
-// Per-URL context: meta.lcc + index.bin parsed into per-Unit grid boxes + per-LOD runs. Cached.
-const ctxCache = new Map();
-async function getCtx(url) {
-  if (ctxCache.has(url)) return ctxCache.get(url);
+// Per-URL context: meta.lcc + index.bin parsed into per-Unit grid boxes + per-LOD runs. memoizeAsync
+// caches FAILURES too — a broken source fails fast on retry (see cache.js's own comment).
+const getCtx = memoizeAsync(async (url) => {
   const base = url.slice(0, url.lastIndexOf('/') + 1);
   // index.bin's URL only depends on `url` itself, not on meta.lcc's PARSED contents — fetching it
   // sequentially after meta.lcc (as if it were a dependency) just adds meta.lcc's own round-trip to
@@ -70,11 +69,9 @@ async function getCtx(url) {
   const diag = Math.hypot(bb.max[0]-bb.min[0], bb.max[1]-bb.min[1], bb.max[2]-bb.min[2]) || 1;
   const geo = lccGeoref(meta, 'lcc-live');
   const transform = geo || LCC_LOCAL_UPRIGHT;   // no usable EPSG → still flip upright, just not geolocated
-  const ctx = { dataUrl: base + 'data.bin', units, scaleMin: scaleAttr.min, scaleMax: scaleAttr.max, sceneBox: boundToZUpBox(bb.min, bb.max), rootGE: diag * ROOT_GE_FACTOR, transform };
-  ctxCache.set(url, ctx);
   console.log(`[lcc-live] ${url} → ${units.length} units, georef=${!!geo}${meta.epsg ? ' (EPSG:'+meta.epsg+')' : ' (local upright, no EPSG)'}`);
-  return ctx;
-}
+  return { dataUrl: base + 'data.bin', units, scaleMin: scaleAttr.min, scaleMax: scaleAttr.max, sceneBox: boundToZUpBox(bb.min, bb.max), rootGE: diag * ROOT_GE_FACTOR, transform };
+});
 
 function buildTileset(ctx, urlParam, centroids = false) {
   const enc = encodeURIComponent(urlParam);

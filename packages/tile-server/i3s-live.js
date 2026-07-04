@@ -37,7 +37,7 @@ import { parseSLPKArchive } from '@loaders.gl/i3s';
 import { DataViewReadableFile } from '@loaders.gl/zip';
 import { decodeDefaultGeometry, geodeticToEcef, obbToBox } from '../i3s-to-3dtiles/src/i3sParse.js';
 import { buildGlb } from '../i3s-to-3dtiles/src/glbBuild.js';
-import { enuFrame } from '../core/index.js';
+import { enuFrame, memoizeAsync } from '../core/index.js';
 
 const MESH_TYPES  = new Set(['IntegratedMesh', '3DObject']);
 const POINT_TYPES = new Set(['PointCloud']);
@@ -156,10 +156,9 @@ async function makeFileReader(url) {
 
 // ── Per-URL context (cached): scene layer + flattened node table + ENU frame ───────────────────
 
-const ctxCache = new Map();
-async function getCtx(url) {
-  if (ctxCache.has(url)) return ctxCache.get(url);
-
+// memoizeAsync caches FAILURES too — a broken source (unreachable, unsupported layerType/LEPCC, ...)
+// fails fast on retry instead of re-running the whole SLPK/SceneServer read every time (see cache.js).
+const getCtx = memoizeAsync(async (url) => {
   const getFile = await makeFileReader(url);
   const sl = JSON.parse((await getFile('3dSceneLayer.json')).toString('utf8'));
 
@@ -248,18 +247,16 @@ async function getCtx(url) {
   const toEnu = (e) => { const dx=e[0]-originEcef[0], dy=e[1]-originEcef[1], dz=e[2]-originEcef[2];
     return [dx*EAST[0]+dy*EAST[1]+dz*EAST[2], dx*NORTH[0]+dy*NORTH[1]+dz*NORTH[2], dx*UP[0]+dy*UP[1]+dz*UP[2]]; };
 
-  const ctx = {
+  console.log(`[i3s-live] ${url} → ${layerType} v${sl.store?.version}, ${nodes.length} nodes from page 0 (${isGeographic ? 'WGS84' : 'local'})`
+    + `${_allPagesLoaded ? '' : ' — loading remaining pages in background'}`);
+  return {
     getFile, nodes, schema, isGeographic, layerType, textureFormatFor,
     isPoint: POINT_TYPES.has(layerType),
     bufIdx: uncompressedBufferIndex >= 0 ? uncompressedBufferIndex : 0,
     originEcef, EAST, NORTH, UP, toEnu,
     _pagesDonePromise, get _allPagesLoaded() { return _allPagesLoaded; },
   };
-  ctxCache.set(url, ctx);
-  console.log(`[i3s-live] ${url} → ${layerType} v${sl.store?.version}, ${nodes.length} nodes from page 0 (${isGeographic ? 'WGS84' : 'local'})`
-    + `${_allPagesLoaded ? '' : ' — loading remaining pages in background'}`);
-  return ctx;
-}
+});
 
 // ── Bounding box from OBB (cheap pass — no geometry) ──────────────────────────────────────────
 // Convert the node OBB to an axis-aligned box in the shared ENU frame by enclosing its 8 corners.

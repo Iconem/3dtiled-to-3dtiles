@@ -18,7 +18,7 @@
  */
 import path from 'node:path';
 import { Document, NodeIO } from '@gltf-transform/core';
-import { georefFromCrs } from '../core/index.js';
+import { georefFromCrs, memoizeAsync } from '../core/index.js';
 import { decodeCTM } from '../threemx-to-3dtiles/src/ctm-decode.js';
 
 const CTM_RE = /__\d+$/;
@@ -27,9 +27,8 @@ const baseOf = (u) => u.slice(0, u.lastIndexOf('/') + 1);
 const joinRel = (relDir, child) => path.posix.normalize(path.posix.join(relDir, child));
 
 // ── per-URL context (master .3mx parse → base + root rel path + georef) ─────────
-const ctxCache = new Map();
-async function getCtx(url) {
-  if (ctxCache.has(url)) return ctxCache.get(url);
+// memoizeAsync caches FAILURES too — a broken source fails fast on retry (see cache.js's own comment).
+const getCtx = memoizeAsync(async (url) => {
   const base = baseOf(url);
   let rootRel, transform = null;
   if (/\.3mx(\?|$)/i.test(url)) {
@@ -41,11 +40,9 @@ async function getCtx(url) {
   } else {
     rootRel = path.posix.basename(url);        // pointed straight at a root .3mxb (no master / SRS)
   }
-  const ctx = { base, rootRel, transform };
-  ctxCache.set(url, ctx);
   console.log(`[threemx-live] ${url} → root=${rootRel}, georef=${!!transform}`);
-  return ctx;
-}
+  return { base, rootRel, transform };
+});
 
 // Parse a .3mxb → { nodes, payload:Map<resourceId,{format,data}> }.
 function parse3mxb(buf) {
