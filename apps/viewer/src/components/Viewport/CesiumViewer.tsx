@@ -33,6 +33,8 @@ const CesiumViewer = forwardRef<ViewerHandle, Props>(function CesiumViewer({ vis
   const cropDragRef = useRef<{ axis: 'lon' | 'lat' | 'height'; set: (v: number) => void } | null>(null);
   const cropDragHandlerRef = useRef<Cesium.ScreenSpaceEventHandler | null>(null);
   const googleTilesetRef = useRef<Cesium.Cesium3DTileset | null>(null);
+  const visibleRef = useRef(visible);
+  visibleRef.current = visible;
 
   const store = useViewerStore;
   const cleanupRef = useRef<(() => void) | null>(null);
@@ -148,6 +150,13 @@ const CesiumViewer = forwardRef<ViewerHandle, Props>(function CesiumViewer({ vis
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  // Pause/resume Cesium's own render loop on every renderer-pill switch (see the comment on
+  // `useDefaultRenderLoop` in initViewer above for why this exists at all).
+  useEffect(() => {
+    const v = viewerRef.current;
+    if (v && !v.isDestroyed()) v.useDefaultRenderLoop = visible;
+  }, [visible]);
+
   function initViewer(container: HTMLDivElement) {
     // A personal Cesium Ion token — required for Cesium World Terrain and Google Photorealistic 3D
     // Tiles (see setTerrainMode below). Ships client-side like any Ion demo token; rotate it in the
@@ -168,6 +177,16 @@ const CesiumViewer = forwardRef<ViewerHandle, Props>(function CesiumViewer({ vis
       baseLayer: new Cesium.ImageryLayer(new Cesium.OpenStreetMapImageryProvider({ url: 'https://tile.openstreetmap.org/' })),
     });
     viewerRef.current = v;
+    // Both renderers stay mounted (CSS `visibility` toggle, not unmount) when switching the RENDERER
+    // pill — but that only hides Cesium visually. Cesium's own render loop is a SEPARATE, independent
+    // requestAnimationFrame driven by `v.useDefaultRenderLoop` (nothing to do with 3DTRJS's R3F
+    // Canvas/frameloop) and defaults to running forever regardless of visibility. A real-size Cesium
+    // scene rendering fully every frame while hidden showed up in a trace as ~850ms/frame FireAnimationFrame
+    // calls into Cesium's render2 — starving the main thread of everything else, including 3DTRJS's own
+    // frames and ALL UI event handling (this is what actually explains "even opening a dropdown is slow
+    // with 3DTRJS active" — Cesium was still fully rendering in the background the whole time). Stop its
+    // loop outright while hidden; the `visible`-keyed effect below resumes it when switched back.
+    v.useDefaultRenderLoop = visibleRef.current;
     v.scene.backgroundColor = Cesium.Color.fromCssColorString('#0a0a0f');
     (window as any).viewer = v;
     const initialBasemap = store.getState().basemap;
