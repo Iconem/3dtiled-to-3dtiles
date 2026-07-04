@@ -22,6 +22,10 @@ const urlStateParsers = {
   cache: parseAsStringEnum<CacheScope>(['none', 'hierarchy', 'all']).withDefault('none'),
   prefetch: parseAsInteger.withDefault(1),
   transform: parseAsString.withDefault(''),
+  // Tileset-level op for the "3D Tiles" format group specifically — distinct from `transform` above
+  // (a per-TILE glTF-Transform compression op that rides on /stream/tile requests). This instead picks
+  // which /3dtiles-tools whole-tileset rewrite (if any) wraps the selected DIRECT preset's URL.
+  tilesetOp: parseAsString.withDefault(''),
   centroids: parseAsBoolean.withDefault(false),
   tiling: parseAsStringEnum<TilingMode>(['implicit', 'explicit']).withDefault('implicit'),
   renderer: parseAsStringEnum<ActiveRenderer>(['cesium', '3dtrjs']).withDefault('cesium'),

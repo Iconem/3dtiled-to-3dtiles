@@ -19,8 +19,10 @@
  *   • SLPK archive             — url = ….slpk, OR any URL whose response is a zip regardless of its
  *     path (e.g. ArcGIS Online's `…/content/items/<id>/data` download endpoint has no `.slpk` in the
  *     URL at all — detected by sniffing the first bytes for the local PKZIP magic, or by a
- *     Content-Disposition filename ending `.slpk`). The whole archive is fetched once into memory and
- *     read via loaders.gl.
+ *     Content-Disposition filename ending `.slpk`). Read via loaders.gl over ranged HTTP GETs when the
+ *     host honors Range (the common case) — only the ZIP central directory + whichever nodes/textures a
+ *     request actually needs get fetched, not the whole archive; falls back to buffering it all only if
+ *     Range isn't supported.
  *
  * Scope matches the offline draft: uncompressed geometry only (Draco/LEPCC gated out). Textures ARE
  * embedded when the node's material references a raster (JPEG/PNG) format in `textureSetDefinitions`
@@ -65,19 +67,43 @@ function arcgisSceneServerReader(url) {
   };
 }
 
-// Does `url` look like an SLPK (zip) archive when the URL itself gives no clue? A HEAD (or tiny
-// ranged GET, for hosts that don't support HEAD well) is enough: ArcGIS Online's download endpoint
+// Does `url` look like an SLPK (zip) archive when the URL itself gives no clue, and does the host
+// honor byte-range requests? A single tiny ranged GET answers both: ArcGIS Online's download endpoint
 // answers with `Content-Disposition: attachment; filename="Foo.slpk"` and no `.slpk` anywhere in the
 // URL path, so a pure extension check misses it — fall back to sniffing the local-file-header PKZIP
-// magic (0x50 0x4B, "PK") in the first bytes.
-async function probeIsSlpk(url) {
+// magic (0x50 0x4B, "PK") in the first bytes. `Content-Range: bytes 0-3/<total>` on a real 206 gives
+// the archive's total size AND proves range support, both needed for HttpRangeReadableFile below.
+async function probeSlpk(url) {
   try {
     const r = await fetch(url, { headers: { Range: 'bytes=0-3' } });
-    if (!r.ok && r.status !== 206) return false;
-    if (/\.slpk"?\s*$/i.test(r.headers.get('content-disposition') || '')) return true;
+    if (!r.ok && r.status !== 206) return null;
+    const cd = r.headers.get('content-disposition') || '';
     const b = Buffer.from(await r.arrayBuffer());
-    return b.length >= 2 && b[0] === 0x50 && b[1] === 0x4b;   // 'PK'
-  } catch { return false; }
+    const looksLikeSlpk = /\.slpk"?\s*$/i.test(cd) || (b.length >= 2 && b[0] === 0x50 && b[1] === 0x4b);
+    if (!looksLikeSlpk) return null;
+    const cr = r.headers.get('content-range');
+    const total = cr && r.status === 206 ? Number(cr.split('/')[1]) : NaN;
+    return { supportsRange: r.status === 206 && Number.isFinite(total), size: total };
+  } catch { return null; }
+}
+
+// Minimal loaders.gl ReadableFile backed by ranged HTTP GETs instead of an in-memory buffer — lets
+// parseSLPKArchive read only the ZIP central directory + whichever nodes/textures a request actually
+// needs. Buffering the WHOLE archive first (the previous approach) meant even the very first
+// tileset.json had to wait for a full download — verified against the live Rancho Mesh .slpk (286 MB):
+// ~27s cold before any response at all, which is what "SLPK not resolving" looks like from a browser
+// that gives up waiting. Same range-adapter philosophy as every other format here (COPC/LCC/etc).
+class HttpRangeReadableFile {
+  constructor(url, size) { this.url = url; this.size = size; this.bigsize = BigInt(size); }
+  async close() {}
+  async stat() { return { size: this.size, bigsize: this.bigsize, isDirectory: false }; }
+  async read(start = 0, length) {
+    const s = Number(start);
+    const e = length != null ? s + Number(length) - 1 : this.size - 1;
+    const r = await fetch(this.url, { headers: { Range: `bytes=${s}-${e}` } });
+    if (!r.ok && r.status !== 206) throw new Error(`ranged fetch ${this.url} [${s}-${e}] → ${r.status}`);
+    return r.arrayBuffer();
+  }
 }
 
 // Build a uniform getFile(relPath) → Buffer (gunzipped) over an SLPK archive, a live ArcGIS SceneServer,
@@ -85,10 +111,19 @@ async function probeIsSlpk(url) {
 async function makeFileReader(url) {
   if (/\/SceneServer(\/|$|\?)/i.test(url)) return arcgisSceneServerReader(url);
   const looksLikeJson = /\.json(\.gz)?(\?|$)/i.test(url);
-  if (/\.slpk(\?|$)/i.test(url) || (!looksLikeJson && await probeIsSlpk(url))) {
-    const buf = await fetchBuf(url);
-    const ab = buf.buffer.slice(buf.byteOffset, buf.byteOffset + buf.byteLength);
-    const archive = await parseSLPKArchive(new DataViewReadableFile(new DataView(ab)), undefined, 'slpk');
+  const looksLikeSlpkUrl = /\.slpk(\?|$)/i.test(url);
+  const probe = !looksLikeJson ? await probeSlpk(url) : null;
+  if (looksLikeSlpkUrl || probe) {
+    // Prefer range reads (only pulls the ZIP central directory + whichever nodes/textures a request
+    // actually needs); fall back to buffering the whole archive only if the host doesn't honor Range.
+    let fileProvider;
+    if (probe?.supportsRange) {
+      fileProvider = new HttpRangeReadableFile(url, probe.size);
+    } else {
+      const buf = await fetchBuf(url);
+      fileProvider = new DataViewReadableFile(new DataView(buf.buffer.slice(buf.byteOffset, buf.byteOffset + buf.byteLength)));
+    }
+    const archive = await parseSLPKArchive(fileProvider, undefined, 'slpk');
     return async (rel) => {
       let last;
       for (const mode of ['raw', 'http']) {

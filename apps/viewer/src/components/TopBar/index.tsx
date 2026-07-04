@@ -90,7 +90,7 @@ export default function TopBar({ activeHandleRef }: { activeHandleRef: React.Ref
     tilingMode: url.tiling,
   };
 
-  const presets = currentPresets({ ...params, toolName: url.tool });
+  const presets = currentPresets({ ...params, toolName: url.tool, tilesetOp: url.tilesetOp as any });
   const fmtOfSelected = fmtMeta(url.format);
 
   function doLoad(loadUrl: string, type: Preset['type'], flyTo?: Preset['flyTo']) {
@@ -150,7 +150,7 @@ export default function TopBar({ activeHandleRef }: { activeHandleRef: React.Ref
     const target = wanted || presets.find((p) => p.url);
     if (target) selectPreset(target);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [url.mode, url.format, url.tool]);
+  }, [url.mode, url.format, url.tool, url.tilesetOp]);
 
   return (
     <header className="flex flex-col gap-2 border-b bg-background/95 p-2">
@@ -174,15 +174,30 @@ export default function TopBar({ activeHandleRef }: { activeHandleRef: React.Ref
                 <Input type="number" min={-1} step={1} value={url.prefetch} onChange={(e) => setUrl({ prefetch: parseInt(e.target.value, 10) || 0 })} className="h-7 w-14" />
               </span>
             )}
-            <Select value={url.transform || 'none'} onValueChange={(v) => setUrl({ transform: v === 'none' ? '' : v })}>
-              <SelectTrigger size="sm" className="h-7 text-xs"><SelectValue /></SelectTrigger>
-              <SelectContent>
-                <SelectItem value="none">transform: none</SelectItem>
-                <SelectItem value="meshopt">meshopt ↓</SelectItem>
-                <SelectItem value="draco">draco ↓ (mesh)</SelectItem>
-                <SelectItem value="decompress">decompress ↑</SelectItem>
-              </SelectContent>
-            </Select>
+            {url.format === '3dtiles' ? (
+              // Tileset-level op, not per-tile compression: rewrites the WHOLE tileset (implicit→explicit
+              // subtree expansion, or bumping a legacy 1.0/b3dm tileset to 1.1 with on-the-fly glb
+              // conversion) via /3dtiles-tools — same backend the "Tools" mode pills use, now applied to
+              // any DIRECT 3D Tiles preset instead of just the two hardcoded Tools datasets.
+              <Select value={url.tilesetOp || 'none'} onValueChange={(v) => setUrl({ tilesetOp: v === 'none' ? '' : v })}>
+                <SelectTrigger size="sm" className="h-7 text-xs"><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="none">tileset: none</SelectItem>
+                  <SelectItem value="implicit-to-explicit">⬡→⬢ implicit→explicit</SelectItem>
+                  <SelectItem value="upgrade">⬆ legacy b3dm upgrade</SelectItem>
+                </SelectContent>
+              </Select>
+            ) : (
+              <Select value={url.transform || 'none'} onValueChange={(v) => setUrl({ transform: v === 'none' ? '' : v })}>
+                <SelectTrigger size="sm" className="h-7 text-xs"><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="none">transform: none</SelectItem>
+                  <SelectItem value="meshopt">meshopt ↓</SelectItem>
+                  <SelectItem value="draco">draco ↓ (mesh)</SelectItem>
+                  <SelectItem value="decompress">decompress ↑</SelectItem>
+                </SelectContent>
+              </Select>
+            )}
           </PillGroup>
         )}
 

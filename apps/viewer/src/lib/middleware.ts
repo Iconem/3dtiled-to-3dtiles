@@ -2,6 +2,8 @@
 // (lines ~694-797) — same algorithms, but read an explicit params object instead of globals.
 import { MW, SDATA, FORMATS, DIRECT, TOOLS_DATASETS, PSEUDO_FORMATS, fmtMeta, canCentroids, type Asset, type AssetType, type FormatMeta } from './formats';
 
+export type TilesetOp = 'implicit-to-explicit' | 'upgrade' | '';
+
 export type ViewerMode = 'stream' | 'offline' | 'tools';
 export type CacheScope = 'none' | 'hierarchy' | 'all';
 export type TilingMode = 'implicit' | 'explicit';
@@ -62,7 +64,7 @@ export interface Preset {
 }
 
 /** Ported from viewer.html's currentPresets() — the asset-pill list for the current mode/format. */
-export function currentPresets(p: MiddlewareParams & { toolName: ToolName }): Preset[] {
+export function currentPresets(p: MiddlewareParams & { toolName: ToolName; tilesetOp?: TilesetOp }): Preset[] {
   if (p.viewerMode === 'tools') {
     return (TOOLS_DATASETS[p.toolName] || []).map((a) => ({
       id: `tool-${p.toolName}-${a.id}`,
@@ -74,7 +76,13 @@ export function currentPresets(p: MiddlewareParams & { toolName: ToolName }): Pr
           : `${MW}/3dtiles-tools/tileset.json?tool=${encodeURIComponent(p.toolName)}&url=${encodeURIComponent(a.url!)}`,
     }));
   }
-  if (p.selectedFormat === '3dtiles') return DIRECT.map((d) => ({ id: d.id, label: `${d.icon} ${d.label}`, type: d.type, url: d.url }));
+  if (p.selectedFormat === '3dtiles') {
+    // Whole-tileset rewrite (implicit→explicit / legacy b3dm→1.1 upgrade) via the SAME generic
+    // /3dtiles-tools endpoint the "Tools" mode pills already use — it already accepts an arbitrary
+    // `url=`, not just the two hardcoded Tools presets, so any DIRECT tileset can be run through it.
+    const wrap = (u: string) => (p.tilesetOp ? `${MW}/3dtiles-tools/tileset.json?tool=${p.tilesetOp}&url=${encodeURIComponent(u)}` : u);
+    return DIRECT.map((d) => ({ id: d.id, label: `${d.icon} ${d.label}`, type: d.type, url: wrap(d.url) }));
+  }
   if (p.selectedFormat === 'packages') {
     return (TOOLS_DATASETS['packages'] || []).map((a) => ({
       id: `fmt-pkg-${a.id}`,
