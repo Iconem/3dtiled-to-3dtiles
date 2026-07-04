@@ -86,8 +86,15 @@ export default defineConfig({
     // Fumadocs (`/docs`, was its own `next dev` on :3002 — that process still runs, just no longer
     // something you navigate to directly, see the proxy rules below).
     port: 3000,
+    // Bind all interfaces (Vite defaults to localhost-only) so this is reachable from other devices
+    // on the LAN at http://<this machine's LAN IP>:3000/ — the tile-server middleware already listens
+    // on all interfaces by default (plain `.listen(PORT)`, no host arg), and formats.ts's MW/SDATA
+    // bases are derived from window.location at runtime rather than hardcoded to 'localhost' for
+    // exactly this reason (a hardcoded 'localhost' would resolve to the REMOTE device itself, not
+    // this machine, breaking every tileset/sample-data fetch even once the page itself loaded).
+    host: true,
     // Serve sample-data/output/** (repo root) too, same as the old root-level app — the built-in
-    // presets point at `http://localhost:3000/sample-data/...`.
+    // presets point at `<origin>/sample-data/...`.
     fs: { allow: [repoRoot] },
     // Don't file-watch sample-data (~100k+ tile files — crawls on startup/every HMR) or apps/docs'
     // own .next build output (spurious reloads here) — still served on demand, only watching is off.

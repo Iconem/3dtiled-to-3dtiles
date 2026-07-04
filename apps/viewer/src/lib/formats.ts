@@ -1,8 +1,15 @@
 // Ported verbatim (same ids/labels/urls) from viewer.html's FORMATS/DIRECT/TOOLS_DATASETS/SNIPPETS —
 // see C:\Dev\Iconem\3d-tiles-converters\viewer.html lines ~578-834.
 
-export const MW = 'http://localhost:3001'; // tile-server middleware
-export const SDATA = 'http://localhost:3000/sample-data'; // sample data served by the MAIN vite dev server
+// Derived from window.location rather than hardcoded to 'localhost' — this app is reachable from
+// other devices on the LAN (vite.config.ts's `server.host: true`), and a hardcoded 'localhost' would
+// resolve to the REMOTE device itself in that case, not this machine, breaking every tileset/
+// sample-data fetch even though the page itself loaded fine. Falls back to 'localhost' for any
+// non-browser evaluation (e.g. a Node-based tooling script importing this file directly).
+const ORIGIN_HOST = typeof window !== 'undefined' ? window.location.hostname : 'localhost';
+const ORIGIN_PROTOCOL = typeof window !== 'undefined' ? window.location.protocol : 'http:';
+export const MW = `${ORIGIN_PROTOCOL}//${ORIGIN_HOST}:3001`; // tile-server middleware
+export const SDATA = `${ORIGIN_PROTOCOL}//${ORIGIN_HOST}:3000/sample-data`; // sample data served by the MAIN vite dev server
 
 export type AssetType = 'mesh' | 'pointcloud' | 'splat';
 
