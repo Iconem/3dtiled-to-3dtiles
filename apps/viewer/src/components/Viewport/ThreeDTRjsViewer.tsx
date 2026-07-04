@@ -114,6 +114,21 @@ function TerrainGlobe({ basemap, gl }: { basemap: 'google' | 'osm' | 'none'; gl:
   );
 }
 
+// Google Photorealistic 3D Tiles — Ion asset 2275207, the SAME well-known public asset ID Cesium's own
+// `Cesium.createGooglePhotorealistic3DTileset()` uses internally. No separate Google Maps Platform key
+// needed: Cesium ion brokers access to this asset for any ion account (same token as World Terrain
+// above), which is exactly how CesiumViewer's terrainMode==='google' already authenticates — confirmed
+// by reading its own createGooglePhotorealistic3DTileset() call, which takes no explicit key argument.
+// Already fully textured (real photos baked into the mesh) — no separate basemap imagery overlay needed
+// or wanted here, unlike TerrainGlobe above.
+function GoogleGlobe() {
+  return (
+    <TilesRendererR3F onLoadModel={(e: any) => buildBoundsTrees(e.scene)}>
+      <TilesPlugin plugin={CesiumIonAuthPlugin as any} args={{ apiToken: CESIUM_ION_TOKEN, assetId: '2275207', autoRefreshToken: true } as any} />
+    </TilesRendererR3F>
+  );
+}
+
 // Drag (or press W/E/R to switch translate/rotate/scale, drei/three.js's standard TransformControls
 // shortcuts) directly on the loaded tileset's own root group — a manual alternative to typing lon/lat/
 // alt for tilesets with no geographic locator.
@@ -316,15 +331,27 @@ const Scene = forwardRef<ViewerHandle, { loadArgs: LoadArgs }>(function Scene({ 
   // otherwise sit frozen until the next interaction.
   useEffect(() => { invalidate(); }, [controlMode, debugTiles, basemap, terrainMode, errorTarget, invalidate]);
 
-  const applyPointSize = () => {
-    const tiles = tilesRef.current;
-    if (!tiles || !isPoints) return;
-    tiles.group.traverse((o: any) => {
-      if (o.isPoints && o.material) o.material.size = pointSize;
+  // rAF-throttled: the point-size slider's onValueChange fires on every drag tick (dozens of times a
+  // second), and traversing the WHOLE tiles group to restyle every Points mesh is not free for a large
+  // cloud with many loaded tiles — doing that traversal synchronously on every single tick is exactly
+  // why dragging this slider specifically felt slow with 3DTRJS open (Cesium's point-size path is a
+  // single shared style set, not a per-mesh JS traversal, so it doesn't have this cost). Collapse any
+  // number of rapid pointSize changes into at most one traversal per animation frame.
+  const pointSizeRaf = useRef<number | null>(null);
+  useEffect(() => {
+    if (!isPoints) return;
+    if (pointSizeRaf.current != null) cancelAnimationFrame(pointSizeRaf.current);
+    pointSizeRaf.current = requestAnimationFrame(() => {
+      pointSizeRaf.current = null;
+      const tiles = tilesRef.current;
+      if (!tiles) return;
+      tiles.group.traverse((o: any) => {
+        if (o.isPoints && o.material) o.material.size = pointSize;
+      });
+      invalidate();
     });
-    invalidate();
-  };
-  useEffect(applyPointSize, [pointSize, loadArgs]); // eslint-disable-line react-hooks/exhaustive-deps
+    return () => { if (pointSizeRaf.current != null) cancelAnimationFrame(pointSizeRaf.current); };
+  }, [pointSize, loadArgs, isPoints, invalidate]);
 
   useImperativeHandle(ref, (): ViewerHandle => ({
     load() { /* handled via loadArgs prop from the outer component (URL change remounts TilesRenderer) */ },
@@ -456,13 +483,14 @@ const Scene = forwardRef<ViewerHandle, { loadArgs: LoadArgs }>(function Scene({ 
       {/* Base globe surface. Hidden entirely for tilesets with no real geographic placement (see the
           comment in frameToTileset above). terrainMode 'cesium' gets REAL elevation (Cesium World
           Terrain via QuantizedMeshPlugin, TerrainGlobe above) with imagery draped on top as an optional
-          overlay layer; otherwise a real OSM/Google-tile-draped WGS84 ellipsoid (Globe above) when
-          imagery is on, or a plain wireframe sphere as a ground reference when imagery is off.
-          terrainMode 'google' has no 3DTRJS equivalent yet — Google's Photorealistic 3D Tiles need a
-          Google Maps Platform API key, which only CesiumViewer's Ion-brokered path has; falls back to
-          the same wgs84 behavior here. */}
+          overlay layer; 'google' gets Google's own already-textured Photorealistic 3D Tiles (GoogleGlobe
+          above, same Ion token, no basemap overlay needed); otherwise a real OSM/Google-tile-draped
+          WGS84 ellipsoid (Globe above) when imagery is on, or a plain wireframe sphere as a ground
+          reference when imagery is off. */}
       {showGlobe && (terrainMode === 'cesium' ? (
         <TerrainGlobe basemap={basemap} gl={gl} />
+      ) : terrainMode === 'google' ? (
+        <GoogleGlobe />
       ) : basemap === 'none' ? (
         <mesh>
           <sphereGeometry args={[6378137, 64, 64]} />
