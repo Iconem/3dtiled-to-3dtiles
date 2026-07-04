@@ -340,6 +340,7 @@ async function serveTileGlb(ctx, idx) {
   if (!g.vertexCount) return EMPTY_GLB;
 
   let positions = g.position;
+  let normals = g.normal;
   if (ctx.isGeographic) {
     const c = node.obb.center;
     positions = new Float32Array(g.vertexCount * 3);
@@ -348,7 +349,29 @@ async function serveTileGlb(ctx, idx) {
       const u = ctx.toEnu(e);
       positions[i*3] = u[0]; positions[i*3+1] = u[2]; positions[i*3+2] = -u[1]; // glTF (E, U, −N)
     }
+    // Positions get the full geodetic→ECEF→ENU→glTF-axis remap above; normals are pure directions
+    // already expressed in the SAME local (East, North, Up) tangent frame I3S stores position offsets
+    // in (per-node, no earth-curvature correction needed at building/node scale) — they only need the
+    // SAME final glTF-axis relabel, not the geographic reprojection.
+    if (g.normal) {
+      normals = new Float32Array(g.vertexCount * 3);
+      for (let i = 0; i < g.vertexCount; i++) {
+        normals[i*3] = g.normal[i*3]; normals[i*3+1] = g.normal[i*3+2]; normals[i*3+2] = -g.normal[i*3+1];
+      }
+    }
   }
+  // Root-caused the "I3S mesh needs brightness ~2048 to look right" report against the real Rancho
+  // Mesh dataset: its geometry buffer stores an all-ZERO normal for every vertex (verified — positions
+  // decode to real, sane values from the SAME buffer, ruling out an offset/decode bug; this is a
+  // genuine characteristic of this Drone2Map/photogrammetry export). A zero-length normal makes the
+  // lighting dot product (N·L) zero for every light direction under ANY dynamic lighting model — only
+  // a thin ambient/emissive sliver shows through, and cranking the app's own brightness multiplier just
+  // amplifies that sliver rather than fixing the shading. glTF's own spec answer for "no usable
+  // normals" is to OMIT the attribute entirely: a conformant loader (Cesium, three.js) then computes
+  // correct flat per-face normals itself. Detect and drop degenerate all-zero normal data instead of
+  // embedding it — the alternative (shading it "shadeless"/unlit) is also valid and already exposed as
+  // a toggle in the sidebar, but per-face normals let real dynamic lighting work correctly too.
+  if (normals && normals.every((v) => v === 0)) normals = undefined;
 
   // Texture: node.mesh.material.{definition,resource} — resource is the SAME per-node resource
   // bucket geometry uses, definition indexes materialDefinitions[] for the format lookup. Unlike
@@ -379,7 +402,7 @@ async function serveTileGlb(ctx, idx) {
     }
   }
 
-  return Buffer.from(buildGlb({ mode: ctx.isPoint ? 'POINTS' : 'TRIANGLES', positions, normals: g.normal, colors: g.color, uvs: g.uv0, texture }));
+  return Buffer.from(buildGlb({ mode: ctx.isPoint ? 'POINTS' : 'TRIANGLES', positions, normals, colors: g.color, uvs: g.uv0, texture }));
 }
 
 // Pure builders for the /stream dispatcher.
