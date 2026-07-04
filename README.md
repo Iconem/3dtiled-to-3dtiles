@@ -391,15 +391,11 @@ Roughly in the order we're tackling them:
   `next start` couldn't find its own `next` binary in the final runtime stage (hoisted node-linker puts
   it in the ROOT `node_modules/.bin`, not `apps/docs/node_modules/.bin`, and that stage never copies
   `pnpm-workspace.yaml` for `pnpm run start` to resolve the workspace root either) — fixed by putting
-  the root `.bin` on `PATH` and invoking `next` directly, skipping pnpm in that stage. **Traefik**:
-  `docker-compose.yml` now carries real `traefik.*` labels (Host-based routing for `viewer`, a more
-  specific `Host && PathPrefix` router for `docs` so it wins for `/docs` + its asset/API routes,
-  `Host` for `tile-server` on a separate subdomain) modeled on the ops team's own Portainer-stack
-  convention (one service per subdomain, `leresolver` certresolver, `traefik_proxy` external network) —
-  domains are best-effort guesses (only two were specified), swap in whatever the real DNS is. The
-  actual Traefik *routing* (as opposed to each image running/serving correctly, which IS verified) could
-  not be end-to-end tested in this environment — Docker Desktop's Windows/WSL2 docker.sock passthrough
-  into a nested Traefik container failed here for reasons unrelated to this repo's own compose file.
+  the root `.bin` on `PATH` and invoking `next` directly, skipping pnpm in that stage.
+  `docker-compose.yml` itself stays reverse-proxy-agnostic (plain `ports:` on all three, no assumed
+  setup) — wiring it behind Traefik/Caddy/nginx with real domains is left to whoever deploys it; the
+  compose file's own comment on the `docs` service spells out which paths need to route there instead
+  of to `viewer` if you do.
 - [~] **Fumadocs migration — scaffolded** (2026-07-02), content migration started. `apps/docs`
   (a proper pnpm workspace member, `pnpm --filter docs dev` on port 3002) is a real, building
   Fumadocs/Next.js site: `README.md`'s 18 `##` sections and all 25 `docs-references/*.md` files are

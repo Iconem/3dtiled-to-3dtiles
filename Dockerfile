@@ -2,10 +2,12 @@
 #   - tile-server: the live <format> -> OGC 3D Tiles middleware (packages/tile-server)
 #   - viewer:      apps/viewer ("3D Tiled", React + vite build) — also serves the legacy standalone
 #                  vanilla-viewer.html at /vanilla-viewer, built into the same dist/
-#   - docs:        apps/docs (Fumadocs/Next) — kept as its OWN service; in production there's no
-#                  vite dev-server proxy to fold /docs into the viewer's port, so path-based routing
-#                  (Traefik PathPrefix on /docs + its asset/API routes -> this service, everything
-#                  else -> viewer) does that job instead — see docker-compose.yml's Traefik labels.
+#   - docs:        apps/docs (Fumadocs/Next) — kept as its OWN service; its search API needs a live
+#                  Node server, not just static files, so it can't fold into the viewer's static
+#                  dist/ the way vanilla-viewer.html does. If you put a reverse proxy in front of all
+#                  three, route /docs + its asset/API routes (see docker-compose.yml's comment) at
+#                  this service and everything else at viewer — matching what apps/viewer's own
+#                  vite dev-server proxy already does for local dev.
 #
 # Build + run all three:
 #   docker compose up --build
