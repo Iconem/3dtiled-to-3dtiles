@@ -502,17 +502,25 @@ independently researched (a web-search-depth pass, not a spec audit like the sou
   captures (the same scale problem GeoSplats/RAD/LCC solve with HLOD), but unverified — flagged here as
   a format worth investigating once a live viewer link is found, not a confirmed adapter target.
 
-**SPZ v4/v5 roadmap** (from [Niantic Spatial's own announcement](https://radiancefields.com/niantic-spatial-releases-spz-v4.0),
-2026): SPZ v4 shipped with **Scaniverse v4-export support landing within months**, and **Adobe extended
-its Babylon.js SPZ integration** to read v4. The stated **v5 roadmap**: **streaming and progressive
-loading, spatial chunking and LOD** (the "tiled Scaniverse" possibility noted above), **better SH
-quantization**, and **additional vendor extensions** — i.e. SPZ is explicitly moving toward the same
-problem this repo's HLOD/tiled-splat adapters (GeoSplats, RAD, LCC, streamed-SOG) already solve, just
-as a single-vendor-defined *file* format rather than a 3D-Tiles-hierarchy adapter. Worth re-checking
-once v5 actually ships. The article notes SPZ encoding is now "fast enough for production scale,
-flexible enough for vendor-specific data without forking, and stable enough that 800,000 new files a
-month is a low baseline" — i.e. SPZ is a genuinely widely-adopted interchange format at this point, not
-a niche one.
+**SPZ v4/v5 roadmap** (primary source: [Niantic Spatial's own v4 announcement](https://www.nianticspatial.com/blog/spz4),
+published 2026-05-05 — supersedes the earlier secondhand radiancefields.com summary this section used
+to cite). **v4, shipped:** six parallel ZSTD streams (one per attribute: positions/colors/scales/
+rotations/alphas/SH) replacing the old single GZip stream — "**compresses about 3-5x faster**" (an
+8.5 GB/34M-point PLY benchmark: 3 min 26 s on v3 vs. 1 min 8 s on v4) and "**loads roughly 1.5-2x
+faster**", while still landing "**10x smaller than uncompressed PLYs**". Also: the old **10-million-point
+cap is gone**; SH support goes to **degree 4** (from degree 3) with configurable quantization (3-8 bits,
+5 recommended); a new "NGSP"-magic extensible header carries vendor extensions (e.g. an Adobe
+camera-control extension); and **old (pre-v4) readers fail gracefully** on the new magic bytes rather
+than misparsing — v4 itself reads every older SPZ file. Adoption stat cited: "**800,000 SPZ files in
+the last two months**."
+
+**v5, roadmap only — no design specifics or date given:** the post names, verbatim, "**streaming and
+progressive loading**" and "**spatial chunking and LOD**" as "directions on our radar", alongside
+further SH-quantization refinement and more vendor extensions. No bit layout, chunk scheme, LOD tier
+count, or streaming protocol is specified — it's a roadmap bullet list, not a spec draft. That's the
+same tiled/HLOD problem this repo's own streaming adapters (GeoSplats, RAD, LCC, streamed-SOG) already
+solve today, just heading toward a single-vendor-defined *file* format instead of a 3D-Tiles-hierarchy
+one — worth a re-check once v5 actually publishes something concrete to read against, not before.
 
 ---
 
