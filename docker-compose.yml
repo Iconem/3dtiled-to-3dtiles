@@ -50,8 +50,9 @@ services:
       context: .
       target: docs
     restart: unless-stopped
-    ports:
-      - "3002:3002"
+    # No `ports:` mapping — unlike viewer/tile-server, this one is ONLY reachable through Traefik's
+    # path-based routing below (or container-to-container on the traefik_proxy network). Matches the
+    # "single access point" model: /docs lives at the same host as the viewer, not on its own port.
     labels:
       traefik.enable: true
       # Same host(s) as the viewer but scoped to /docs (+ the root-absolute paths Next's own dev
