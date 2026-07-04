@@ -8,7 +8,8 @@ import {
   EnvironmentControls,
   CameraTransition,
 } from '3d-tiles-renderer/r3f';
-import { DebugTilesPlugin, XYZTilesOverlay, QuantizedMeshPlugin, CesiumIonAuthPlugin, ImageOverlayPlugin, GoogleCloudAuthPlugin, ImplicitTilingPlugin } from '3d-tiles-renderer/plugins';
+import { DebugTilesPlugin, XYZTilesOverlay, QuantizedMeshPlugin, CesiumIonAuthPlugin, ImageOverlayPlugin, GoogleCloudAuthPlugin, ImplicitTilingPlugin, GLTFExtensionsPlugin } from '3d-tiles-renderer/plugins';
+import { DRACOLoader } from 'three/addons/loaders/DRACOLoader.js';
 // GeneratedSurfacePlugin is exported at runtime (3d-tiles-renderer/src/three/plugins/index.js) but
 // missing from this package's .d.ts — imported via the namespace + cast to dodge the stale types.
 import * as ThreeTilesPlugins from '3d-tiles-renderer/plugins';
@@ -38,6 +39,30 @@ THREE.Mesh.prototype.raycast = acceleratedRaycast;
 // back to brute force. Points/Lines aren't meshes (no-op there — three-mesh-bvh is triangle-only).
 // try/catch: a handful of malformed/degenerate tile geometries (zero triangles, no position attribute)
 // throw inside computeBoundsTree rather than no-op — one bad tile shouldn't break the whole scene.
+// Shared across every TilesRenderer instance (content + basemaps) — same pattern viewer.html used.
+// Without this, any tileset whose glTF/GLB content is Draco-compressed (Bing 3D is the one that
+// actually surfaced it: "THREE.GLTFLoader: No DRACOLoader instance provided") fails to decode geometry
+// entirely, since 3d-tiles-renderer's GLTFExtensionsPlugin only wires Draco support when given a loader.
+const dracoLoader = new DRACOLoader();
+dracoLoader.setDecoderPath('https://www.gstatic.com/draco/versioned/decoders/1.5.6/');
+
+// `TilesRendererBase.invokeOnePlugin('loadRootTileset')` runs the FIRST plugin (in registration-array
+// order) that implements the hook — and `registerPlugin` inserts a LOWER-priority plugin EARLIER in
+// that array (before any already-registered higher-priority one). QuantizedMeshPlugin sets
+// `priority = -1000`; CesiumIonAuthPlugin defaults to 0 — so QuantizedMeshPlugin's OWN loadRootTileset
+// ends up running FIRST regardless of JSX order, using `tiles.rootURL` still at CesiumIonAuthPlugin's
+// un-resolved placeholder (`https://api.cesium.com/v1/assets/<id>/endpoint`) instead of the real,
+// Ion-resolved terrain base URL. QuantizedMeshPlugin then builds `layer.json` against that placeholder,
+// producing the malformed `.../assets/<id>/layer.json` request (real symptom: a 405 from Cesium Ion's
+// API, which has no such route) — Ion's own endpoint-resolution never gets a chance to run first. Force
+// a lower priority than QuantizedMeshPlugin's so CesiumIonAuthPlugin always wins that one hook.
+class PrioritizedCesiumIonAuthPlugin extends CesiumIonAuthPlugin {
+  constructor(...args: ConstructorParameters<typeof CesiumIonAuthPlugin>) {
+    super(...args);
+    (this as any).priority = -2000;
+  }
+}
+
 function buildBoundsTrees(scene: THREE.Object3D) {
   scene.traverse((o: any) => {
     if (o.isMesh && o.geometry && !o.geometry.boundsTree) {
@@ -108,7 +133,7 @@ function TerrainGlobe({ basemap, gl }: { basemap: 'google' | 'osm' | 'none'; gl:
     [basemap]);
   return (
     <TilesRendererR3F onLoadModel={(e: any) => buildBoundsTrees(e.scene)}>
-      <TilesPlugin plugin={CesiumIonAuthPlugin as any} args={{ apiToken: CESIUM_ION_TOKEN, assetId: '1', autoRefreshToken: true } as any} />
+      <TilesPlugin plugin={PrioritizedCesiumIonAuthPlugin as any} args={{ apiToken: CESIUM_ION_TOKEN, assetId: '1', autoRefreshToken: true } as any} />
       <TilesPlugin plugin={QuantizedMeshPlugin as any} />
       {overlay && <TilesPlugin plugin={ImageOverlayPlugin as any} args={{ renderer: gl, overlays: [overlay] } as any} />}
     </TilesRendererR3F>
@@ -125,6 +150,8 @@ function GoogleGlobe() {
   return (
     <TilesRendererR3F onLoadModel={(e: any) => buildBoundsTrees(e.scene)}>
       <TilesPlugin plugin={GoogleCloudAuthPlugin as any} args={{ apiToken: GOOGLE_MAPS_API_KEY, autoRefreshToken: true } as any} />
+      {/* Google Photorealistic 3D Tiles ships Draco-compressed geometry — same decoder as content below. */}
+      <TilesPlugin plugin={GLTFExtensionsPlugin as any} args={{ dracoLoader } as any} />
     </TilesRendererR3F>
   );
 }
@@ -198,6 +225,18 @@ const Scene = forwardRef<ViewerHandle, { loadArgs: LoadArgs }>(function Scene({ 
   // Whether the WGS84-radius wireframe globe is meaningful to show at all — see frameToTileset below.
   const [showGlobe, setShowGlobe] = useState(true);
   useEffect(() => { if (!loadArgs) setShowGlobe(true); }, [loadArgs]);
+  useEffect(() => { setPickScene(null); }, [loadArgs]);
+
+  // GlobeControls/EnvironmentControls default to raycasting the WHOLE R3F scene (3d-tiles-renderer's
+  // own ControlsBaseComponent falls back to useThree's default scene when no `scene` prop is given) to
+  // find the point under the cursor to orbit/pivot around — which sweeps up our OWN UI furniture too:
+  // the crop/tileset TransformControls gizmo handles, the bottom-right GizmoHelper compass, lights.
+  // That's very likely the "Cannot read properties of null (reading 'layers')" crash reported with
+  // these controls — none of that furniture is meant to be pickable, and TransformControls in
+  // particular churns internal helper objects during a drag. Scope the raycast to just the loaded
+  // content group once it's actually mounted (set from onLoadRootTileset below, so it's never a stale
+  // ref read at render time) instead of the whole scene.
+  const [pickScene, setPickScene] = useState<THREE.Object3D | null>(null);
 
   useEffect(() => {
     if ('fov' in camera) (camera as THREE.PerspectiveCamera).fov = fov;
@@ -291,6 +330,7 @@ const Scene = forwardRef<ViewerHandle, { loadArgs: LoadArgs }>(function Scene({ 
     camera.lookAt(sphere.center);
     (camera as THREE.PerspectiveCamera).updateProjectionMatrix?.();
     setControlsPivot(sphere.center);
+    setPickScene(tiles.group);
     invalidate();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [camera, invalidate, setControlsPivot]);
@@ -324,6 +364,24 @@ const Scene = forwardRef<ViewerHandle, { loadArgs: LoadArgs }>(function Scene({ 
   const isPoints = loadArgs?.type === 'pointcloud';
   const defaultSSE = isSplat ? 0.5 : loadArgs?.type === 'mesh' ? 16 : 4;
   const errorTarget = loadArgs?.sseOverride ?? maxSSE ?? defaultSSE;
+
+  // Read fresh in onLoadContentModel below (called from 3d-tiles-renderer's own event, not a React
+  // effect) — a plain closure over `pointSize` would capture whatever value was current when
+  // TilesRendererR3F itself last remounted, not the slider's current value.
+  const pointSizeRef = useRef(pointSize);
+  pointSizeRef.current = pointSize;
+
+  // Point size was only ever (re)applied by the rAF-throttled effect below, which fires on slider drag
+  // or on the INITIAL loadArgs change — but tiles for a large point cloud keep streaming in well after
+  // that first effect run finds nothing yet to restyle (`tiles.group` is still empty at that instant).
+  // Every subsequently-loaded tile then rendered at three.js's PointsMaterial default size until the
+  // user nudged the slider by hand. Apply it per newly-loaded tile too, not just on slider changes.
+  const onLoadContentModel = useCallback((e: any) => {
+    buildBoundsTrees(e.scene);
+    if (isPoints) {
+      e.scene.traverse((o: any) => { if (o.isPoints && o.material) o.material.size = pointSizeRef.current; });
+    }
+  }, [isPoints]);
 
   // Canvas runs frameloop="demand" (see below) — controls/TilesRenderer/CameraTransition all invalidate()
   // themselves on their own 'change'/'needs-update' events, but a bare controls/plugin remount (switching
@@ -505,7 +563,7 @@ const Scene = forwardRef<ViewerHandle, { loadArgs: LoadArgs }>(function Scene({ 
           url={loadArgs.url}
           errorTarget={errorTarget}
           onLoadRootTileset={() => frameToTileset(tilesRef.current)}
-          onLoadModel={(e: any) => buildBoundsTrees(e.scene)}
+          onLoadModel={onLoadContentModel}
         >
           {/* 3D Tiles 1.1 implicit tiling (OCTREE/QUADTREE `.subtree` expansion) — unlike Cesium, 3DTRJS
               has no built-in support for `implicitTiling` root nodes; without this plugin a tileset that
@@ -513,10 +571,11 @@ const Scene = forwardRef<ViewerHandle, { loadArgs: LoadArgs }>(function Scene({ 
               implicit roots) never expands past the root tile. Plug-and-play, no options, and a no-op on
               explicit tilesets (only triggers on nodes that actually carry `implicitTiling`). */}
           <TilesPlugin plugin={ImplicitTilingPlugin as any} />
+          <TilesPlugin plugin={GLTFExtensionsPlugin as any} args={{ dracoLoader } as any} />
           {isSplat && <TilesPlugin plugin={GaussianSplatPlugin as any} args={{ renderer: gl, scene } as any} />}
           {debugTiles && <TilesPlugin plugin={DebugTilesPlugin as any} displayBoxBounds colorMode={7} />}
-          {controlMode === 'globe' && <GlobeControls ref={controlsRef} enableDamping dampingFactor={0.05} minDistance={1} />}
-          {controlMode === 'env' && <EnvironmentControls ref={controlsRef} enableDamping dampingFactor={0.05} minDistance={1} />}
+          {controlMode === 'globe' && <GlobeControls ref={controlsRef} scene={pickScene ?? undefined} enableDamping dampingFactor={0.05} minDistance={1} />}
+          {controlMode === 'env' && <EnvironmentControls ref={controlsRef} scene={pickScene ?? undefined} enableDamping dampingFactor={0.05} minDistance={1} />}
         </TilesRendererR3F>
       )}
       {controlMode === 'orbit' && <OrbitControls ref={controlsRef} enableDamping dampingFactor={0.05} />}
@@ -596,7 +655,13 @@ const ThreeDTRjsViewer = forwardRef<ViewerHandle, Props>(function ThreeDTRjsView
           OrbitControls' 'change'/'start'/'end' events, CameraTransition's own animation loop) already
           calls invalidate() itself when it has something new to draw — that's what makes demand mode
           safe here instead of freezing mid-load or mid-orbit. */}
-      <Canvas frameloop="demand" camera={{ fov: 60, near: 0.1, far: 1e8, position: [0, 0, 1e7] }} gl={{ logarithmicDepthBuffer: true }}>
+      {/* `flat`: R3F's Canvas defaults to ACESFilmicToneMapping (its own opinionated default, not a
+          three.js default) — a nonlinear rolloff that visibly darkens/desaturates vertex colors and
+          textures with no on-screen control for it. Point clouds/splats especially carry final,
+          already-correct sRGB color data (not HDR meant for filmic tone mapping) and just looked dim
+          compared to the identical data in Cesium (which does no such tone mapping) — this is the
+          "hidden brightness multiplier" affecting potree/COPC/mesh content alike. */}
+      <Canvas frameloop="demand" flat camera={{ fov: 60, near: 0.1, far: 1e8, position: [0, 0, 1e7] }} gl={{ logarithmicDepthBuffer: true }}>
         <Scene ref={sceneRef} loadArgs={loadArgs} />
       </Canvas>
     </div>
