@@ -81,6 +81,12 @@ interface ViewerStore {
   setSplatFormat: (v: string) => void;
   setSplatClip: (v: boolean) => void;
   setCropGizmoOn: (v: boolean) => void;
+  // Shared between the crop-box gizmo and the tileset-placement gizmo (3DTRJS only) — drei's
+  // TransformControls only ever does ONE of translate/rotate/scale at a time (W/E/R keys cycle it in
+  // plain three.js apps, but this app has no keyboard focus story for the canvas), so it needs an
+  // explicit UI control instead of only being reachable via keyboard shortcuts a user wouldn't know about.
+  gizmoMode: 'translate' | 'rotate' | 'scale';
+  setGizmoMode: (v: ViewerStore['gizmoMode']) => void;
 
   // Navigation
   collisionEnabled: boolean;
@@ -182,6 +188,8 @@ export const useViewerStore = create<ViewerStore>((set, get) => ({
   setSplatFormat: (v) => set({ splatFormat: v }),
   setSplatClip: (v) => set({ splatClip: v }),
   setCropGizmoOn: (v) => set({ cropGizmoOn: v }),
+  gizmoMode: 'translate',
+  setGizmoMode: (v) => set({ gizmoMode: v }),
 
   collisionEnabled: true,
   setCollisionEnabled: (v) => set({ collisionEnabled: v }),

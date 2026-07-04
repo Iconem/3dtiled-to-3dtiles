@@ -156,19 +156,27 @@ function GoogleGlobe() {
   );
 }
 
-// Drag (or press W/E/R to switch translate/rotate/scale, drei/three.js's standard TransformControls
-// shortcuts) directly on the loaded tileset's own root group — a manual alternative to typing lon/lat/
-// alt for tilesets with no geographic locator.
-function TilesetGizmo({ tilesRef }: { tilesRef: React.MutableRefObject<TilesRendererImpl | null> }) {
+// Drag directly on the loaded tileset's own root group — a manual alternative to typing lon/lat/alt
+// for tilesets with no geographic locator. `pickScene` (set once `frameToTileset` confirms the
+// tileset actually loaded — see the comment on its declaration) gates readiness instead of reading
+// `tilesRef.current` directly in render: a plain ref mutation doesn't trigger a re-render, so toggling
+// this gizmo on could easily land on a render where the ref was still null (tileset started loading
+// but hadn't finished) and permanently return null for THIS render — nothing forced a follow-up
+// render once the ref did populate. That's what "gizmo pill doesn't show it before I switch ortho/
+// persp mode" actually was: switching modes just happened to trigger an UNRELATED re-render at a
+// moment when the ref had since become valid.
+function TilesetGizmo({ tilesRef, pickScene }: { tilesRef: React.MutableRefObject<TilesRendererImpl | null>; pickScene: THREE.Object3D | null }) {
   const on = useViewerStore((s) => s.tilesetGizmoOn);
-  if (!on || !tilesRef.current) return null;
-  return <TransformControls object={tilesRef.current.group} mode="translate" />;
+  const mode = useViewerStore((s) => s.gizmoMode);
+  if (!on || !pickScene || !tilesRef.current) return null;
+  return <TransformControls object={tilesRef.current.group} mode={mode} />;
 }
 
-function CropGizmo({ tilesRef }: { tilesRef: React.MutableRefObject<TilesRendererImpl | null> }) {
+function CropGizmo({ tilesRef, pickScene }: { tilesRef: React.MutableRefObject<TilesRendererImpl | null>; pickScene: THREE.Object3D | null }) {
   const boxRef = useRef<THREE.Mesh>(null);
   const store = useViewerStore;
   const on = useViewerStore((s) => s.cropGizmoOn);
+  const mode = useViewerStore((s) => s.gizmoMode);
 
   useEffect(() => {
     const box = boxRef.current;
@@ -181,20 +189,31 @@ function CropGizmo({ tilesRef }: { tilesRef: React.MutableRefObject<TilesRendere
       const pos = new THREE.Vector3();
       ellipsoid.getCartographicToPosition(centerCarto.lat, centerCarto.lon, centerCarto.height, pos);
       box.position.copy(pos);
+      // Orient the box to the LOCAL East/North/Up frame at its own position, not left at world/ECEF
+      // identity — TransformControls' `space="local"` (below) then draws its arrows along this
+      // rotation, so dragging actually moves the box east/north/up instead of along whatever direction
+      // ECEF's global X/Y/Z axes happen to point at that spot on the globe ("only lets me translate
+      // along weird axes"). A quick, correct-enough basis: ellipsoid "up" from the normal, then two
+      // vectors perpendicular to it for east/north (exact heading doesn't matter for a crop box).
+      const up = ellipsoid.getPositionToNormal(pos, new THREE.Vector3());
+      const helper = Math.abs(up.y) < 0.99 ? new THREE.Vector3(0, 1, 0) : new THREE.Vector3(1, 0, 0);
+      const east = new THREE.Vector3().crossVectors(helper, up).normalize();
+      const north = new THREE.Vector3().crossVectors(up, east).normalize();
+      box.quaternion.setFromRotationMatrix(new THREE.Matrix4().makeBasis(east, up, north));
       const dLat = THREE.MathUtils.degToRad(n - s), dLon = THREE.MathUtils.degToRad(e - w);
       const R = 6378137;
       box.scale.set(Math.max(1, dLon * R * Math.cos(centerCarto.lat)), Math.max(1, maxH - minH), Math.max(1, dLat * R));
     }
   }, [on]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  if (!on) return null;
+  if (!on || !pickScene) return null;
   return (
     <>
-      <mesh ref={boxRef} visible={false}>
+      <mesh ref={boxRef}>
         <boxGeometry args={[1, 1, 1]} />
         <meshBasicMaterial color="cyan" wireframe />
       </mesh>
-      {boxRef.current && <TransformControls object={boxRef.current} mode="translate" />}
+      {boxRef.current && <TransformControls object={boxRef.current} mode={mode} space="local" />}
     </>
   );
 }
@@ -212,6 +231,21 @@ const Scene = forwardRef<ViewerHandle, { loadArgs: LoadArgs }>(function Scene({ 
   const store = useViewerStore;
   const [pendingFlyTo, setPendingFlyTo] = useState<{ lon: number; lat: number; height: number } | null>(null);
   const controlsRef = useRef<any>(null);
+  // Cached local "up" (ellipsoid surface normal) at the loaded tileset's own location — set once in
+  // frameToTileset, read by applyZOffsetInternal. null for non-georeferenced content (flat world-Y is
+  // already correct "up" there — it's only wrong for content sitting elsewhere on the globe's surface).
+  const upDirRef = useRef<THREE.Vector3 | null>(null);
+
+  // Z-offset used to be a flat `group.position.y = v` — correct only for local/non-georeferenced
+  // content near the world origin. For real georeferenced content sitting somewhere else on the
+  // ellipsoid, world +Y isn't "up" at that point (it's only ever "up" relative to Earth's own center),
+  // so a flat Y-set nudged the content sideways/diagonally instead of vertically — reported as "Z
+  // offset applied in the same weird CRS rather than ENU". Move along the cached local-up direction
+  // instead when one is available.
+  const applyZOffsetInternal = useCallback((tiles: TilesRendererImpl, v: number) => {
+    if (upDirRef.current) tiles.group.position.set(0, 0, 0).addScaledVector(upDirRef.current, v);
+    else tiles.group.position.y = v;
+  }, []);
 
   const controlMode = useViewerStore((s) => s.controlMode);
   const ortho = useViewerStore((s) => s.ortho);
@@ -270,15 +304,29 @@ const Scene = forwardRef<ViewerHandle, { loadArgs: LoadArgs }>(function Scene({ 
   // controls are active (orbit target, or globe/environment controls' internal state) to match.
   const frameToTileset = useCallback((tiles: TilesRendererImpl | null) => {
     if (!tiles) return;
-    // Z offset composes onto the tileset's own transform, so a freshly-loaded tileset needs it applied
-    // before we frame the camera on it — previously it only took effect the next time the user actually
-    // edited the Z-offset field on an already-loaded tileset.
-    const zOffset = store.getState().localFrame.zOffset;
-    if (zOffset) tiles.group.position.y = zOffset;
     const sphere = new THREE.Sphere();
     if (!(tiles as any).getBoundingSphere(sphere)) return;
     tiles.group.updateWorldMatrix(true, false);
     sphere.applyMatrix4(tiles.group.matrixWorld);
+    // Cache the local "up" direction (the ellipsoid surface normal at the tileset's OWN, pre-offset
+    // location) for applyZOffsetInternal below — must come from THIS bounding sphere, before the group
+    // moves; a flat world-Y offset (the previous behavior) only means "up" for content sitting near the
+    // world origin — for real georeferenced content sitting somewhere else on the globe's surface, "up"
+    // there is the ellipsoid's surface normal at that point, not the world +Y axis.
+    upDirRef.current = sphere.center.length() > 6378137 * 0.5 && (tiles as any).ellipsoid
+      ? (tiles as any).ellipsoid.getPositionToNormal(sphere.center, new THREE.Vector3())
+      : null;
+    // Z offset composes onto the tileset's own transform, so a freshly-loaded tileset needs it applied
+    // before we frame the camera on it — previously it only took effect the next time the user actually
+    // edited the Z-offset field on an already-loaded tileset. Re-derive the sphere afterward so framing
+    // below reflects the actual (offset-applied) final position, not the pre-offset one.
+    const zOffset = store.getState().localFrame.zOffset;
+    if (zOffset) {
+      applyZOffsetInternal(tiles, zOffset);
+      tiles.group.updateWorldMatrix(true, false);
+      (tiles as any).getBoundingSphere(sphere);
+      sphere.applyMatrix4(tiles.group.matrixWorld);
+    }
     // A tileset with no real geographic placement loads with its own local origin near (0,0,0) — its
     // group transform is never moved onto the WGS84 ellipsoid (that's what 3d-tiles-renderer's
     // ReorientationPlugin is for, and we intentionally don't register it: it would also recenter — and
@@ -501,7 +549,7 @@ const Scene = forwardRef<ViewerHandle, { loadArgs: LoadArgs }>(function Scene({ 
     applyZOffset(v) {
       const tiles = tilesRef.current;
       if (!tiles) return;
-      tiles.group.position.y = v;
+      applyZOffsetInternal(tiles, v);
       invalidate();
     },
     loadIonAsset() { store.getState().setStatus('Ion loading via 3DTRJS: not yet wired in this first pass.'); },
@@ -577,7 +625,7 @@ const Scene = forwardRef<ViewerHandle, { loadArgs: LoadArgs }>(function Scene({ 
     hideCropGizmo() { store.getState().setCropGizmoOn(false); },
     showTilesetGizmo() { store.getState().setTilesetGizmoOn(true); },
     hideTilesetGizmo() { store.getState().setTilesetGizmoOn(false); },
-  }), [camera, invalidate, frameToTileset]);
+  }), [camera, invalidate, frameToTileset, applyZOffsetInternal]);
 
   function flyToLocalFrameInternal(lon: number, lat: number, alt: number, range: number) {
     const tiles = tilesRef.current;
@@ -669,8 +717,8 @@ const Scene = forwardRef<ViewerHandle, { loadArgs: LoadArgs }>(function Scene({ 
           manager.syncCameras();
         }}
       />
-      <CropGizmo tilesRef={tilesRef} />
-      <TilesetGizmo tilesRef={tilesRef} />
+      <CropGizmo tilesRef={tilesRef} pickScene={pickScene} />
+      <TilesetGizmo tilesRef={tilesRef} pickScene={pickScene} />
       <GizmoHelper alignment="bottom-right" margin={[60, 60]}>
         <GizmoViewport />
       </GizmoHelper>

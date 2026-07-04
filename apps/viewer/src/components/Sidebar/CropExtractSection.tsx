@@ -103,6 +103,19 @@ export default function CropExtractSection({ activeHandleRef }: { activeHandleRe
             ⬚ 3D box gizmo (3DTRJS)
           </Button>
         )}
+        {url.renderer === '3dtrjs' && (s.cropGizmoOn || s.tilesetGizmoOn) && (
+          // drei's TransformControls only ever does ONE of translate/rotate/scale at a time — W/E/R
+          // keyboard shortcuts exist in plain three.js apps, but this canvas has no keyboard-focus
+          // story, so it needs an explicit control. Shared between the crop-box and tileset-placement
+          // gizmos (only one is normally on at a time anyway).
+          <div className="flex gap-1" title="Gizmo mode — only one of translate/rotate/scale is active at a time">
+            {(['translate', 'rotate', 'scale'] as const).map((m) => (
+              <Button key={m} size="sm" variant={s.gizmoMode === m ? 'default' : 'outline'} onClick={() => s.setGizmoMode(m)}>
+                {m === 'translate' ? '✥ T' : m === 'rotate' ? '↻ R' : '⤢ S'}
+              </Button>
+            ))}
+          </div>
+        )}
         <p className="text-xs text-muted-foreground">Extracts the loaded tileset within the box. Octree sources are fetched as explicit tiling.</p>
     </SidebarSection>
   );
