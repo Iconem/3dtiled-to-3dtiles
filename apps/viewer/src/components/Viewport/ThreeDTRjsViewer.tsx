@@ -335,8 +335,31 @@ const Scene = forwardRef<ViewerHandle, { loadArgs: LoadArgs }>(function Scene({ 
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [camera, invalidate, setControlsPivot]);
 
+  // rAF-driven eased camera tween — Canvas runs frameloop="demand", so each step must invalidate() to
+  // actually get drawn. Used by double-click-to-zoom below (previously an instant one-frame jump).
+  const cameraTweenRef = useRef<number | null>(null);
+  const animateCameraTo = useCallback((toPos: THREE.Vector3, toLookAt: THREE.Vector3, durationMs = 450) => {
+    if (cameraTweenRef.current != null) cancelAnimationFrame(cameraTweenRef.current);
+    const fromPos = camera.position.clone();
+    const fromLookAt = controlsRef.current?.target?.clone() ?? camera.position.clone().add(camera.getWorldDirection(new THREE.Vector3()));
+    const t0 = performance.now();
+    const step = () => {
+      const t = Math.min(1, (performance.now() - t0) / durationMs);
+      const eased = t < 0.5 ? 2 * t * t : 1 - Math.pow(-2 * t + 2, 2) / 2; // ease-in-out-quad
+      camera.position.lerpVectors(fromPos, toPos, eased);
+      const lookAt = new THREE.Vector3().lerpVectors(fromLookAt, toLookAt, eased);
+      camera.lookAt(lookAt);
+      setControlsPivot(lookAt);
+      invalidate();
+      cameraTweenRef.current = t < 1 ? requestAnimationFrame(step) : null;
+    };
+    cameraTweenRef.current = requestAnimationFrame(step);
+  }, [camera, invalidate, setControlsPivot]);
+  useEffect(() => () => { if (cameraTweenRef.current != null) cancelAnimationFrame(cameraTweenRef.current); }, []);
+
   // Double-click to re-pivot + zoom halfway toward the clicked point — mirrors CesiumViewer's own
-  // LEFT_DOUBLE_CLICK handler (same 50%-lerp-toward-the-pick behavior) for consistency between renderers.
+  // LEFT_DOUBLE_CLICK handler (same 50%-lerp-toward-the-pick behavior) for consistency between
+  // renderers, animated with an ease-in/ease-out tween instead of an instant one-frame jump.
   useEffect(() => {
     const dom = gl.domElement;
     function onDblClick(e: MouseEvent) {
@@ -351,14 +374,55 @@ const Scene = forwardRef<ViewerHandle, { loadArgs: LoadArgs }>(function Scene({ 
       raycaster.setFromCamera(ndc, camera);
       const hit = raycaster.intersectObject(tiles.group, true)[0];
       if (!hit) return;
-      camera.position.lerp(hit.point, 0.5);
-      camera.lookAt(hit.point);
-      setControlsPivot(hit.point);
-      invalidate();
+      const targetPos = camera.position.clone().lerp(hit.point, 0.5);
+      animateCameraTo(targetPos, hit.point);
     }
     dom.addEventListener('dblclick', onDblClick);
     return () => dom.removeEventListener('dblclick', onDblClick);
-  }, [gl, camera, invalidate, setControlsPivot]);
+  }, [gl, camera, animateCameraTo]);
+
+  // Middle-mouse-drag to smoothly dolly in/out — a continuous alternative to the mousewheel's
+  // discrete zoom steps. Vertical drag distance maps to a fraction of the current camera-to-pivot
+  // distance moved per frame (not a fixed world-space speed), so it feels consistent whether you're
+  // orbiting a whole city or a single point-cloud sample — exactly how the wheel-zoom step already
+  // scales in these controls.
+  useEffect(() => {
+    const dom = gl.domElement;
+    let dragging = false;
+    let lastY = 0;
+    function getPivot(): THREE.Vector3 {
+      const controls = controlsRef.current;
+      if (controls?.target) return controls.target;
+      if (controls?.getPivotPoint) { const p = new THREE.Vector3(); controls.getPivotPoint(p); return p; }
+      return camera.position.clone().add(camera.getWorldDirection(new THREE.Vector3()).multiplyScalar(100));
+    }
+    function onMouseDown(e: MouseEvent) {
+      if (e.button !== 1) return;
+      dragging = true; lastY = e.clientY;
+      e.preventDefault();
+    }
+    function onMouseMove(e: MouseEvent) {
+      if (!dragging) return;
+      const dy = e.clientY - lastY;
+      lastY = e.clientY;
+      const pivot = getPivot();
+      const toCam = camera.position.clone().sub(pivot);
+      // Drag down (+dy) dollies out, drag up dollies in — matches the mousewheel's own convention.
+      const scale = Math.exp(dy * 0.005);
+      toCam.multiplyScalar(scale);
+      camera.position.copy(pivot).add(toCam);
+      invalidate();
+    }
+    function onMouseUp(e: MouseEvent) { if (e.button === 1) dragging = false; }
+    dom.addEventListener('mousedown', onMouseDown);
+    window.addEventListener('mousemove', onMouseMove);
+    window.addEventListener('mouseup', onMouseUp);
+    return () => {
+      dom.removeEventListener('mousedown', onMouseDown);
+      window.removeEventListener('mousemove', onMouseMove);
+      window.removeEventListener('mouseup', onMouseUp);
+    };
+  }, [gl, camera, invalidate]);
 
   const isSplat = loadArgs?.type === 'splat';
   const isPoints = loadArgs?.type === 'pointcloud';
