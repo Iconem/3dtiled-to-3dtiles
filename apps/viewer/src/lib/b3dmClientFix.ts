@@ -99,14 +99,19 @@ function fixGlbExtensionsUsed(glbBytes: Uint8Array): Uint8Array {
   try { json = JSON.parse(new TextDecoder().decode(glbBytes.subarray(jsonStart, jsonStart + jsonLen))); }
   catch { return glbBytes; }
 
-  const used = new Set<string>(json.extensionsUsed || []);
+  // Lille's b3dm-embedded glTFs crashed here with "(json.materials || []).forEach is not a
+  // function" — `|| []` only substitutes when the field is missing/falsy, not when it's present but
+  // malformed (e.g. an object instead of an array, seen in some real-world exports). Array.isArray
+  // guards against both cases.
+  const asArray = (v: any): any[] => (Array.isArray(v) ? v : []);
+  const used = new Set<string>(asArray(json.extensionsUsed));
   const before = used.size;
   const collect = (obj: any) => { if (obj?.extensions) Object.keys(obj.extensions).forEach((k) => used.add(k)); };
   collect(json);
-  (json.materials || []).forEach(collect);
-  (json.meshes || []).forEach((m: any) => (m.primitives || []).forEach(collect));
-  (json.nodes || []).forEach(collect);
-  (json.textures || []).forEach(collect);
+  asArray(json.materials).forEach(collect);
+  asArray(json.meshes).forEach((m: any) => asArray(m?.primitives).forEach(collect));
+  asArray(json.nodes).forEach(collect);
+  asArray(json.textures).forEach(collect);
   if (used.size === before) return glbBytes; // nothing to fix
 
   json.extensionsUsed = [...used];

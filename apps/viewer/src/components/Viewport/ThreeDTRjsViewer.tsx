@@ -21,7 +21,7 @@ import { GaussianSplatPlugin } from '3d-tiles-rendererjs-3dgs-plugin';
 import * as THREE from 'three';
 import { acceleratedRaycast, computeBoundsTree, disposeBoundsTree } from 'three-mesh-bvh';
 import type { ViewerHandle } from '@/lib/viewer-handle';
-import type { AssetType } from '@/lib/formats';
+import { MW, type AssetType } from '@/lib/formats';
 import { CESIUM_ION_TOKEN } from '@/lib/ion';
 import { GOOGLE_MAPS_API_KEY } from '@/lib/google';
 import { installB3dmClientFixes } from '@/lib/b3dmClientFix';
@@ -86,6 +86,23 @@ function buildBoundsTrees(scene: THREE.Object3D) {
   });
 }
 
+// Points have zero raycast area — a bare THREE.Raycaster needs a near-exact pixel hit to register
+// anything at all, which is what made "double-click to zoom" often miss on point clouds. Widen the hit
+// test to accept anything within ~15 screen pixels of the ray, converted to a world-space radius that
+// scales with distance (so it feels like a constant 15px whether zoomed into a single sample or looking
+// at a whole city, the same idea behind GlobeControls' own pixel-based tolerances) — harmless for
+// mesh/triangle raycasts, `params.Points` is only ever consulted when testing THREE.Points objects.
+// `refPoint` estimates how far into the scene the click will likely land — there's an inherent
+// chicken-and-egg problem (the real distance isn't known until AFTER the raycast), so callers pass the
+// last-framed tileset's own bounding-sphere center as a reasonable stand-in for "roughly how far away
+// things are here".
+function applyPointsPickTolerance(raycaster: THREE.Raycaster, camera: THREE.Camera, dom: HTMLElement, refPoint: THREE.Vector3, pixelRadius = 15) {
+  const fovRad = THREE.MathUtils.degToRad((camera as THREE.PerspectiveCamera).fov ?? 60);
+  const distance = camera.position.distanceTo(refPoint) || 1;
+  const worldPerPixel = (2 * distance * Math.tan(fovRad / 2)) / (dom.clientHeight || 1);
+  raycaster.params.Points.threshold = worldPerPixel * pixelRadius;
+}
+
 // R3F port of viewer.html's 3DTilesRendererJS section (lines ~1838-2753). Uses 3d-tiles-renderer's
 // OFFICIAL /r3f components (<TilesRenderer>, <TilesPlugin>, <GlobeControls>, <EnvironmentControls>,
 // <CameraTransition>) instead of hand-rolled imperative three.js — see the plan file for why. The
@@ -109,26 +126,32 @@ type LoadArgs = { url: string; type: AssetType; sseOverride?: number | null } | 
 // texture — NOT an <img> tag (which is how Cesium's own imagery pipeline gets away with hotlinking the
 // same URL: a cross-origin <img> can be uploaded as a texture with no CORS headers at all, it just taints
 // the canvas for pixel *readback*, which a basemap never needs). Under fetch()'s default `mode: 'cors'`,
-// a same response with no ACAO header makes the fetch() Promise reject outright — the request still hits
-// the wire (so it isn't a URL-template bug) but the overlay never gets bytes, so it silently never
-// textures anything and never throws (a previous attempt routing this through the tile-server's own
-// CORS-adding proxy also mysteriously fired zero tile requests — root cause not found at the time, but
-// is consistent with the same fetch()-vs-CORS mismatch: TiledImageSource still called fetch() against
-// the FINAL destination's own headers once the proxy handed back a redirect/passthrough in some paths).
-// Fix: force `mode: 'no-cors'` for Google's fetches specifically. The response is opaque (no readable
-// status/headers) but its body IS still readable — `TiledImageSource.fetchItem` never checks `res.ok`,
-// it goes straight to `res.arrayBuffer()` → `createImageBitmap`, which decodes fine from an opaque body.
-// OSM is left on the CORS-checked default since its tile server sends real ACAO headers and a stricter
-// mode gives cleaner 404 handling for genuinely-missing tiles.
+// a response with no ACAO header makes the fetch() Promise reject outright, so the overlay never gets
+// bytes and silently never textures anything.
+//
+// A first attempt forced `mode: 'no-cors'` for Google's fetches, reasoning that TiledImageSource never
+// checks `res.ok` before `res.arrayBuffer()` so an opaque body should still decode — WRONG in practice:
+// verified live that Chrome returns a genuinely EMPTY (0-byte) body for an opaque cross-origin response
+// (a Spectre-era mitigation — opaque bodies aren't actually readable via fetch(), despite older docs/
+// assumptions), so createImageBitmap always fails to decode.
+//
+// The actual fix: route Google's tile requests through this app's own tile-server, which already has a
+// generic CORS-adding passthrough (`/proxy?url=<source>`, packages/tile-server/proxy-live.js) — verified
+// live that fetching a tile THROUGH it returns a real, decodable 256×256 JPEG. Crucially, the proxy
+// prefix must be applied via `preprocessURL` (an ImageOverlay constructor option, invoked in
+// ImageOverlay.fetch() AFTER XYZImageSource.getUrl() has already substituted real x/y/z into the
+// template) rather than baked into the raw URL template up front — `encodeURIComponent`-ing the whole
+// `.../proxy?url=https://mt1.google.com/vt/lyrs=y&x={x}&y={y}&z={z}` string turns the `{`/`}` into
+// `%7B`/`%7D`, and XYZImageSource's placeholder-replace regex (which matches literal `{x}` etc.) then
+// never matches — every tile silently requests the exact same broken literal-`{x}` URL forever. That's
+// almost certainly what "a previous attempt through the proxy fired zero *varying* tile requests" was.
 const BASEMAP_URL: Record<'osm' | 'google', string> = {
   osm: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
   google: 'https://mt1.google.com/vt/lyrs=y&x={x}&y={y}&z={z}',
 };
-const BASEMAP_FETCH_OPTIONS: Partial<Record<'osm' | 'google', RequestInit>> = {
-  google: { mode: 'no-cors' },
-};
 function makeBasemapOverlay(basemap: 'osm' | 'google') {
-  return new XYZTilesOverlay({ url: BASEMAP_URL[basemap], fetchOptions: BASEMAP_FETCH_OPTIONS[basemap] } as any);
+  const preprocessURL = basemap === 'google' ? (url: string) => `${MW}/proxy?url=${encodeURIComponent(url)}` : undefined;
+  return new XYZTilesOverlay({ url: BASEMAP_URL[basemap], preprocessURL } as any);
 }
 
 // Real slippy-map (XYZ) tile draping over a procedurally-generated WGS84 ellipsoid — no real terrain
@@ -483,6 +506,7 @@ const Scene = forwardRef<ViewerHandle, { loadArgs: LoadArgs }>(function Scene({ 
         -((e.clientY - rect.top) / rect.height) * 2 + 1,
       );
       const raycaster = new THREE.Raycaster();
+      applyPointsPickTolerance(raycaster, camera, dom, lastSphereCenterRef.current ?? camera.position);
       raycaster.setFromCamera(ndc, camera);
       const hit = raycaster.intersectObject(tiles.group, true)[0];
       if (!hit) return;
@@ -527,6 +551,7 @@ const Scene = forwardRef<ViewerHandle, { loadArgs: LoadArgs }>(function Scene({ 
         -((e.clientY - rect.top) / rect.height) * 2 + 1,
       );
       const raycaster = new THREE.Raycaster();
+      applyPointsPickTolerance(raycaster, camera, dom, lastSphereCenterRef.current ?? camera.position);
       raycaster.setFromCamera(ndc, camera);
       const hit = tilesRef.current ? raycaster.intersectObject(tilesRef.current.group, true)[0] : undefined;
       if (hit) return hit.point;
@@ -682,6 +707,7 @@ const Scene = forwardRef<ViewerHandle, { loadArgs: LoadArgs }>(function Scene({ 
       // terrain"). A per-corner ellipsoid intersection is a flat-ground approximation (no real terrain
       // elevation), which is fine for a rough crop-box starting point.
       const raycaster = new THREE.Raycaster();
+      applyPointsPickTolerance(raycaster, camera, gl.domElement, lastSphereCenterRef.current ?? camera.position);
       const corners: THREE.Vector3[] = [];
       for (const [nx, ny] of [[0, 0], [-0.9, -0.9], [0.9, -0.9], [-0.9, 0.9], [0.9, 0.9]]) {
         raycaster.setFromCamera(new THREE.Vector2(nx, ny), camera);
@@ -692,15 +718,43 @@ const Scene = forwardRef<ViewerHandle, { loadArgs: LoadArgs }>(function Scene({ 
       }
       let w: number, e: number, s: number, n: number, minH: number, maxH: number;
       if (corners.length) {
-        const lons: number[] = [], lats: number[] = [], heights: number[] = [];
+        // Project each corner into a local East-North-Up tangent frame at their centroid and take
+        // min/max in TRUE east/north METERS there, rather than raw lon/lat min/max — plain degree
+        // min/max is skewed by cos(latitude) (a degree of longitude is NOT the same ground distance as
+        // a degree of latitude except at the equator) and doesn't correspond to any consistent
+        // screen-aligned rectangle for an off-axis camera either way (reported as "doesn't use ENU" +
+        // "weird ratio vs screen"). Converting the resulting east/north half-extents back to degrees
+        // with the correct per-axis scale keeps the box the crop store expects (a plain geographic
+        // bbox, no rotation field) while making its SIZE track true ground distance at the view center.
+        // This still won't exactly match the screen's aspect ratio for a camera not looking straight
+        // down or due north — that would need a rotated box, which the crop data model doesn't support.
+        const center = new THREE.Vector3();
+        corners.forEach((c) => center.add(c));
+        center.divideScalar(corners.length);
+        const centerCarto: any = {};
+        ellipsoid.getPositionToCartographic(center, centerCarto);
+        const up = ellipsoid.getPositionToNormal(center, new THREE.Vector3());
+        const helper = Math.abs(up.y) < 0.99 ? new THREE.Vector3(0, 1, 0) : new THREE.Vector3(1, 0, 0);
+        const east = new THREE.Vector3().crossVectors(helper, up).normalize();
+        const north = new THREE.Vector3().crossVectors(up, east).normalize();
+        let minE = Infinity, maxE = -Infinity, minN = Infinity, maxN = -Infinity;
+        const heights: number[] = [];
+        const rel = new THREE.Vector3();
         for (const c of corners) {
+          rel.subVectors(c, center);
+          const de = rel.dot(east), dn = rel.dot(north);
+          minE = Math.min(minE, de); maxE = Math.max(maxE, de);
+          minN = Math.min(minN, dn); maxN = Math.max(maxN, dn);
           const carto: any = {};
           ellipsoid.getPositionToCartographic(c, carto);
-          lons.push(THREE.MathUtils.radToDeg(carto.lon));
-          lats.push(THREE.MathUtils.radToDeg(carto.lat));
           heights.push(carto.height);
         }
-        w = Math.min(...lons); e = Math.max(...lons); s = Math.min(...lats); n = Math.max(...lats);
+        const R = 6378137;
+        const cosLat = Math.max(0.1, Math.cos(centerCarto.lat));
+        w = THREE.MathUtils.radToDeg(centerCarto.lon + minE / (R * cosLat));
+        e = THREE.MathUtils.radToDeg(centerCarto.lon + maxE / (R * cosLat));
+        s = THREE.MathUtils.radToDeg(centerCarto.lat + minN / R);
+        n = THREE.MathUtils.radToDeg(centerCarto.lat + maxN / R);
         minH = Math.min(...heights); maxH = Math.max(...heights);
       } else {
         // No ray hit anything visible (e.g. camera framing content too loosely) — fall back to the

@@ -161,14 +161,18 @@ export function fixGlbExtensionsUsed(glb) {
   try { json = JSON.parse(glb.slice(jsonStart, jsonStart + jsonLen).toString('utf8')); }
   catch { return glb; }
 
-  const used = new Set(json.extensionsUsed || []);
+  // `|| []` only substitutes when the field is missing/falsy, not when it's present but malformed
+  // (e.g. an object instead of an array — seen in some real-world b3dm-embedded glTFs, crashed with
+  // "(json.materials || []).forEach is not a function"). Array.isArray guards against both cases.
+  const asArray = (v) => (Array.isArray(v) ? v : []);
+  const used = new Set(asArray(json.extensionsUsed));
   const before = used.size;
   const collect = (obj) => { if (obj?.extensions) Object.keys(obj.extensions).forEach((k) => used.add(k)); };
   collect(json);
-  (json.materials || []).forEach(collect);
-  (json.meshes || []).forEach((m) => (m.primitives || []).forEach(collect));
-  (json.nodes || []).forEach(collect);
-  (json.textures || []).forEach(collect);
+  asArray(json.materials).forEach(collect);
+  asArray(json.meshes).forEach((m) => asArray(m?.primitives).forEach(collect));
+  asArray(json.nodes).forEach(collect);
+  asArray(json.textures).forEach(collect);
   if (used.size === before) return glb;                  // nothing to fix
 
   json.extensionsUsed = [...used];
