@@ -8,7 +8,7 @@ import {
   EnvironmentControls,
   CameraTransition,
 } from '3d-tiles-renderer/r3f';
-import { DebugTilesPlugin, XYZTilesOverlay, QuantizedMeshPlugin, CesiumIonAuthPlugin, ImageOverlayPlugin } from '3d-tiles-renderer/plugins';
+import { DebugTilesPlugin, XYZTilesOverlay, QuantizedMeshPlugin, CesiumIonAuthPlugin, ImageOverlayPlugin, GoogleCloudAuthPlugin } from '3d-tiles-renderer/plugins';
 // GeneratedSurfacePlugin is exported at runtime (3d-tiles-renderer/src/three/plugins/index.js) but
 // missing from this package's .d.ts — imported via the namespace + cast to dodge the stale types.
 import * as ThreeTilesPlugins from '3d-tiles-renderer/plugins';
@@ -21,6 +21,7 @@ import type { ViewerHandle } from '@/lib/viewer-handle';
 import type { AssetType } from '@/lib/formats';
 import { MW } from '@/lib/formats';
 import { CESIUM_ION_TOKEN } from '@/lib/ion';
+import { GOOGLE_MAPS_API_KEY } from '@/lib/google';
 import { useViewerStore } from '@/state/store';
 
 // GlobeControls/EnvironmentControls raycast the loaded scene on every drag/zoom interaction to find
@@ -114,17 +115,16 @@ function TerrainGlobe({ basemap, gl }: { basemap: 'google' | 'osm' | 'none'; gl:
   );
 }
 
-// Google Photorealistic 3D Tiles — Ion asset 2275207, the SAME well-known public asset ID Cesium's own
-// `Cesium.createGooglePhotorealistic3DTileset()` uses internally. No separate Google Maps Platform key
-// needed: Cesium ion brokers access to this asset for any ion account (same token as World Terrain
-// above), which is exactly how CesiumViewer's terrainMode==='google' already authenticates — confirmed
-// by reading its own createGooglePhotorealistic3DTileset() call, which takes no explicit key argument.
-// Already fully textured (real photos baked into the mesh) — no separate basemap imagery overlay needed
-// or wanted here, unlike TerrainGlobe above.
+// Google Photorealistic 3D Tiles — 3d-tiles-renderer's own first-party GoogleCloudAuthPlugin, using a
+// real Google Maps Platform key (lib/google.ts) rather than brokering through Cesium ion. The plugin
+// sets tiles.rootURL itself (https://tile.googleapis.com/v1/3dtiles/root.json) when unset, same
+// self-resolving pattern as CesiumIonAuthPlugin above — no separate `url` prop needed. Already fully
+// textured (real photos baked into the mesh) — no separate basemap imagery overlay needed or wanted
+// here, unlike TerrainGlobe above.
 function GoogleGlobe() {
   return (
     <TilesRendererR3F onLoadModel={(e: any) => buildBoundsTrees(e.scene)}>
-      <TilesPlugin plugin={CesiumIonAuthPlugin as any} args={{ apiToken: CESIUM_ION_TOKEN, assetId: '2275207', autoRefreshToken: true } as any} />
+      <TilesPlugin plugin={GoogleCloudAuthPlugin as any} args={{ apiToken: GOOGLE_MAPS_API_KEY, autoRefreshToken: true } as any} />
     </TilesRendererR3F>
   );
 }
