@@ -8,8 +8,22 @@
 // non-browser evaluation (e.g. a Node-based tooling script importing this file directly).
 const ORIGIN_HOST = typeof window !== 'undefined' ? window.location.hostname : 'localhost';
 const ORIGIN_PROTOCOL = typeof window !== 'undefined' ? window.location.protocol : 'http:';
-export const MW = `${ORIGIN_PROTOCOL}//${ORIGIN_HOST}:3001`; // tile-server middleware
-export const SDATA = `${ORIGIN_PROTOCOL}//${ORIGIN_HOST}:3000/sample-data`; // sample data served by the MAIN vite dev server
+
+// Sample data is always served by the SAME origin as this app itself (vite's dev server in local dev,
+// the viewer's own static file server in prod) — window.location.origin already carries the right
+// port implicitly (or no port at all behind a reverse proxy on 443), so no hardcoded ":3000" is needed
+// here at all. Only kept a literal fallback for non-browser evaluation.
+const ORIGIN = typeof window !== 'undefined' ? window.location.origin : `${ORIGIN_PROTOCOL}//${ORIGIN_HOST}:3000`;
+export const SDATA = `${ORIGIN}/sample-data`;
+
+// The tile-server middleware, UNLIKE sample data above, is a genuinely separate origin in a real
+// deployment behind a reverse proxy (e.g. Traefik routing viewer.example.com and
+// tiles.example.com to two different containers, each on its own :443 — not the same host on a
+// different port the way local dev's ORIGIN_HOST + ':3001' assumes). That can't be derived from
+// window.location, so it's a build-time Vite env var, baked into the static bundle by the Dockerfile
+// (see its viewer-build stage) — falls back to the same-host-different-port pattern for local dev and
+// the bundled (non-Traefik) docker-compose.yml, where that assumption still holds.
+export const MW = import.meta.env.VITE_TILE_SERVER_URL || `${ORIGIN_PROTOCOL}//${ORIGIN_HOST}:3001`;
 
 export type AssetType = 'mesh' | 'pointcloud' | 'splat';
 

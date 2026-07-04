@@ -28,12 +28,25 @@ export async function glbV1toV2(glbV1) {
 
 /**
  * Return the byte offset of the embedded GLB inside a b3dm file/buffer.
- * b3dm header layout (all uint32LE, 28 bytes total):
+ * Current-spec b3dm header layout (all uint32LE, 28 bytes total):
  *   magic(4) version(4) byteLength(4) ftJSONLen(4) ftBinLen(4) btJSONLen(4) btBinLen(4)
  */
 export function b3dmGlbOffset(buf) {
   if (buf.toString('ascii', 0, 4) !== 'b3dm') throw new Error('Not a b3dm file');
-  return 28 + buf.readUInt32LE(12) + buf.readUInt32LE(16) + buf.readUInt32LE(20) + buf.readUInt32LE(24);
+  const isGlbStart = (off) => off + 4 <= buf.length && (buf.readUInt32LE(off) === 0x46546c67 /* 'glTF' */ || buf[off] === 0x7b /* '{' */);
+
+  const specOffset = 28 + buf.readUInt32LE(12) + buf.readUInt32LE(16) + buf.readUInt32LE(20) + buf.readUInt32LE(24);
+  if (isGlbStart(specOffset)) return specOffset;
+
+  // Some real-world tilesets (e.g. Marseille_Cesium's root.b3dm) predate the 28-byte spec header
+  // and pack as few as 20 bytes (magic+version+byteLength, no feature/batch tables at all) before
+  // the glTF starts. Blindly trusting the spec field layout on these reads the glTF magic bytes
+  // themselves as a byteLength, producing a garbage offset that throws a Buffer bounds error.
+  // Scan the plausible legacy offsets for the actual glTF/JSON magic instead.
+  for (const off of [12, 16, 20, 24]) {
+    if (isGlbStart(off)) return off;
+  }
+  throw new Error('b3dm: could not locate embedded glTF (unrecognized header layout)');
 }
 
 /** Slice the embedded GLB out of a b3dm Buffer (zero-copy view, no version check). */
@@ -53,7 +66,7 @@ export function b3dmToGlb(buf) {
 export async function b3dmToGlb2(buf) {
   let glb = buf.slice(b3dmGlbOffset(buf));
   if (glb.readUInt32LE(4) === 1) glb = await glbV1toV2(glb);
-  return bakeCesiumRtc(glb);
+  return fixGlbExtensionsUsed(bakeCesiumRtc(glb));
 }
 
 // ── CESIUM_RTC → node translation ──────────────────────────────────────────────
@@ -122,6 +135,44 @@ export function bakeCesiumRtc(glb) {
   if (json.extensionsRequired) { json.extensionsRequired = strip(json.extensionsRequired); if (!json.extensionsRequired.length) delete json.extensionsRequired; }
 
   // Extract the BIN chunk (unchanged) and repack with the new JSON.
+  const binStart = jsonStart + jsonLen;
+  let bin = null;
+  if (binStart + 8 <= glb.length) {
+    const binLen = glb.readUInt32LE(binStart);
+    bin = glb.slice(binStart + 8, binStart + 8 + binLen);
+  }
+  return repackGlb(json, bin);
+}
+
+/**
+ * Some real-world b3dm-embedded glTFs (e.g. Clermont's mesh_*.b3dm tiles) declare a material
+ * `extensions` block (KHR_materials_unlit here) without listing it in extensionsUsed, which the
+ * glTF 2.0 spec requires. Three.js's GLTFLoader only instantiates an extension's handler plugin
+ * (GLTFMaterialsUnlitExtension, etc.) when extensionsUsed names it — with the entry missing, the
+ * handler is never created, and GLTFParser.loadMaterial crashes on `undefined.getMaterialType()`
+ * when it later tries to use it. Patch extensionsUsed to include every extension actually
+ * referenced so conformant loaders handle it. No-op if nothing is missing.
+ */
+export function fixGlbExtensionsUsed(glb) {
+  if (glb.readUInt32LE(0) !== 0x46546C67) return glb;   // not a GLB
+  const jsonLen   = glb.readUInt32LE(12);
+  const jsonStart = 20;
+  let json;
+  try { json = JSON.parse(glb.slice(jsonStart, jsonStart + jsonLen).toString('utf8')); }
+  catch { return glb; }
+
+  const used = new Set(json.extensionsUsed || []);
+  const before = used.size;
+  const collect = (obj) => { if (obj?.extensions) Object.keys(obj.extensions).forEach((k) => used.add(k)); };
+  collect(json);
+  (json.materials || []).forEach(collect);
+  (json.meshes || []).forEach((m) => (m.primitives || []).forEach(collect));
+  (json.nodes || []).forEach(collect);
+  (json.textures || []).forEach(collect);
+  if (used.size === before) return glb;                  // nothing to fix
+
+  json.extensionsUsed = [...used];
+
   const binStart = jsonStart + jsonLen;
   let bin = null;
   if (binStart + 8 <= glb.length) {

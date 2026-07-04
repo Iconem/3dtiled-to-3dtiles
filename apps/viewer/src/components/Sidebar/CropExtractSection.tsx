@@ -43,7 +43,12 @@ export default function CropExtractSection({ activeHandleRef }: { activeHandleRe
 
   function setToView() {
     const bbox = h()?.setCropToView();
-    if (bbox) s.setStatus('Crop box set from current view.');
+    if (bbox) {
+      s.setStatus('Crop box set from current view.');
+      // Populating the numbers without also showing the box left users wondering where it went
+      // ("set box to view does things, but is not shown") — turn the 3D gizmo on to match.
+      if (url.renderer === '3dtrjs' && !s.cropGizmoOn) { s.setCropGizmoOn(true); h()?.showCropGizmo?.(); }
+    }
   }
 
   return (

@@ -48,3 +48,8 @@ jobs:
           labels: ${{ steps.meta.outputs.labels }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
+          # Only consumed by the `viewer` target's ARG (see Dockerfile) — harmlessly ignored by the
+          # other two matrix targets, which never declare that ARG. Bakes the production tile-server's
+          # own Traefik-routed domain into the published viewer image's static bundle.
+          build-args: |
+            VITE_TILE_SERVER_URL=https://3dtiler.prod.heritagewatch.ai

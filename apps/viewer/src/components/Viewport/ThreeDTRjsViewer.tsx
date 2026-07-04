@@ -10,20 +10,27 @@ import {
 } from '3d-tiles-renderer/r3f';
 import { DebugTilesPlugin, XYZTilesOverlay, QuantizedMeshPlugin, CesiumIonAuthPlugin, ImageOverlayPlugin, GoogleCloudAuthPlugin, ImplicitTilingPlugin, GLTFExtensionsPlugin } from '3d-tiles-renderer/plugins';
 import { DRACOLoader } from 'three/addons/loaders/DRACOLoader.js';
+import { KTX2Loader } from 'three/addons/loaders/KTX2Loader.js';
 // GeneratedSurfacePlugin is exported at runtime (3d-tiles-renderer/src/three/plugins/index.js) but
 // missing from this package's .d.ts — imported via the namespace + cast to dodge the stale types.
 import * as ThreeTilesPlugins from '3d-tiles-renderer/plugins';
 const GeneratedSurfacePlugin = (ThreeTilesPlugins as any).GeneratedSurfacePlugin;
 import type { TilesRenderer as TilesRendererImpl } from '3d-tiles-renderer';
+import { PivotPointMesh } from '3d-tiles-renderer/src/three/renderer/controls/PivotPointMesh.js';
 import { GaussianSplatPlugin } from '3d-tiles-rendererjs-3dgs-plugin';
 import * as THREE from 'three';
 import { acceleratedRaycast, computeBoundsTree, disposeBoundsTree } from 'three-mesh-bvh';
 import type { ViewerHandle } from '@/lib/viewer-handle';
 import type { AssetType } from '@/lib/formats';
-import { MW } from '@/lib/formats';
 import { CESIUM_ION_TOKEN } from '@/lib/ion';
 import { GOOGLE_MAPS_API_KEY } from '@/lib/google';
+import { installB3dmClientFixes } from '@/lib/b3dmClientFix';
 import { useViewerStore } from '@/state/store';
+
+// Fixes Clermont/Marseille-style crashes (see b3dmClientFix.ts) for tilesets loaded directly, with
+// no ?tool=upgrade transform selected — those never touch packages/3dtiles-tools/upgrade.js's
+// already-working server-side fixes for the exact same two real-world b3dm spec violations.
+installB3dmClientFixes();
 
 // GlobeControls/EnvironmentControls raycast the loaded scene on every drag/zoom interaction to find
 // the point under the cursor to orbit/zoom around (so does our own double-click-to-pivot handler and
@@ -45,6 +52,14 @@ THREE.Mesh.prototype.raycast = acceleratedRaycast;
 // entirely, since 3d-tiles-renderer's GLTFExtensionsPlugin only wires Draco support when given a loader.
 const dracoLoader = new DRACOLoader();
 dracoLoader.setDecoderPath('https://www.gstatic.com/draco/versioned/decoders/1.5.6/');
+
+// KTX2/BasisU-textured content (Bing 3D is the one that surfaced it: "THREE.GLTFLoader: setKTX2Loader
+// must be called before loading KTX2 textures") needs a KTX2Loader too — unlike dracoLoader, it can't be
+// a plain module-level singleton: `detectSupport(renderer)` needs the actual WebGLRenderer instance to
+// pick GPU-native vs. software transcoding, which only exists once <Canvas> has mounted. Created inside
+// Scene (below) via useMemo once `gl` is available instead. Pinned to this repo's exact `three` version
+// (see root package.json) — the basis transcoder .wasm must match the loader JS that requests it.
+const KTX2_TRANSCODER_PATH = 'https://unpkg.com/three@0.180.0/examples/jsm/libs/basis/';
 
 // `TilesRendererBase.invokeOnePlugin('loadRootTileset')` runs the FIRST plugin (in registration-array
 // order) that implements the hook — and `registerPlugin` inserts a LOWER-priority plugin EARLIER in
@@ -88,18 +103,33 @@ interface Props { visible: boolean }
 type LoadArgs = { url: string; type: AssetType; sseOverride?: number | null } | null;
 
 // Google's raw mt1.google.com tile hotlink sends no Access-Control-Allow-Origin header at all (unlike
-// OSM's tile server, which does) — Cesium's <img>-based imagery pipeline can get away with that (it never
-// reads pixels back), but XYZTilesOverlay uploads the fetched bytes straight into a WebGL texture, which
-// the browser blocks outright for a cross-origin response with no CORS header. Routed through the
-// tile-server's already-existing generic byte-passthrough proxy (adds Access-Control-Allow-Origin: *)
-// instead of fetching mt1.google.com directly. {x}/{y}/{z} must stay LITERAL (not percent-encoded) since
-// XYZTilesOverlay substitutes them by plain string replacement on the whole URL, proxy prefix included.
-const proxied = (raw: string) => `${MW}/proxy?url=${encodeURIComponent(raw).replace('%7Bx%7D', '{x}').replace('%7By%7D', '{y}').replace('%7Bz%7D', '{z}')}`;
-
+// OSM's tile server, which does). That matters here because 3d-tiles-renderer's XYZTilesOverlay fetches
+// tiles with plain `fetch()` (TiledImageSource.fetchItem, in 3d-tiles-renderer/src/three/plugins/images/
+// sources/TiledImageSource.js) and feeds the bytes straight into `createImageBitmap` for a WebGL
+// texture — NOT an <img> tag (which is how Cesium's own imagery pipeline gets away with hotlinking the
+// same URL: a cross-origin <img> can be uploaded as a texture with no CORS headers at all, it just taints
+// the canvas for pixel *readback*, which a basemap never needs). Under fetch()'s default `mode: 'cors'`,
+// a same response with no ACAO header makes the fetch() Promise reject outright — the request still hits
+// the wire (so it isn't a URL-template bug) but the overlay never gets bytes, so it silently never
+// textures anything and never throws (a previous attempt routing this through the tile-server's own
+// CORS-adding proxy also mysteriously fired zero tile requests — root cause not found at the time, but
+// is consistent with the same fetch()-vs-CORS mismatch: TiledImageSource still called fetch() against
+// the FINAL destination's own headers once the proxy handed back a redirect/passthrough in some paths).
+// Fix: force `mode: 'no-cors'` for Google's fetches specifically. The response is opaque (no readable
+// status/headers) but its body IS still readable — `TiledImageSource.fetchItem` never checks `res.ok`,
+// it goes straight to `res.arrayBuffer()` → `createImageBitmap`, which decodes fine from an opaque body.
+// OSM is left on the CORS-checked default since its tile server sends real ACAO headers and a stricter
+// mode gives cleaner 404 handling for genuinely-missing tiles.
 const BASEMAP_URL: Record<'osm' | 'google', string> = {
   osm: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
-  google: proxied('https://mt1.google.com/vt/lyrs=y&x={x}&y={y}&z={z}'),
+  google: 'https://mt1.google.com/vt/lyrs=y&x={x}&y={y}&z={z}',
 };
+const BASEMAP_FETCH_OPTIONS: Partial<Record<'osm' | 'google', RequestInit>> = {
+  google: { mode: 'no-cors' },
+};
+function makeBasemapOverlay(basemap: 'osm' | 'google') {
+  return new XYZTilesOverlay({ url: BASEMAP_URL[basemap], fetchOptions: BASEMAP_FETCH_OPTIONS[basemap] } as any);
+}
 
 // Real slippy-map (XYZ) tile draping over a procedurally-generated WGS84 ellipsoid — no real terrain
 // tileset needed. GeneratedSurfacePlugin (its own, SEPARATE TilesRenderer, independent of whatever
@@ -109,7 +139,7 @@ const BASEMAP_URL: Record<'osm' | 'google', string> = {
 function Globe({ basemap }: { basemap: 'google' | 'osm' | 'none' }) {
   const pluginArgs = useMemo(() => {
     if (basemap === 'none') return null;
-    return { overlay: new XYZTilesOverlay({ url: BASEMAP_URL[basemap] }), shape: 'ellipsoid' as const, applyOverlayTexture: true };
+    return { overlay: makeBasemapOverlay(basemap), shape: 'ellipsoid' as const, applyOverlayTexture: true };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [basemap]);
   if (!pluginArgs) return null;
@@ -128,7 +158,7 @@ function Globe({ basemap }: { basemap: 'google' | 'osm' | 'none' }) {
 // geometry when a basemap is selected; terrain itself still renders (bare, Cesium's own material) with
 // basemap 'none'. This is the 3DTRJS equivalent of CesiumViewer's terrainMode==='cesium'.
 function TerrainGlobe({ basemap, gl }: { basemap: 'google' | 'osm' | 'none'; gl: THREE.WebGLRenderer }) {
-  const overlay = useMemo(() => (basemap === 'none' ? null : new XYZTilesOverlay({ url: BASEMAP_URL[basemap] })),
+  const overlay = useMemo(() => (basemap === 'none' ? null : makeBasemapOverlay(basemap)),
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [basemap]);
   return (
@@ -146,12 +176,13 @@ function TerrainGlobe({ basemap, gl }: { basemap: 'google' | 'osm' | 'none'; gl:
 // self-resolving pattern as CesiumIonAuthPlugin above — no separate `url` prop needed. Already fully
 // textured (real photos baked into the mesh) — no separate basemap imagery overlay needed or wanted
 // here, unlike TerrainGlobe above.
-function GoogleGlobe() {
+function GoogleGlobe({ ktxLoader }: { ktxLoader: KTX2Loader }) {
   return (
     <TilesRendererR3F onLoadModel={(e: any) => buildBoundsTrees(e.scene)}>
       <TilesPlugin plugin={GoogleCloudAuthPlugin as any} args={{ apiToken: GOOGLE_MAPS_API_KEY, autoRefreshToken: true } as any} />
-      {/* Google Photorealistic 3D Tiles ships Draco-compressed geometry — same decoder as content below. */}
-      <TilesPlugin plugin={GLTFExtensionsPlugin as any} args={{ dracoLoader } as any} />
+      {/* Google Photorealistic 3D Tiles ships Draco-compressed (and sometimes KTX2-textured) geometry —
+          same decoders as content below. */}
+      <TilesPlugin plugin={GLTFExtensionsPlugin as any} args={{ dracoLoader, ktxLoader } as any} />
     </TilesRendererR3F>
   );
 }
@@ -227,6 +258,13 @@ const Scene = forwardRef<ViewerHandle, { loadArgs: LoadArgs }>(function Scene({ 
   const camera = useThree((s) => s.camera);
   const gl = useThree((s) => s.gl);
   const scene = useThree((s) => s.scene);
+  const ktxLoader = useMemo(() => {
+    const loader = new KTX2Loader();
+    loader.setTranscoderPath(KTX2_TRANSCODER_PATH);
+    loader.detectSupport(gl);
+    return loader;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [gl]);
   const invalidate = useThree((s) => s.invalidate);
   const store = useViewerStore;
   const [pendingFlyTo, setPendingFlyTo] = useState<{ lon: number; lat: number; height: number } | null>(null);
@@ -235,6 +273,12 @@ const Scene = forwardRef<ViewerHandle, { loadArgs: LoadArgs }>(function Scene({ 
   // frameToTileset, read by applyZOffsetInternal. null for non-georeferenced content (flat world-Y is
   // already correct "up" there — it's only wrong for content sitting elsewhere on the globe's surface).
   const upDirRef = useRef<THREE.Vector3 | null>(null);
+  // Last-framed tileset bounding-sphere center — re-applied as the pivot/target whenever `controlMode`
+  // switches to a control scheme that wasn't mounted at load time (e.g. loading in 'globe' mode, then
+  // switching to 'orbit' afterward). Without this, a freshly-mounted OrbitControls initializes its own
+  // `.target` at the default (0,0,0) — for georeferenced (ECEF-scale) content that's ~Earth's center,
+  // not the tileset ("orbit pivot/target should be the tileset origin, not earth center").
+  const lastSphereCenterRef = useRef<THREE.Vector3 | null>(null);
 
   // Z-offset used to be a flat `group.position.y = v` — correct only for local/non-georeferenced
   // content near the world origin. For real georeferenced content sitting somewhere else on the
@@ -377,11 +421,31 @@ const Scene = forwardRef<ViewerHandle, { loadArgs: LoadArgs }>(function Scene({ 
     if (surfaceUp) camera.up.copy(surfaceUp);
     camera.lookAt(sphere.center);
     (camera as THREE.PerspectiveCamera).updateProjectionMatrix?.();
+    // EnvironmentControls.getUpDirection() (unlike GlobeControls, which overrides it with real
+    // per-point ellipsoid math) just returns `this.up`, which defaults to world +Y — wrong for
+    // georeferenced content sitting elsewhere on the globe's surface ("env controls should have ENU as
+    // up vector"). GlobeControls ignores this.up entirely (its own override takes over), so setting it
+    // unconditionally here is harmless for that mode.
+    if (surfaceUp && controlsRef.current?.up) controlsRef.current.up.copy(surfaceUp);
+    lastSphereCenterRef.current = sphere.center.clone();
     setControlsPivot(sphere.center);
     setPickScene(tiles.group);
     invalidate();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [camera, invalidate, setControlsPivot]);
+
+  // Re-sync the pivot/target and up-vector whenever a DIFFERENT control scheme mounts (e.g. loading a
+  // tileset in the default 'globe' mode, then switching to 'orbit' afterward) — a freshly-mounted
+  // OrbitControls/EnvironmentControls otherwise starts at its own default (0,0,0 target, world +Y up),
+  // which frameToTileset above never gets a chance to correct since it only runs once at load time.
+  useEffect(() => {
+    const controls = controlsRef.current;
+    if (!controls) return;
+    if (lastSphereCenterRef.current) setControlsPivot(lastSphereCenterRef.current);
+    if (upDirRef.current && controls.up) controls.up.copy(upDirRef.current);
+    controls.update?.();
+    invalidate();
+  }, [controlMode, setControlsPivot, invalidate]);
 
   // rAF-driven eased camera tween — Canvas runs frameloop="demand", so each step must invalidate() to
   // actually get drawn. Used by double-click-to-zoom below (previously an instant one-frame jump).
@@ -433,27 +497,59 @@ const Scene = forwardRef<ViewerHandle, { loadArgs: LoadArgs }>(function Scene({ 
   // discrete zoom steps. Vertical drag distance maps to a fraction of the current camera-to-pivot
   // distance moved per frame (not a fixed world-space speed), so it feels consistent whether you're
   // orbiting a whole city or a single point-cloud sample — exactly how the wheel-zoom step already
-  // scales in these controls.
+  // scales in these controls. The pivot is resolved ONCE, at drag-start, from the actual clicked
+  // point on the loaded tileset (raycast, like double-click-to-zoom above) rather than re-derived
+  // from controls.target every move — that's what makes it "zoom to that clicked point" instead of
+  // always the screen/orbit center. A PivotPointMesh (the exact same white-ring marker class
+  // GlobeControls/EnvironmentControls use for their own click-to-pivot indicator, deep-imported for
+  // visual consistency — see the ambient .d.ts in src/types) is shown at that point for the duration
+  // of the drag.
+  //
+  // MUST be Pointer Events, not Mouse Events: GlobeControls/EnvironmentControls install their own
+  // `pointerdown` listener on this same element and call `preventDefault()` on it unconditionally (see
+  // EnvironmentControls.js) — per the Pointer Events spec, that suppresses the browser's compatibility
+  // `mousedown`/`mousemove`/`mouseup` events entirely for that interaction, so a mousedown-based handler
+  // here would silently never fire (this was the actual "middle-click drag not working" bug — several
+  // *other* listeners on the same element don't block each other, only the mouse-event fallback does).
   useEffect(() => {
     const dom = gl.domElement;
     let dragging = false;
     let lastY = 0;
-    function getPivot(): THREE.Vector3 {
+    const pivot = new THREE.Vector3();
+    const pivotMesh = new PivotPointMesh();
+    pivotMesh.scale.setScalar(0.25); // same scale EnvironmentControls uses for its own indicator
+    pivotMesh.raycast = () => {}; // never itself pickable
+    pivotMesh.visible = false;
+    function resolvePivot(e: PointerEvent): THREE.Vector3 {
+      const rect = dom.getBoundingClientRect();
+      const ndc = new THREE.Vector2(
+        ((e.clientX - rect.left) / rect.width) * 2 - 1,
+        -((e.clientY - rect.top) / rect.height) * 2 + 1,
+      );
+      const raycaster = new THREE.Raycaster();
+      raycaster.setFromCamera(ndc, camera);
+      const hit = tilesRef.current ? raycaster.intersectObject(tilesRef.current.group, true)[0] : undefined;
+      if (hit) return hit.point;
       const controls = controlsRef.current;
-      if (controls?.target) return controls.target;
+      if (controls?.target) return controls.target.clone();
       if (controls?.getPivotPoint) { const p = new THREE.Vector3(); controls.getPivotPoint(p); return p; }
       return camera.position.clone().add(camera.getWorldDirection(new THREE.Vector3()).multiplyScalar(100));
     }
-    function onMouseDown(e: MouseEvent) {
+    function onPointerDown(e: PointerEvent) {
       if (e.button !== 1) return;
       dragging = true; lastY = e.clientY;
+      pivot.copy(resolvePivot(e));
+      pivotMesh.position.copy(pivot);
+      pivotMesh.updateMatrixWorld();
+      scene.add(pivotMesh);
+      pivotMesh.visible = true;
+      invalidate();
       e.preventDefault();
     }
-    function onMouseMove(e: MouseEvent) {
+    function onPointerMove(e: PointerEvent) {
       if (!dragging) return;
       const dy = e.clientY - lastY;
       lastY = e.clientY;
-      const pivot = getPivot();
       const toCam = camera.position.clone().sub(pivot);
       // Drag down (+dy) dollies out, drag up dollies in — matches the mousewheel's own convention.
       const scale = Math.exp(dy * 0.005);
@@ -461,16 +557,24 @@ const Scene = forwardRef<ViewerHandle, { loadArgs: LoadArgs }>(function Scene({ 
       camera.position.copy(pivot).add(toCam);
       invalidate();
     }
-    function onMouseUp(e: MouseEvent) { if (e.button === 1) dragging = false; }
-    dom.addEventListener('mousedown', onMouseDown);
-    window.addEventListener('mousemove', onMouseMove);
-    window.addEventListener('mouseup', onMouseUp);
+    function onPointerUp(e: PointerEvent) {
+      if (e.button !== 1) return;
+      dragging = false;
+      pivotMesh.visible = false;
+      pivotMesh.removeFromParent();
+      invalidate();
+    }
+    dom.addEventListener('pointerdown', onPointerDown);
+    window.addEventListener('pointermove', onPointerMove);
+    window.addEventListener('pointerup', onPointerUp);
     return () => {
-      dom.removeEventListener('mousedown', onMouseDown);
-      window.removeEventListener('mousemove', onMouseMove);
-      window.removeEventListener('mouseup', onMouseUp);
+      dom.removeEventListener('pointerdown', onPointerDown);
+      window.removeEventListener('pointermove', onPointerMove);
+      window.removeEventListener('pointerup', onPointerUp);
+      pivotMesh.removeFromParent();
+      pivotMesh.dispose();
     };
-  }, [gl, camera, invalidate]);
+  }, [gl, camera, invalidate, scene]);
 
   const isSplat = loadArgs?.type === 'splat';
   const isPoints = loadArgs?.type === 'pointcloud';
@@ -569,16 +673,22 @@ const Scene = forwardRef<ViewerHandle, { loadArgs: LoadArgs }>(function Scene({ 
       const tiles = tilesRef.current;
       const ellipsoid = (tiles as any)?.ellipsoid;
       if (!tiles || !ellipsoid) { store.getState().setStatus('Load a tileset in 3DTRJS to set the crop box from view.'); return null; }
-      // Raycast a handful of NDC points against the loaded content — tighter margins (±0.5, plus dead
-      // center) than before (±0.8) since the auto-frame-on-load fit doesn't always leave content
-      // reaching all the way to the far viewport corners, which made every ray miss and this silently
-      // no-op ("not working").
+      // Raycast the viewport's actual corners against the loaded content FIRST, but fall back to the
+      // bare ellipsoid surface per-corner when a ray misses the tileset geometry — e.g. zoomed out on
+      // a georeferenced dataset (Strasbourg) so the visible ground extends past the tileset's own
+      // extent. Without this fallback, corners that miss the tileset were just dropped, so the box
+      // silently shrank to "wherever the tileset happens to be" instead of the true viewport ground
+      // footprint ("set box to view uses the tileset rather than the viewport footprint on ellipsoid/
+      // terrain"). A per-corner ellipsoid intersection is a flat-ground approximation (no real terrain
+      // elevation), which is fine for a rough crop-box starting point.
       const raycaster = new THREE.Raycaster();
       const corners: THREE.Vector3[] = [];
-      for (const [nx, ny] of [[0, 0], [-0.5, -0.5], [0.5, -0.5], [-0.5, 0.5], [0.5, 0.5]]) {
+      for (const [nx, ny] of [[0, 0], [-0.9, -0.9], [0.9, -0.9], [-0.9, 0.9], [0.9, 0.9]]) {
         raycaster.setFromCamera(new THREE.Vector2(nx, ny), camera);
         const hit = raycaster.intersectObject(tiles.group, true)[0];
-        if (hit) corners.push(hit.point);
+        if (hit) { corners.push(hit.point); continue; }
+        const ground = ellipsoid.intersectRay(raycaster.ray, new THREE.Vector3());
+        if (ground) corners.push(ground);
       }
       let w: number, e: number, s: number, n: number, minH: number, maxH: number;
       if (corners.length) {
@@ -660,7 +770,7 @@ const Scene = forwardRef<ViewerHandle, { loadArgs: LoadArgs }>(function Scene({ 
       {showGlobe && (terrainMode === 'cesium' ? (
         <TerrainGlobe basemap={basemap} gl={gl} />
       ) : terrainMode === 'google' ? (
-        <GoogleGlobe />
+        <GoogleGlobe ktxLoader={ktxLoader} />
       ) : basemap === 'none' ? (
         <mesh>
           <sphereGeometry args={[6378137, 64, 64]} />
@@ -683,14 +793,20 @@ const Scene = forwardRef<ViewerHandle, { loadArgs: LoadArgs }>(function Scene({ 
               implicit roots) never expands past the root tile. Plug-and-play, no options, and a no-op on
               explicit tilesets (only triggers on nodes that actually carry `implicitTiling`). */}
           <TilesPlugin plugin={ImplicitTilingPlugin as any} />
-          <TilesPlugin plugin={GLTFExtensionsPlugin as any} args={{ dracoLoader } as any} />
+          <TilesPlugin plugin={GLTFExtensionsPlugin as any} args={{ dracoLoader, ktxLoader } as any} />
           {isSplat && <TilesPlugin plugin={GaussianSplatPlugin as any} args={{ renderer: gl, scene } as any} />}
           {debugTiles && <TilesPlugin plugin={DebugTilesPlugin as any} displayBoxBounds colorMode={7} />}
           {controlMode === 'globe' && <GlobeControls ref={controlsRef} scene={pickScene ?? undefined} enableDamping dampingFactor={0.05} minDistance={1} />}
           {controlMode === 'env' && <EnvironmentControls ref={controlsRef} scene={pickScene ?? undefined} enableDamping dampingFactor={0.05} minDistance={1} />}
         </TilesRendererR3F>
       )}
-      {controlMode === 'orbit' && <OrbitControls ref={controlsRef} enableDamping dampingFactor={0.05} />}
+      {/* makeDefault registers this as R3F's `state.controls` — same thing GlobeControls/EnvironmentControls
+          already do unconditionally (see 3d-tiles-renderer's ControlsBaseComponent). drei's own
+          <TransformControls> (the crop/tileset gizmos below) listens for exactly that and auto-pauses
+          `state.controls.enabled` while a gizmo handle is being dragged, so they stop fighting over the
+          same pointer drag ("clicking the gizmo should pause the control") — no extra wiring needed once
+          every control scheme is registered the same way. */}
+      {controlMode === 'orbit' && <OrbitControls ref={controlsRef} makeDefault enableDamping dampingFactor={0.05} />}
       <CameraTransition
         mode={ortho ? 'orthographic' : 'perspective'}
         onBeforeToggle={(manager: any) => {
