@@ -39,6 +39,7 @@ import { handleGltf } from './gltf-live.js';
 import { handleBing } from './bing-live.js';
 import { handleExtract } from './extract-live.js';
 import { handleProxy } from './proxy-live.js';
+import { handleHomepage } from './homepage-live.js';
 import { progressGet } from '../core/index.js';
 
 // Port resolution order: --port <n> (CLI, wins) → TILE_PORT → PORT → 3001. The CLI/TILE_PORT escape
@@ -87,6 +88,7 @@ http.createServer(async (req, res) => {
       res.writeHead(200, { 'Content-Type': 'application/json', ...CORS });
       return res.end(JSON.stringify(snap || { done: 0, total: 0, finished: false }));
     }
+    if (await handleHomepage(req, res, u)) return;    // / , /openapi.json, /playground (+ /docs alias)
     if (await handleTiles(req, res, u)) return;      // unified /tiles?cache= continuum entry (in-process, no redirect)
     if (await handleStream(req, res, u)) return;     // unified true-streaming dispatcher (copc/potree/sog/lcc/rad/i3s)
     if (await handleConvert(req, res, u)) return;    // any <fmt> → 3D Tiles live (preprocess + cache)
@@ -96,7 +98,7 @@ http.createServer(async (req, res) => {
     if (await handleBing(req, res, u)) return;            // /bing — Bing Maps 3D (tf=3dv4 GLB) → 3D Tiles
     if (await handleExtract(req, res, u)) return;         // /extract/las — bbox crop of a point cloud → LAS
     if (await handleProxy(req, res, u)) return;            // /proxy?url= — generic CORS-open passthrough for public sources
-    res.writeHead(404, CORS); res.end('not found — try /tiles, /stream, /convert, /3dtiles-self-contained, or /3dtiles-tools');
+    res.writeHead(404, CORS); res.end('not found — see / for a full list of endpoints, or /playground to try them interactively');
   } catch (e) {
     console.error('[tile-server]', e.stack || e.message);
     // A handler may have already started streaming a response — don't double-send headers (that throw
@@ -106,6 +108,7 @@ http.createServer(async (req, res) => {
   }
 }).listen(PORT, () => {
   console.log(`tile-server on http://localhost:${PORT}`);
+  console.log(`  playground  interactive API reference (Scalar, driven by /openapi.json) → /playground (alias: /docs)`);
   console.log(`  tiles    (unified, no redirect) /tiles/tileset.json?url=<SRC>&format=<fmt>&cache=<none|hierarchy|full>[&prefetch=N][&tiling=implicit|explicit]`);
   console.log(`  stream   (cache=none/hierarchy; copc/potree/sog/lcc/rad/i3s/threemx/geosplats) /stream/tileset.json?url=<SRC>&format=<fmt>[&cache=none|hierarchy][&prefetch=N]`);
   console.log(`  convert  (preprocess+cache, any fmt) /convert/tileset.json?url=<SRC>[&format=<fmt>][&centroids=1]`);

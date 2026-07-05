@@ -2273,6 +2273,27 @@ relative path with no token; confirmed live that the token is required per-resou
 with), so silently dropping it while resolving relative paths would re-break every child tile. Anything
 else (a tile GLB, a subtree binary) streams through byte-for-byte. Used by the Agisoft Jam pill.
 
+### API playground & OpenAPI schema (implemented ✅)
+
+`packages/tile-server` now has the "TiTiler-for-3D" bookend that title implies:
+
+- `GET /` — a minimal, titiler-style landing page (title, one-line description, a link list) instead
+  of a bare 404 at the root. Links to the playground, the OpenAPI JSON, this repo, and (if you set
+  `DOCS_URL`/`VIEWER_URL` in your own deployment's environment) your docs site and demo viewer —
+  deliberately not hardcoded to any real domain, same reasoning as the committed `docker-compose.yml`
+  staying reverse-proxy-agnostic.
+- `GET /openapi.json` — a hand-authored OpenAPI 3.0 spec covering every endpoint (`/tiles`, `/stream`,
+  `/convert`, `/3dtiles-self-contained`, `/3dtiles-tools`, `/gltf`, `/bing`, `/extract`, `/proxy`,
+  `/progress`), including query params, enums, and examples. Hand-authored rather than framework-derived
+  (unlike FastAPI, which generates this from route/type annotations) since the server is plain Node
+  `http`, not a schema-first framework — see `packages/tile-server/homepage-live.js`'s own comment for
+  why that's still the right call here (no new runtime dependency, no build step).
+- `GET /playground` (alias: `GET /docs`, the exact route FastAPI itself uses for the same purpose) — an
+  interactive API reference driven by that spec, via [Scalar](https://github.com/scalar/scalar) (the
+  modern successor to Swagger UI — FastAPI itself now ships it as an alternative to Swagger UI's own
+  `/docs`). Loaded from Scalar's own CDN as a single script tag, the same pattern already used for the
+  Draco/KTX2 decoders — no vendoring, no build step.
+
 ### COPC — Autzen Stadium, Oregon (10.6M pts)
 
 ```
