@@ -53,11 +53,11 @@ const CesiumViewer = forwardRef<ViewerHandle, Props>(function CesiumViewer({ vis
 
   const store = useViewerStore;
   const cleanupRef = useRef<(() => void) | null>(null);
-  const pendingLoadRef = useRef<{ url: string; type: AssetType; opts?: { sseOverride?: number | null } } | null>(null);
+  const pendingLoadRef = useRef<{ url: string; type: AssetType; opts?: { sseOverride?: number | null; skipAutoFrame?: boolean } } | null>(null);
 
   const getViewer = () => viewerRef.current;
 
-  function loadTilesetInternal(url: string, type: AssetType, opts?: { sseOverride?: number | null }) {
+  function loadTilesetInternal(url: string, type: AssetType, opts?: { sseOverride?: number | null; skipAutoFrame?: boolean }) {
     const v = getViewer();
     if (!v) return;
     const gen = ++loadGenRef.current;
@@ -102,18 +102,26 @@ const CesiumViewer = forwardRef<ViewerHandle, Props>(function CesiumViewer({ vis
         const isLocalCoords = distFromEcefOrigin < 1e6 && bs.radius < 1e6;
         if (isLocalCoords) {
           store.getState().setLocalFrame({ range: Math.max(5, Math.round(bs.radius * 3)) });
-          const lf = store.getState().localFrame;
-          applyLocalFrameInternal(lf.lon, lf.lat, lf.alt, lf.range);
+          if (!opts?.skipAutoFrame) {
+            const lf = store.getState().localFrame;
+            applyLocalFrameInternal(lf.lon, lf.lat, lf.alt, lf.range);
+          }
           store.getState().setStatus(`${isSplat ? 'Splat' : 'Local tileset'} placed at local frame origin.\nAdjust ⊕ Local Frame if needed.`);
         } else {
-          try {
-            const range = Math.max(50, bs.radius * 2.5);
-            v.camera.flyToBoundingSphere(bs, {
-              offset: new Cesium.HeadingPitchRange(Cesium.Math.toRadians(-30), Cesium.Math.toRadians(-25), range),
-              duration: 1.5,
-            });
-          } catch {
-            store.getState().setStatus('Tileset loaded but zoom failed.\nUse ⊕ Local Frame to place it.');
+          // Skipped when the caller is about to fly to its OWN city/point instead (see viewer-handle.ts) —
+          // this async auto-frame (fires once the tileset.json fetch resolves) would otherwise land AFTER
+          // and override that flyTo with the tileset's own (possibly much larger, e.g. Bing's whole-world)
+          // bounding sphere.
+          if (!opts?.skipAutoFrame) {
+            try {
+              const range = Math.max(50, bs.radius * 2.5);
+              v.camera.flyToBoundingSphere(bs, {
+                offset: new Cesium.HeadingPitchRange(Cesium.Math.toRadians(-30), Cesium.Math.toRadians(-25), range),
+                duration: 1.5,
+              });
+            } catch {
+              store.getState().setStatus('Tileset loaded but zoom failed.\nUse ⊕ Local Frame to place it.');
+            }
           }
           store.getState().setStatus(`Loaded: ${url}`);
         }

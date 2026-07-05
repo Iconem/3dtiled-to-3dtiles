@@ -1,10 +1,10 @@
-import { useEffect, useRef } from 'react';
+import { Fragment, useEffect, useRef } from 'react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { useUrlState } from '@/state/urlState';
 import { useViewerStore } from '@/state/store';
-import { FORMATS, PSEUDO_FORMATS, fmtMeta, canCentroids, MW } from '@/lib/formats';
+import { PSEUDO_FORMATS, FORMAT_PILL_ORDER, pillMeta, fmtMeta, canCentroids, MW } from '@/lib/formats';
 import { buildMiddlewareUrl, currentPresets, type MiddlewareParams, type Preset } from '@/lib/middleware';
 import type { ViewerHandle } from '@/lib/viewer-handle';
 import { cn } from '@/lib/utils';
@@ -93,11 +93,19 @@ export default function TopBar({ activeHandleRef }: { activeHandleRef: React.Ref
   const presets = currentPresets({ ...params, toolName: url.tool, tilesetOp: url.tilesetOp as any });
   const fmtOfSelected = fmtMeta(url.format);
 
+  // Deliberately-grouped pill order (see FORMAT_PILL_ORDER's own comment) — pseudo-formats (3D Tiles,
+  // Packages, Bing, 3MX, GeoSplats) have no "offline" (prebuilt) story, so they're hidden in that mode,
+  // same as before this was unified into one ordered list instead of two back-to-back arrays.
+  const visibleFormatPills = FORMAT_PILL_ORDER
+    .filter((item) => !(url.mode === 'offline' && PSEUDO_FORMATS.some(([v]) => v === item.id)))
+    .map((item) => ({ ...item, meta: pillMeta(item.id) }))
+    .filter((item): item is typeof item & { meta: NonNullable<typeof item.meta> } => item.meta != null);
+
   function doLoad(loadUrl: string, type: Preset['type'], flyTo?: Preset['flyTo']) {
     store.getState().setCurrentType(type);
     store.getState().setLastLoadUrl(loadUrl);
     store.getState().tlogReset(`${url.mode} · ${url.format}${flyTo ? ' [fly]' : ''}`);
-    activeHandleRef.current?.load(loadUrl, type);
+    activeHandleRef.current?.load(loadUrl, type, { skipAutoFrame: !!flyTo });
     if (flyTo) activeHandleRef.current?.flyToCity(flyTo.lon, flyTo.lat, flyTo.height);
   }
 
@@ -110,6 +118,10 @@ export default function TopBar({ activeHandleRef }: { activeHandleRef: React.Ref
       return;
     }
     if (!p.url) return;
+    // Bing 3D's mesh has baked/pre-lit textures like most photogrammetry — lit shading double-darkens
+    // it the same way plain b3dm mesh does elsewhere in this app. Default shadeless ON when picking any
+    // Bing preset; the sidebar checkbox still lets you turn it back off manually afterward.
+    if (url.format === 'bing') store.getState().setShadeless(true);
     const field = rawUrlMode && p.rawSrc ? p.rawSrc : p.url;
     store.getState().setUrlField(field);
     const loadUrl = rawUrlMode && p.rawSrc ? buildMiddlewareUrl(p.rawSrc, params) : p.url;
@@ -214,13 +226,16 @@ export default function TopBar({ activeHandleRef }: { activeHandleRef: React.Ref
             ))
           ) : (
             <>
-              {FORMATS.map((f) => (
-                <Pill key={f.fmt} tint="emerald" active={url.format === f.fmt} onClick={() => setUrl({ format: f.fmt, preset: '' })}>{f.icon} {f.label}</Pill>
+              {visibleFormatPills.map((item, idx) => (
+                <Fragment key={item.id}>
+                  {idx > 0 && item.group !== visibleFormatPills[idx - 1].group && (
+                    <span className="mx-1 h-5 w-px self-center bg-current opacity-20" aria-hidden="true" />
+                  )}
+                  <Pill tint="emerald" active={url.format === item.id} onClick={() => setUrl({ format: item.id, preset: '' })}>
+                    {item.meta.icon ? `${item.meta.icon} ${item.meta.label}` : item.meta.label}
+                  </Pill>
+                </Fragment>
               ))}
-              {url.mode !== 'offline' &&
-                PSEUDO_FORMATS.map(([v, l]) => (
-                  <Pill key={v} tint="emerald" active={url.format === v} onClick={() => setUrl({ format: v, preset: '' })}>{l}</Pill>
-                ))}
               {url.mode === 'stream' && fmtOfSelected?.octree &&
                 TILING_PILLS.map(([v, l]) => (
                   <Pill key={v} tint="emerald" active={url.tiling === v} onClick={() => setUrl({ tiling: v as any })}>{l}</Pill>

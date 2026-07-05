@@ -20,7 +20,7 @@ const urlStateParsers = {
   format: parseAsString.withDefault('copc'),
   mode: parseAsStringEnum<ViewerMode>(['stream', 'offline', 'tools']).withDefault('stream'),
   cache: parseAsStringEnum<CacheScope>(['none', 'hierarchy', 'all']).withDefault('none'),
-  prefetch: parseAsInteger.withDefault(1),
+  prefetch: parseAsInteger.withDefault(0),
   transform: parseAsString.withDefault(''),
   // Tileset-level op for the "3D Tiles" format group specifically — distinct from `transform` above
   // (a per-TILE glTF-Transform compression op that rides on /stream/tile requests). This instead picks

@@ -112,7 +112,7 @@ export function currentPresets(p: MiddlewareParams & { toolName: ToolName; tiles
     const gs = (mdl: string) => `${MW}/stream/tileset.json?format=geosplats&url=${encodeURIComponent(mdl)}&lod=5`;
     return [
       { id: 'gs-1', label: '✨ Jastrzębia Góra, Poland', type: 'splat', url: gs('https://api.maptiler.com/splats/019e67bf-b89b-743d-91dd-79f7f4b4bd4e/model.json?key=GKF1QdQ4MpjgqtKiQuxR') },
-      { id: 'gs-2', label: '✨ Biltmore Hotel, Miami', type: 'splat', url: gs('https://api.maptiler.com/splats/019e5ff3-e23b-7063-bed2-c385d3e96d99/model.json?key=mNLmXyaTH4gRlwJHSYWp') },
+      { id: 'gs-2', label: '✨ Baltimore Hotel Miami', type: 'splat', url: gs('https://api.maptiler.com/splats/019e5ff3-e23b-7063-bed2-c385d3e96d99/model.json?key=mNLmXyaTH4gRlwJHSYWp') },
     ];
   }
   const f = fmtMeta(p.selectedFormat);

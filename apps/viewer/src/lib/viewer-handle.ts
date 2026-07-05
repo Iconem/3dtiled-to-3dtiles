@@ -6,7 +6,13 @@ import type { AssetType } from './formats';
  * See C:\Users\jonathan\.claude\plans\cuddly-jingling-rabbit.md.
  */
 export interface ViewerHandle {
-  load(url: string, type: AssetType, opts?: { sseOverride?: number | null }): void;
+  // skipAutoFrame: the caller is about to issue its OWN flyToCity() right after this — set true so
+  // the renderer's normal "auto-frame camera on the newly-loaded tileset's bounds" behavior doesn't
+  // race against it. Both renderers fire their auto-frame asynchronously once the tileset.json fetch
+  // resolves, which can land AFTER (and override) an immediately-issued flyToCity — the actual bug
+  // behind "Berlin/Washington pills don't zoom to their own location" (all Bing city pills load the
+  // SAME global tileset URL, so the auto-frame target is the whole-world bounding sphere, not the city).
+  load(url: string, type: AssetType, opts?: { sseOverride?: number | null; skipAutoFrame?: boolean }): void;
   setBasemap(id: string): void;
   setTerrainMode(mode: 'wgs84' | 'cesium' | 'google'): void;
   setMaxSSE(v: number | null): void;

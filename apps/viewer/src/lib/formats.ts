@@ -88,9 +88,8 @@ export const FORMATS: FormatMeta[] = [
     { id: 'texas', label: 'Texas', src: 'https://data.opengeos.org/USGS_LPC_TX_CoastalRegion_2018_A18_stratmap18-50cm-2995201a1.copc.laz', out: 'output/copc/texas-3dtiles-from-copc' },
   ] },
   { fmt: 'potree', icon: '🌲', label: 'Potree', type: 'pointcloud', octree: true, stream: true, assets: [
-    // No public Potree-2.0 (metadata.json) build of the lion scan exists anywhere — only 1.x builds
-    // are public (below). Stays on local sample-data.
-    { id: 'lion2', label: 'Lion 2.0', src: 'input/POTREE/lion_p2/metadata.json', out: 'output/potree/lion_p2' },
+    // Real source: potree.org's own hosted Potree-2.0 build of the lion scan.
+    { id: 'lion2', label: 'Lion 2.0', src: 'https://potree.org/pointclouds/lion/metadata.json', out: 'output/potree/lion_p2' },
     // Real sources: potree/potree's own bundled example point clouds (github.com/potree/potree).
     { id: 'takanawa', label: 'Lion Takanawa 1.x', src: 'https://raw.githubusercontent.com/potree/potree/develop/pointclouds/lion_takanawa/cloud.js', out: 'output/potree/lion_takanawa' },
     { id: 'takalaz', label: 'Lion Takanawa LAZ', src: 'https://raw.githubusercontent.com/potree/potree/develop/pointclouds/lion_takanawa_laz/cloud.js', out: 'output/potree/lion_takanawa_laz' },
@@ -165,6 +164,35 @@ export const PSEUDO_FORMATS: [string, string][] = [
   ['threemx', '🏛 3MX'],
   ['geosplats', '✨ GeoSplats'],
 ];
+
+// The single, deliberately-grouped render order for the format pill row — cuts across the FORMATS
+// vs. PSEUDO_FORMATS split (GeoSplats moves next to the other splat formats, I3S moves next to the
+// other tileset-native/mesh formats), which is why this can't just be "FORMATS then PSEUDO_FORMATS"
+// in array order. `group` drives the visual separators TopBar renders between clusters:
+//   0: point-cloud octrees (COPC, Potree)
+//   1: splat formats (SOG, LCC, GeoSplats, RAD)
+//   2: tileset-native / mesh formats (3D Tiles, Packages, I3S, 3MX, Bing)
+export const FORMAT_PILL_ORDER: { id: string; group: number }[] = [
+  { id: 'copc', group: 0 },
+  { id: 'potree', group: 0 },
+  { id: 'sog', group: 1 },
+  { id: 'lcc', group: 1 },
+  { id: 'geosplats', group: 1 },
+  { id: 'rad', group: 1 },
+  { id: '3dtiles', group: 2 },
+  { id: 'packages', group: 2 },
+  { id: 'i3s', group: 2 },
+  { id: 'threemx', group: 2 },
+  { id: 'bing', group: 2 },
+];
+
+/** Look up a pill's icon+label whether it's a real FORMATS entry or a PSEUDO_FORMATS one. */
+export function pillMeta(id: string): { icon: string; label: string } | null {
+  const f = FORMATS.find((x) => x.fmt === id);
+  if (f) return { icon: f.icon, label: f.label };
+  const p = PSEUDO_FORMATS.find(([v]) => v === id);
+  return p ? { icon: '', label: p[1] } : null;
+}
 
 export const fmtMeta = (fmt: string) => FORMATS.find((f) => f.fmt === fmt);
 export const canCentroids = (fmt: string) => SPLAT_FORMATS.has(fmt);

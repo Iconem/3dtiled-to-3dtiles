@@ -117,7 +117,7 @@ function applyPointsPickTolerance(raycaster: THREE.Raycaster, camera: THREE.Came
 
 interface Props { visible: boolean }
 
-type LoadArgs = { url: string; type: AssetType; sseOverride?: number | null } | null;
+type LoadArgs = { url: string; type: AssetType; sseOverride?: number | null; skipAutoFrame?: boolean } | null;
 
 // Google's raw mt1.google.com tile hotlink sends no Access-Control-Allow-Origin header at all (unlike
 // OSM's tile server, which does). That matters here because 3d-tiles-renderer's XYZTilesOverlay fetches
@@ -838,7 +838,11 @@ const Scene = forwardRef<ViewerHandle, { loadArgs: LoadArgs }>(function Scene({ 
           ref={tilesRef as any}
           url={loadArgs.url}
           errorTarget={errorTarget}
-          onLoadRootTileset={() => frameToTileset(tilesRef.current)}
+          // Skipped when the caller (a flyTo-tagged preset — e.g. Bing's per-city pills, which all
+          // load the SAME global tileset URL) is about to issue its OWN flyToCity right after load()
+          // — this async auto-frame (fires once the tileset.json fetch resolves) would otherwise land
+          // AFTER and override that flyTo with the tileset's own (possibly world-sized) bounding sphere.
+          onLoadRootTileset={() => { if (!loadArgs?.skipAutoFrame) frameToTileset(tilesRef.current); }}
           onLoadModel={onLoadContentModel}
           onLoadError={(e: any) => {
             // `tile === null` means the ROOT tileset.json itself failed (nothing will ever show) —
@@ -912,7 +916,7 @@ const ThreeDTRjsViewer = forwardRef<ViewerHandle, Props>(function ThreeDTRjsView
   const sceneRef = useRef<ViewerHandle>(null);
 
   useImperativeHandle(ref, (): ViewerHandle => ({
-    load(url, type, opts) { setLoadArgs({ url, type, sseOverride: opts?.sseOverride }); },
+    load(url, type, opts) { setLoadArgs({ url, type, sseOverride: opts?.sseOverride, skipAutoFrame: opts?.skipAutoFrame }); },
     setBasemap: (...a) => sceneRef.current?.setBasemap(...a),
     setTerrainMode: (...a) => sceneRef.current?.setTerrainMode(...a),
     setMaxSSE: (...a) => sceneRef.current?.setMaxSSE(...a),
