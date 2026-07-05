@@ -29,12 +29,15 @@ function escapeHtml(s) {
   return s.replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 }
 
-// Shared link set for both the homepage's own list AND the playground's slim top nav bar (Scalar's
+// Shared link data for both the homepage's own list AND the playground's slim top nav bar. Scalar's
 // own `navigation.header`/`navigation.sidebar` config keys — the obvious first thing to reach for —
-// turned out to be a paid scalar.com-hosted "Docs" product feature, NOT part of the free, self-hosted
-// @scalar/api-reference component this embeds; confirmed against scalar/scalar's own configuration.md,
-// which only documents `customCss`, no `navigation`/`footer` keys. A plain nav bar OUTSIDE Scalar's own
-// DOM, in our own markup, sidesteps that entirely and doesn't depend on any undocumented Scalar internals.
+// turned out to be a paid scalar.com-hosted "Docs" product feature: confirmed by downloading the
+// ACTUAL @scalar/api-reference CDN bundle and grepping its source for the schema scalar.com's docs
+// describe (`type:"link"`, `type:"spacer"`, `newTab`) — zero matches, while other real config keys
+// (`hideClientButton`) DO appear verbatim. A plain nav bar in our own markup, outside Scalar's DOM,
+// sidesteps the whole question and doesn't depend on any undocumented/paid-tier Scalar internals.
+// `nav: true` marks the subset shown in the playground's own top bar (kept short on purpose — Home,
+// Docs, Demo viewer, GitHub — Hoppscotch/OpenAPI JSON stay on the homepage list only).
 function buildLinks(origin) {
   // Hoppscotch's own documented deep-link import format (distinct from the plain https://hoppscotch.io
   // app URL) — opens the app with this spec already imported, no manual "paste URL into the Import
@@ -43,13 +46,13 @@ function buildLinks(origin) {
   // proxy/port without a deployment-specific env var for this one link.
   const hoppscotchUrl = `https://hoppscotch.io/import?url=${encodeURIComponent(`${origin}/openapi.json`)}`;
   return [
-    { href: '/', label: 'Home', desc: 'Endpoint list' },
-    { href: '/playground', label: 'Playground', desc: 'Try every endpoint interactively' },
-    { href: '/openapi.json', label: 'OpenAPI JSON', desc: 'Machine-readable API spec' },
-    { href: hoppscotchUrl, label: 'Open in Hoppscotch', desc: 'Import this spec into Hoppscotch' },
-    DOCS_URL && { href: DOCS_URL, label: 'Docs', desc: 'Architecture, format support, self-hosting' },
-    { href: REPO_URL, label: 'GitHub', desc: 'Source code' },
-    VIEWER_URL && { href: VIEWER_URL, label: 'Demo viewer', desc: 'Load a real tileset through this server' },
+    { href: '/', label: 'Home', desc: 'Endpoint list', nav: true },
+    { href: '/playground', label: 'Playground', desc: 'Try every endpoint interactively', nav: false },
+    { href: '/openapi.json', label: 'OpenAPI JSON', desc: 'Machine-readable API spec', nav: false },
+    { href: hoppscotchUrl, label: 'Open in Hoppscotch', desc: 'Import this spec into Hoppscotch', nav: false },
+    DOCS_URL && { href: DOCS_URL, label: 'Docs', desc: 'Architecture, format support, self-hosting', nav: true },
+    VIEWER_URL && { href: VIEWER_URL, label: 'Demo viewer', desc: 'Load a real tileset through this server', nav: true },
+    { href: REPO_URL, label: 'GitHub', desc: 'Source code', nav: true },
   ].filter(Boolean);
 }
 
@@ -127,7 +130,7 @@ const SCALAR_CONFIG = {
 };
 
 function renderPlayground(origin) {
-  const navLinks = buildLinks(origin).filter((l) => l.href !== '/playground'); // already here
+  const navLinks = buildLinks(origin).filter((l) => l.nav);
   const nav = navLinks.map((l) => `<a href="${escapeHtml(l.href)}">${escapeHtml(l.label)}</a>`).join('');
 
   return `<!doctype html>
@@ -137,14 +140,20 @@ function renderPlayground(origin) {
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>3dtiled tile-server — playground</title>
 <style>
-  :root { color-scheme: dark; }
   body { margin: 0; }
+  /* Colors read straight from Scalar's OWN theme (--scalar-* custom properties, defined by whichever
+     theme= is set below) instead of a hardcoded palette — Scalar toggles a "dark-mode"/"light-mode"
+     class on the body element itself (confirmed in its own bundle source), which is an ancestor of
+     THIS nav bar too, so these variables cascade in correctly no matter which theme or light/dark
+     mode is active. The literal fallback (after the comma) only matters for the ~0-frame gap before
+     Scalar's CSS finishes loading. */
   #topnav { display: flex; gap: 1.25rem; align-items: center; padding: 0.6rem 1.25rem;
-            background: #0b0f14; border-bottom: 1px solid #1e2530; font-family: -apple-system,
-            BlinkMacSystemFont, 'Segoe UI', sans-serif; font-size: 0.85rem; }
-  #topnav a { color: #9fb0c0; text-decoration: none; }
-  #topnav a:hover { color: #6cb6ff; text-decoration: underline; }
-  #topnav strong { color: #d7dee6; margin-right: 0.5rem; }
+            background: var(--scalar-background-1, #0f0f0f);
+            border-bottom: 1px solid var(--scalar-border-color, #2d2d2d);
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; font-size: 0.85rem; }
+  #topnav a { color: var(--scalar-color-2, #a4a4a4); text-decoration: none; }
+  #topnav a:hover { color: var(--scalar-color-accent, #3ea6ff); text-decoration: underline; }
+  #topnav strong { color: var(--scalar-color-1, #e7e7e7); margin-right: 0.5rem; }
 </style>
 </head>
 <body>
