@@ -81,35 +81,56 @@ export const TOOLS_DATASETS: Record<string, Asset[]> = {
 
 export const FORMATS: FormatMeta[] = [
   { fmt: 'copc', icon: '☁', label: 'COPC', type: 'pointcloud', octree: true, stream: true, assets: [
-    { id: 'autzen', label: 'Autzen', src: 'input/COPC/autzen.copc.laz', out: 'output/copc/autzen-3dtiles-from-copc' },
-    { id: 'eiffel', label: 'Eiffel', src: 'input/COPC/eiffel.copc.laz', out: 'output/copc/eiffel-3dtiles-from-copc' },
-    { id: 'texas', label: 'Texas', src: 'input/COPC/texas.copc.laz', out: 'output/copc/texas-3dtiles-from-copc' },
+    // Real, independently-hosted public sources (not this app's own /sample-data) — see README's
+    // "COPC — Autzen Stadium" section for provenance/attribution of all three.
+    { id: 'autzen', label: 'Autzen', src: 'https://s3.amazonaws.com/hobu-lidar/autzen-classified.copc.laz', out: 'output/copc/autzen-3dtiles-from-copc' },
+    { id: 'eiffel', label: 'Eiffel', src: 'https://data.geopf.fr/telechargement/download/LiDARHD-NUALID/NUALHD_1-0__LAZ_LAMB93_KE_2025-06-06/LHD_FXX_0648_6863_PTS_LAMB93_IGN69.copc.laz', out: 'output/copc/eiffel-3dtiles-from-copc' },
+    { id: 'texas', label: 'Texas', src: 'https://data.opengeos.org/USGS_LPC_TX_CoastalRegion_2018_A18_stratmap18-50cm-2995201a1.copc.laz', out: 'output/copc/texas-3dtiles-from-copc' },
   ] },
   { fmt: 'potree', icon: '🌲', label: 'Potree', type: 'pointcloud', octree: true, stream: true, assets: [
+    // No public Potree-2.0 (metadata.json) build of the lion scan exists anywhere — only 1.x builds
+    // are public (below). Stays on local sample-data.
     { id: 'lion2', label: 'Lion 2.0', src: 'input/POTREE/lion_p2/metadata.json', out: 'output/potree/lion_p2' },
-    { id: 'takanawa', label: 'Lion Takanawa 1.x', src: 'input/POTREE/lion_takanawa/cloud.js', out: 'output/potree/lion_takanawa' },
-    { id: 'takalaz', label: 'Lion Takanawa LAZ', src: 'input/POTREE/lion_takanawa_laz/cloud.js', out: 'output/potree/lion_takanawa_laz' },
-    { id: 'voltotal', label: 'Vol Total', src: 'input/POTREE/vol_total/cloud.js', out: 'output/potree/vol_total' },
+    // Real sources: potree/potree's own bundled example point clouds (github.com/potree/potree).
+    { id: 'takanawa', label: 'Lion Takanawa 1.x', src: 'https://raw.githubusercontent.com/potree/potree/develop/pointclouds/lion_takanawa/cloud.js', out: 'output/potree/lion_takanawa' },
+    { id: 'takalaz', label: 'Lion Takanawa LAZ', src: 'https://raw.githubusercontent.com/potree/potree/develop/pointclouds/lion_takanawa_laz/cloud.js', out: 'output/potree/lion_takanawa_laz' },
+    // "Vol Total" is Potree's own "Sorvilier" Swiss survey (courtesy sigeom sa) — same dataset, kept
+    // this preset's existing label since it's just an id/display name, not a claim about the place.
+    { id: 'voltotal', label: 'Vol Total', src: 'https://raw.githubusercontent.com/potree/potree/develop/pointclouds/vol_total/cloud.js', out: 'output/potree/vol_total' },
     { id: 'geghard', label: 'Geghard (iconem) ⬀', src: 'https://api.iconem.com/s/rIdPkRfOmEdRtgsoO08TgNt9MSxh-woC/cloud.js' },
   ] },
   { fmt: 'sog', icon: '⬢', label: 'SOG', type: 'splat', octree: false, stream: true, assets: [
-    { id: 'skatepark', label: 'Skatepark', src: 'input/SOG/skatepark/lod-meta.json', out: 'output/sog/skatepark-3dtiles-from-sog' },
-    { id: 'roman', label: 'Roman Parish', src: 'input/SOG/roman-parish/lod-meta.json', out: 'output/sog/roman-parish-3dtiles-from-sog' },
+    // Real sources: PlayCanvas's own SOG example assets (code.playcanvas.com) — see README's SOG
+    // section (`fetch-sog.mjs` originally mirrored these here; now streamed straight from PlayCanvas).
+    { id: 'skatepark', label: 'Skatepark', src: 'https://code.playcanvas.com/examples_data/example_skatepark_02/lod-meta.json', out: 'output/sog/skatepark-3dtiles-from-sog' },
+    { id: 'roman', label: 'Roman Parish', src: 'https://code.playcanvas.com/examples_data/example_roman_parish_02/lod-meta.json', out: 'output/sog/roman-parish-3dtiles-from-sog' },
     { id: 'arrival-jaffa', label: 'Arrival jaffa3 (.lod) ⬀', src: 'https://ugc.arrival.space/71585765/14ae36863868a5f74fbc29389e156bc5f18e0d7a612af78c492cd84cfa4a9c44_jaffa3_1777965648677_LOD/lod-meta.json' },
   ] },
   { fmt: 'lcc', icon: '◆', label: 'LCC', type: 'splat', octree: false, stream: true, assets: [
+    // No public sample datasets found for XGRIDS' proprietary LCC format — they open-sourced the
+    // format SPEC (github.com/xgrids/LCCWhitepaper), not sample captures; Guan Temple/Guanlan Town/
+    // Religious Center are private showcase captures with no public download. Stay on local sample-data
+    // until/unless a real public .lcc download turns up (checked xgrids.com's own site + "LCC Studio").
     { id: 'guan', label: 'Guan Temple', src: 'input/LCC/Guan_Temple/meta.lcc', out: 'output/lcc/Guan_Temple-3dtiles-from-lcc' },
     { id: 'guanlan', label: 'Guanlan Town', src: 'input/LCC/Guanlan Ancient Town/meta.lcc', out: 'output/lcc/Guanlan_Ancient_Town-3dtiles-from-lcc' },
     { id: 'religious', label: 'Religious Center', src: 'input/LCC/religious_center_L2_P/meta.lcc', out: 'output/lcc/religious_center_L2_P-3dtiles-from-lcc' },
   ] },
   { fmt: 'rad', icon: '✦', label: 'RAD', type: 'splat', octree: false, stream: true, assets: [
-    { id: 'coit', label: 'Coit', src: 'input/RAD/coit.rad', out: 'output/rad/coit-3dtiles-from-rad' },
-    { id: 'tastier', label: 'Tastier', src: 'input/RAD/tastier500k.rad', out: 'output/rad/tastier500k-3dtiles-from-rad' },
+    // Real sources: the exact files this repo's own README setup instructions curl down as
+    // coit.rad/tastier500k.rad (wlt-ai-cdn.art — William Liu's own CDN, the RAD/BhattLod format author).
+    { id: 'coit', label: 'Coit', src: 'https://wlt-ai-cdn.art/spark-2.0/rad/coit-40m-sh1-lod.rad', out: 'output/rad/coit-3dtiles-from-rad' },
+    { id: 'tastier', label: 'Tastier', src: 'https://wlt-ai-cdn.art/tastier_rad_500/0524c1a1-abf2-4969-ae40-9981ee836536_500k-lod.rad', out: 'output/rad/tastier500k-3dtiles-from-rad' },
+    // No public source found for either — private/internal PLY-derived test assets (WIP label already
+    // flags these as such). Stay on local sample-data.
     { id: 'elevator', label: 'WIP PLY-RAD · Elevator', src: 'input/PLY/Elevator-lod.rad', out: 'output/rad/Elevator-3dtiles-from-rad' },
     { id: 'svir', label: 'WIP PLY-RAD · Svirnas', src: 'input/PLY/SvirnasAlyt-lod.rad', out: 'output/rad/SvirnasAlyt-3dtiles-from-rad' },
   ] },
   { fmt: 'i3s', icon: '🧱', label: 'I3S', type: 'mesh', octree: false, stream: true, assets: [
-    { id: 'nyc', label: 'NYC Buildings', src: 'input/I3S-SLPK/Buildings_NewYork_v18.slpk', streamSrc: 'input/I3S-SLPK/Buildings_NewYork_v18/3dSceneLayer.json.gz', out: 'output/i3s/Buildings_NewYork_v18' },
+    // Swapped from a local Buildings_NewYork_v18.slpk file to Esri's own official, live-hosted
+    // "Buildings New York 3D" SceneServer (item 3653d502714248f8b81a34faba956bdb, owner esri_3d, built
+    // from NYC DoITT's 2014 building survey) — no `out`/streamSrc since there's no local prebuilt/SLPK
+    // counterpart for this one anymore, same shape as the arcgis-mesh-svc entries below.
+    { id: 'nyc', label: 'NYC Buildings (SceneServer)', src: 'https://tiles.arcgis.com/tiles/P3ePLMYs2RVChkJx/arcgis/rest/services/Buildings_New_York_3D/SceneServer' },
     // v17, not v18 — v17 is the one ESRI's own Scene Viewer showcases publicly (Fire Station No. 3,
     // https://www.arcgis.com/home/webscene/viewer.html?layers=4028eb46e12e42f7889367bafcd6866d), with
     // known-good textures. v18 (same org, different item) may just be a different/less-maintained
