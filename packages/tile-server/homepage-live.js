@@ -29,15 +29,21 @@ function escapeHtml(s) {
   return s.replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 }
 
-function renderHomepage(origin) {
+// Shared link set for both the homepage's own list AND the playground's slim top nav bar (Scalar's
+// own `navigation.header`/`navigation.sidebar` config keys — the obvious first thing to reach for —
+// turned out to be a paid scalar.com-hosted "Docs" product feature, NOT part of the free, self-hosted
+// @scalar/api-reference component this embeds; confirmed against scalar/scalar's own configuration.md,
+// which only documents `customCss`, no `navigation`/`footer` keys. A plain nav bar OUTSIDE Scalar's own
+// DOM, in our own markup, sidesteps that entirely and doesn't depend on any undocumented Scalar internals.
+function buildLinks(origin) {
   // Hoppscotch's own documented deep-link import format (distinct from the plain https://hoppscotch.io
   // app URL) — opens the app with this spec already imported, no manual "paste URL into the Import
   // dialog" step. Needs an ABSOLUTE openapi.json URL since Hoppscotch is a different origin; built from
   // the incoming request's own Host header rather than hardcoded, so it's correct behind any reverse
   // proxy/port without a deployment-specific env var for this one link.
   const hoppscotchUrl = `https://hoppscotch.io/import?url=${encodeURIComponent(`${origin}/openapi.json`)}`;
-
-  const links = [
+  return [
+    { href: '/', label: 'Home', desc: 'Endpoint list' },
     { href: '/playground', label: 'Playground', desc: 'Try every endpoint interactively' },
     { href: '/openapi.json', label: 'OpenAPI JSON', desc: 'Machine-readable API spec' },
     { href: hoppscotchUrl, label: 'Open in Hoppscotch', desc: 'Import this spec into Hoppscotch' },
@@ -45,6 +51,10 @@ function renderHomepage(origin) {
     { href: REPO_URL, label: 'GitHub', desc: 'Source code' },
     VIEWER_URL && { href: VIEWER_URL, label: 'Demo viewer', desc: 'Load a real tileset through this server' },
   ].filter(Boolean);
+}
+
+function renderHomepage(origin) {
+  const links = buildLinks(origin).filter((l) => l.href !== '/'); // homepage IS "/" — no self-link
 
   const items = links.map((l) => `
     <li>
@@ -116,15 +126,29 @@ const SCALAR_CONFIG = {
   agent: { disabled: true },
 };
 
-function renderPlayground() {
+function renderPlayground(origin) {
+  const navLinks = buildLinks(origin).filter((l) => l.href !== '/playground'); // already here
+  const nav = navLinks.map((l) => `<a href="${escapeHtml(l.href)}">${escapeHtml(l.label)}</a>`).join('');
+
   return `<!doctype html>
 <html lang="en">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>3dtiled tile-server — playground</title>
+<style>
+  :root { color-scheme: dark; }
+  body { margin: 0; }
+  #topnav { display: flex; gap: 1.25rem; align-items: center; padding: 0.6rem 1.25rem;
+            background: #0b0f14; border-bottom: 1px solid #1e2530; font-family: -apple-system,
+            BlinkMacSystemFont, 'Segoe UI', sans-serif; font-size: 0.85rem; }
+  #topnav a { color: #9fb0c0; text-decoration: none; }
+  #topnav a:hover { color: #6cb6ff; text-decoration: underline; }
+  #topnav strong { color: #d7dee6; margin-right: 0.5rem; }
+</style>
 </head>
-<body style="margin:0">
+<body>
+  <nav id="topnav"><strong>3dtiled tile-server</strong>${nav}</nav>
   <script id="api-reference" data-url="/openapi.json" data-configuration='${escapeHtml(JSON.stringify(SCALAR_CONFIG))}'></script>
   <script src="https://cdn.jsdelivr.net/npm/@scalar/api-reference"></script>
 </body>
@@ -132,12 +156,13 @@ function renderPlayground() {
 }
 
 export async function handleHomepage(req, res, u) {
+  // `u.protocol` reflects the literal `http://localhost:${PORT}` base server.js parses `req.url`
+  // against (see server.js), NOT the real client-facing scheme — behind Traefik/any TLS-terminating
+  // reverse proxy this process only ever sees plain HTTP. Prefer the standard forwarded-proto header.
+  const proto = req.headers['x-forwarded-proto'] || u.protocol.replace(':', '');
+  const origin = `${proto}://${req.headers.host}`;
+
   if (u.pathname === '/') {
-    // `u.protocol` reflects the literal `http://localhost:${PORT}` base server.js parses `req.url`
-    // against (see server.js), NOT the real client-facing scheme — behind Traefik/any TLS-terminating
-    // reverse proxy this process only ever sees plain HTTP. Prefer the standard forwarded-proto header.
-    const proto = req.headers['x-forwarded-proto'] || u.protocol.replace(':', '');
-    const origin = `${proto}://${req.headers.host}`;
     res.writeHead(200, CORS_HTML); res.end(renderHomepage(origin)); return true;
   }
   if (u.pathname === '/openapi.json') {
@@ -152,7 +177,7 @@ export async function handleHomepage(req, res, u) {
   // /docs kept as an alias — the route FastAPI itself uses for the exact same purpose, muscle-memory
   // for anyone coming from that ecosystem. Distinct from apps/docs (the separate Fumadocs project site).
   if (u.pathname === '/playground' || u.pathname === '/docs') {
-    res.writeHead(200, CORS_HTML); res.end(renderPlayground()); return true;
+    res.writeHead(200, CORS_HTML); res.end(renderPlayground(origin)); return true;
   }
   return false;
 }

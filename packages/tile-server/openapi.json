@@ -97,10 +97,23 @@
         "description": "Proxies an existing tileset.json, rewriting content URIs through /gltf/tile.glb so each glTF/GLB tile is decoded (Draco, meshopt, KTX2 → PNG/JPEG) on the fly — useful for renderers that can't decode one of those encodings natively.",
         "parameters": [
           { "name": "url", "in": "query", "required": true, "schema": { "type": "string", "format": "uri" } },
-          { "name": "ops", "in": "query", "schema": { "type": "string", "default": "decompress" } },
+          { "name": "ops", "in": "query", "style": "form", "explode": false, "schema": { "type": "array", "items": { "type": "string", "enum": ["decompress", "draco", "meshopt", "ktx"] }, "default": ["decompress"] }, "description": "Comma-separated combination of ops (`style: form, explode: false` — e.g. `ops=draco,ktx`). `decompress` is shorthand for `draco,meshopt,ktx` together." },
           { "name": "tex", "in": "query", "schema": { "type": "string", "enum": ["jpg", "png"], "default": "jpg" }, "description": "Output format for decoded KTX2 textures." }
         ],
         "responses": { "200": { "description": "A tileset.json with rewritten content URIs" } }
+      }
+    },
+    "/gltf/tile.glb": {
+      "get": {
+        "tags": ["transforms"],
+        "summary": "GET /gltf/tile.glb — decode a single glTF/GLB tile (same ops as /gltf/tileset.json)",
+        "description": "The per-tile endpoint /gltf/tileset.json's rewritten content URIs point at — callable directly against any glTF/GLB URL, not just ones reached via a rewritten tileset.",
+        "parameters": [
+          { "name": "url", "in": "query", "required": true, "schema": { "type": "string", "format": "uri" } },
+          { "name": "ops", "in": "query", "style": "form", "explode": false, "schema": { "type": "array", "items": { "type": "string", "enum": ["decompress", "draco", "meshopt", "ktx"] }, "default": ["decompress"] }, "description": "Comma-separated combination of ops (`style: form, explode: false` — e.g. `ops=draco,ktx`). `decompress` is shorthand for `draco,meshopt,ktx` together." },
+          { "name": "tex", "in": "query", "schema": { "type": "string", "enum": ["jpg", "png"], "default": "jpg" }, "description": "Output format for decoded KTX2 textures." }
+        ],
+        "responses": { "200": { "description": "A decoded glTF/GLB" } }
       }
     },
     "/bing/tileset.json": {
