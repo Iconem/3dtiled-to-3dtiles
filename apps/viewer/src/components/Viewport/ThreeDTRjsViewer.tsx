@@ -840,6 +840,17 @@ const Scene = forwardRef<ViewerHandle, { loadArgs: LoadArgs }>(function Scene({ 
           errorTarget={errorTarget}
           onLoadRootTileset={() => frameToTileset(tilesRef.current)}
           onLoadModel={onLoadContentModel}
+          onLoadError={(e: any) => {
+            // `tile === null` means the ROOT tileset.json itself failed (nothing will ever show) —
+            // worth a user-visible error. A per-TILE failure (tile is a real tile) just means one
+            // piece is missing out of a potentially huge tree; that's already visible via 3d-tiles-
+            // renderer's own console.error per tile, and popping a modal for every one would be
+            // very noisy on a large tileset with sporadic failures. Previously 3DTRJS had NO
+            // user-visible error surfacing at all for a totally-failed load (silent blank viewport).
+            if (e.tile) return;
+            store.getState().showError(`Failed to load tileset:\n${e.error?.message || String(e.error) || 'unknown error'}`);
+            store.getState().setStatus('Load failed.');
+          }}
         >
           {/* 3D Tiles 1.1 implicit tiling (OCTREE/QUADTREE `.subtree` expansion) — unlike Cesium, 3DTRJS
               has no built-in support for `implicitTiling` root nodes; without this plugin a tileset that

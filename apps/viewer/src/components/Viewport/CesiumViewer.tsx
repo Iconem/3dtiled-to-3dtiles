@@ -21,6 +21,21 @@ interface Props {
   visible: boolean;
 }
 
+// Cesium's own request pipeline rejects with a `RequestErrorEvent` on a network-level failure
+// (DNS failure, connection refused, CORS, or an untrusted/self-signed TLS certificate on the
+// tile-server's own domain) — that object has NO `.message` property, unlike a standard Error, so
+// `` `Failed to load tileset:\n${e.message}` `` rendered literally as "...\nundefined" with zero
+// actionable information (the actual bug behind a mis-issued cert on a Traefik-routed subdomain).
+// Extract whatever's actually there, falling back to an actionable hint instead of "undefined".
+function describeLoadError(e: any): string {
+  if (typeof e === 'string' && e) return e;
+  if (e?.message) return String(e.message);
+  if (e?.statusCode != null) return `HTTP ${e.statusCode}`;
+  return 'Network error — the tile-server may be unreachable, blocked by CORS, or its TLS ' +
+    'certificate may not be trusted by this browser. Try opening the tile-server URL directly in ' +
+    'a new tab to see the underlying error.';
+}
+
 const CesiumViewer = forwardRef<ViewerHandle, Props>(function CesiumViewer({ visible }, ref) {
   const containerRef = useRef<HTMLDivElement>(null);
   const viewerRef = useRef<Cesium.Viewer | null>(null);
@@ -125,9 +140,10 @@ const CesiumViewer = forwardRef<ViewerHandle, Props>(function CesiumViewer({ vis
         });
       })
       .catch((e) => {
-        store.getState().showError(`Failed to load tileset:\n${e.message}`);
+        const msg = describeLoadError(e);
+        store.getState().showError(`Failed to load tileset:\n${msg}`);
         store.getState().setStatus('Load failed.');
-        store.getState().tlog(`✗ load failed: ${(e.message || '').slice(0, 50)}`);
+        store.getState().tlog(`✗ load failed: ${msg.slice(0, 50)}`);
       });
   }
 
@@ -477,7 +493,7 @@ const CesiumViewer = forwardRef<ViewerHandle, Props>(function CesiumViewer({ vis
         store.getState().setStatus(`Ion asset ${assetId} loaded (CesiumJS).`);
         tileset.tileFailed.addEventListener((e: any) => console.error('[Ion] tile failed:', e.url, e.message));
       } catch (e) {
-        store.getState().showError(`Ion endpoint/tileset load failed: ${(e as Error).message}`);
+        store.getState().showError(`Ion endpoint/tileset load failed: ${describeLoadError(e)}`);
       }
     },
     toggleCollision(enabled) {
