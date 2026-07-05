@@ -29,10 +29,18 @@ function escapeHtml(s) {
   return s.replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 }
 
-function renderHomepage() {
+function renderHomepage(origin) {
+  // Hoppscotch's own documented deep-link import format (distinct from the plain https://hoppscotch.io
+  // app URL) — opens the app with this spec already imported, no manual "paste URL into the Import
+  // dialog" step. Needs an ABSOLUTE openapi.json URL since Hoppscotch is a different origin; built from
+  // the incoming request's own Host header rather than hardcoded, so it's correct behind any reverse
+  // proxy/port without a deployment-specific env var for this one link.
+  const hoppscotchUrl = `https://hoppscotch.io/import?url=${encodeURIComponent(`${origin}/openapi.json`)}`;
+
   const links = [
     { href: '/playground', label: 'Playground', desc: 'Try every endpoint interactively' },
     { href: '/openapi.json', label: 'OpenAPI JSON', desc: 'Machine-readable API spec' },
+    { href: hoppscotchUrl, label: 'Open in Hoppscotch', desc: 'Import this spec into Hoppscotch' },
     DOCS_URL && { href: DOCS_URL, label: 'Docs', desc: 'Architecture, format support, self-hosting' },
     { href: REPO_URL, label: 'GitHub', desc: 'Source code' },
     VIEWER_URL && { href: VIEWER_URL, label: 'Demo viewer', desc: 'Load a real tileset through this server' },
@@ -72,6 +80,42 @@ function renderHomepage() {
 </html>`;
 }
 
+// theme: 'default' — 'purple'/'deepSpace' (this playground's previous default) both carry a heavy
+// gradient/starfield background; the full theme list is 'alternate' | 'default' | 'moon' | 'purple' |
+// 'solarized' | 'bluePlanet' | 'saturn' | 'kepler' | 'mars' | 'deepSpace' | 'laserwave' | 'none' — swap
+// this if 'default' still isn't neutral enough for you ('alternate'/'solarized' are the other flat ones;
+// 'none' strips ALL theme CSS, unstyled browser default).
+// agent.disabled: true — removes the "Ask AI" button entirely (a Scalar-hosted feature, on by default
+// on localhost for a 10-message free trial; unnecessary here and would otherwise need an Agent key in
+// production anyway).
+const SCALAR_CONFIG = {
+  layout: 'modern',
+  defaultOpenAllTags: true,
+  theme: 'default',
+  hideClientButton: false,
+  showSidebar: true,
+  showDeveloperTools: 'localhost',
+  showToolbar: 'localhost',
+  operationTitleSource: 'summary',
+  persistAuth: false,
+  isEditable: false,
+  hideModels: false,
+  documentDownloadType: 'both',
+  hideTestRequestButton: false,
+  hideSearch: false,
+  showOperationId: false,
+  hideDarkModeToggle: false,
+  withDefaultFonts: true,
+  defaultOpenFirstTag: true,
+  expandAllModelSections: false,
+  expandAllResponses: false,
+  expandAllSchemaProperties: false,
+  orderSchemaPropertiesBy: 'alpha',
+  orderRequiredPropertiesFirst: true,
+  modelsSectionLabel: 'Models',
+  agent: { disabled: true },
+};
+
 function renderPlayground() {
   return `<!doctype html>
 <html lang="en">
@@ -81,7 +125,7 @@ function renderPlayground() {
 <title>3dtiled tile-server — playground</title>
 </head>
 <body style="margin:0">
-  <script id="api-reference" data-url="/openapi.json" data-configuration='{"theme":"deepSpace"}'></script>
+  <script id="api-reference" data-url="/openapi.json" data-configuration='${escapeHtml(JSON.stringify(SCALAR_CONFIG))}'></script>
   <script src="https://cdn.jsdelivr.net/npm/@scalar/api-reference"></script>
 </body>
 </html>`;
@@ -89,7 +133,12 @@ function renderPlayground() {
 
 export async function handleHomepage(req, res, u) {
   if (u.pathname === '/') {
-    res.writeHead(200, CORS_HTML); res.end(renderHomepage()); return true;
+    // `u.protocol` reflects the literal `http://localhost:${PORT}` base server.js parses `req.url`
+    // against (see server.js), NOT the real client-facing scheme — behind Traefik/any TLS-terminating
+    // reverse proxy this process only ever sees plain HTTP. Prefer the standard forwarded-proto header.
+    const proto = req.headers['x-forwarded-proto'] || u.protocol.replace(':', '');
+    const origin = `${proto}://${req.headers.host}`;
+    res.writeHead(200, CORS_HTML); res.end(renderHomepage(origin)); return true;
   }
   if (u.pathname === '/openapi.json') {
     try {
