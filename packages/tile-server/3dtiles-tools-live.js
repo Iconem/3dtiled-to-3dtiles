@@ -213,6 +213,23 @@ async function serveUpgradeTile(relPathRaw, u, res) {
   const ext = path.extname(relPath.split('?')[0]).toLowerCase();
 
   if (url) {
+    // A NESTED tileset.json (e.g. Lille: root tileset.json → pyramid/tileset.json → leaf b3dm) must be
+    // recursively rewritten the SAME way serveUpgradeTileset rewrites the root — otherwise its own
+    // content URIs stay plain, unwrapped b3dm/pnts references, resolved and fetched directly by the
+    // client/renderer, completely bypassing our b3dmToGlb2 conversion. That's why multi-level tilesets
+    // kept crashing in the client's own (legacy-glTF-1.0-incapable) b3dm parser even with the "upgrade"
+    // transform selected — only the ROOT tileset was ever actually being upgraded.
+    if (ext === '.json') {
+      const tilesetUrl = new URL(relPath, url).href;
+      const r = await fetch(tilesetUrl);
+      if (!r.ok) { res.writeHead(r.status, CORS_ERR); res.end(`upstream ${r.status}`); return; }
+      const obj = await r.json();
+      if (obj.asset) obj.asset.version = '1.1';
+      const newBaseParam = `url=${encodeURIComponent(tilesetUrl.replace(/\/[^/]+$/, '/'))}`;
+      rewriteContentUris(obj.root, (uri) => wrapTileUri(uri, `tool=upgrade&${newBaseParam}`));
+      res.writeHead(200, CORS_JSON); res.end(JSON.stringify(obj));
+      return;
+    }
     const tileUrl = new URL(relPath, url).href;
     const r = await fetch(tileUrl);
     if (!r.ok) { res.writeHead(r.status, CORS_ERR); res.end(`upstream ${r.status}`); return; }
@@ -228,6 +245,14 @@ async function serveUpgradeTile(relPathRaw, u, res) {
     }
   } else {
     const abs = path.join(path.resolve(dir), relPath);
+    if (ext === '.json') {
+      const obj = JSON.parse(await fs.readFile(abs, 'utf8'));
+      if (obj.asset) obj.asset.version = '1.1';
+      const newBaseParam = `dir=${encodeURIComponent(path.dirname(abs))}`;
+      rewriteContentUris(obj.root, (uri) => wrapTileUri(uri, `tool=upgrade&${newBaseParam}`));
+      res.writeHead(200, CORS_JSON); res.end(JSON.stringify(obj));
+      return;
+    }
     if (ext === '.b3dm') {
       await pipeB3dmAsGlb(abs, res);
     } else if (ext === '.pnts') {
