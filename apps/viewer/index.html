@@ -15,6 +15,10 @@
   </head>
   <body>
     <div id="root"></div>
+    <!-- Runtime-overridable tile-server URL — see public/env-config.js and docker-entrypoint.sh.
+         A plain (non-module) script tag so it runs synchronously, before the deferred module
+         script below, guaranteeing window.__TILE_SERVER_URL__ is set before formats.ts reads it. -->
+    <script src="/env-config.js"></script>
     <script type="module" src="/src/main.tsx"></script>
   </body>
 </html>

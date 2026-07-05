@@ -36,13 +36,16 @@ RUN pnpm install --frozen-lockfile
 
 # ---- viewer: vite build → static dist/, served by a tiny static file server ----
 FROM deps AS viewer-build
-# Baked into the static bundle at build time (see apps/viewer/src/lib/formats.ts's MW export) —
-# the viewer's build output is immutable static files (no runtime env vars possible, see the
-# `viewer` stage below), so a deployment where the tile-server lives on its own domain/origin
-# (e.g. behind Traefik, one Host-routed subdomain per service instead of same-host-different-port)
-# must pass this at `docker build`/`build-push-action` time. Empty by default — apps/viewer falls
-# back to same-host-port-3001 (correct for local dev and this repo's own bundled docker-compose.yml,
-# where viewer and tile-server really do share a host, just on different ports).
+# Baked PERMANENTLY into the static bundle at `docker build` time (see apps/viewer/src/lib/
+# formats.ts's MW export) — setting this in a compose file's `environment:` block does nothing,
+# since a container's runtime env is invisible to an already-built static JS bundle. Prefer the
+# RUNTIME-configurable TILE_SERVER_URL env var instead (see docker-entrypoint.sh + public/
+# env-config.js below) for a deployment where the tile-server lives on its own domain/origin (e.g.
+# behind Traefik, one Host-routed subdomain per service) — it takes effect on container restart, no
+# rebuild needed. This ARG stays as a build-time-only alternative for anyone who prefers it. Empty
+# by default — apps/viewer falls back to same-host-port-3001 (correct for local dev and this repo's
+# own bundled docker-compose.yml, where viewer and tile-server really do share a host, just on
+# different ports).
 ARG VITE_TILE_SERVER_URL=""
 ENV VITE_TILE_SERVER_URL=${VITE_TILE_SERVER_URL}
 RUN pnpm --filter 3d-tiled build
@@ -51,7 +54,13 @@ FROM node:22-slim AS viewer
 RUN npm install -g serve@14
 WORKDIR /app
 COPY --from=viewer-build /app/apps/viewer/dist ./dist
+COPY apps/viewer/docker-entrypoint.sh /usr/local/bin/docker-entrypoint.sh
+RUN chmod +x /usr/local/bin/docker-entrypoint.sh
 EXPOSE 3000
+# Regenerates dist/env-config.js from $TILE_SERVER_URL on every container start — see the script's
+# own comment. This is what actually makes the tile-server URL configurable per-deployment without
+# rebuilding the image; VITE_TILE_SERVER_URL (ARG above) only ever takes effect at `docker build` time.
+ENTRYPOINT ["docker-entrypoint.sh"]
 # `serve`'s SPA fallback would break the adapters' "real 404 for a missing optional file" probing
 # (see vite.config.ts's own comment on this) — -s only rewrites a bare `/` request, not every path.
 # `dist/serve.json` (vite's publicDir → apps/viewer/public/serve.json) supplies the /vanilla-viewer

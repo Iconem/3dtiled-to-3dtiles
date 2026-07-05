@@ -20,10 +20,21 @@ export const SDATA = `${ORIGIN}/sample-data`;
 // deployment behind a reverse proxy (e.g. Traefik routing viewer.example.com and
 // tiles.example.com to two different containers, each on its own :443 — not the same host on a
 // different port the way local dev's ORIGIN_HOST + ':3001' assumes). That can't be derived from
-// window.location, so it's a build-time Vite env var, baked into the static bundle by the Dockerfile
-// (see its viewer-build stage) — falls back to the same-host-different-port pattern for local dev and
-// the bundled (non-Traefik) docker-compose.yml, where that assumption still holds.
-export const MW = import.meta.env.VITE_TILE_SERVER_URL || `${ORIGIN_PROTOCOL}//${ORIGIN_HOST}:3001`;
+// window.location, so it's configurable two ways, checked in order:
+//   1. window.__TILE_SERVER_URL__ — a RUNTIME override, regenerated from the container's own
+//      TILE_SERVER_URL env var at container START (see public/env-config.js + docker-entrypoint.sh).
+//      Takes effect on a plain container restart, no image rebuild needed.
+//   2. import.meta.env.VITE_TILE_SERVER_URL — a Vite BUILD-TIME env var baked permanently into the
+//      compiled JS bundle by the Dockerfile's viewer-build stage. Setting this in a compose file's
+//      `environment:` block does NOTHING — that only affects the container's runtime environment,
+//      which a static already-built JS bundle never reads. Kept for anyone who prefers baking it in
+//      at build time (e.g. a one-off `docker build --build-arg`) over runtime configuration.
+// Falls back to the same-host-different-port pattern for local dev and the bundled (non-Traefik)
+// docker-compose.yml, where that assumption still holds.
+export const MW =
+  (typeof window !== 'undefined' && (window as any).__TILE_SERVER_URL__) ||
+  import.meta.env.VITE_TILE_SERVER_URL ||
+  `${ORIGIN_PROTOCOL}//${ORIGIN_HOST}:3001`;
 
 export type AssetType = 'mesh' | 'pointcloud' | 'splat';
 

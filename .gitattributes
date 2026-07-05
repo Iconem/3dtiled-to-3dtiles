@@ -1,0 +1,4 @@
+# Shell scripts run inside Linux containers (see Dockerfile) — a CRLF shebang line breaks them
+# ("/bin/sh^M: bad interpreter") if checked out with Windows line endings. Force LF unconditionally,
+# regardless of core.autocrlf on whatever machine clones/builds this repo.
+*.sh text eol=lf
