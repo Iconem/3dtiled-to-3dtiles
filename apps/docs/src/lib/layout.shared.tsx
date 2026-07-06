@@ -9,7 +9,10 @@ import { appName, gitConfig } from './shared';
 const TILE_SERVER_URL = process.env.TILE_SERVER_URL || '';
 const VIEWER_URL = process.env.VIEWER_URL || '';
 
-const links: LinkItemType[] = ([
+// Exported separately from `baseOptions()` so the docs layout can render this same set of links in
+// its sidebar FOOTER instead of at the sidebar's top (see apps/docs/src/app/docs/layout.tsx) — the
+// home layout still uses it as-is, at the top, via `links` below.
+export const crossLinks: LinkItemType[] = ([
   TILE_SERVER_URL && { type: 'main', text: 'Playground', url: `${TILE_SERVER_URL}/playground`, external: true },
   VIEWER_URL && { type: 'main', text: 'Demo viewer', url: VIEWER_URL, external: true },
   TILE_SERVER_URL && { type: 'main', text: 'OpenAPI JSON', url: `${TILE_SERVER_URL}/openapi.json`, external: true },
@@ -22,6 +25,6 @@ export function baseOptions(): BaseLayoutProps {
       title: appName,
     },
     githubUrl: `https://github.com/${gitConfig.user}/${gitConfig.repo}`,
-    links,
+    links: crossLinks,
   };
 }
