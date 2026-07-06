@@ -23,10 +23,10 @@ pulling a sub-region, with user-controlled Geometric Error target precision, of 
 now done: **containerizing the server** (`Dockerfile` + `docker-compose.yml` + a GHCR-publishing GitHub
 Actions workflow — `docker compose up --build` runs the whole stack) and a first pass at the
 **Fumadocs** documentation site (`apps/docs`, `pnpm --filter docs dev`) — `README.md`'s sections and
-every [`docs-references/`](docs-references/) file are chunked into it and verified building/rendering,
-though the chunking itself is a first pass (unreviewed page boundaries, no cross-linking yet) and this
-README stays the canonical source until that catches up. Both are tracked in
-[TODO / Future work](#todo--future-work) below.
+every [`docs-references/`](docs-references/) file are chunked into it and verified building/rendering;
+the guide and reference sections are now cross-linked (e.g. `format-comparison.md` links every format to
+its reference-page mirror) and the migration is complete — the docs site, not this README, is the
+canonical source going forward. Both are tracked in [TODO / Future work](#todo--future-work) below.
 
 Further out: a browser/server tiled-splat transcoding UI in the spirit of SuperSplat's splat-transform
 tooling; a **georeferencing/geolocator** step for splats that don't ship one, along the lines of

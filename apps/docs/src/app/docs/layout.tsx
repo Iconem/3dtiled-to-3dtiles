@@ -39,9 +39,13 @@ export default function Layout({ children }: LayoutProps<'/docs'>) {
       tree={source.getPageTree()}
       {...baseOptions()}
       links={[]}
-      // defaultOpenLevel starts counting from 1 (0 = every folder collapsed, fumadocs-ui's default) —
-      // "Guide" and "Reference notes" are both first-level folders, so 1 opens them both by default.
-      sidebar={{ footer: <SidebarFooterLinks />, defaultOpenLevel: 1 }}
+      // Per-folder open state now comes from each folder's own meta.json (`"defaultOpen": true`),
+      // read by fumadocs-core's loader into that folder's page-tree node (see
+      // node_modules/fumadocs-core/dist/definitions-*.d.ts's `Folder.defaultOpen` and
+      // loader-*.js's `buildFolder()`, which sets it straight from `metadata.defaultOpen`) — so
+      // "guide/meta.json" opts itself in while "references/meta.json" stays collapsed, without a
+      // global `defaultOpenLevel` (which would open every first-level folder, references included).
+      sidebar={{ footer: <SidebarFooterLinks /> }}
     >
       {children}
     </DocsLayout>

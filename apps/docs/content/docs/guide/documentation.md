@@ -190,8 +190,7 @@ trees on disk — the converter reads those directly, no unzip). Mix of `3DObjec
 | `spark-2.0-blog-post.md` | Spark 2.0 technical deep dive (LoD, streaming, RAD format, PackedSplats vs ExtSplats) |
 | `sparkjs-packed-splats.md` | SparkJS PackedSplats API + 16-byte layout |
 | `sparkjs-ext-splats.md` | SparkJS ExtSplats API + 32-byte layout (Spark 2.0 preview) |
-| `KHR_gaussian_splatting.md` | KHR_gaussian_splatting glTF extension spec (RC) |
-| `KHR_gaussian_splatting_compression_spz_2.md` | SPZ compression extension spec (Draft) |
+| `KHR_gaussian_splatting.md` | KHR_gaussian_splatting glTF extension spec (RC), plus the `KHR_gaussian_splatting_compression_spz_2` SPZ-compression child extension (Draft) as a subsection |
 | `spz-format.md` | SPZ v2/v3 binary format — per-field encoding, pack/unpack formulas (source: github.com/nianticlabs/spz) |
 | `sog.md` | SOG (Spatially Ordered Gaussians) chunk format — WebP textures + dequant (positions/quats/scales/SH); consumed by `sog-to-3dtiles` (source: developer.playcanvas.com) |
 | `streamed-sog.md` | PlayCanvas Streamed SOG LOD format — `lod-meta.json` spatial tree + chunk references; the input to `sog-to-3dtiles` (source: developer.playcanvas.com) |
@@ -199,8 +198,13 @@ trees on disk — the converter reads those directly, no unzip). Mix of `3DObjec
 | `potree-format.md` | Potree 1.x (`cloud.js` + `.hrc`/`.bin`/`.laz`) and 2.0 (binary octree) — input to `potree-to-3dtiles`. Key: 1.x decode is `POSITION·scale + the NODE's box.min` (node-relative), with the `createChildAABB` octant convention bit0→Z/bit1→Y/bit2→X. cloud.js can carry a proj4 CRS. Sources: potree repo `docs/` (pinned commits). |
 | `nexus-format.md` | 🟠 CNR-ISTI Nexus multiresolution mesh (DAG of patches) — **doc-referenced, no converter** (mesh, not splats; niche). Refs: github.com/cnr-isti-vclab/nexus, FastDec paper |
 | `i3s-spec.md` | 🟡 Esri I3S (Indexed 3D Scene Layer / SLPK) — **draft converter `i3s-to-3dtiles/`** (validated on `Buildings_NewYork_v18.slpk` → 5882 tiles, see below): explicit nodepages + uncompressed `DefaultGeometrySchema` mesh / point cloud only. Ref: github.com/esri/i3s-spec |
-| `streaming-architecture-design-log.md` | Design log for the live-streaming harmonization — lazy hierarchy, the `cache = none/hierarchy/full` continuum, push/pull, per-format wiring + parallel hierarchy build. Companion to the README "materialization continuum" section. |
 | `streaming-adapter-plans.md` | Implementation plans for candidate adapters — **Bentley 3MX** (`3MXBO`/OpenCTM) and **Bing Maps 3D** (`tf=3dv4` GLB+Draco+KTX2, quadtree) — plus feasibility verdicts for **Nexus** (moderate, postponed) and **Autodesk ReCap** (blocked). Research-backed. |
+
+> `streaming-architecture-design-log.md` (design log for the live-streaming harmonization — lazy
+> hierarchy, the `cache = none/hierarchy/full` continuum, push/pull, per-format wiring + parallel
+> hierarchy build) has moved into the **Guide**, next to
+> ["Architecture: the materialization continuum"](/docs/guide/architecture-the-materialization-continuum-cache-none-hierar)
+> — it's a companion narrative to that section, not a per-format reference doc.
 
 #### Upstream specs & reference implementations
 

@@ -1,19 +1,15 @@
 {
-  "title": "Reference notes",
+  "title": "Per-format reference docs",
   "pages": [
     "3tz-3dtiles-packages",
-    "CONVERSATION",
     "copc-format",
     "gltf-2.1-complex-scenes",
     "i3s-spec",
     "KHR_gaussian_splatting",
-    "KHR_gaussian_splatting_compression_spz_2",
     "lcc-format",
     "loaders-gl-tile-converter",
     "maptiler-geosplats",
     "nexus-format",
-    "offline-tilers",
-    "open-data-3dtiles-samples",
     "plugin-feature-request",
     "potree-format",
     "rad-format-notes",
@@ -25,7 +21,6 @@
     "spz-format",
     "streamed-sog",
     "streaming-adapter-plans",
-    "streaming-architecture-design-log",
     "usd-gaussian-splats"
   ]
 }

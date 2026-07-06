@@ -13,7 +13,8 @@ const VIEWER_URL = process.env.VIEWER_URL || '';
 // its sidebar FOOTER instead of at the sidebar's top (see apps/docs/src/app/docs/layout.tsx) — the
 // home layout still uses it as-is, at the top, via `links` below.
 export const crossLinks: LinkItemType[] = ([
-  TILE_SERVER_URL && { type: 'main', text: 'Playground', url: `${TILE_SERVER_URL}/playground`, external: true },
+  TILE_SERVER_URL && { type: 'main', text: 'API Playground (ext)', url: `${TILE_SERVER_URL}/playground`, external: true },
+  { type: 'main', text: 'API Playground (embedded)', url: '/docs/api-reference' },
   VIEWER_URL && { type: 'main', text: 'Demo viewer', url: VIEWER_URL, external: true },
   TILE_SERVER_URL && { type: 'main', text: 'OpenAPI JSON', url: `${TILE_SERVER_URL}/openapi.json`, external: true },
 ] as (LinkItemType | false)[]).filter(Boolean) as LinkItemType[];

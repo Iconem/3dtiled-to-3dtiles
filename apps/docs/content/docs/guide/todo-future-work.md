@@ -5,8 +5,138 @@ description: "Roughly in the order we're tackling them:"
 
 Roughly in the order we're tackling them:
 
-- [x] ~~`copc-to-3dtiles`: `--explicit` flag (one tile per COPC node instead of 3D Tiles 1.1 implicit
-  tiling, for viewers without implicit-tiling support)~~ — **done**: both the offline converter and
+- [ ] **Composable `tiling=explicit`.** The still-open, more invasive half of an earlier item (see
+  "Streaming endpoint consolidation" in Done, below): route `&tiling=explicit` for COPC/Potree-2.0
+  *through* the existing `/3dtiles-tools?tool=implicit-to-explicit` tool against their own implicit
+  `/stream` output, instead of each format's live adapter keeping a bespoke `buildTilesetExplicit`.
+  Deferred until the consolidation above has settled — untested whether `implicit-to-explicit`'s generic
+  walker round-trips cleanly against our own live implicit tilesets. (I3S dropped out of scope here: it
+  was simplified to always-explicit directly, having no implicit representation worth composing through
+  the tool.) `viewer.html`'s Tools → implicit-to-explicit demo now includes a Potree and a COPC example
+  against our own prebuilt output as a stopgap — that's the tool working *against* our formats offline,
+  not the live routing described here.
+- [ ] **Port the middleware into 3DTilesRendererJS itself.** Today `packages/tile-server` sits in
+  front of 3DTilesRendererJS/CesiumJS as an HTTP layer; the longer-term idea is a 3DTilesRendererJS
+  **plugin** (in the spirit of its existing `ImplicitTilingPlugin`/`GaussianSplatPlugin`) that lets the
+  renderer consume COPC, Potree, streamed-SOG, LCC, etc. **directly** — any 3D-Tiles-consuming app
+  gets native support for these tiled formats without running a separate server process.
+
+  **Design sketch (not implemented) — what's portable vs. Node-only.** Surveyed what each
+  `packages/tile-server/*-live.js` adapter actually leans on:
+  - **Range-reads via `fetch` + `Range` header** — portable as-is. `copc-live.js`/`potree-live.js`/etc.
+    already use plain `fetch(url, { headers: { Range: ... } })`, no Node-specific HTTP client. Browsers
+    support `Range` requests against any host that sends `Accept-Ranges`/honors the header identically.
+  - **In-memory hierarchy caching** (`memoizeAsync`-wrapped per-URL context: COPC node maps, RAD chunk
+    topology, etc.) — portable as-is. It's a plain `Map`/closure cache, nothing Node-specific; a browser
+    tab has the same "cache for the life of this session" lifetime a server process does.
+  - **glTF encoding via `@gltf-transform/core`** — portable; `@gltf-transform/core` is isomorphic
+    (pure JS/typed-arrays, no `fs`), already used that way in other JS-ecosystem viewers.
+  - **Not portable as-is: `remote-zip.js`'s SLPK unzip.** It calls `node:zlib`'s `inflateRawSync`
+    directly (`packages/tile-server/remote-zip.js`) for the DEFLATE entries inside `.slpk` archives —
+    that's a Node built-in with no browser equivalent. A browser build would need to swap in
+    `pako`'s `inflateRaw` or the browser-native `DecompressionStream('deflate-raw')` API. Everything
+    else I3S's live adapter does (range-fetch, JSON/binary parsing, LEPCC decode) is plain JS already.
+  - **Plugin surface, matched against 3d-tiles-renderer's own `ImplicitTilingPlugin`**
+    (`node_modules/3d-tiles-renderer/src/core/plugins/ImplicitTilingPlugin.js`): plugins are plain
+    classes with an optional `init(tiles)` (receives the `TilesRenderer` instance),
+    `preprocessNode(tile, tilesetDir, parentTile)` (mutate a tile as it's registered — e.g. mark
+    unrenderable/implicit tiles), `parseTile(buffer, tile, extension)` (turn fetched bytes into
+    renderable content for tiles this plugin owns), `preprocessURL(url, tile)` (rewrite a tile's
+    content URL before fetching — this is where a COPC/Potree plugin would synthesize a per-node
+    tile URL instead of relying on a server), and `disposeTile(tile)` (cleanup). A per-format plugin
+    (`CopcPlugin`, `PotreePlugin`, `SogPlugin`, …) would likely: fabricate the root tileset JSON
+    in-memory from the format's own header/hierarchy (what `*-live.js`'s `tileset.json` handler does
+    today, minus the HTTP framing) and hand it to `tiles.rootURL`/a synthetic loader; use
+    `preprocessURL`/`parseTile` to intercept per-node "URLs" that are really just node-IDs, range-fetch
+    that node's bytes directly from the plugin, decode, and hand back a GLB `ArrayBuffer` — the same
+    decode logic `*-live.js` already has, just invoked in-browser instead of behind an HTTP route.
+  - **What's genuinely new work per format**: none of the *decoders* need rewriting (COPC/LAZ, SPZ,
+    LEPCC, OpenCTM are already plain JS with no Node dependency beyond the SLPK unzip above) — the work
+    is wrapping each `*-live.js`'s tileset-building + per-node logic behind the plugin hooks above
+    instead of Express-style request handlers, and replacing the one `node:zlib` call. This is a design
+    sketch, not a scoped work estimate — actually landing it means picking one format (COPC is the
+    simplest tree) as a proof of concept before generalizing the pattern to the rest.
+- [ ] **Test fixtures from open data.** Pin the small, `sample-data/`-friendly open datasets this repo
+  already references throughout (Autzen, Eiffel COPC tiles, Skatepark/Roman Parish streamed-SOG,
+  Tastier RAD, Geghard, Tende 3MX, …) as versioned fixtures — either vendored into their own small
+  GitHub repo(s) or referenced by stable upstream URL — so CI and new contributors get a reproducible
+  test corpus instead of relying on live third-party hosts.
+- [ ] **Find a real open-data `.3tz`/`.3dtiles` package.** `viewer.html`'s Packages pills currently only
+  demo our own repo-packed `sample-data/input/3DTILES-PACKAGES/tastier.{3tz,3dtiles}` — we don't have a
+  publicly-hosted example of either package format found in the wild to verify `/3dtiles-self-contained`
+  against a real third-party `.3tz`/`.3dtiles` file, not just our own packer's output.
+- [ ] **`/convert`-equivalent for `3d-tiles-tools`.** `3d-tiles-tools` (the real, unscoped npm package —
+  see the dependencies note above) isn't wired up as a dependency anywhere in this repo despite being
+  referenced in prose. Worth a `/convert`-style endpoint that shells out to / calls it directly (tileset
+  upgrade, implicit↔explicit, glTF-to-3TILES packaging, etc. — whatever it covers that our own
+  `/3dtiles-tools` endpoint's hand-rolled `implicit-to-explicit`/`upgrade` ops don't), mirroring how
+  `/convert` relates to `/stream`: one endpoint per capability tier.
+- [ ] **Test `/stream?cache=all`.** Recent verification passes (threemx/geosplats migration, uniform
+  crop, ArcGIS I3S) only exercised `cache=none`. `cache=all` (routes to `/convert`, preprocess + cache
+  the whole dataset) shares the same underlying adapters but hasn't been separately re-verified against
+  the newer/changed formats.
+- [ ] **Crop uniformity: georeferenced vs. non-georeferenced.** The `SPLAT_FLIP_BAKED` uniform-crop fix
+  (see "`/extract`" above) was verified against georeferenced real-world tiles for LCC/SOG/RAD. Not yet
+  separately verified: whether the same flip table holds for a **non-georeferenced** (local-frame, no
+  ENU→ECEF root transform) source of each format — worth a dedicated pass before trusting it universally.
+- [ ] **Spherical harmonics (view-dependent color) for Gaussian splats.** Every splat converter
+  (RAD/LCC/SOG/GeoSplats) currently emits **DC-only** color — the source formats' higher-order SH bands
+  are decoded-and-discarded (or never touched) on the way to a 3D Tiles GLB, so specular/view-dependent
+  appearance is lost.
+
+  **Design sketch (not implemented) — this is a design note, not a work-estimate promise.**
+  - **What each format actually stores** (per this repo's own reference docs):
+    - **RAD** (`apps/docs/content/docs/references/rad-format-notes.md`) — per-splat LoD tree; the
+      converter notes don't document an `sh1`/higher-band column explicitly beyond opacity/orientation/
+      scale decode, so the first step for RAD specifically would be confirming which SH bands (if any)
+      the monolithic `.rad` chunk layout actually persists before designing a carry-through path —
+      flagged here as a gap in the existing notes, not assumed absent.
+    - **LCC** (`apps/docs/content/docs/references/lcc-format.md`) — `Shcoef.bin`, present only when
+      `fileType: "Quality"` (absent for `"Portable"`). **64 bytes/splat = 15 packed-11 coefficients**
+      (`sh1`..`sh15`), decoded via `DecodePacked11` then lerped through `attributes.shcoef` min/max —
+      i.e. **SH degree 3** (3 coefficients × RGB × ... the doc counts 15 coeffs total, matching degree-3's
+      15 AC terms). Already positionally mapped in the doc's own "planned `lcc-to-3dtiles`" section as
+      "SH (Quality) → KHR `SH_DEGREE_*` attributes" — i.e. the target mapping is already anticipated,
+      just not implemented.
+    - **SOG** (`apps/docs/content/docs/references/sog.md`) — optional `shN_centroids.webp` +
+      `shN_labels.webp` palette: `bands ∈ [1,3]` → **3, 8, or 15 coefficients/channel** (degree 1/2/3),
+      16-bit per-Gaussian label indexing a 64-entry-per-row centroid palette, each channel itself a
+      codebook index into a shared 256-float `shN.codebook`. Two levels of indirection (label → centroid
+      row → codebook value) versus LCC's direct packed-11 lerp.
+    - **GeoSplats** — not covered by its own dedicated format-notes doc in `references/` the way
+      RAD/LCC/SOG are (it's built on SOG octants per the MapTiler GeoSplats memory notes), so its SH
+      story is presumably SOG's `shN_*` mechanism inherited as-is — needs confirming against the actual
+      GeoSplats reference doc before design, not assumed here.
+  - **What the OUTPUT side needs**: `apps/docs/content/docs/references/KHR_gaussian_splatting.md`
+    (Khronos Release Candidate, 2026) already defines the extension attributes for this —
+    `KHR_gaussian_splatting:SH_DEGREE_1_COEF_[0-2]` (VEC3 float, degree 1), `..._DEGREE_2_COEF_[0-4]`
+    (degree 2), `..._DEGREE_3_COEF_[0-6]` (degree 3) — all listed **optional** attributes alongside the
+    required POSITION/SCALE/ROTATION/OPACITY/`SH_DEGREE_0_COEF_0`. So the glTF-side target already
+    exists and needs no new extension design — it's a matter of populating additional accessors that
+    the spec already reserves. Degree-3 sources (LCC Quality, SOG `bands:3`) map directly onto the
+    extension's own degree-3 ceiling; nothing in RAD/LCC/SOG currently claims degree 4 (SPZ v4 does,
+    per this doc's own SPZ roadmap section below, but that's a different source format not yet a
+    converter input).
+  - **Rough per-converter work sketch**: for LCC and SOG this looks like "carry the extra bytes through
+    and write new glTF accessors" rather than a geometry re-derivation — both formats already deliver
+    SH coefficients in a fixed per-splat layout that only needs dequantizing (LCC: packed-11 lerp,
+    already documented; SOG: label→centroid→codebook, two indirections but no new math) and writing
+    into `VEC3 float` accessors matching the extension's `SH_DEGREE_n_COEF_m` semantics — no
+    re-deriving normals or a new basis, since the SH basis is defined relative to the existing splat
+    rotation/scale the converters already decode. RAD needs the "does the format even carry this"
+    question answered first. Quantized (non-float) accessor types aren't listed as allowed for the SH
+    attributes in the extension table above (only POSITION/SCALE/ROTATION/OPACITY list
+    byte/short/normalized variants) — so output accessors would be plain `float`, meaning the main
+    per-converter cost is likely the extra GLB payload size (degree-3 = 15 extra VEC3-float attributes
+    per splat) more than decode complexity. This is a sketch to scope future work, not a commitment to
+    a specific implementation order or timeline.
+
+## Done
+
+Completed items, moved out of the active list above but kept for history/context.
+
+- [x] ~~`copc-to-3dtiles`: `--explicit` flag~~ (one tile per COPC node instead of 3D Tiles 1.1 implicit
+  tiling, for viewers without implicit-tiling support) — **done**: both the offline converter and
   `/stream?format=copc` already take `--tiling explicit|implicit` / `?tiling=explicit`, default
   implicit. (This item had gone stale in the TODO list after being implemented.)
 - [x] ~~Streaming endpoint consolidation~~ — **done** (2026-07-02): `/stream` reads `cache=none|hierarchy`
@@ -16,15 +146,6 @@ Roughly in the order we're tackling them:
   and I3S entirely, were simplified to full materialization instead of per-chunk/lazy-fragment
   continuation routes; `/dump` was renamed `/extract` (clearer, less overloaded name). See "Endpoint
   rework" above and the CHANGELOG.
-- [ ] **Composable `tiling=explicit`.** The still-open, more invasive half of the item above: route
-  `&tiling=explicit` for COPC/Potree-2.0 *through* the existing `/3dtiles-tools?tool=implicit-to-explicit`
-  tool against their own implicit `/stream` output, instead of each format's live adapter keeping a
-  bespoke `buildTilesetExplicit`. Deferred until the consolidation above has settled — untested whether
-  `implicit-to-explicit`'s generic walker round-trips cleanly against our own live implicit tilesets.
-  (I3S dropped out of scope here: it was simplified to always-explicit directly, having no implicit
-  representation worth composing through the tool.) `viewer.html`'s Tools → implicit-to-explicit demo
-  now includes a Potree and a COPC example against our own prebuilt output as a stopgap — that's the
-  tool working *against* our formats offline, not the live routing described here.
 - [x] ~~Migrate `/threemx` and `/geosplats` into `/tiles`~~ — **done** (2026-07-02): both are now
   `/stream`'s `ADAPTERS` registry entries (`format=threemx`/`format=geosplats`), so they get the
   unified `cache=`/`/tiles` vocabulary like every other format. The old standalone `/threemx`,
@@ -51,40 +172,27 @@ Roughly in the order we're tackling them:
   setup) — wiring it behind Traefik/Caddy/nginx with real domains is left to whoever deploys it; the
   compose file's own comment on the `docs` service spells out which paths need to route there instead
   of to `viewer` if you do.
-- [~] **Fumadocs migration — scaffolded** (2026-07-02), content migration started. `apps/docs`
-  (a proper pnpm workspace member, `pnpm --filter docs dev` on port 3002) is a real, building
+- [x] ~~Fumadocs migration~~ — **done** (scaffolded 2026-07-02, functionally complete 2026-07-06).
+  `apps/docs` (a proper pnpm workspace member, `pnpm --filter docs dev` on port 3002) is a real, building
   Fumadocs/Next.js site: `README.md`'s 18 `##` sections and all 25 `docs-references/*.md` files are
   chunked into `content/docs/guide/*.md` and `content/docs/references/*.md` respectively (mechanical
   per-file/per-section split, `.md` not `.mdx` so `<SRC>`-style placeholder syntax throughout this repo's
   prose doesn't get misparsed as JSX) — verified rendering correctly (sidebar nav, in-page TOC, code
-  blocks, checkboxes/strikethrough) via a full `next build` + dev-server check. **Not yet done**: the
-  chunking is a first pass (one page per original heading, unreviewed boundaries — see `apps/docs/README.md`
-  for the concrete next steps), no cross-linking between guide/reference pages, and `README.md` (not the
-  new site) is still the canonical, most-current source until the migration catches up.
-- [ ] **Port the middleware into 3DTilesRendererJS itself.** Today `packages/tile-server` sits in
-  front of 3DTilesRendererJS/CesiumJS as an HTTP layer; the longer-term idea is a 3DTilesRendererJS
-  **plugin** (in the spirit of its existing `ImplicitTilingPlugin`/`GaussianSplatPlugin`) that lets the
-  renderer consume COPC, Potree, streamed-SOG, LCC, etc. **directly** — any 3D-Tiles-consuming app
-  gets native support for these tiled formats without running a separate server process.
-- [ ] **Test fixtures from open data.** Pin the small, `sample-data/`-friendly open datasets this repo
-  already references throughout (Autzen, Eiffel COPC tiles, Skatepark/Roman Parish streamed-SOG,
-  Tastier RAD, Geghard, Tende 3MX, …) as versioned fixtures — either vendored into their own small
-  GitHub repo(s) or referenced by stable upstream URL — so CI and new contributors get a reproducible
-  test corpus instead of relying on live third-party hosts.
-- [ ] **Find a real open-data `.3tz`/`.3dtiles` package.** `viewer.html`'s Packages pills currently only
-  demo our own repo-packed `sample-data/input/3DTILES-PACKAGES/tastier.{3tz,3dtiles}` — we don't have a
-  publicly-hosted example of either package format found in the wild to verify `/3dtiles-self-contained`
-  against a real third-party `.3tz`/`.3dtiles` file, not just our own packer's output.
-- [x] ~~Add a generic CORS proxy~~ — done (2026-07-02): `/proxy?url=<source>`, tileset-aware
+  blocks, checkboxes/strikethrough) via a full `next build` + dev-server check. The 18 guide + 25
+  reference files are now cross-linked (`format-comparison.md` links every format to its reference-page
+  mirror, `documentation.md` cross-references, 11+ files carry internal `/docs/guide/`/`/docs/references/`
+  links), and the root `README.md` was trimmed to a pitch + quickstart pointing at the docs site (see
+  the Docker item above) — the docs site is now the canonical source, not README.
+- [x] ~~Add a generic CORS proxy~~ — **done** (2026-07-02): `/proxy?url=<source>`, tileset-aware
   `content.uri` rewriting so nested children keep routing through it. Fixes the Agisoft Jam pill (its
   host sends no CORS header at all, on any resource). See "`/proxy`" above.
-- [x] ~~I3S: SLPK support~~ — the SLPK-archive code path already existed in `i3s-live.js`
+- [x] ~~I3S: SLPK support~~ — **done**. The SLPK-archive code path already existed in `i3s-live.js`
   (`@loaders.gl/i3s`'s `parseSLPKArchive`) but only ever triggered on a URL literally ending in `.slpk`
   — ArcGIS Online's own download endpoint (`.../content/items/<id>/data`) has no `.slpk` anywhere in the
   URL (the real filename only shows up in a `Content-Disposition` header). Fixed 2026-07-02: sniff the
   first bytes for the PKZIP magic (`PK`) when the URL doesn't already look like JSON, so any zip-shaped
   response is detected regardless of URL shape.
-- [x] ~~I3S: mesh textures rendering black~~ — done (2026-07-02). Two separate things were wrong:
+- [x] ~~I3S: mesh textures rendering black~~ — **done** (2026-07-02). Two separate things were wrong:
   (1) textures were **never implemented** at all — `uv0` was decoded from the geometry buffer and then
   silently dropped before reaching the glTF writer, and no texture image was ever fetched (an explicit,
   documented scope-gate, not a bug). Added: `materialDefinitions`/`textureSetDefinitions` lookup (picks
@@ -119,26 +227,12 @@ Roughly in the order we're tackling them:
   earlier "Moro Bay `.slpk` exposes a single root node" finding — same bug, not a property of that
   archive. Fixed via a shared `childIndices()` helper in `i3sParse.js`, used by both `i3s-live.js` and
   the offline draft converter. Verified: Moro Bay SceneServer 1 → 13,775 tiles, its `.slpk` 1 → 2,624.
-- [ ] **`/convert`-equivalent for `3d-tiles-tools`.** `3d-tiles-tools` (the real, unscoped npm package —
-  see the dependencies note above) isn't wired up as a dependency anywhere in this repo despite being
-  referenced in prose. Worth a `/convert`-style endpoint that shells out to / calls it directly (tileset
-  upgrade, implicit↔explicit, glTF-to-3TILES packaging, etc. — whatever it covers that our own
-  `/3dtiles-tools` endpoint's hand-rolled `implicit-to-explicit`/`upgrade` ops don't), mirroring how
-  `/convert` relates to `/stream`: one endpoint per capability tier.
-- [ ] **Test `/stream?cache=all`.** Recent verification passes (threemx/geosplats migration, uniform
-  crop, ArcGIS I3S) only exercised `cache=none`. `cache=all` (routes to `/convert`, preprocess + cache
-  the whole dataset) shares the same underlying adapters but hasn't been separately re-verified against
-  the newer/changed formats.
-- [ ] **Crop uniformity: georeferenced vs. non-georeferenced.** The `SPLAT_FLIP_BAKED` uniform-crop fix
-  (see "`/extract`" above) was verified against georeferenced real-world tiles for LCC/SOG/RAD. Not yet
-  separately verified: whether the same flip table holds for a **non-georeferenced** (local-frame, no
-  ENU→ECEF root transform) source of each format — worth a dedicated pass before trusting it universally.
-- [ ] **Standalone React + Vite viewer app.** Port `viewer.html`'s functionality (format/cache/prefetch/
-  transform/option/model top-bar pills, the full sidepanel — renderer choice, basemap, tileset/LOD,
-  crop & extract, navigation, local frame — CesiumJS + 3DTRJS rendering, and a link to the new Fumadocs
-  site) into a proper React app under `apps/viewer` (or similar), built with shadcn/ui for every input/
-  label/select. `viewer.html` stays as-is alongside it during the transition — this is a rewrite, not a
-  replace-in-place. See the architecture plan below before implementation starts.
+- [x] ~~Standalone React + Vite viewer app~~ — **done** (2026-07-06). `apps/viewer` (React) now has full
+  feature parity with the legacy `viewer.html`/`vanilla-viewer.html`: all 11 format preset pills
+  (COPC/Potree/SOG/LCC/GeoSplats/RAD/3D Tiles/Packages/I3S/3MX/Bing), renderer choice (Cesium/3DTRJS),
+  basemap/terrain, LOD controls, crop & extract (format-aware as of 2026-07-06), Local Frame, and
+  navigation are all ported. The legacy HTML files are kept only as historical reference — no unique
+  functionality remains there that isn't also in `apps/viewer`.
 
 ### Inspected, no tiled splat/generic format found
 
