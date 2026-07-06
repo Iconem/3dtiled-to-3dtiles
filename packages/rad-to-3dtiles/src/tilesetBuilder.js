@@ -31,6 +31,12 @@ const GEOMETRIC_ERROR_ROOT_DEFAULT = 1000;
 export function buildTileset(nodes, opts = {}) {
   const {
     tileUriTemplate    = 'tiles/node_{index}.glb',
+    // Set on a bounded/depth-cut scan (rad-live.js's cache=none path): a node with `node.frontier`
+    // true was visited (so it has its own bounds/GE) but its REAL children were never scanned —
+    // instead of emitting them as regular tile children (there are none in `nodes`), append one
+    // childless synthetic tile whose content is an EXTERNAL tileset.json continuing the scan rooted
+    // at that node. Mirrors how Potree/COPC cut their implicit octree into linked subtrees.
+    subtreeUriTemplate = null,
     rootGeometricError = null,
     // geScale: global multiplier applied to every tile GE. Default 1 — raw
     //   featureSize GE is already the right magnitude (matches the reference
@@ -95,6 +101,22 @@ export function buildTileset(nodes, opts = {}) {
       refine: 'REPLACE',
       content: { uri }
     };
+
+    // A bounded/depth-cut scan stopped AT this node without reading its real children (they exist —
+    // node.childCount/children says so — but weren't fetched). Graft one synthetic, content-less
+    // tile whose own content is an external tileset.json that resumes the scan rooted here, instead
+    // of emitting (nonexistent, in `nodes`) real children.
+    if (node.frontier && subtreeUriTemplate) {
+      const subUri = subtreeUriTemplate.replace('{index}', node.nodeIndex ?? node.index);
+      const subError = Math.min(error * 0.5, error - 1e-6);
+      t.children = [{
+        boundingVolume: t.boundingVolume,
+        geometricError: Math.max(subError, 0),
+        refine: 'REPLACE',
+        content: { uri: subUri },
+      }];
+      return t;
+    }
 
     // Prefer node.children[] (arbitrary list); fall back to childStart/childCount range.
     const childIds = node.children ?? (

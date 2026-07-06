@@ -10,13 +10,17 @@
  *   GET /stream/tile/<key>.glb?url=<SRC>&format=<fmt>       → one range-built tile from that adapter
  *   GET /stream/subtrees/<key>.subtree?url=<SRC>&format=<fmt>  → implicit-tiling subtree (octree fmts)
  *   GET /stream/threemx/node/<path>.json?url=<SRC>          → 3MX lazy-fragment continuation (one .3mxb)
+ *   GET /stream/rad/subtree/<chunkIndex>.json?url=<SRC>     → RAD cache=none depth-cut continuation
  *
- * RAD and I3S have no persisted spatial index to make a lazy/partial hierarchy read meaningful (see
- * their file-header comments), so both always fully materialize their explicit tree regardless of
- * `cache=` — matching the Potree 1.x `tiling=explicit` simplification. (2026-07-02: this removed their
- * `/stream/rad/subtree/…` and `/stream/i3s/node,tile/…` lazy-fragment continuation routes.) 3MX is a
- * genuine DAG with no persisted spatial index, so it keeps its own lazy continuation (above) — the same
- * mechanism RAD/I3S used to have, just for a format where "scan everything eagerly" isn't cheap.
+ * I3S has no persisted spatial index to make a lazy/partial hierarchy read meaningful (see its
+ * file-header comments), so it always fully materializes its explicit tree regardless of `cache=` —
+ * matching the Potree 1.x `tiling=explicit` simplification. (2026-07-02: this removed its
+ * `/stream/i3s/node,tile/…` lazy-fragment continuation routes.) RAD USED to be in the same boat and
+ * had its own `/stream/rad/subtree/…` route removed the same day — reinstated once a cheaper per-chunk
+ * topology read (see rad-live.js) made a depth-bounded lazy scan worth it again for cache=none. 3MX is
+ * a genuine DAG with no persisted spatial index at all, so it keeps its own lazy continuation (above)
+ * regardless of cache mode — the same shape RAD/I3S used to share, just for a format where "scan
+ * everything eagerly" isn't cheap even once.
  *
  * threemx and geosplats (2026-07-02) moved here from their own standalone /threemx, /geosplats
  * endpoints — same ADAPTERS-registry pattern as every other format, so they now get cache=/prefetch=/
@@ -34,7 +38,7 @@ import { copcTileset, copcTile, copcSubtree, copcTileRe } from './copc-live.js';
 import { potreeTileset, potreeTile, potreeSubtree, potreeTileRe } from './potree-live.js';
 import { sogTileset, sogTile, sogTileRe } from './sog-live.js';
 import { lccTileset, lccTile, lccTileRe } from './lcc-live.js';
-import { radTileset, radTile, radTileRe } from './rad-live.js';
+import { radTileset, radTile, radTileRe, radSubtree } from './rad-live.js';
 import { i3sTileset, i3sTile, i3sTileRe } from './i3s-live.js';
 import { threemxTileset, threemxTile, threemxTileRe, threemxNode } from './threemx-live.js';
 import { geosplatsTileset, geosplatsTile, geosplatsTileRe } from './geosplats-live.js';
@@ -119,10 +123,27 @@ async function handleThreemxNode(u, res) {
   return true;
 }
 
+// RAD's cache=none continuation (see rad-live.js's file header + scanBoundedTopology comment) — a
+// depth-cut external-tileset reference, same idea as threemx's node continuation above but for a
+// format that DOES have real per-chunk bounds/topology once you bother reading them, just too many
+// chunks to read them all up front for a fast first response.
+async function handleRadSubtree(u, res) {
+  const n = u.pathname.match(/^\/stream\/rad\/subtree\/(\d+)\.json$/);
+  if (!n) return false;
+  const url = u.searchParams.get('url');
+  if (!url) { res.writeHead(400, CORS); res.end('missing ?url=<source url>'); return true; }
+  const centroids = u.searchParams.get('centroids') === '1' || u.searchParams.get('centroids') === 'true';
+  const ts = await radSubtree(url, n[1], { centroids });
+  res.writeHead(200, { 'Content-Type': 'application/json', ...CORS });
+  res.end(JSON.stringify(ts));
+  return true;
+}
+
 /** Try to handle a /stream/* request. Returns true iff it owned the response. */
 export async function handleStream(req, res, u) {
   if (!u.pathname.startsWith('/stream/')) return false;
   if (await handleThreemxNode(u, res)) return true;
+  if (await handleRadSubtree(u, res)) return true;
   const url = u.searchParams.get('url');
   if (!url) { res.writeHead(400, CORS); res.end('missing ?url=<source url>'); return true; }
   const name = url.split('?')[0].split('/').pop() || '';
