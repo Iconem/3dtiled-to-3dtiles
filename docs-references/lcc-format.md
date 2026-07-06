@@ -2,6 +2,15 @@
 
 > Sources: https://github.com/xgrids/LCCWhitepaper · https://developer.xgrids.com/#/document?titleId=en-1720509291851
 > License: XGRIDS White Paper License (attribution required: "Data Organization Format originated from XGRIDS"; derivatives must be published under terms no less open; no AI-model training that competes with XGRIDS). Quote/cite, don't relicense.
+>
+> Independent third-party decoder implementation (not affiliated with XGRIDS, useful as a second
+> reference alongside the whitepaper above): https://github.com/wallabyway/lcc-decoder/tree/master
+>
+> Public sample `.lcc` downloads (used by this repo's LCC presets): XGRIDS' own sample-data page,
+> https://developer.xgrids.com/#/download?page=sampledata (e.g. fine_v2/Guan_Temple.zip on
+> da9i2vj1xvtoc.cloudfront.net), plus two smaller community-hosted captures — PentHouse
+> (pub-70118068888842fdb18fe226dbd4c745.r2.dev) and Big Mirror (raw.githubusercontent.com/
+> willeastcott/assets) — both wired up as live-streaming presets.
 
 LCC is XGRIDS's chunked, LOD-native container for 3D Gaussian Splatting from Multi-SLAM capture
 (L1/L2/K1/PortCam/Drone). Smaller than PLY, progressive streaming, integrations for Three.js,

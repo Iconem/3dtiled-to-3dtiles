@@ -119,13 +119,12 @@ export const FORMATS: FormatMeta[] = [
     { id: 'arrival-jaffa', label: 'Arrival jaffa3 (.lod) ⬀', src: 'https://ugc.arrival.space/71585765/14ae36863868a5f74fbc29389e156bc5f18e0d7a612af78c492cd84cfa4a9c44_jaffa3_1777965648677_LOD/lod-meta.json' },
   ] },
   { fmt: 'lcc', icon: '◆', label: 'LCC', type: 'splat', octree: false, stream: true, assets: [
-    // No public sample datasets found for XGRIDS' proprietary LCC format — they open-sourced the
-    // format SPEC (github.com/xgrids/LCCWhitepaper), not sample captures; Guan Temple/Guanlan Town/
-    // Religious Center are private showcase captures with no public download. Stay on local sample-data
-    // until/unless a real public .lcc download turns up (checked xgrids.com's own site + "LCC Studio").
-    { id: 'guan', label: 'Guan Temple', src: 'input/LCC/Guan_Temple/meta.lcc', out: 'output/lcc/Guan_Temple-3dtiles-from-lcc' },
-    { id: 'guanlan', label: 'Guanlan Town', src: 'input/LCC/Guanlan Ancient Town/meta.lcc', out: 'output/lcc/Guanlan_Ancient_Town-3dtiles-from-lcc' },
-    { id: 'religious', label: 'Religious Center', src: 'input/LCC/religious_center_L2_P/meta.lcc', out: 'output/lcc/religious_center_L2_P-3dtiles-from-lcc' },
+    // Real public .lcc downloads (found via XGRIDS' own sample-data page,
+    // developer.xgrids.com/#/download?page=sampledata, and a hobbyist's own R2/GitHub mirrors) —
+    // replaces the earlier private/local-only showcase captures (Guan Temple/Guanlan Town/Religious
+    // Center), which had no public source and stayed on local sample-data.
+    { id: 'penthouse', label: 'PentHouse', src: 'https://pub-70118068888842fdb18fe226dbd4c745.r2.dev/PentHouse/meta.lcc', out: 'output/lcc/PentHouse-3dtiles-from-lcc' },
+    { id: 'bigmirror', label: 'Big Mirror', src: 'https://raw.githubusercontent.com/willeastcott/assets/main/lcc/bigmirror/meta.lcc', out: 'output/lcc/bigmirror-3dtiles-from-lcc' },
   ] },
   { fmt: 'rad', icon: '✦', label: 'RAD', type: 'splat', octree: false, stream: true, assets: [
     // Real sources: the exact files this repo's own README setup instructions curl down as
