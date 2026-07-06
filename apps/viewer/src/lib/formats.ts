@@ -123,13 +123,16 @@ export const FORMATS: FormatMeta[] = [
     // developer.xgrids.com/#/download?page=sampledata, and a hobbyist's own R2/GitHub mirrors) —
     // replaces the earlier private/local-only showcase captures (Guan Temple/Guanlan Town/Religious
     // Center), which had no public source and stayed on local sample-data.
-    // PentHouse's bucket is missing its required Data.bin (confirmed: index.bin's own LOD offset
-    // table references byte ranges up to ~316MB into it, but only meta.lcc/index.bin/a much smaller
-    // environment.bin actually exist there) — every tile request 404s. Left wired up (with a clear
-    // error message, see lcc-live.js's rangeGet) rather than removed, in case the uploader fixes the
-    // bucket; swap for a different public host if a complete mirror turns up.
-    { id: 'penthouse', label: 'PentHouse', src: 'https://pub-70118068888842fdb18fe226dbd4c745.r2.dev/PentHouse/meta.lcc', out: 'output/lcc/PentHouse-3dtiles-from-lcc' },
+    // PentHouse REMOVED (2026-07-06): its bucket is missing the required Data.bin — confirmed
+    // index.bin's own LOD offset table references byte ranges up to ~316MB into it, but only
+    // meta.lcc/index.bin/a much smaller environment.bin actually exist there. Every tile request
+    // 404s; no complete public mirror found. Re-add if a fixed/alternate host turns up.
     { id: 'bigmirror', label: 'Big Mirror', src: 'https://raw.githubusercontent.com/willeastcott/assets/main/lcc/bigmirror/meta.lcc', out: 'output/lcc/bigmirror-3dtiles-from-lcc' },
+    // Whole LCC file set bundled as one .zip (XGRIDS' own CDN) — lcc-live.js detects the `.zip`
+    // extension and reads meta.lcc/index.bin/data.bin as zip entries via range reads instead of
+    // sibling HTTP files (see remote-zip.js). data.bin is DEFLATE-compressed inside the zip (not
+    // byte-seekable), so it's decompressed once per cold source (~5-13s) and cached, not per-tile.
+    { id: 'guan-temple', label: 'Guan Temple (zip)', src: 'https://da9i2vj1xvtoc.cloudfront.net/lcc-pub/fine_v2/Guan_Temple.zip', out: 'output/lcc/Guan_Temple-3dtiles-from-lcc' },
   ] },
   { fmt: 'rad', icon: '✦', label: 'RAD', type: 'splat', octree: false, stream: true, assets: [
     // Real sources: the exact files this repo's own README setup instructions curl down as

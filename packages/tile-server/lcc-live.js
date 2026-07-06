@@ -9,10 +9,19 @@
  *   GET /lcc/tileset.json?url=<meta.lcc URL>
  *   GET /lcc/tile/<offset>_<size>_<points>.glb?url=<meta.lcc URL>   (run encoded in the name)
  *
- * Note: data.bin is a sibling of meta.lcc (named `data.bin`); `index.bin` likewise.
+ * Two source layouts, auto-detected from `url`:
+ *   • Sibling files (the common case) — `url` points at meta.lcc itself; `index.bin`/`data.bin` are
+ *     siblings at the same base path, range-read directly over HTTP.
+ *   • Zip-packaged (`url` ends in `.zip`) — the whole LCC file set is bundled as ZIP entries (e.g.
+ *     XGRIDS' own published samples). meta.lcc/index.bin are small — read whole via remote-zip's
+ *     getFile(). data.bin is large and, in every sample seen so far, DEFLATE-compressed *inside* the
+ *     zip (not STORED) — deflate isn't byte-seekable, so per-tile range reads into the compressed
+ *     stream can't work. We fetch+inflate data.bin ONCE (cached on ctx, same lifetime as meta/index)
+ *     and slice tiles out of the decompressed buffer in memory instead of re-reading over HTTP.
  */
 import { decodeSplats } from '../lcc-to-3dtiles/src/lccDecode.js';
 import { buildSplatTileGlb, computeBounds, lccGeoref, LCC_LOCAL_UPRIGHT, memoizeAsync } from '../core/index.js';
+import { remoteZipFileSystem } from './remote-zip.js';
 
 const ROOT_GE_FACTOR = 0.05, DEPTH_RATIO = 0.5;
 
@@ -35,9 +44,10 @@ async function rangeGet(url, begin, length) {
   return Buffer.from(await r.arrayBuffer());
 }
 
-// Per-URL context: meta.lcc + index.bin parsed into per-Unit grid boxes + per-LOD runs. memoizeAsync
-// caches FAILURES too — a broken source fails fast on retry (see cache.js's own comment).
-const getCtx = memoizeAsync(async (url) => {
+// Build { metaBuf, indexBuf, readData } for either source layout. `readData` is an async
+// (off,size)→Buffer reader over data.bin, resolved once up front so serveTileGlb doesn't need to
+// know which layout it's in.
+async function openSiblingSource(url) {
   const base = url.slice(0, url.lastIndexOf('/') + 1);
   // index.bin's URL only depends on `url` itself, not on meta.lcc's PARSED contents — fetching it
   // sequentially after meta.lcc (as if it were a dependency) just adds meta.lcc's own round-trip to
@@ -45,6 +55,48 @@ const getCtx = memoizeAsync(async (url) => {
   // thing up front to know where every Unit's LOD chunks live in data.bin — see the file header
   // above), so this concurrent fetch is the only real lever on that part of first-load latency.
   const [metaBuf, indexBuf] = await Promise.all([fetchBuf(url), fetchBuf(base + 'index.bin')]);
+  const dataUrl = base + 'data.bin';
+  return { metaBuf, indexBuf, readData: (off, size) => rangeGet(dataUrl, off, size) };
+}
+
+// Find a zip entry by basename, case-insensitively (XGRIDS' own sample zips nest everything under a
+// top-level `<Name>/` dir, and casing of e.g. Index.bin/index.bin isn't guaranteed across exports).
+function findEntry(names, base) {
+  const name = names.find(n => n.toLowerCase().endsWith('/' + base) || n.toLowerCase() === base);
+  if (!name) throw new Error(`zip has no "${base}" entry (found: ${names.join(', ')})`);
+  return name;
+}
+
+async function openZipSource(url) {
+  const zfs = await remoteZipFileSystem(url);
+  const metaName = findEntry(zfs.names, 'meta.lcc');
+  const indexName = findEntry(zfs.names, 'index.bin');
+  const dataName = findEntry(zfs.names, 'data.bin');
+  const [metaBuf, indexBuf] = await Promise.all([zfs.getFile(metaName), zfs.getFile(indexName)]);
+
+  const dataInfo = await zfs.stat(dataName);
+  let readData;
+  if (dataInfo.method === 0) {
+    // STORED in the zip — true range reads, no decompression, no full-entry fetch.
+    console.log(`[lcc-live] zip ${url}: data.bin is STORED — byte-range reads`);
+    readData = (off, size) => zfs.rawEntryRange(dataName, off, size);
+  } else {
+    // DEFLATE — not byte-seekable. Fetch + inflate the whole entry once, cache it on this ctx, and
+    // slice tiles out of the in-memory decompressed buffer. Honest one-time cost instead of a fake
+    // "range read" that would actually re-fetch/re-inflate on every tile.
+    console.log(`[lcc-live] zip ${url}: data.bin is DEFLATE (${dataInfo.compressedSize} → ${dataInfo.uncompressedSize} bytes) — decompressing once…`);
+    const t0 = Date.now();
+    const full = await zfs.getFullDecompressed(dataName);
+    console.log(`[lcc-live] zip ${url}: data.bin decompressed in ${Date.now() - t0}ms`);
+    readData = async (off, size) => full.subarray(off, off + size);
+  }
+  return { metaBuf, indexBuf, readData };
+}
+
+// Per-URL context: meta.lcc + index.bin parsed into per-Unit grid boxes + per-LOD runs. memoizeAsync
+// caches FAILURES too — a broken source fails fast on retry (see cache.js's own comment).
+const getCtx = memoizeAsync(async (url) => {
+  const { metaBuf, indexBuf, readData } = /\.zip(\?|$)/i.test(url) ? await openZipSource(url) : await openSiblingSource(url);
   const meta = JSON.parse(metaBuf.toString('utf8'));
   const scaleAttr = (meta.attributes || []).find(a => a.name === 'scale');
   if (!scaleAttr) throw new Error('meta.lcc missing attributes.scale min/max');
@@ -71,7 +123,7 @@ const getCtx = memoizeAsync(async (url) => {
   const geo = lccGeoref(meta, 'lcc-live');
   const transform = geo || LCC_LOCAL_UPRIGHT;   // no usable EPSG → still flip upright, just not geolocated
   console.log(`[lcc-live] ${url} → ${units.length} units, georef=${!!geo}${meta.epsg ? ' (EPSG:'+meta.epsg+')' : ' (local upright, no EPSG)'}`);
-  return { dataUrl: base + 'data.bin', units, scaleMin: scaleAttr.min, scaleMax: scaleAttr.max, sceneBox: boundToZUpBox(bb.min, bb.max), rootGE: diag * ROOT_GE_FACTOR, transform };
+  return { readData, units, scaleMin: scaleAttr.min, scaleMax: scaleAttr.max, sceneBox: boundToZUpBox(bb.min, bb.max), rootGE: diag * ROOT_GE_FACTOR, transform };
 });
 
 function buildTileset(ctx, urlParam, centroids = false) {
@@ -100,7 +152,7 @@ function buildTileset(ctx, urlParam, centroids = false) {
 }
 
 async function serveTileGlb(ctx, off, size, pts, centroids = false) {
-  const buf = await rangeGet(ctx.dataUrl, off, size);
+  const buf = await ctx.readData(off, size);
   const { positions, alphas, rgb, scales, rotations } = decodeSplats(buf, 0, pts, ctx.scaleMin, ctx.scaleMax);
   const bounds = computeBounds(positions, pts);
   return Buffer.from(await buildSplatTileGlb({ positions, alphas, rgb, scales, rotations }, pts, bounds, centroids));
