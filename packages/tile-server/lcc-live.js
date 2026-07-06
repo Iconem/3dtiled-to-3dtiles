@@ -30,6 +30,7 @@ async function fetchBuf(url) {
 }
 async function rangeGet(url, begin, length) {
   const r = await fetch(url, { headers: { Range: `bytes=${begin}-${begin + length - 1}` } });
+  if (r.status === 404) throw new Error(`range ${url} → 404 (this file doesn't exist — the LCC export at this URL is missing its required sibling data.bin, not a range-request issue)`);
   if (r.status !== 206 && r.status !== 200) throw new Error(`range ${url} → ${r.status} (server must support HTTP 206)`);
   return Buffer.from(await r.arrayBuffer());
 }

@@ -33,9 +33,6 @@ export default function Sidebar({ activeHandleRef }: { activeHandleRef: React.Re
     <div className="flex h-full w-72 shrink-0 flex-col border-l">
       <div className="flex items-center justify-between border-b px-2 py-1.5">
         <div className="flex items-center gap-1">
-          <Button size="icon" variant="ghost" className="size-7" title={theme === 'dark' ? 'Switch to light theme' : 'Switch to dark theme'} onClick={() => setTheme(theme === 'dark' ? 'light' : 'dark')}>
-            {theme === 'dark' ? <Sun className="size-4" /> : <Moon className="size-4" />}
-          </Button>
           <Button size="icon" variant="ghost" className="size-7" title="Docs" asChild>
             <a href={DOCS_URL} target="_blank" rel="noopener noreferrer"><BookOpen className="size-4" /></a>
           </Button>
@@ -47,9 +44,14 @@ export default function Sidebar({ activeHandleRef }: { activeHandleRef: React.Re
           <ToggleGroupItem value="cesium" className="h-7 px-2 text-xs">Cesium</ToggleGroupItem>
           <ToggleGroupItem value="3dtrjs" className="h-7 px-2 text-xs">3DTRJS</ToggleGroupItem>
         </ToggleGroup>
-        <Button size="icon" variant="ghost" className="size-7" title="Collapse sidebar" onClick={() => setCollapsed(true)}>
-          <PanelRightClose className="size-4" />
-        </Button>
+        <div className="flex items-center gap-1">
+          <Button size="icon" variant="ghost" className="size-7" title={theme === 'dark' ? 'Switch to light theme' : 'Switch to dark theme'} onClick={() => setTheme(theme === 'dark' ? 'light' : 'dark')}>
+            {theme === 'dark' ? <Sun className="size-4" /> : <Moon className="size-4" />}
+          </Button>
+          <Button size="icon" variant="ghost" className="size-7" title="Collapse sidebar" onClick={() => setCollapsed(true)}>
+            <PanelRightClose className="size-4" />
+          </Button>
+        </div>
       </div>
       <ScrollArea className="min-h-0 flex-1">
         <div className="flex flex-col divide-y divide-border">

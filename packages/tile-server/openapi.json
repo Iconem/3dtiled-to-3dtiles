@@ -24,7 +24,7 @@
           { "name": "url", "in": "query", "required": true, "schema": { "type": "string", "format": "uri" }, "description": "Absolute URL of the source dataset (e.g. a `.copc.laz`, Potree `cloud.js`, SOG manifest, etc.)." },
           { "name": "format", "in": "query", "schema": { "type": "string", "enum": ["copc", "potree", "sog", "lcc", "rad", "i3s", "threemx", "geosplats"] }, "description": "Source format. Auto-detected from the URL/extension when omitted for most formats." },
           { "name": "cache", "in": "query", "schema": { "type": "string", "enum": ["none", "hierarchy", "full"], "default": "none" }, "description": "none = fully live, nothing cached. hierarchy = tree cached in RAM, tiles per-request. full = whole dataset converted to disk once, then served static." },
-          { "name": "prefetch", "in": "query", "schema": { "type": "integer", "default": 1 }, "description": "Octree formats (COPC/Potree) only — number of extra LOD levels to eagerly resolve bounds for on tileset.json build." },
+          { "name": "prefetch", "in": "query", "schema": { "type": "integer", "default": 0 }, "description": "Octree formats (COPC/Potree) only — number of extra LOD levels to eagerly resolve bounds for on tileset.json build." },
           { "name": "tiling", "in": "query", "schema": { "type": "string", "enum": ["implicit", "explicit"], "default": "implicit" }, "description": "Octree formats only — 3D Tiles 1.1 implicit tiling vs. a fully-materialized explicit tree." }
         ],
         "responses": {
@@ -42,7 +42,7 @@
           { "name": "url", "in": "query", "required": true, "schema": { "type": "string", "format": "uri" } },
           { "name": "format", "in": "query", "required": true, "schema": { "type": "string", "enum": ["copc", "potree", "sog", "lcc", "rad", "i3s", "threemx", "geosplats"] } },
           { "name": "cache", "in": "query", "schema": { "type": "string", "enum": ["none", "hierarchy"], "default": "none" } },
-          { "name": "prefetch", "in": "query", "schema": { "type": "integer", "default": 1 } },
+          { "name": "prefetch", "in": "query", "schema": { "type": "integer", "default": 0 } },
           { "name": "tiling", "in": "query", "schema": { "type": "string", "enum": ["implicit", "explicit"], "default": "implicit" }, "description": "COPC/Potree only." }
         ],
         "responses": { "200": { "description": "A 3D Tiles tileset.json" } }
