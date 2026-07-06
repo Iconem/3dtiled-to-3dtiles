@@ -35,9 +35,10 @@ export default defineConfig({
   plugins: [
     react(),
     cesium({ cesiumBuildRootPath: cesiumBuildRoot, cesiumBuildPath: path.join(cesiumBuildRoot, 'Cesium') + path.sep }),
-    // This app is now THE single dev/build entry point (viewer + vanilla-viewer + docs, one port +
-    // the tile-server's 3001 — see the port-consolidation note on `server` below). Its project root is
-    // apps/viewer/, not the monorepo root, so — unlike the OLD root-level vite.config.mjs, where
+    // This app is the dev/build entry point for the viewer + legacy vanilla-viewer (docs is its own
+    // always-on process on :3002, linked to directly — see formats.ts's DOCS_URL — not proxied through
+    // here). Its project root is apps/viewer/, not the monorepo root, so — unlike the OLD root-level
+    // vite.config.mjs, where
     // `/sample-data/**` was served automatically by Vite's own default static handler because its
     // project root WAS the repo root — sample-data needs an explicit static passthrough here.
     {
@@ -80,11 +81,10 @@ export default defineConfig({
     },
   ],
   server: {
-    // The ONE port this whole repo's front end needs day-to-day (paired with the tile-server
-    // middleware's 3001) — this app now folds in everything that used to need its own port: the
-    // legacy standalone page (`/vanilla-viewer`, was the root-level vite.config.mjs on :3000) and
-    // Fumadocs (`/docs`, was its own `next dev` on :3002 — that process still runs, just no longer
-    // something you navigate to directly, see the proxy rules below).
+    // This app's port — pairs with the tile-server middleware's 3001 and Fumadocs' own 3002 (both
+    // always-on separate processes; `pnpm dev` boots all three concurrently, see root package.json's
+    // `dev:app` script). Also folds in the legacy standalone page (`/vanilla-viewer`, was the
+    // root-level vite.config.mjs on :3000).
     port: 3000,
     // Bind all interfaces (Vite defaults to localhost-only) so this is reachable from other devices
     // on the LAN at http://<this machine's LAN IP>:3000/ — the tile-server middleware already listens
@@ -96,18 +96,8 @@ export default defineConfig({
     // Serve sample-data/output/** (repo root) too, same as the old root-level app — the built-in
     // presets point at `<origin>/sample-data/...`.
     fs: { allow: [repoRoot] },
-    // Don't file-watch sample-data (~100k+ tile files — crawls on startup/every HMR) or apps/docs'
-    // own .next build output (spurious reloads here) — still served on demand, only watching is off.
-    watch: { ignored: ['**/sample-data/**', '**/*.next/**'] },
-    proxy: {
-      '/docs': { target: 'http://localhost:3002', changeOrigin: true },
-      '/_next': { target: 'http://localhost:3002', changeOrigin: true, ws: true },
-      '/api/search': { target: 'http://localhost:3002', changeOrigin: true },
-      '/og': { target: 'http://localhost:3002', changeOrigin: true },
-      '/llms.txt': { target: 'http://localhost:3002', changeOrigin: true },
-      '/llms-full.txt': { target: 'http://localhost:3002', changeOrigin: true },
-      '/llms.mdx': { target: 'http://localhost:3002', changeOrigin: true },
-    },
+    // Don't file-watch sample-data (~100k+ tile files — crawls on startup/every HMR).
+    watch: { ignored: ['**/sample-data/**'] },
   },
   resolve: {
     dedupe: ['three'],

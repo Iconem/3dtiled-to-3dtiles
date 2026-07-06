@@ -36,6 +36,19 @@ export const MW =
   import.meta.env.VITE_TILE_SERVER_URL ||
   `${ORIGIN_PROTOCOL}//${ORIGIN_HOST}:3001`;
 
+// apps/docs — same three-tier resolution as MW above (runtime override → build-time env → local-dev
+// same-host-different-port fallback). Used to exist as a same-origin `/docs` path, proxied to apps/docs'
+// own dev server by vite.config.ts — reverted (docs now needs its own always-on process either way in
+// prod, not something a dev-only proxy should paper over) in favor of linking to the real service
+// directly, same as production's own separate 3dtiled-docs.* subdomain.
+// Trailing `/docs`: apps/docs' own content routes live under that path segment on ITS OWN origin too
+// (see apps/docs/next.config.mjs's comment — no root basePath, content is under src/app/docs/[[...slug]]),
+// there's no root page. True for both local dev (:3002/docs) and prod (the subdomain's own /docs).
+export const DOCS_URL =
+  (typeof window !== 'undefined' && (window as any).__DOCS_URL__) ||
+  import.meta.env.VITE_DOCS_URL ||
+  `${ORIGIN_PROTOCOL}//${ORIGIN_HOST}:3002/docs`;
+
 export type AssetType = 'mesh' | 'pointcloud' | 'splat';
 
 export interface Asset {

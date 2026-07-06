@@ -10,6 +10,7 @@ import CropExtractSection from './CropExtractSection';
 import LocalFrameSection from './LocalFrameSection';
 import IonAssetSection from './IonAssetSection';
 import type { ViewerHandle } from '@/lib/viewer-handle';
+import { DOCS_URL } from '@/lib/formats';
 
 export default function Sidebar({ activeHandleRef }: { activeHandleRef: React.RefObject<ViewerHandle | null> }) {
   const theme = useViewerStore((s) => s.theme);
@@ -35,9 +36,8 @@ export default function Sidebar({ activeHandleRef }: { activeHandleRef: React.Re
           <Button size="icon" variant="ghost" className="size-7" title={theme === 'dark' ? 'Switch to light theme' : 'Switch to dark theme'} onClick={() => setTheme(theme === 'dark' ? 'light' : 'dark')}>
             {theme === 'dark' ? <Sun className="size-4" /> : <Moon className="size-4" />}
           </Button>
-          {/* /docs is proxied to apps/docs' own dev server by this app's vite.config.ts — see there. */}
           <Button size="icon" variant="ghost" className="size-7" title="Docs" asChild>
-            <a href="/docs" target="_blank" rel="noopener noreferrer"><BookOpen className="size-4" /></a>
+            <a href={DOCS_URL} target="_blank" rel="noopener noreferrer"><BookOpen className="size-4" /></a>
           </Button>
         </div>
         <ToggleGroup type="single" variant="outline" size="sm" value={url.renderer} onValueChange={(v) => v && setUrl({ renderer: v as any })}>
