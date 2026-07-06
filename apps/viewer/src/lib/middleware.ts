@@ -102,17 +102,20 @@ export function currentPresets(p: MiddlewareParams & { toolName: ToolName; tiles
   }
   if (p.selectedFormat === 'threemx') {
     const tmx = (mdl: string) => `${MW}/stream/tileset.json?format=threemx&url=${encodeURIComponent(mdl)}`;
+    // rawSrc = the actual .3mx/.3mxb source, NOT the MW-wrapped url — without it, toggling "raw url"
+    // ON has nothing to switch the field to and silently keeps showing the wrapped middleware URL.
     return [
-      { id: '3mx-tende', label: '🏛 Tende village (dept06, colormap)', type: 'mesh', url: tmx('https://3d.departement06.fr/3mx/2019_07_Village_Tende_Resolution/Scene/2019_07_Village_Tende_Resolution.3mx') },
-      { id: '3mx-byu', label: '🏛 BYU Athletic (RGB)', type: 'mesh', url: tmx('https://campusmodel.groups.et.byu.net/Athletic_Buildings_3MX/Scene/Athletic_Buildings_3MX.3mx') },
-      { id: '3mx-chapelle', label: '🏛 Chapelle (scanit, .3mxb)', type: 'mesh', url: tmx('https://www.scanit-alsace.fr/PARTAGE/CHAPELLE/Scene/Data/MESH.3mxb') },
+      { id: '3mx-tende', label: '🏛 Tende village (dept06, colormap)', type: 'mesh', url: tmx('https://3d.departement06.fr/3mx/2019_07_Village_Tende_Resolution/Scene/2019_07_Village_Tende_Resolution.3mx'), rawSrc: 'https://3d.departement06.fr/3mx/2019_07_Village_Tende_Resolution/Scene/2019_07_Village_Tende_Resolution.3mx' },
+      { id: '3mx-byu', label: '🏛 BYU Athletic (RGB)', type: 'mesh', url: tmx('https://campusmodel.groups.et.byu.net/Athletic_Buildings_3MX/Scene/Athletic_Buildings_3MX.3mx'), rawSrc: 'https://campusmodel.groups.et.byu.net/Athletic_Buildings_3MX/Scene/Athletic_Buildings_3MX.3mx' },
+      { id: '3mx-chapelle', label: '🏛 Chapelle (scanit, .3mxb)', type: 'mesh', url: tmx('https://www.scanit-alsace.fr/PARTAGE/CHAPELLE/Scene/Data/MESH.3mxb'), rawSrc: 'https://www.scanit-alsace.fr/PARTAGE/CHAPELLE/Scene/Data/MESH.3mxb' },
     ];
   }
   if (p.selectedFormat === 'geosplats') {
     const gs = (mdl: string) => `${MW}/stream/tileset.json?format=geosplats&url=${encodeURIComponent(mdl)}&lod=5`;
+    // Same rawSrc fix as threemx above — the raw source is the MapTiler splats model.json URL.
     return [
-      { id: 'gs-1', label: '✨ Jastrzębia Góra, Poland', type: 'splat', url: gs('https://api.maptiler.com/splats/019e67bf-b89b-743d-91dd-79f7f4b4bd4e/model.json?key=GKF1QdQ4MpjgqtKiQuxR') },
-      { id: 'gs-2', label: '✨ Baltimore Hotel Miami', type: 'splat', url: gs('https://api.maptiler.com/splats/019e5ff3-e23b-7063-bed2-c385d3e96d99/model.json?key=mNLmXyaTH4gRlwJHSYWp') },
+      { id: 'gs-1', label: '✨ Jastrzębia Góra, Poland', type: 'splat', url: gs('https://api.maptiler.com/splats/019e67bf-b89b-743d-91dd-79f7f4b4bd4e/model.json?key=GKF1QdQ4MpjgqtKiQuxR'), rawSrc: 'https://api.maptiler.com/splats/019e67bf-b89b-743d-91dd-79f7f4b4bd4e/model.json?key=GKF1QdQ4MpjgqtKiQuxR' },
+      { id: 'gs-2', label: '✨ Baltimore Hotel Miami', type: 'splat', url: gs('https://api.maptiler.com/splats/019e5ff3-e23b-7063-bed2-c385d3e96d99/model.json?key=mNLmXyaTH4gRlwJHSYWp'), rawSrc: 'https://api.maptiler.com/splats/019e5ff3-e23b-7063-bed2-c385d3e96d99/model.json?key=mNLmXyaTH4gRlwJHSYWp' },
     ];
   }
   const f = fmtMeta(p.selectedFormat);
