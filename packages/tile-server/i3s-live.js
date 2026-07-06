@@ -24,10 +24,12 @@
  *     request actually needs get fetched, not the whole archive; falls back to buffering it all only if
  *     Range isn't supported.
  *
- * Scope matches the offline draft: uncompressed geometry only (Draco/LEPCC gated out). Textures ARE
- * embedded when the node's material references a raster (JPEG/PNG) format in `textureSetDefinitions`
- * — DDS/KTX2/Basis-encoded textures have no decoder here and are silently skipped (geometry still
- * renders, untextured), same gating philosophy as Draco/LEPCC.
+ * Mesh geometry: uncompressed only (Draco gated out). PointCloud geometry: uncompressed OR
+ * LEPCC-compressed (`encoding: "lepcc-xyz"`, decoded via ../i3s-to-3dtiles/src/lepccDecode.js, a JS
+ * port of Esri's own github.com/Esri/lepcc). Textures ARE embedded when the node's material
+ * references a raster (JPEG/PNG) format in `textureSetDefinitions` — DDS/KTX2/Basis-encoded textures
+ * have no decoder here and are silently skipped (geometry still renders, untextured), same gating
+ * philosophy as Draco.
  *
  *   GET /stream/tileset.json?format=i3s&url=<3dSceneLayer.json | .slpk | SceneServer URL>
  *   GET /stream/tile/<nodeIndex>.glb?format=i3s&url=<same URL>
@@ -166,7 +168,8 @@ const getCtx = memoizeAsync(async (url) => {
   if (!MESH_TYPES.has(layerType) && !POINT_TYPES.has(layerType))
     throw new Error(`I3S layerType "${layerType}" not supported (mesh/point only)`);
 
-  // Pick the uncompressed geometry buffer; gate out Draco-only / LEPCC.
+  // Pick the uncompressed geometry buffer; gate out Draco-only (LEPCC point clouds are decoded via
+  // lepccDecode.js — see decodeDefaultGeometry's dispatch on schema.encoding).
   const defs = sl.geometryDefinitions || [];
   let uncompressedBufferIndex = -1, hasDraco = false;
   for (const d of defs) {
@@ -177,11 +180,8 @@ const getCtx = memoizeAsync(async (url) => {
     }
     if (uncompressedBufferIndex >= 0) break;
   }
-  const schemaEnc = sl.store?.defaultGeometrySchema?.encoding;
   if (uncompressedBufferIndex < 0 && hasDraco)
     throw new Error('I3S layer is Draco-only — not supported (no Draco decoder in this adapter).');
-  if (typeof schemaEnc === 'string' && schemaEnc.toLowerCase().startsWith('lepcc'))
-    throw new Error('I3S PointCloud uses LEPCC-compressed positions — not supported.');
 
   // Texture lookup: materialDefinitions[].pbrMetallicRoughness.baseColorTexture.textureSetDefinitionId
   // → textureSetDefinitions[].formats[] (each a {name, format} — the SAME logical texture encoded
@@ -229,7 +229,12 @@ const getCtx = memoizeAsync(async (url) => {
       );
       let done = false;
       for (let i = 0; i < results.length; i++) {
-        if (results[i].status !== 'fulfilled') { done = true; break; }
+        // Some SceneServers answer a missing page with HTTP 200 + an ArcGIS error envelope
+        // (`{error:{code:404,...}}`) instead of a real 404 — `getFile` sees that as success, so this
+        // isn't caught by `.status !== 'fulfilled'`. Treat a page with no `.nodes` array the same as
+        // end-of-pagination (verified against USGSNYC_2014_LiDAR, whose page 0 has exactly
+        // nodesPerPage nodes, forcing this exact boundary case).
+        if (results[i].status !== 'fulfilled' || !Array.isArray(results[i].value.pg.nodes)) { done = true; break; }
         addNodes(results[i].value.pg);
         if (results[i].value.pg.nodes.length < nodesPerPage) { done = true; break; }
       }
@@ -342,10 +347,16 @@ async function serveTileGlb(ctx, idx) {
   let positions = g.position;
   let normals = g.normal;
   if (ctx.isGeographic) {
+    // Uncompressed DefaultGeometrySchema stores per-vertex offsets relative to the node OBB centre;
+    // LEPCC (g.absolutePosition) decodes straight to absolute (lon, lat, height) — see
+    // decodeDefaultGeometry's doc comment in i3sParse.js.
     const c = node.obb.center;
     positions = new Float32Array(g.vertexCount * 3);
     for (let i = 0; i < g.vertexCount; i++) {
-      const e = geodeticToEcef([c[0] + g.position[i*3], c[1] + g.position[i*3+1], c[2] + g.position[i*3+2]]);
+      const lon = g.absolutePosition ? g.position[i*3]   : c[0] + g.position[i*3];
+      const lat = g.absolutePosition ? g.position[i*3+1] : c[1] + g.position[i*3+1];
+      const h   = g.absolutePosition ? g.position[i*3+2] : c[2] + g.position[i*3+2];
+      const e = geodeticToEcef([lon, lat, h]);
       const u = ctx.toEnu(e);
       positions[i*3] = u[0]; positions[i*3+1] = u[2]; positions[i*3+2] = -u[1]; // glTF (E, U, −N)
     }

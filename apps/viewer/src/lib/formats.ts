@@ -156,8 +156,16 @@ export const FORMATS: FormatMeta[] = [
     // dataset — swapped to the one actually verified end-to-end against a real reference render.
     { id: 'arcgis-mesh-slpk', label: 'ArcGIS Rancho Mesh v17 (.slpk)', src: 'https://www.arcgis.com/sharing/rest/content/items/e0dfde9f11054aac8e15edbb8aa1631d/data' },
     { id: 'arcgis-mesh-svc', label: 'ArcGIS Rancho Mesh v17 (SceneServer)', src: 'https://tiles.arcgis.com/tiles/z2tnIkrLQ2BRzr6P/arcgis/rest/services/Rancho_Mesh_v17/SceneServer' },
-    { id: 'arcgis-pts-slpk', label: 'ArcGIS Moro Bay LiDAR .slpk (LEPCC — unsupported)', src: 'https://www.arcgis.com/sharing/rest/content/items/496552d059644b4892c51ad06bdba8e2/data' },
-    { id: 'arcgis-pts-svc', label: 'ArcGIS Moro Bay LiDAR SceneServer (LEPCC — unsupported)', src: 'https://tiles.arcgis.com/tiles/z2tnIkrLQ2BRzr6P/arcgis/rest/services/Moro_Bay_LiDAR/SceneServer' },
+    // LEPCC point-cloud decoding (2026-07-06): ported Esri's own github.com/Esri/lepcc XYZ codec to
+    // JS (packages/i3s-to-3dtiles/src/lepccDecode.js) — both these datasets' `lepcc-xyz`-encoded
+    // positions now decode to real geometry, verified against real ArcGIS-hosted nodes (checksum +
+    // blobSize match, decoded coordinates sane vs. the layer's own extent). The .slpk archive item
+    // below only exposes a single, empty root node (no children in its own node-page tree, an
+    // apparent property of that specific export — a DIFFERENT item than the live SceneServer, not
+    // necessarily the same content) — kept for reference but the SceneServer is the one to pick.
+    { id: 'arcgis-pts-slpk', label: 'ArcGIS Moro Bay LiDAR .slpk (single root node)', src: 'https://www.arcgis.com/sharing/rest/content/items/496552d059644b4892c51ad06bdba8e2/data' },
+    { id: 'arcgis-pts-svc', label: 'ArcGIS Moro Bay LiDAR SceneServer', src: 'https://tiles.arcgis.com/tiles/z2tnIkrLQ2BRzr6P/arcgis/rest/services/Moro_Bay_LiDAR/SceneServer' },
+    { id: 'arcgis-usgsnyc-svc', label: 'ArcGIS USGSNYC 2014 LiDAR SceneServer', src: 'https://tiles.arcgis.com/tiles/z2tnIkrLQ2BRzr6P/arcgis/rest/services/USGSNYC_2014_LiDAR/SceneServer' },
   ] },
 ];
 

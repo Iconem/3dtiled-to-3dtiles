@@ -15,6 +15,7 @@
 import fs   from 'fs/promises';
 import path from 'path';
 import zlib from 'zlib';
+import { decodeLepccXyz } from './lepccDecode.js';
 
 /** Read a file that may be stored plain or gzip'd (`name` or `name.gz`); returns a Buffer. */
 export async function readMaybeGzip(dir, name) {
@@ -59,10 +60,12 @@ export async function readSceneLayer(dir) {
  * buffers[0]=uncompressed Float32 pos/nrm/uv0 + U8 color, buffers[1]=draco — so it IS convertible.)
  *
  * POINT-CLOUD layers carry no geometryDefinitions; the encoding is on
- * `store.defaultGeometrySchema.encoding` ("lepcc-xyz" → LEPCC/PCSL compressed, NOT the plain
- * Float64 PerAttributeArray the schema's vertexAttributes nominally describe). LEPCC has no decoder
- * here, so it is reported as 'lepcc' and gated out. (Verified on SMALL_AUTZEN_LAS_All: encoding
- * "lepcc-xyz", geometry file nodes/0/geometries/0.bin.pccxyz with a "LEPCC" magic header.)
+ * `store.defaultGeometrySchema.encoding` ("lepcc-xyz" → LEPCC/PCSL compressed positions, NOT the
+ * plain Float64/Int32 PerAttributeArray the schema's vertexAttributes nominally describe). Decoded
+ * via lepccDecode.js (a JS port of Esri's own github.com/Esri/lepcc XYZ codec — see that file for
+ * the format). Reported as 'lepcc' (still a distinct tag from 'uncompressed' since the on-disk
+ * bytes need the LEPCC decode step, not the plain decodeDefaultGeometry array reader) but no longer
+ * gated out. Verified against real ArcGIS-hosted layers Moro_Bay_LiDAR and USGSNYC_2014_LiDAR.
  */
 function detectGeometryEncoding(sl) {
   const defs = sl.geometryDefinitions || [];
@@ -140,14 +143,30 @@ export function obbToBox(obb, isGeographic = true) {
 }
 
 /**
- * Decode an UNCOMPRESSED DefaultGeometrySchema buffer (`topology: PerAttributeArray`).
- * Layout = header {vertexCount u32, featureCount u32} then SEQUENTIAL arrays in `ordering`:
- *   position f32[3·V] · normal f32[3·V] · uv0 f32[2·V] · color u8[4·V]
- * then per-feature: id u64[F] · faceRange u32[2·F]. (Only the attributes present in the schema
- * are written; we read in declared order.) Positions are relative to the node origin in the
- * layer's Cartesian frame.  ⚠️ origin/offset application unverified without a sample.
+ * Decode a DefaultGeometrySchema buffer — either the UNCOMPRESSED `PerAttributeArray` layout, or
+ * (for PointCloud layers whose schema declares `encoding: "lepcc-xyz"`) a LEPCC-compressed XYZ blob
+ * decoded via lepccDecode.js. LEPCC point clouds carry ONLY `position` (verified: Moro_Bay_LiDAR,
+ * USGSNYC_2014_LiDAR both list just that one vertexAttribute) — the blob has no vertexCount/
+ * featureCount prefix of its own (LEPCC's own header carries numPoints instead).
+ *
+ * UNCOMPRESSED layout = header {vertexCount u32, featureCount u32} then SEQUENTIAL arrays in
+ * `ordering`: position f32[3·V] · normal f32[3·V] · uv0 f32[2·V] · color u8[4·V], then per-feature:
+ * id u64[F] · faceRange u32[2·F]. (Only the attributes present in the schema are written; we read in
+ * declared order.) Positions are relative to the node origin in the layer's Cartesian frame.
+ * ⚠️ origin/offset application unverified without a sample.
+ *
+ * LEPCC positions, by contrast, decode to ABSOLUTE geodetic (lon°, lat°, height m) coordinates, NOT
+ * node-relative offsets (verified: a node's decoded extent spans the node's full OBB footprint, not
+ * a small range around its OBB centre) — callers must NOT add the node OBB centre to them the way
+ * they do for uncompressed positions. `absolutePosition: true` flags this for callers.
  */
 export function decodeDefaultGeometry(buf, schema) {
+  const encoding = schema?.encoding;
+  if (typeof encoding === 'string' && encoding.toLowerCase().startsWith('lepcc')) {
+    const { position, vertexCount } = decodeLepccXyz(buf);
+    return { vertexCount, featureCount: 0, position, absolutePosition: true };
+  }
+
   const dv = buf;
   let o = 0;
   const vertexCount  = dv.readUInt32LE(o); o += 4;
