@@ -123,6 +123,11 @@ export const FORMATS: FormatMeta[] = [
     // developer.xgrids.com/#/download?page=sampledata, and a hobbyist's own R2/GitHub mirrors) —
     // replaces the earlier private/local-only showcase captures (Guan Temple/Guanlan Town/Religious
     // Center), which had no public source and stayed on local sample-data.
+    // PentHouse's bucket is missing its required Data.bin (confirmed: index.bin's own LOD offset
+    // table references byte ranges up to ~316MB into it, but only meta.lcc/index.bin/a much smaller
+    // environment.bin actually exist there) — every tile request 404s. Left wired up (with a clear
+    // error message, see lcc-live.js's rangeGet) rather than removed, in case the uploader fixes the
+    // bucket; swap for a different public host if a complete mirror turns up.
     { id: 'penthouse', label: 'PentHouse', src: 'https://pub-70118068888842fdb18fe226dbd4c745.r2.dev/PentHouse/meta.lcc', out: 'output/lcc/PentHouse-3dtiles-from-lcc' },
     { id: 'bigmirror', label: 'Big Mirror', src: 'https://raw.githubusercontent.com/willeastcott/assets/main/lcc/bigmirror/meta.lcc', out: 'output/lcc/bigmirror-3dtiles-from-lcc' },
   ] },
