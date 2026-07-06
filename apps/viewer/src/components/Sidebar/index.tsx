@@ -1,4 +1,4 @@
-import { Moon, Sun, PanelRightClose, PanelRightOpen, BookOpen } from 'lucide-react';
+import { Moon, Sun, PanelRightClose, PanelRightOpen, BookOpen, Terminal } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { ToggleGroup, ToggleGroupItem } from '@/components/ui/toggle-group';
@@ -10,7 +10,7 @@ import CropExtractSection from './CropExtractSection';
 import LocalFrameSection from './LocalFrameSection';
 import IonAssetSection from './IonAssetSection';
 import type { ViewerHandle } from '@/lib/viewer-handle';
-import { DOCS_URL } from '@/lib/formats';
+import { DOCS_URL, MW } from '@/lib/formats';
 
 export default function Sidebar({ activeHandleRef }: { activeHandleRef: React.RefObject<ViewerHandle | null> }) {
   const theme = useViewerStore((s) => s.theme);
@@ -38,6 +38,9 @@ export default function Sidebar({ activeHandleRef }: { activeHandleRef: React.Re
           </Button>
           <Button size="icon" variant="ghost" className="size-7" title="Docs" asChild>
             <a href={DOCS_URL} target="_blank" rel="noopener noreferrer"><BookOpen className="size-4" /></a>
+          </Button>
+          <Button size="icon" variant="ghost" className="size-7" title="API playground (middleware server)" asChild>
+            <a href={`${MW}/playground`} target="_blank" rel="noopener noreferrer"><Terminal className="size-4" /></a>
           </Button>
         </div>
         <ToggleGroup type="single" variant="outline" size="sm" value={url.renderer} onValueChange={(v) => v && setUrl({ renderer: v as any })}>

@@ -71,21 +71,28 @@ function renderHomepage(origin) {
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>3dtiled tile-server</title>
+<!-- Just Scalar's own THEME stylesheet (a few KB of CSS custom properties), not the whole
+     @scalar/api-reference JS bundle the playground loads — this page has no Scalar UI to render, it
+     only wants the SAME --scalar-* variables so its own markup below genuinely matches whatever
+     theme= the playground is configured with (see SCALAR_CONFIG.theme), instead of a hand-picked
+     palette that silently drifts out of sync if that theme ever changes. -->
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@scalar/themes/dist/presets/default.css">
 <style>
   :root { color-scheme: dark; }
   body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; max-width: 640px;
-         margin: 10vh auto 4rem; padding: 0 1.5rem; background: #0b0f14; color: #d7dee6; }
+         margin: 10vh auto 4rem; padding: 0 1.5rem;
+         background: var(--scalar-background-1, #0b0f14); color: var(--scalar-color-1, #d7dee6); }
   h1 { font-size: 1.5rem; margin-bottom: 0.25rem; }
-  p.tagline { color: #8a97a5; margin-top: 0; }
-  ul { list-style: none; padding: 0; margin-top: 2rem; border-top: 1px solid #1e2530; }
+  p.tagline { color: var(--scalar-color-2, #8a97a5); margin-top: 0; }
+  ul { list-style: none; padding: 0; margin-top: 2rem; border-top: 1px solid var(--scalar-border-color, #1e2530); }
   li { display: flex; justify-content: space-between; align-items: baseline;
-       padding: 0.9rem 0; border-bottom: 1px solid #1e2530; }
-  a { color: #6cb6ff; text-decoration: none; font-weight: 500; }
+       padding: 0.9rem 0; border-bottom: 1px solid var(--scalar-border-color, #1e2530); }
+  a { color: var(--scalar-color-accent, #6cb6ff); text-decoration: none; font-weight: 500; }
   a:hover { text-decoration: underline; }
-  .desc { color: #6b7684; font-size: 0.85rem; }
+  .desc { color: var(--scalar-color-3, #6b7684); font-size: 0.85rem; }
 </style>
 </head>
-<body>
+<body class="dark-mode">
   <h1>3dtiled tile-server</h1>
   <p class="tagline">A "TiTiler for 3D" — live &lt;format&gt; → OGC 3D Tiles middleware.</p>
   <ul>${items}</ul>

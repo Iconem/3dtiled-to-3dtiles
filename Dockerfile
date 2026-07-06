@@ -57,9 +57,12 @@ COPY --from=viewer-build /app/apps/viewer/dist ./dist
 COPY apps/viewer/docker-entrypoint.sh /usr/local/bin/docker-entrypoint.sh
 RUN chmod +x /usr/local/bin/docker-entrypoint.sh
 EXPOSE 3000
-# Regenerates dist/env-config.js from $TILE_SERVER_URL on every container start — see the script's
-# own comment. This is what actually makes the tile-server URL configurable per-deployment without
-# rebuilding the image; VITE_TILE_SERVER_URL (ARG above) only ever takes effect at `docker build` time.
+# Regenerates dist/env-config.js from $TILE_SERVER_URL and $DOCS_URL on every container start — see
+# the script's own comment. This is what actually makes those URLs configurable per-deployment
+# without rebuilding the image; the VITE_* build args above only ever take effect at `docker build`
+# time. Set DOCS_URL in your compose file's `environment:` block when docs lives on its own
+# subdomain (e.g. behind Traefik) — without it, apps/viewer falls back to guessing
+# <this host>:3002/docs, which is wrong once viewer and docs aren't on the same host.
 ENTRYPOINT ["docker-entrypoint.sh"]
 # `serve`'s SPA fallback would break the adapters' "real 404 for a missing optional file" probing
 # (see vite.config.ts's own comment on this) — -s only rewrites a bare `/` request, not every path.
