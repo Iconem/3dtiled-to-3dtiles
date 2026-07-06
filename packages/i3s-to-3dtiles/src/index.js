@@ -24,7 +24,7 @@
 import fs   from 'fs/promises';
 import path from 'path';
 import { fileURLToPath } from 'node:url';
-import { readSceneLayer, loadNodePages, decodeDefaultGeometry, obbToBox, readMaybeGzip, geodeticToEcef } from './i3sParse.js';
+import { readSceneLayer, loadNodePages, decodeDefaultGeometry, obbToBox, readMaybeGzip, geodeticToEcef, childIndices } from './i3sParse.js';
 import { buildGlb } from './glbBuild.js';
 
 const MESH_TYPES  = new Set(['IntegratedMesh', '3DObject']);
@@ -175,11 +175,9 @@ export async function convert(inDir, outDir, opts = {}) {
       }
     }
 
-    if (node.children && node.children.length) {
-      const kids = [];
-      for (const ci of node.children) { const r = await buildTile(ci); if (r) { kids.push(r.tile); unionAabb(aabb, r.aabb); } }
-      if (kids.length) tile.children = kids;
-    }
+    const kids = [];
+    for (const ci of childIndices(node)) { const r = await buildTile(ci); if (r) { kids.push(r.tile); unionAabb(aabb, r.aabb); } }
+    if (kids.length) tile.children = kids;
 
     // Fallback for an empty node (no geometry, no children): a small box at its OBB centre (ENU).
     if (!isFinite(aabb.min[0])) {

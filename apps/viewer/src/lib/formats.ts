@@ -159,11 +159,13 @@ export const FORMATS: FormatMeta[] = [
     // LEPCC point-cloud decoding (2026-07-06): ported Esri's own github.com/Esri/lepcc XYZ codec to
     // JS (packages/i3s-to-3dtiles/src/lepccDecode.js) — both these datasets' `lepcc-xyz`-encoded
     // positions now decode to real geometry, verified against real ArcGIS-hosted nodes (checksum +
-    // blobSize match, decoded coordinates sane vs. the layer's own extent). The .slpk archive item
-    // below only exposes a single, empty root node (no children in its own node-page tree, an
-    // apparent property of that specific export — a DIFFERENT item than the live SceneServer, not
-    // necessarily the same content) — kept for reference but the SceneServer is the one to pick.
-    { id: 'arcgis-pts-slpk', label: 'ArcGIS Moro Bay LiDAR .slpk (single root node)', src: 'https://www.arcgis.com/sharing/rest/content/items/496552d059644b4892c51ad06bdba8e2/data' },
+    // blobSize match, decoded coordinates sane vs. the layer's own extent). The .slpk archive was
+    // MISDIAGNOSED as "single root node" in an earlier pass — the real cause (fixed in i3s-live.js)
+    // was that PointCloud node pages (v2.0) express children via `firstChild`+`childCount`, not the
+    // explicit `children:[idx…]` array mesh node pages use; `buildTile` only ever read `.children`,
+    // so EVERY point-cloud tileset (SLPK or SceneServer) silently built as root-only. Both now expand
+    // to their full tree (SLPK: 2624 tiles, SceneServer: 13775 tiles).
+    { id: 'arcgis-pts-slpk', label: 'ArcGIS Moro Bay LiDAR (.slpk)', src: 'https://www.arcgis.com/sharing/rest/content/items/496552d059644b4892c51ad06bdba8e2/data' },
     { id: 'arcgis-pts-svc', label: 'ArcGIS Moro Bay LiDAR SceneServer', src: 'https://tiles.arcgis.com/tiles/z2tnIkrLQ2BRzr6P/arcgis/rest/services/Moro_Bay_LiDAR/SceneServer' },
     { id: 'arcgis-usgsnyc-svc', label: 'ArcGIS USGSNYC 2014 LiDAR SceneServer', src: 'https://tiles.arcgis.com/tiles/z2tnIkrLQ2BRzr6P/arcgis/rest/services/USGSNYC_2014_LiDAR/SceneServer' },
   ] },

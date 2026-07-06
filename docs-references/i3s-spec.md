@@ -93,6 +93,16 @@ sublayers). A *single* scene layer is one type; heterogeneity comes from BSL or 
   compact, range-friendly index access. Older layers used per-node `3dNodeIndexDocument`.
 - **Refine:** REPLACE-style — a node's children supersede it; selection driven by `lodThreshold`.
 - **HTTP:** REST + range-friendly by design; SLPK packs the same layout into a zip.
+- **Children encoding is NOT uniform across layer types.** Mesh node pages (validated on
+  `Buildings_NewYork_v18`, Rancho Mesh) carry an explicit `children:[idx…]` array per node. PointCloud
+  node pages (v2.0 — `Moro_Bay_LiDAR`, `USGSNYC_2014_LiDAR`) carry **no such array at all** — only
+  `firstChild`+`childCount`, a contiguous-index shorthand (`children = [firstChild, firstChild+1, …,
+  firstChild+childCount-1]`). A reader that only checks `.children` silently builds a **root-only
+  tree** for every point-cloud dataset — this was a real bug here (fixed in `i3s-live.js` and the
+  offline draft, via a shared `childIndices()` in `i3sParse.js`), not a renderer refine/LOD issue. The
+  earlier "Moro Bay .slpk exposes only a single root node" note in this repo's viewer presets was this
+  same bug, not a property of that specific archive — both the `.slpk` and the live SceneServer build
+  their full tree correctly now (13,775 / 2,624 tiles respectively, up from 1).
 
 ## Key on-disk structures (1.8)
 - **`3dSceneLayer.json`** — `layerType`, `store` (version, `index.nodesPerPage`,

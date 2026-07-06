@@ -131,6 +131,17 @@ function rotateByQuat([x, y, z, w], [vx, vy, vz]) {
   const tx = 2 * (y * vz - z * vy), ty = 2 * (z * vx - x * vz), tz = 2 * (x * vy - y * vx);
   return [ vx + w * tx + (y * tz - z * ty), vy + w * ty + (z * tx - x * tz), vz + w * tz + (x * ty - y * tx) ];
 }
+// Mesh node pages carry an explicit `children:[idx…]` array. PointCloud node pages (v2.0 — validated
+// on Moro_Bay_LiDAR/USGSNYC_2014_LiDAR) carry NO such array — only `firstChild`+`childCount`, a
+// contiguous-index shorthand. Callers that only checked `.children` silently built a root-only tree
+// for every point-cloud dataset (see packages/tile-server/i3s-live.js's own copy of this fix).
+export function childIndices(node) {
+  if (Array.isArray(node.children)) return node.children;
+  if (Number.isInteger(node.firstChild) && node.childCount > 0)
+    return Array.from({ length: node.childCount }, (_, i) => node.firstChild + i);
+  return [];
+}
+
 export function obbToBox(obb, isGeographic = true) {
   const c = isGeographic ? geodeticToEcef(obb.center) : obb.center;
   const q = obb.quaternion || [0, 0, 0, 1];

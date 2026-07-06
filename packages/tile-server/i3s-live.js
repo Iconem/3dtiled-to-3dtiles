@@ -37,7 +37,7 @@
 import zlib from 'node:zlib';
 import { parseSLPKArchive } from '@loaders.gl/i3s';
 import { DataViewReadableFile } from '@loaders.gl/zip';
-import { decodeDefaultGeometry, geodeticToEcef, obbToBox } from '../i3s-to-3dtiles/src/i3sParse.js';
+import { decodeDefaultGeometry, geodeticToEcef, obbToBox, childIndices } from '../i3s-to-3dtiles/src/i3sParse.js';
 import { buildGlb } from '../i3s-to-3dtiles/src/glbBuild.js';
 import { enuFrame, memoizeAsync } from '../core/index.js';
 
@@ -297,7 +297,7 @@ function buildTileset(ctx, urlParam) {
     const tile = { boundingVolume: { box }, geometricError: 0, refine: 'REPLACE' };
     if (nodeHasGeometry(node)) tile.content = { uri: `tile/${idx}.glb?url=${enc}` };
     const kids = [];
-    for (const ci of (node.children || [])) { const c = buildTile(ci, seen); if (c) kids.push(c); }
+    for (const ci of childIndices(node)) { const c = buildTile(ci, seen); if (c) kids.push(c); }
     if (kids.length) tile.children = kids;
     // GE shrinks with depth: half the box diagonal for interior nodes, 0 at leaves.
     const diag = 2 * Math.hypot(box[3], box[7], box[11]);
