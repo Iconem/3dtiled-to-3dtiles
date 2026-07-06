@@ -198,13 +198,62 @@ GET /extract/{las|glb|copc|tileset|zip|splat}?url=<tileset.json>&bbox=<west,sout
   the crop's bbox center, so multiple crops of the same source share one coordinate system — the
   tradeoff is that a single crop far from the source root can look "off-center" relative to its own
   bounding box when loaded standalone in a viewer that assumes content sits near its own origin.
-- LCC's splat crop had a real placement bug (not the origin-anchoring tradeoff above): its
-  `[East,−Up,North]` root-transform column layout already bakes the Y-up→Z-up content flip in (unlike
-  every other adapter's plain `[East,North,Up]` georef), so the extractor's generic flip double-applied
-  — fixed 2026-07-02 by detecting an LCC source (`format=lcc` in the nested `/stream` URL, or an
-  `/LCC/` path segment) and using the inverse rotation for it. See CHANGELOG.
+- LCC's (and, it turns out, SOG's) splat crop had a real placement bug: their root-transform already
+  bakes the FULL Y-up→Z-up content flip in (unlike RAD's — the extractor's original default — which
+  assumes the renderer applies that flip automatically), so the extractor's generic flip double-applied.
+  Originally patched as a single hardcoded `isLcc` special-case, which — fair callout — was "pretty
+  weird, double-flipping 180°" and not obviously generalizable. Replaced 2026-07-02 with a small,
+  documented per-**format** table (`SPLAT_FLIP_BAKED = {lcc, sog}`) in `extract-live.js`'s `splatFlip()`:
+  any format whose adapter bakes the full flip itself goes in the set; everything else (RAD, and any
+  future format following RAD's convention) uses the default. This is the general answer to "should all
+  tilesets crop the same way" — **yes**, modulo which of the two conventions (`auto` renderer-flip vs
+  `baked` self-flip) that format's own `/stream` adapter already committed to; the table is where that
+  one bit of per-format knowledge lives, not scattered special-casing. Verified against real tile data
+  for all three formats (LCC, SOG, RAD) via centroid-vs-declared-box sampling. **Not yet verified**: the
+  georeferenced vs. non-georeferenced case split for each format — see TODO/Future work.
 
 viewer.html's "CROP & EXTRACT" sidebar section drives this directly.
+
+### `/proxy` — generic CORS proxy (implemented ✅)
+
+```sh
+GET /proxy?url=<absolute source URL>
+```
+
+For public tilesets whose host sends no `Access-Control-Allow-Origin` at all (confirmed against
+Agisoft Cloud's `cloud.agisoft.com/api/...tileset.json` — no CORS header on the tileset.json OR its
+tile GLBs), a browser-side Cesium/3DTRJS fetch is blocked even though the data itself is public. A pure
+byte passthrough only fixes the ROOT request — Agisoft's `content.uri`s are relative ("Data/d000.glb"),
+so children resolve against `/proxy`'s own path once loaded through a naive proxy, not the original host.
+So `/proxy` is tileset-aware: for a JSON response shaped like a 3D Tiles tileset (`asset`+`root`), it
+recursively rewrites every `content.uri` to an absolute `/proxy?url=<resolved>` (same tree-walk as
+`/gltf`'s `rewriteTree`), so children keep flowing back through the proxy however deep the tree goes.
+A resolved child URI that carries no query string of its own **inherits the parent's** — Agisoft's own
+access token lives only on the root `tileset.json?access=…` URL, and every child content URI is a bare
+relative path with no token; confirmed live that the token is required per-resource (302 without it, 200
+with), so silently dropping it while resolving relative paths would re-break every child tile. Anything
+else (a tile GLB, a subtree binary) streams through byte-for-byte. Used by the Agisoft Jam pill.
+
+### API playground & OpenAPI schema (implemented ✅)
+
+`packages/tile-server` now has the "TiTiler-for-3D" bookend that title implies:
+
+- `GET /` — a minimal, titiler-style landing page (title, one-line description, a link list) instead
+  of a bare 404 at the root. Links to the playground, the OpenAPI JSON, this repo, and (if you set
+  `DOCS_URL`/`VIEWER_URL` in your own deployment's environment) your docs site and demo viewer —
+  deliberately not hardcoded to any real domain, same reasoning as the committed `docker-compose.yml`
+  staying reverse-proxy-agnostic.
+- `GET /openapi.json` — a hand-authored OpenAPI 3.0 spec covering every endpoint (`/tiles`, `/stream`,
+  `/convert`, `/3dtiles-self-contained`, `/3dtiles-tools`, `/gltf`, `/bing`, `/extract`, `/proxy`,
+  `/progress`), including query params, enums, and examples. Hand-authored rather than framework-derived
+  (unlike FastAPI, which generates this from route/type annotations) since the server is plain Node
+  `http`, not a schema-first framework — see `packages/tile-server/homepage-live.js`'s own comment for
+  why that's still the right call here (no new runtime dependency, no build step).
+- `GET /playground` (alias: `GET /docs`, the exact route FastAPI itself uses for the same purpose) — an
+  interactive API reference driven by that spec, via [Scalar](https://github.com/scalar/scalar) (the
+  modern successor to Swagger UI — FastAPI itself now ships it as an alternative to Swagger UI's own
+  `/docs`). Loaded from Scalar's own CDN as a single script tag, the same pattern already used for the
+  Draco/KTX2 decoders — no vendoring, no build step.
 
 ### COPC — Autzen Stadium, Oregon (10.6M pts)
 

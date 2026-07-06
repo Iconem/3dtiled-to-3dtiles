@@ -19,15 +19,13 @@ tunable per use case (`cache=none|hierarchy|all`). `viewer.html` (CesiumJS + 3DT
 reference client, and doubles as a **bbox + geometric-error-aware crop/extract** tool (`/extract/*`) for
 pulling a sub-region, with user-controlled Geometric Error target precision, of any of these formats back out as LAS/COPC/GLB/SPZ/SOG/PLY.
 
-**Where this is going next.** Two items are concrete and addressable in the near term, not just
-aspirational: **containerizing the server** — a `docker-compose`-runnable `packages/tile-server` (+
-viewer), built and published to **GHCR** by a GitHub Actions workflow on release, so it drops straight
-into a `docker-compose`/**Portainer** stack behind **Traefik** with no manual Node setup — and a
-**Fumadocs** documentation site, which is more tractable than it sounds: almost every format's deep
-findings already live in their own file under [`docs/references/`](/docs/guide/documentation) (this README
-mostly *links* to them rather than duplicating), so the migration is largely **chunking** the existing
-material (this README foremost, plus a few docs-references files that have grown large in their own
-right) into Fumadocs' page-per-topic model, not writing new docs from scratch. Both are tracked in
+**Where this is going next.** Two items that used to be listed here as "concrete and addressable" are
+now done: **containerizing the server** (`Dockerfile` + `docker-compose.yml` + a GHCR-publishing GitHub
+Actions workflow — `docker compose up --build` runs the whole stack) and a first pass at the
+**Fumadocs** documentation site (`apps/docs`, `pnpm --filter docs dev`) — `README.md`'s sections and
+every [`docs-references/`](docs-references/) file are chunked into it and verified building/rendering,
+though the chunking itself is a first pass (unreviewed page boundaries, no cross-linking yet) and this
+README stays the canonical source until that catches up. Both are tracked in
 [TODO / Future work](#todo--future-work) below.
 
 Further out: a browser/server tiled-splat transcoding UI in the spirit of SuperSplat's splat-transform

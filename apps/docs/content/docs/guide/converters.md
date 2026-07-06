@@ -3,15 +3,34 @@ title: "Converters"
 description: "All viewer deps (Cesium, three, 3d-tiles-renderer, @sparkjsdev/spark, the 3DGS plugin) are npm"
 ---
 
-### Viewer (`viewer.html`) — offline, self-contained via Vite
-
-All viewer deps (Cesium, three, 3d-tiles-renderer, @sparkjsdev/spark, the 3DGS plugin) are **npm
-dependencies bundled by Vite — no CDN, works fully offline**:
+### Running this repo day-to-day: two ports
 
 ```sh
-pnpm install         # (or npm install) — installs cesium/three/3d-tiles-renderer/spark/vite
-pnpm run dev         # vite dev server → http://localhost:3000/ (redirects to viewer.html; serves sample-data/)
-# pnpm run build     # static offline bundle in dist/
+pnpm install    # installs the whole workspace
+pnpm dev        # http://localhost:3000  (3D Tiled — the React app, + /vanilla-viewer + /docs folded in)
+                # http://localhost:3001  (tile-server middleware — the only other port you need)
+```
+
+`pnpm dev` runs `apps/viewer`'s own Vite dev server (`dev:viewer`) alongside the tile-server
+(`serve:tiles`) and the Fumadocs site's own Next dev server (`dev:docs`, port 3002 — that process still
+runs, it's just no longer something you navigate to directly: `apps/viewer`'s Vite config proxies
+`/docs` and its asset/API routes through to it). `apps/viewer`'s own build also folds in the legacy
+standalone `vanilla-viewer.html` (below) as a second page at `/vanilla-viewer`, so it ships in the same
+`dist/` and needs no separate server either. See [3D Tiled](#3d-tiled-standalone-react-viewer-appsviewer-shadcnui-r3f-one-push-wip-first-pass)
+below for the app itself.
+
+### `vanilla-viewer.html` — offline, self-contained via Vite, no React/build tooling needed
+
+The **original**, pre-React reference viewer — kept as a from-scratch fallback that needs nothing but
+Vite (no Node backend beyond the tile-server, no component framework). All its deps (Cesium, three,
+3d-tiles-renderer, @sparkjsdev/spark, the 3DGS plugin) are **npm dependencies bundled by Vite — no CDN,
+works fully offline**. Served at `/vanilla-viewer` by `apps/viewer`'s own dev server/build (above) — the
+repo-root copy of the same file (`viewer.html`) also still runs completely standalone via a separate,
+untouched legacy path if you want zero dependency on `apps/viewer` even existing:
+
+```sh
+pnpm run dev:legacy    # vite dev server → http://localhost:3000/ (redirects to viewer.html; serves sample-data/)
+# pnpm run build:legacy  # static offline bundle in dist/
 ```
 
 pnpm uses `pnpm-workspace.yaml` + `.npmrc` (`node-linker=hoisted`, so the meta-converter's
@@ -59,6 +78,59 @@ draws bounding volumes coloured by octree depth in both renderers. The preset ba
 [3DTilesRendererJS-3DGS-Plugin](https://github.com/WilliamLiu-1997/3DTilesRendererJS-3DGS-Plugin)
 demo data (PLY→3D Tiles). For deeper tileset inspection (tree, bounds, per-tile stats) alongside
 this viewer, see [3DTiles-Inspector](https://github.com/WilliamLiu-1997/3DTiles-Inspector).
+
+### 3D Tiled — standalone React viewer (`apps/viewer`), shadcn/ui, R3F, one push, WIP first pass
+
+A ground-up port of `viewer.html` into a real React app, named **3D Tiled** — the repo-root `viewer.html`
+stays as-is, unaffected; this app carries its own copy (`vanilla-viewer.html`, served at `/vanilla-viewer`)
+instead of depending on the legacy path. `pnpm --filter 3d-tiled dev` → `http://localhost:3000` — this
+IS `pnpm dev` now (added to `.claude/launch.json` as `"viewer"`, `dev:viewer` root script; see "Running
+this repo day-to-day" above). Stack: Vite + React 19 + TypeScript +
+Tailwind v4, shadcn/ui (hand-vendored `src/components/ui/*`, default dark theme, not a port of
+viewer.html's own hand-tuned palette), **nuqs** for the shareable URL-param slice (format/mode/cache/
+prefetch/transform/tiling/renderer/preset — the address bar is a bookmarkable link to a given view;
+the fully-resolved tileset URL itself deliberately stays out of it, see `state/urlState.ts`'s comment
+for why), **Zustand** for everything else (crop bbox, camera-derived readouts, status/timing log).
+
+- **CesiumJS side** (`components/Viewport/CesiumViewer.tsx`): plain imperative `Cesium.Viewer` in a
+  `useEffect`, functionally identical to viewer.html's `initCesium()`. Resium was tried first per the
+  original plan; dropped in favor of this — see the file's own comment.
+- **3DTRJS side** (`components/Viewport/ThreeDTRjsViewer.tsx`): uses `3d-tiles-renderer`'s **official
+  `/r3f` export** (`<TilesRenderer>`, `<TilesPlugin>`, `<GlobeControls>`, `<EnvironmentControls>`,
+  `<CameraTransition>`) instead of hand-rolled three.js — a real capability of the upstream package,
+  not previously used anywhere in this repo. `GaussianSplatPlugin` registers only for splat assets.
+  drei's `<TransformControls>` on a box mesh is the crop-box gizmo (first pass: translate mode,
+  approximate — see the file's `CropGizmo` comment). No imagery overlay on the background globe yet
+  (a plain wireframe sphere placeholder) and no auto-fly-to-loaded-content — both documented gaps.
+- Both renderers stay mounted (CSS-hidden, not unmounted) when you switch the RENDERER pill — matches
+  viewer.html's `#cesium-container`/`#three-container` behavior — and the last-loaded tileset URL
+  replays into whichever one you switch to (`App.tsx`'s `url.renderer` effect).
+
+**Real bugs found and fixed while building this** (all upstream/tooling issues, not React-port
+artifacts — kept here since they'd bite anyone doing the equivalent Vite+Cesium+pnpm-monorepo setup):
+- `vite-plugin-cesium`'s default `cesiumBuildRootPath` is the **relative** path
+  `node_modules/cesium/Build`, resolved against the dev server's cwd. Works for the root app (cesium
+  is right there) but not a nested `apps/*` package under pnpm's hoisting (cesium lives in the
+  **monorepo root**'s `node_modules`, not `apps/viewer/node_modules`) — every Cesium static asset
+  (`Widgets/widgets.css`, the skybox JPGs, `approximateTerrainHeights.json`, …) 404'd. Worse: Vite's
+  default SPA fallback served `index.html` (200, `text/html`) instead of a real 404, and Cesium's
+  WebGL texture pipeline tried to decode that HTML as an image — crashing the **entire render loop**
+  with an opaque `InvalidStateError: the source image could not be decoded`, not a per-asset failure.
+  Fixed by pointing the plugin at cesium's actual resolved location (`vite.config.ts`) and adding
+  `appType: 'mpa'` (same fix the root app's `vite.config.mjs` already documents for a related
+  tile-server gotcha) so a real 404 surfaces instead of being masked.
+- The raw `mt1.google.com` "Google Hybrid" tile hotlink used as the default basemap sometimes answers
+  with an HTML error page instead of image bytes, hitting the exact same Cesium crash independently —
+  default basemap changed to OSM (a properly public tile service); Google stays selectable.
+- TopBar's mount effect only auto-loaded a preset when the URL had **none** selected — meaning a
+  reloaded/shared link (which always has `?preset=…` from the previous session) silently never
+  fired the actual tileset load, since the resolved URL is deliberately not persisted (see above).
+
+**Not yet done** (first-pass, tracked as follow-up, not attempted to fully match viewer.html feature-
+for-feature in one pass): 3DTRJS auto-fly-to-content on load, 3DTRJS basemap imagery overlay, Ion
+asset loading on the 3DTRJS side, Cesium `shadeless`/brightness shading ported but not yet re-verified
+against baked-lighting photogrammetry content, crop-gizmo precision (approximate ENU conversion, no
+face-handle resize yet — translate only).
 
 ---
 
@@ -260,7 +332,13 @@ Layer) → 3D Tiles 1.1. Validated on `Buildings_NewYork_v18.slpk` → **5882 gl
 place correctly in NYC: I3S geographic-layer vertices are `(Δlon°, Δlat°, Δheight_m)` relative to the
 node OBB centre, converted per-vertex to ECEF (stored relative to the centre for float32 precision,
 tile `transform` translates back). Still a draft: **projected/vertical CRS** placement is not handled,
-normals stay in the source frame, and Draco/LEPCC/textures/attributes are gated out.
+normals stay in the source frame, and Draco/attributes are gated out. **JPEG/PNG base-color
+textures ARE embedded** (2026-07-02) when the layer offers a raster format; DDS/KTX2/Basis-only
+textures have no decoder here and are gated the same way Draco is (geometry still renders,
+untextured). **LEPCC-compressed PointCloud positions now decode** too (2026-07-06,
+`i3sParse.js`'s `decodeDefaultGeometry` — shared with the live `i3s-live.js` adapter, which is what's
+actually been run against real LEPCC data; this offline CLI hasn't separately been exercised on a
+LEPCC dataset yet, so treat it as wired-but-unverified through this specific code path).
 
 ```sh
 unzip your-layer.slpk -d your-layer/        # an SLPK is a plain zip
@@ -275,8 +353,10 @@ node src/index.js ../your-layer ./out-i3s
 | Explicit `nodepages/*.json` trees | Legacy per-node `3dNodeIndexDocument` index (pre-1.7) |
 | `IntegratedMesh` / `3DObject` → glTF **TRIANGLES** | **Draco**-compressed geometry (no decoder) |
 | `PointCloud` → glTF **POINTS** | `Point` (symbol/instance) & `Building` (composite) layers |
-| Uncompressed `DefaultGeometrySchema` (PerAttributeArray) | Textures / PBR materials (dropped — geometry only) |
-| OBB → 3D Tiles `box`; node tree → REPLACE tileset | Per-feature attributes (dropped); non-WGS84 vertical CRS |
+| Uncompressed `DefaultGeometrySchema` (PerAttributeArray) | Per-feature attributes (dropped); non-WGS84 vertical CRS |
+| **LEPCC**-compressed point-cloud positions (decoded — shared w/ live adapter) | RGB/Intensity LEPCC blob types (position-only decoder) |
+| OBB → 3D Tiles `box`; node tree → REPLACE tileset | |
+| **JPEG/PNG base-color textures** (embedded, per-node) | DDS/KTX2/Basis-encoded textures (no decoder — gated, geometry-only) |
 
 **Investigation notes** (answering "is it complex? meshes/points/instances/mix? implicit?"):
 I3S **does** cover meshes (`IntegratedMesh`, `3DObject`), point clouds (`PointCloud`), and
@@ -284,10 +364,12 @@ symbol/model **instances** (`Point` layers); a **Building Scene Layer** is the "
 sublayers. Tiling is **always explicit** (a node tree addressed via paged indices); I3S has **no
 implicit/template scheme** like 3D Tiles subtrees, so the user's "explicit tiling only" constraint is
 automatic. The node-tree → tileset mapping is **direct** (OBB↔box, children↔children, REPLACE). The
-genuinely hard parts — and why this stays a draft — are **Draco** geometry, **textures/materials**,
+genuinely hard remaining part — and why this stays a draft — is **Draco** geometry compression (no
+decoder; LEPCC point-cloud positions and raster **textures** are now both handled, see above),
 **per-feature attributes** (→ `EXT_mesh_features`/metadata), and the **CRS/ECEF vertex placement**
-nuances. A mesh-or-points-only, uncompressed, explicit-tree converter (this draft) is **moderate**;
-full-fidelity I3S is **high** effort and overlaps mature tools (loaders.gl, Cesium ion).
+nuances. A mesh-or-points-only,
+uncompressed, explicit-tree converter (this draft) is **moderate**; full-fidelity I3S is **high** effort
+and overlaps mature tools (loaders.gl, Cesium ion).
 
 > **ESRI also publishes Gaussian splats as 3D Tiles directly**, not through I3S: ArcGIS's
 > **3D Tiles Server** hosts `KHR_gaussian_splatting`/SPZ GLB tilesets alongside its regular
@@ -304,8 +386,8 @@ readme](https://github.com/Esri/i3s-spec/blob/master/docs/2.1/pcsl_ReadMe.md), t
 and the [ArcGIS 3D Tiles samples experience](https://experience.arcgis.com/experience/e2e1e497d13b41cab368c894fd9b3df7)
 (ArcGIS portal items — open each `item.html` link and use its "Download" button for the SLPK, or the
 REST service URL directly for streaming). All four verified live against `/stream?format=i3s`:
-- Integrated mesh (**works**) — SLPK: [item `95a427c7a6ec4789b03c1a177366b54c`](https://3dcities.maps.arcgis.com/home/item.html?id=95a427c7a6ec4789b03c1a177366b54c) (`Rancho_Mesh_v18.slpk`, 285 MB) · service: [item `01eff699c8404a27a65e0877201136b4`](https://3dcities.maps.arcgis.com/home/item.html?id=01eff699c8404a27a65e0877201136b4) → `https://tiles.arcgis.com/tiles/z2tnIkrLQ2BRzr6P/arcgis/rest/services/Rancho_Mesh_v18/SceneServer`
-- Point cloud (**LEPCC-compressed — unsupported**, same gap as the Autzen sample) — SLPK: [item `496552d059644b4892c51ad06bdba8e2`](https://www.arcgis.com/home/item.html?id=496552d059644b4892c51ad06bdba8e2) (`Moro_Bay_LiDAR.slpk`, 578 MB) · service: [item `908d6b986f314d51b1ff50b3bc321dfd`](https://www.arcgis.com/home/item.html?id=908d6b986f314d51b1ff50b3bc321dfd) → `https://tiles.arcgis.com/tiles/z2tnIkrLQ2BRzr6P/arcgis/rest/services/Moro_Bay_LiDAR/SceneServer`. A second point-cloud sample (item `fc3f4a4919394808830cd11df4631a54`, `BARNEGAT_BAY_LiDAR_UTM`) is also LEPCC — every real ArcGIS point-cloud SceneServer sample found so far uses it, since it's Esri's own default point-cloud codec.
+- Integrated mesh (**works, fully textured**) — SLPK: [item `95a427c7a6ec4789b03c1a177366b54c`](https://3dcities.maps.arcgis.com/home/item.html?id=95a427c7a6ec4789b03c1a177366b54c) (`Rancho_Mesh_v18.slpk`, 285 MB) · service: [item `01eff699c8404a27a65e0877201136b4`](https://3dcities.maps.arcgis.com/home/item.html?id=01eff699c8404a27a65e0877201136b4) → `https://tiles.arcgis.com/tiles/z2tnIkrLQ2BRzr6P/arcgis/rest/services/Rancho_Mesh_v18/SceneServer`. The SLPK link is ArcGIS Online's own download endpoint (`.../content/items/<id>/data`) — no `.slpk` anywhere in the URL (only in a `Content-Disposition` header), which the adapter didn't originally detect as an archive at all; both this and the texture support (see the scope table above) were fixed 2026-07-02, verified byte-identical (same JPEG at the same buffer offset) against both the SLPK and the SceneServer URL for the same underlying dataset.
+- Point cloud (**LEPCC-compressed — now decoded, both work**) — SLPK: [item `496552d059644b4892c51ad06bdba8e2`](https://www.arcgis.com/home/item.html?id=496552d059644b4892c51ad06bdba8e2) (`Moro_Bay_LiDAR.slpk`, 578 MB, 2,624 tiles) · service: [item `908d6b986f314d51b1ff50b3bc321dfd`](https://www.arcgis.com/home/item.html?id=908d6b986f314d51b1ff50b3bc321dfd) → `https://tiles.arcgis.com/tiles/z2tnIkrLQ2BRzr6P/arcgis/rest/services/Moro_Bay_LiDAR/SceneServer` (13,775 tiles). Position decodes correctly (checksum + extent-verified); RGB doesn't render yet — it's a separate LEPCC blob type not yet ported, and this specific dataset's `RGB` attribute resource 404s server-side anyway despite being advertised in its schema. A second point-cloud sample (item `fc3f4a4919394808830cd11df4631a54`, `BARNEGAT_BAY_LiDAR_UTM`) is also LEPCC — every real ArcGIS point-cloud SceneServer sample found so far uses it, since it's Esri's own default point-cloud codec.
 - **Live ArcGIS SceneServer REST support added** (2026-07-02) to test the "service" URLs above directly
   (previously the adapter only read a static `3dSceneLayer.json`/SLPK tree, not the REST API's
   `?f=json`-based resource paths) — see `arcgisSceneServerReader()` in `i3s-live.js`.
