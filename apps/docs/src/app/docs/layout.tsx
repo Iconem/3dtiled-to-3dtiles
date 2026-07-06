@@ -8,9 +8,14 @@ import { crossLinks } from '@/lib/layout.shared';
 // DOM order (both siblings in the same flex-col container) — `order-first` flips that visually so
 // these links sit ABOVE that row, with GitHub/theme staying pinned as the very last thing at the
 // bottom, without needing to override fumadocs' own Sidebar component.
+//
+// Styling matches fumadocs' own page-tree `SidebarItem` exactly (see its `itemVariants` in
+// fumadocs-ui/dist/layouts/docs/slots/sidebar.js: rounded-lg row, p-2, hover:bg-fd-accent/50) so
+// these read as more nav items, not a visually distinct add-on. `pb-2` on the wrapper gives the
+// group its own breathing room above the GitHub/theme row below it.
 function SidebarFooterLinks() {
   return (
-    <div className="flex flex-col gap-1 order-first">
+    <div className="flex flex-col gap-0.5 pb-2 order-first">
       {crossLinks.map((link) =>
         'url' in link ? (
           <a
@@ -18,7 +23,7 @@ function SidebarFooterLinks() {
             href={link.url}
             target={link.external ? '_blank' : undefined}
             rel={link.external ? 'noreferrer' : undefined}
-            className="text-fd-muted-foreground hover:text-fd-accent-foreground text-sm py-1"
+            className="flex items-center rounded-lg p-2 text-sm text-fd-muted-foreground transition-colors hover:bg-fd-accent/50 hover:text-fd-accent-foreground/80 hover:transition-none"
           >
             {link.text}
           </a>

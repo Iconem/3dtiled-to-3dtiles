@@ -31,10 +31,9 @@ lepccDecode.js`, a pure-JS port of Esri's own open-source codec
 (**github.com/Esri/lepcc**, Apache-2.0 — a small, actively-maintained C++ repo whose own README
 says "easy to port the decoder to other languages such as JS, Python, C# etc").
 
-Scope: **decode only**, and only the `bt_XYZ` blob type (position). RGB/Intensity/FlagBytes are
-separate LEPCC blob types — not needed here since every real I3S point-cloud dataset checked so far
-declares only a `position` vertexAttribute (color/intensity, if present at all, come through a
-different, uncompressed channel).
+Scope: position (`bt_XYZ`/`LEPCC.cpp`) **and** color (`ClusterRGB.cpp`) blob types — see the RGB
+section below. Intensity/FlagBytes (separate LEPCC blob types) are not ported: no dataset checked so
+far both declares one and actually serves the underlying attribute resource.
 
 Format (all little-endian): a 16-byte top header (`"LEPCC     "` file key + version + Fletcher-32
 checksum), an 88-byte header (blob size, extent, max error, point count), then four **bit-stuffed,
@@ -67,8 +66,58 @@ crashing the naive `for (const n of pg.nodes)` node-page reader. Fixed by treati
 `.nodes` isn't an array the same as end-of-pagination.
 
 Not ported: `doLut` bit-stuffer mode (an encoder-side size optimization not observed in any real
-dataset checked) and the non-XYZ LEPCC blob types (RGB/Intensity/FlagBytes) — both fail loudly with
+dataset checked) and the non-XYZ/RGB LEPCC blob types (Intensity/FlagBytes) — both fail loudly with
 a clear error rather than silently mis-decoding, should a dataset ever need them.
+
+## LEPCC per-point RGB (`ClusterRGB`)
+
+Unlike position, RGB is **not** part of `defaultGeometrySchema` at all — it's a separate per-node
+resource declared in the layer's `attributeStorageInfo` array (an entry with `encoding: "lepcc-rgb"`
+or `name: "RGB"`), fetched from `nodes/<resourceId>/attributes/<attributeStorageInfo.key>` — **no
+trailing `/0`/page segment**.
+
+**Real wrinkle found integrating this**: the obvious first guess — copying `@loaders.gl/i3s`'s own
+`generateTilesetAttributeUrls()` URL pattern, `nodes/<res>/attributes/<key>/0` — 404s on every node,
+every key, every resource id tried, even though `attributeStorageInfo` genuinely declares an `RGB`
+entry and the dataset is visibly colored in Esri's own ArcGIS Scene viewer. That loaders.gl helper is
+for the *legacy* per-node `3dNodeIndexDocument` layout's `attributeData[].href` convention — it does
+not apply to modern nodePages-based PointCloud layers. The real spec example
+(`github.com/Esri/i3s-spec/.../pcsl_ReadMe.md`) has no trailing segment at all:
+`.../layers/0/nodes/20/attributes/64`. Dropping the `/0` immediately returns real binary, with a
+`"ClusterRGB"` file-key header — a **separate LEPCC blob type** from the `"LEPCC     "`-keyed
+position blob, decoded via a new `decodeLepccRgb()` in the same `lepccDecode.js`, ported from Esri's
+`ClusterRGB.cpp`.
+
+Format: the same 16-byte top header shape (10-byte file key `"ClusterRGB"`, uint16 version, uint32
+Fletcher-32 checksum) as the XYZ blob, then a 16-byte `Header1` (int64 blobSize, uint32 numPoints,
+uint16 numColorsInColormap, Byte colorLookupMethod, Byte colorIndexCompressionMethod — the two Byte
+fields are 1 each, no bit-stuffing anywhere in this blob type). Decode dispatches purely on
+`numColorsInColormap`, not `colorLookupMethod` (matching `ClusterRGB::Decode` exactly — the lookup
+method is encoder-side bookkeeping): `0` → `numPoints` raw RGB triplets follow directly; otherwise a
+`numColorsInColormap`×3 palette follows, then either one index byte per point
+(`colorIndexCompressionMethod: 0`, "NoCompression") or nothing at all — every point is `colormap[0]`
+(`: 1`, "AllConst"). A third mode, Huffman-coded indices, exists in the struct but is compiled out of
+Esri's own reference encoder (`#ifdef TryHuffmanOnColor`, undefined) — no real file should ever set
+it; fails loudly if one somehow does.
+
+Verified against `Moro_Bay_LiDAR`'s root node: `numColorsInColormap=256`, `colorIndexCompressionMethod=0`,
+and `32 (header) + 256×3 (palette) + 14,998 (indices) = 15,798` bytes — landing exactly on the
+blob's own `blobSize`. Decoded palette spans a real, varied range (R/G/B each roughly 10–254 across
+256 distinct colors, not degenerate).
+
+A SEPARATE bug surfaced once real RGB reached the renderer: I3S PointCloud presets in the viewer's
+`formats.ts` inherited their format group's `type: 'mesh'` default (most I3S samples ARE meshes) with
+no per-asset override actually being read (`middleware.ts` built every preset's `type` from the
+group only, `f.type`, ignoring `asset.type` entirely) — so point clouds got treated as meshes
+client-side, which forces LIT shading; points have no `NORMAL` attribute, so lit shading always
+zeroed them to black regardless of the real (correctly decoded) vertex color. And even after fixing
+both of those, a THIRD, more fundamental bug remained: the point-cloud GLB writer
+(`glbBuild.js`) never attached a `material` to `POINTS` primitives at all — glTF's spec-mandated
+default material for a primitive with no material index is fully metallic
+(`metallicFactor: 1`), which renders flat black without an environment/IBL map **regardless of
+COLOR_0**, the exact same failure mode `glbBuild.js`'s own comment already documented for *mesh*
+tiles (fixed 2026-07-02) but which was never extended to `POINTS` primitives. All three had to be
+fixed together for real point-cloud color to actually reach the screen.
 
 ## Gist
 I3S is Esri's streaming format for large 3D scene layers. Distributed as a **REST service** or a

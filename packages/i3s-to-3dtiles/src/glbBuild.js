@@ -85,21 +85,26 @@ export function buildGlb(g) {
   const gltf = {
     asset: { version: '2.0', generator: 'i3s-to-3dtiles (draft)' },
     scene: 0, scenes: [{ nodes: [0] }], nodes: [{ mesh: 0 }],
-    meshes: [{ primitives: [{ attributes, mode: g.mode === 'POINTS' ? 0 : 4, ...(g.mode !== 'POINTS' ? { material: 0 } : {}) }] }],
+    meshes: [{ primitives: [{ attributes, mode: g.mode === 'POINTS' ? 0 : 4, material: 0 }] }],
     accessors,
     bufferViews: bufferViews.map(bv => ({ buffer: 0, byteOffset: bv.byteOffset, byteLength: bv.byteLength })),
     buffers: [{ byteLength: bin.length }],
   };
-  // Always emit an EXPLICIT material for mesh tiles, textured or not. A primitive with no `material`
+  // Always emit an EXPLICIT material — for BOTH mesh and point tiles. A primitive with no `material`
   // falls back to glTF's spec-mandated default (metallicFactor:1, roughnessFactor:1) — a fully metallic
   // surface that renders pure black without an environment/IBL map. That default was silently landing on
   // every node whose texture fetch failed (i3s-live.js's own "SceneServer returns fake-200 JSON errors
   // intermittently" case) or whose format has no raster decoder — this is the "wrong material, all
   // black" bug, not a geometry/decode problem. A matte (metallicFactor:0) material with no texture still
   // shows COLOR_0 vertex colors / plain white instead of black metal.
-  if (g.mode !== 'POINTS') {
-    gltf.materials = [{ pbrMetallicRoughness: { metallicFactor: 0, roughnessFactor: 1, ...(imageViewIdx >= 0 ? { baseColorTexture: { index: 0 } } : {}) } }];
-  }
+  //
+  // POINTS tiles need this EXACT same fix, not just mesh ones (found 2026-07-06, LEPCC-RGB point
+  // clouds): omitting `material` on a POINTS primitive left it on the same black metallic default —
+  // real per-vertex COLOR_0 decoded correctly (verified independently against the raw GLB bytes) but
+  // rendered as flat black regardless, because there was no material for a renderer to multiply COLOR_0
+  // against. Point clouds have no meaningful metallic/roughness surface response, but the material
+  // object itself (not its specific PBR values) is what makes COLOR_0 actually reach the shader.
+  gltf.materials = [{ pbrMetallicRoughness: { metallicFactor: 0, roughnessFactor: 1, ...(imageViewIdx >= 0 ? { baseColorTexture: { index: 0 } } : {}) } }];
   if (imageViewIdx >= 0) {
     gltf.images = [{ bufferView: imageViewIdx, mimeType: g.texture.mimeType }];
     gltf.textures = [{ source: 0 }];

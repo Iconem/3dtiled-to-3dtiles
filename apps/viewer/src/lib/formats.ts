@@ -165,9 +165,17 @@ export const FORMATS: FormatMeta[] = [
     // explicit `children:[idx…]` array mesh node pages use; `buildTile` only ever read `.children`,
     // so EVERY point-cloud tileset (SLPK or SceneServer) silently built as root-only. Both now expand
     // to their full tree (SLPK: 2624 tiles, SceneServer: 13775 tiles).
-    { id: 'arcgis-pts-slpk', label: 'ArcGIS Moro Bay LiDAR (.slpk)', src: 'https://www.arcgis.com/sharing/rest/content/items/496552d059644b4892c51ad06bdba8e2/data' },
-    { id: 'arcgis-pts-svc', label: 'ArcGIS Moro Bay LiDAR SceneServer', src: 'https://tiles.arcgis.com/tiles/z2tnIkrLQ2BRzr6P/arcgis/rest/services/Moro_Bay_LiDAR/SceneServer' },
-    { id: 'arcgis-usgsnyc-svc', label: 'ArcGIS USGSNYC 2014 LiDAR SceneServer', src: 'https://tiles.arcgis.com/tiles/z2tnIkrLQ2BRzr6P/arcgis/rest/services/USGSNYC_2014_LiDAR/SceneServer' },
+    // `type: 'pointcloud'` override: the `i3s` group defaults to `type: 'mesh'` (most I3S samples are
+    // mesh layers), but these three ARE PointCloud layers — without the override CesiumViewer treated
+    // them as meshes, which forced LIT shading (meshes have real normals) even though point clouds
+    // never carry a NORMAL attribute; with no normal, lit shading zeroed every point to black
+    // regardless of the actual (now correctly LEPCC-RGB-decoded) vertex color. Also ported RGB itself:
+    // a SEPARATE per-node `nodes/<res>/attributes/<key>` LEPCC ClusterRGB blob, not part of
+    // DefaultGeometrySchema — see lepccDecode.js's decodeLepccRgb + its header comment for why the
+    // resource URL (no trailing `/0`) took a second pass to get right.
+    { id: 'arcgis-pts-slpk', label: 'ArcGIS Moro Bay LiDAR (.slpk)', type: 'pointcloud', src: 'https://www.arcgis.com/sharing/rest/content/items/496552d059644b4892c51ad06bdba8e2/data' },
+    { id: 'arcgis-pts-svc', label: 'ArcGIS Moro Bay LiDAR SceneServer', type: 'pointcloud', src: 'https://tiles.arcgis.com/tiles/z2tnIkrLQ2BRzr6P/arcgis/rest/services/Moro_Bay_LiDAR/SceneServer' },
+    { id: 'arcgis-usgsnyc-svc', label: 'ArcGIS USGSNYC 2014 LiDAR SceneServer', type: 'pointcloud', src: 'https://tiles.arcgis.com/tiles/z2tnIkrLQ2BRzr6P/arcgis/rest/services/USGSNYC_2014_LiDAR/SceneServer' },
   ] },
 ];
 

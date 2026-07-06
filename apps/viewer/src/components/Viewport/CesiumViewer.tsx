@@ -275,17 +275,20 @@ const CesiumViewer = forwardRef<ViewerHandle, Props>(function CesiumViewer({ vis
       return;
     }
     const { shadeless, brightness } = store.getState();
+    const isPointCloud = currentTypeRef.current === 'pointcloud';
     try {
-      if (!shadeless && brightness === 1) { (tileset as any).customShader = undefined; return; }
-      // Point clouds are frequently uncolored (LAS/COPC with no RGB channel stores black), so
-      // multiplying a near-zero diffuse by brightness still renders black — shadeless on a point
-      // cloud instead forces a flat white so the geometry actually becomes visible.
-      const fragmentShaderText = currentTypeRef.current === 'pointcloud' && shadeless
-        ? `void fragmentMain(FragmentInput fsInput, inout czm_modelMaterial material){ material.diffuse = vec3(${brightness.toFixed(2)}); }`
-        : `void fragmentMain(FragmentInput fsInput, inout czm_modelMaterial material){ material.diffuse *= ${brightness.toFixed(2)}; }`;
+      // Point clouds never carry a NORMAL attribute (glTF POINTS mode has none), so Cesium's default
+      // LIT shading always zeroes their diffuse to black regardless of the shadeless toggle or
+      // brightness value — always render them UNLIT, independent of the toggle. A genuinely uncolored
+      // point cloud (no COLOR_0 at all, e.g. plain LAS/COPC) already defaults to white per the glTF
+      // spec's own material fallback, so `material.diffuse *= brightness` alone reproduces the old
+      // "shadeless forces flat white" look for that case too — but WITHOUT discarding real per-vertex
+      // color (e.g. LEPCC-decoded RGB on I3S PointCloud layers) the way `diffuse = vec3(brightness)`
+      // used to. That flat override was the actual cause of "real RGB renders as plain grey."
+      if (!shadeless && !isPointCloud && brightness === 1) { (tileset as any).customShader = undefined; return; }
       (tileset as any).customShader = new Cesium.CustomShader({
-        lightingModel: shadeless ? Cesium.LightingModel.UNLIT : undefined,
-        fragmentShaderText,
+        lightingModel: (shadeless || isPointCloud) ? Cesium.LightingModel.UNLIT : undefined,
+        fragmentShaderText: `void fragmentMain(FragmentInput fsInput, inout czm_modelMaterial material){ material.diffuse *= ${brightness.toFixed(2)}; }`,
       });
     } catch (e) {
       console.warn('[shading]', (e as Error).message);

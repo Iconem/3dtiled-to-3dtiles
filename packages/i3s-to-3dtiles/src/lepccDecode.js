@@ -1,17 +1,23 @@
 /**
- * lepccDecode.js — pure-JS port of Esri LEPCC's XYZ position decoder (github.com/Esri/lepcc,
- * Apache-2.0). Scope: DECODE ONLY, and only the `bt_XYZ` blob type (LEPCC.cpp's `LEPCC::Decode`),
- * since I3S PointCloud layers with `defaultGeometrySchema.encoding: "lepcc-xyz"` only need this path
- * — RGB/Intensity/FlagBytes (ClusterRGB.cpp/Intensity.cpp/FlagBytes.cpp) are separate LEPCC blob
- * types this repo's point-cloud datasets don't use (verified: Moro_Bay_LiDAR and USGSNYC_2014_LiDAR
- * both declare only a `position` vertexAttribute).
+ * lepccDecode.js — pure-JS port of two Esri LEPCC decoders (github.com/Esri/lepcc, Apache-2.0):
+ * position (`bt_XYZ`, `LEPCC.cpp`) and per-point color (`ClusterRGB.cpp`). Both are separate blob
+ * types/files in I3S — a PointCloud node's `defaultGeometrySchema.encoding: "lepcc-xyz"` geometry
+ * resource carries ONLY the XYZ blob; RGB (when the layer's `attributeStorageInfo` declares a
+ * `lepcc-rgb`-style RGB entry) lives in a SEPARATE per-node resource,
+ * `nodes/<res>/attributes/<attributeStorageInfo key>` — no trailing `/0`/page segment, unlike the
+ * *legacy* per-node `3dNodeIndexDocument` attribute-href convention (`generateTilesetAttributeUrls`
+ * in `@loaders.gl/i3s`, which does NOT apply to modern nodePages-based PointCloud layers — verified
+ * by direct probing: appending `/0` 404s on every node/key, dropping it returns real "ClusterRGB"-
+ * keyed binary. See the I3S reference page's LEPCC section for the full story, including why this
+ * was initially misdiagnosed as "the dataset doesn't serve RGB").
  *
  * Ported from (line-for-line correspondence kept close on purpose, for auditability):
  *   LEPCC.cpp        LEPCC::Decode / Decode_CutInSegments      → decodeLepccXyz / decodeCutInSegments
  *   BitStuffer2.cpp  BitStuffer2::Decode / BitUnStuff           → bitStufferDecode / bitUnStuff
  *   Common.cpp       Common::ComputeChecksumFletcher32          → fletcher32
+ *   ClusterRGB.cpp   ClusterRGB::Decode                         → decodeLepccRgb
  *
- * File layout (all little-endian, verified against real ArcGIS-hosted node geometries — see
+ * XYZ file layout (all little-endian, verified against real ArcGIS-hosted node geometries — see
  * decodeLepccXyz's header comment for the byte offsets):
  *   TopHeader (16B): char fileKey[10]="LEPCC     ", uint16 version, uint32 checkSum
  *   Header1   (88B): int64 blobSize, Extent3D{lower,upper}(6×f64), Point3D maxError(3×f64),
@@ -24,6 +30,19 @@
  * boundary) — i.e. NOT a byte-at-a-time bit reader. This only matches LEPCC's own "unstuff", not a
  * generic MSB-first bitstream, so it's transcribed faithfully below rather than written as a
  * from-scratch bit reader.
+ *
+ * RGB file layout — much simpler, no bit-stuffing at all:
+ *   TopHeader (16B): char fileKey[10]="ClusterRGB", uint16 version, uint32 checkSum
+ *   Header1   (16B): int64 blobSize, uint32 numPoints, uint16 numColorsInColormap,
+ *                    Byte colorLookupMethod (0=None/1=Lossless/2=Array3D — informational only, the
+ *                    actual decode dispatch below keys off numColorsInColormap==0, matching the
+ *                    reference decoder exactly), Byte colorIndexCompressionMethod (0=NoCompression,
+ *                    1=AllConst; a 3rd HuffmanCodec value exists in the struct but is `#ifdef`'d out
+ *                    of Esri's own reference encoder, so no real file uses it — matching this repo's
+ *                    "fail loudly rather than silently mis-decode" convention for unimplemented modes).
+ *   then either `numPoints` raw RGB triplets (numColorsInColormap==0), or a `numColorsInColormap`×3
+ *   colormap followed by `numPoints` 1-byte indices into it (NoCompression) or nothing at all
+ *   (AllConst — every point is colormap[0]).
  */
 
 function fletcher32(buf, start, end) {
@@ -213,4 +232,70 @@ export function decodeLepccXyz(buf) {
     throw new Error(`lepccDecode: reconstructed ${cnt} points, header says ${numPoints}`);
 
   return { position, vertexCount: numPoints };
+}
+
+/**
+ * Decode a LEPCC ClusterRGB blob (I3S PointCloud `nodes/<n>/attributes/<attributeStorageInfo key>` —
+ * note: NO trailing `/0`/page segment, see this file's header comment) into flat RGBA bytes.
+ *
+ * Verified against a real ArcGIS-hosted node (Moro_Bay_LiDAR): checksum matches, `numColorsInColormap`
+ * (256) × 3 + `numPoints` (14,998) index bytes + 32-byte header sums exactly to `blobSize` (15,798).
+ *
+ * @param {Buffer} buf - one node's raw RGB attribute blob (already gunzipped if applicable)
+ * @returns {{ colors: Uint8Array, vertexCount: number }} colors is RGBA (alpha always 255)
+ */
+export function decodeLepccRgb(buf) {
+  if (buf.length < 10 || buf.toString('ascii', 0, 10) !== 'ClusterRGB')
+    throw new Error('lepccDecode: missing ClusterRGB file key');
+
+  const version = buf.readUInt16LE(10);
+  const checkSum = buf.readUInt32LE(12);
+  if (version > 1) throw new Error(`lepccDecode: unsupported ClusterRGB version ${version}`);
+
+  const blobSize = Number(buf.readBigInt64LE(16));
+  const numPoints = buf.readUInt32LE(24);
+  const numColors = buf.readUInt16LE(28);
+  // colorLookupMethod (byte 30) is informational only — the reference decoder itself dispatches on
+  // numColorsInColormap==0, not on this field, so we do the same (matches ClusterRGB::Decode exactly).
+  const compressionMethod = buf.readUInt8(31);
+
+  if (blobSize > buf.length)
+    throw new Error(`lepccDecode: blobSize ${blobSize} exceeds buffer length ${buf.length}`);
+
+  const computedChecksum = fletcher32(buf, 16, blobSize);
+  if (computedChecksum !== checkSum)
+    throw new Error(`lepccDecode: ClusterRGB checksum mismatch (expected ${checkSum}, computed ${computedChecksum})`);
+
+  let o = 32;
+  const colors = new Uint8Array(numPoints * 4);
+
+  if (numColors === 0) {
+    // No colormap — raw RGB triplet per point.
+    for (let i = 0; i < numPoints; i++) {
+      colors[i*4] = buf[o]; colors[i*4+1] = buf[o+1]; colors[i*4+2] = buf[o+2]; colors[i*4+3] = 255;
+      o += 3;
+    }
+  } else {
+    const colormap = buf.subarray(o, o + numColors * 3); o += numColors * 3;
+    if (compressionMethod === 0) { // NoCompression — one index byte per point
+      for (let i = 0; i < numPoints; i++) {
+        const idx = buf[o++] * 3;
+        colors[i*4] = colormap[idx]; colors[i*4+1] = colormap[idx+1]; colors[i*4+2] = colormap[idx+2]; colors[i*4+3] = 255;
+      }
+    } else if (compressionMethod === 1) { // AllConst — every point is colormap[0], no index bytes at all
+      for (let i = 0; i < numPoints; i++) {
+        colors[i*4] = colormap[0]; colors[i*4+1] = colormap[1]; colors[i*4+2] = colormap[2]; colors[i*4+3] = 255;
+      }
+    } else {
+      // HuffmanCodec (2) — not implemented: Esri's own reference encoder has this path compiled out
+      // (`#ifdef TryHuffmanOnColor`, undefined), so no real file should ever set it. Fail loudly
+      // rather than silently mis-decode if one somehow does.
+      throw new Error(`lepccDecode: ClusterRGB colorIndexCompressionMethod ${compressionMethod} not implemented (expected 0 or 1)`);
+    }
+  }
+
+  if (o !== blobSize)
+    throw new Error(`lepccDecode: ClusterRGB decoded ${o} bytes, expected blobSize ${blobSize}`);
+
+  return { colors, vertexCount: numPoints };
 }

@@ -38,6 +38,7 @@ import zlib from 'node:zlib';
 import { parseSLPKArchive } from '@loaders.gl/i3s';
 import { DataViewReadableFile } from '@loaders.gl/zip';
 import { decodeDefaultGeometry, geodeticToEcef, obbToBox, childIndices } from '../i3s-to-3dtiles/src/i3sParse.js';
+import { decodeLepccRgb } from '../i3s-to-3dtiles/src/lepccDecode.js';
 import { buildGlb } from '../i3s-to-3dtiles/src/glbBuild.js';
 import { enuFrame, memoizeAsync } from '../core/index.js';
 
@@ -205,6 +206,12 @@ const getCtx = memoizeAsync(async (url) => {
   const sr = sl.spatialReference || sl.store?.spatialReference;
   const isGeographic = (sr?.latestWkid === 4326 || sr?.wkid === 4326);
 
+  // PointCloud RGB (when present) is NOT part of DefaultGeometrySchema — it's a separate per-node
+  // resource, `nodes/<res>/attributes/<key>` (see lepccDecode.js's header comment for the URL
+  // convention wrinkle that hid this for a while). Find the attributeStorageInfo entry, if any.
+  const rgbAttrInfo = (sl.attributeStorageInfo || []).find(a => /rgb/i.test(a.encoding || a.name || ''));
+  const rgbAttrKey = rgbAttrInfo ? rgbAttrInfo.key : null;
+
   // Load node pages: page 0 synchronously (fast cold start), then remaining pages in parallel background.
   const nodes = [];
   const addNodes = (pg) => { for (const n of pg.nodes) { if (Number.isInteger(n.index)) nodes[n.index] = n; else nodes.push(n); } };
@@ -255,7 +262,7 @@ const getCtx = memoizeAsync(async (url) => {
   console.log(`[i3s-live] ${url} → ${layerType} v${sl.store?.version}, ${nodes.length} nodes from page 0 (${isGeographic ? 'WGS84' : 'local'})`
     + `${_allPagesLoaded ? '' : ' — loading remaining pages in background'}`);
   return {
-    getFile, nodes, schema, isGeographic, layerType, textureFormatFor,
+    getFile, nodes, schema, isGeographic, layerType, textureFormatFor, rgbAttrKey,
     isPoint: POINT_TYPES.has(layerType),
     bufIdx: uncompressedBufferIndex >= 0 ? uncompressedBufferIndex : 0,
     originEcef, EAST, NORTH, UP, toEnu,
@@ -413,7 +420,21 @@ async function serveTileGlb(ctx, idx) {
     }
   }
 
-  return Buffer.from(buildGlb({ mode: ctx.isPoint ? 'POINTS' : 'TRIANGLES', positions, normals, colors: g.color, uvs: g.uv0, texture }));
+  // PointCloud RGB: a separate per-node attribute resource, not part of DefaultGeometrySchema (mesh
+  // layers' inline `g.color` already covers their case). `nodes/<res>/attributes/<key>` — NO trailing
+  // `/0`/page segment (see lepccDecode.js's header comment: that extra segment is what silently 404'd
+  // this for a while). Missing/undecodable per-node resource degrades to no color, not a crash — same
+  // "gate, don't crash" philosophy as Draco/textures.
+  let colors = g.color;
+  if (!colors && ctx.isPoint && ctx.rgbAttrKey != null) {
+    try {
+      const rgbBuf = await ctx.getFile(`nodes/${res}/attributes/${ctx.rgbAttrKey}`);
+      const rgb = decodeLepccRgb(rgbBuf);
+      if (rgb.vertexCount === g.vertexCount) colors = rgb.colors;
+    } catch { /* no RGB for this node — render uncolored */ }
+  }
+
+  return Buffer.from(buildGlb({ mode: ctx.isPoint ? 'POINTS' : 'TRIANGLES', positions, normals, colors, uvs: g.uv0, texture }));
 }
 
 // Pure builders for the /stream dispatcher.

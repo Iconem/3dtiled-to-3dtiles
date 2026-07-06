@@ -124,7 +124,7 @@ export function currentPresets(p: MiddlewareParams & { toolName: ToolName; tiles
     .map((a) => ({
       id: `${f.fmt}-${a.id}`,
       label: `${f.icon} ${a.label}`,
-      type: f.type,
+      type: a.type ?? f.type,
       url: assetUrl(f, a, p),
       octree: f.octree,
       rawSrc: srcUrl(a.streamSrc ?? a.src!),
