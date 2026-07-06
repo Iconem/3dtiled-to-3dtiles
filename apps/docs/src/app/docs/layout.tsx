@@ -3,12 +3,14 @@ import { DocsLayout } from 'fumadocs-ui/layouts/docs';
 import { baseOptions } from '@/lib/layout.shared';
 import { crossLinks } from '@/lib/layout.shared';
 
-// Same cross-links as the top navbar (see layout.shared.tsx), but rendered in the sidebar's FOOTER
-// slot instead of at its top — keeps the page-tree navigation as the first thing visible when the
-// sidebar opens, with these secondary links tucked below next to the GitHub icon/theme toggle.
+// Same cross-links as the top navbar (see layout.shared.tsx), rendered in the sidebar's FOOTER slot.
+// Fumadocs' own Sidebar renders the GitHub-icon/theme-toggle row BEFORE the `footer` slot content in
+// DOM order (both siblings in the same flex-col container) — `order-first` flips that visually so
+// these links sit ABOVE that row, with GitHub/theme staying pinned as the very last thing at the
+// bottom, without needing to override fumadocs' own Sidebar component.
 function SidebarFooterLinks() {
   return (
-    <div className="flex flex-col gap-1">
+    <div className="flex flex-col gap-1 order-first">
       {crossLinks.map((link) =>
         'url' in link ? (
           <a
