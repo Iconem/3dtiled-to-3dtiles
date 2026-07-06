@@ -1,10 +1,15 @@
 /**
  * 3dtiles-tools-live.js — /3dtiles-tools streaming middleware.
  *
- * Streaming semantics (like /stream, NOT like /convert):
+ * Streaming semantics (like /stream, NOT like /convert) for `implicit-to-explicit` and `upgrade`:
  *   • Tileset JSON is built once on first request and cached in memory.
  *   • Each tile is converted/served on-demand when Cesium requests it.
  *   • Nothing is written to disk; no pre-conversion of the whole dataset.
+ *
+ * `upgrade-real` is different (see its section below): it's a genuine batch/cache operation like
+ * /convert, because the REAL CesiumGS `3d-tiles-tools` package only operates on local filesystem
+ * directories (no streaming/remote API) — a remote `url=` is mirrored to disk first, the whole
+ * tileset is converted once, and the result is served statically from a cache dir on every request.
  *
  * Endpoints:
  *   GET /3dtiles-tools/tileset.json?tool=<t>&dir=<localPath>         (local)
@@ -19,13 +24,21 @@
  *
  *   upgrade               Reads an existing explicit 1.0 tileset (local or remote), bumps version
  *                         to 1.1, and rewrites content URIs so that each b3dm/pnts tile is converted
- *                         on demand. GLB tiles are passed through. No files written.
+ *                         on demand. GLB tiles are passed through. No files written. Hand-rolled
+ *                         (this repo's own upgrade.js), zero-copy where possible.
+ *
+ *   upgrade-real           Same 1.0 → 1.1 upgrade, but via the REAL CesiumGS `3d-tiles-tools` npm
+ *                         package's TilesetUpgrader (b3dm/pnts/i3dm → glb, content upgraded through
+ *                         gltf-pipeline, not just re-pointed). Batch: converts the WHOLE tileset once
+ *                         into a cache dir, then serves the static result — see its section below.
  */
 import fs   from 'node:fs/promises';
 import fss  from 'node:fs';
+import os   from 'node:os';
 import path from 'node:path';
+import crypto from 'node:crypto';
 import { buildExplicitFromUrl, transcodeToExplicit } from 'implicit-to-explicit';
-import { pipeB3dmAsGlb, pntsToGlb, b3dmToGlb2 } from '3dtiles-tools';
+import { pipeB3dmAsGlb, pntsToGlb, b3dmToGlb2, upgradeTilesetReal } from '3dtiles-tools';
 
 const CORS_JSON = { 'Access-Control-Allow-Origin': '*', 'Access-Control-Allow-Headers': '*', 'Content-Type': 'application/json' };
 const CORS_GLB  = { 'Access-Control-Allow-Origin': '*', 'Access-Control-Allow-Headers': '*', 'Content-Type': 'model/gltf-binary' };
@@ -266,9 +279,121 @@ async function serveUpgradeTile(relPathRaw, u, res) {
   }
 }
 
+// ── upgrade-real (real CesiumGS 3d-tiles-tools package) ────────────────────────
+//
+// The real package's TilesetSources/TilesetTargets support exactly three kinds: .3tz, .3dtiles,
+// or a plain filesystem directory — there's no HTTP source (see upgrade-real.js's file header for
+// how this was confirmed). So this tool works like /convert, not like /stream:
+//   1. dir=  → used as-is.  url= → the WHOLE explicit tileset (json + every tile file) is mirrored
+//      to a local temp dir first (recursive content.uri walk + fetch, one time).
+//   2. TilesetOperations.upgrade runs ONCE against that local dir, writing a real converted copy
+//      (b3dm/pnts/i3dm → glb via gltf-pipeline) to a cache dir.
+//   3. Every subsequent request for the same source is served straight from that cache dir — the
+//      tileset.json (content URIs rewritten to our own /tile/<relPath>?tool=upgrade-real&key=<k>
+//      route) and each static tile file.
+const realUpgradeJobs = new Map();      // cacheKey → Promise<outDir> (in-flight de-dupe, like convert-live.js)
+const CACHE_ROOT = path.join(os.tmpdir(), '3dtiles-tools-upgrade-real');
+const keyFor = (s) => crypto.createHash('sha1').update(s).digest('hex').slice(0, 16);   // dot-free — see upgrade-real.js gotcha
+
+// Unlike the `dir=`-mode tools above (where the CALLER already names the whole directory directly, so
+// there's nothing to gain from a `../` escape they couldn't already ask for outright), CACHE_ROOT here
+// is a server-owned path the caller can never name directly — they only supply a `relPath` that's
+// supposed to stay INSIDE one `key` subdirectory of it. `relPath` reaches this from two untrusted
+// places: a remote tileset.json's own `content.uri` fields (mirrorRemoteTileset — a hostile/compromised
+// public tileset could embed "../../../../etc/passwd") and the caller's own request path
+// (serveRealUpgradeTile). Resolve-and-check before ever touching the filesystem with it.
+function safeJoin(base, relPath) {
+  const resolvedBase = path.resolve(base);
+  const resolved = path.resolve(resolvedBase, relPath);
+  if (resolved !== resolvedBase && !resolved.startsWith(resolvedBase + path.sep)) {
+    throw new Error(`path escapes ${resolvedBase}: ${relPath}`);
+  }
+  return resolved;
+}
+
+async function walkContentUris(node, visit) {
+  if (!node) return;
+  const uri = node.content?.uri ?? node.content?.url;
+  if (uri) await visit(uri);
+  if (node.children) await Promise.all(node.children.map((c) => walkContentUris(c, visit)));
+}
+
+/** Mirror a remote EXPLICIT 3D Tiles tileset (tileset.json + every tile it references) to `dir`. */
+async function mirrorRemoteTileset(tilesetUrl, dir) {
+  await fs.mkdir(dir, { recursive: true });
+  const r = await fetch(tilesetUrl);
+  if (!r.ok) throw new Error(`fetch ${tilesetUrl} → ${r.status}`);
+  const text = await r.text();
+  await fs.writeFile(path.join(dir, 'tileset.json'), text);
+  const obj = JSON.parse(text);
+  if (obj.root?.implicitTiling) throw new Error('tileset has implicitTiling — run tool=implicit-to-explicit first, then upgrade-real');
+  const base = tilesetUrl.replace(/\/[^/]+$/, '/');
+  const seen = new Set();
+  await walkContentUris(obj.root, async (uri) => {
+    if (seen.has(uri)) return; seen.add(uri);
+    const src = new URL(uri, base).href;
+    const dst = safeJoin(dir, uri.split('?')[0]);
+    const resp = await fetch(src);
+    if (!resp.ok) throw new Error(`fetch ${src} → ${resp.status}`);
+    await fs.mkdir(path.dirname(dst), { recursive: true });
+    await fs.writeFile(dst, Buffer.from(await resp.arrayBuffer()));
+  });
+  return dir;
+}
+
+function ensureRealUpgrade(cacheKey, srcDirPromise) {
+  if (realUpgradeJobs.has(cacheKey)) return realUpgradeJobs.get(cacheKey);
+  const job = (async () => {
+    const outDir = path.join(CACHE_ROOT, cacheKey);   // hex hash — dot-free, dodges the Windows path bug
+    if (fss.existsSync(path.join(outDir, 'tileset.json'))) return outDir;   // warm from a previous run
+    const srcDir = await srcDirPromise;
+    console.log(`[3dtiles-tools] upgrade-real ${srcDir} → ${outDir}`);
+    await upgradeTilesetReal(srcDir, outDir);
+    return outDir;
+  })();
+  realUpgradeJobs.set(cacheKey, job);
+  job.catch(() => realUpgradeJobs.delete(cacheKey));   // a failed conversion shouldn't poison the cache
+  return job;
+}
+
+async function serveRealUpgradeTileset(u, res) {
+  const dir = u.searchParams.get('dir');
+  const url = u.searchParams.get('url');
+  if (!dir && !url) { res.writeHead(400, CORS_ERR); res.end(JSON.stringify({ error: 'missing ?dir= or ?url=' })); return; }
+
+  // "-" not ":" as the kind/hash separator — a literal ":" is illegal in a Windows directory NAME
+  // (reserved for drive letters/NTFS alternate data streams), and this key becomes a directory name.
+  const cacheKey = url ? `url-${keyFor(url)}` : `dir-${keyFor(path.resolve(dir))}`;
+  const srcDirPromise = url
+    ? mirrorRemoteTileset(url, path.join(CACHE_ROOT, `${cacheKey}.src`))
+    : Promise.resolve(path.resolve(dir));
+  const outDir = await ensureRealUpgrade(cacheKey, srcDirPromise);
+
+  const obj = JSON.parse(await fs.readFile(path.join(outDir, 'tileset.json'), 'utf8'));
+  rewriteContentUris(obj.root, (uri) => `tile/${encodeURIComponent(uri)}?tool=upgrade-real&key=${cacheKey}`);
+  res.writeHead(200, CORS_JSON); res.end(JSON.stringify(obj));
+}
+
+async function serveRealUpgradeTile(relPathRaw, u, res) {
+  const key = u.searchParams.get('key');
+  // key is always server-generated (`${'url'|'dir'}-${16 hex chars}`, see keyFor above) — reject
+  // anything else outright rather than letting a hand-crafted `../` in key itself escape CACHE_ROOT
+  // before relPath is even considered.
+  if (!key || !/^(url|dir)-[0-9a-f]{16}$/.test(key)) { res.writeHead(400, CORS_ERR); res.end(JSON.stringify({ error: 'missing or malformed ?key= (request the tileset.json first)' })); return; }
+  const relPath = decodeURIComponent(relPathRaw).split('?')[0];
+  let abs;
+  try { abs = safeJoin(path.join(CACHE_ROOT, key), relPath); }
+  catch { res.writeHead(400, CORS_ERR); res.end(JSON.stringify({ error: 'invalid tile path' })); return; }
+  let stat; try { stat = await fs.stat(abs); } catch { res.writeHead(404, CORS_ERR); res.end('not found'); return; }
+  const ct = /\.glb$/i.test(abs) ? 'model/gltf-binary' : /\.json$/i.test(abs) ? 'application/json' : 'application/octet-stream';
+  res.writeHead(200, { 'Access-Control-Allow-Origin': '*', 'Content-Type': ct, 'Content-Length': String(stat.size) });
+  fss.createReadStream(abs).pipe(res);
+}
+
 // ── Router ────────────────────────────────────────────────────────────────────
 
 const PREFIX = '/3dtiles-tools/';
+const TOOLS = 'implicit-to-explicit, upgrade, or upgrade-real';
 
 export async function handle3dtilesTools(req, res, u) {
   if (!u.pathname.startsWith(PREFIX)) return false;
@@ -279,14 +404,16 @@ export async function handle3dtilesTools(req, res, u) {
     if (subPath === 'tileset.json') {
       if      (tool === 'implicit-to-explicit') await serveI2ETileset(u, res);
       else if (tool === 'upgrade')              await serveUpgradeTileset(u, res);
-      else { res.writeHead(400, CORS_ERR); res.end(JSON.stringify({ error: `unknown tool "${tool}" — use implicit-to-explicit or upgrade` })); }
+      else if (tool === 'upgrade-real')         await serveRealUpgradeTileset(u, res);
+      else { res.writeHead(400, CORS_ERR); res.end(JSON.stringify({ error: `unknown tool "${tool}" — use ${TOOLS}` })); }
       return true;
     }
     if (subPath.startsWith('tile/')) {
       const relPath = subPath.slice('tile/'.length);
       if      (tool === 'implicit-to-explicit') await serveI2ETile(relPath, u, res);
       else if (tool === 'upgrade')              await serveUpgradeTile(relPath, u, res);
-      else { res.writeHead(400, CORS_ERR); res.end(JSON.stringify({ error: `unknown tool "${tool}"` })); }
+      else if (tool === 'upgrade-real')         await serveRealUpgradeTile(relPath, u, res);
+      else { res.writeHead(400, CORS_ERR); res.end(JSON.stringify({ error: `unknown tool "${tool}" — use ${TOOLS}` })); }
       return true;
     }
     res.writeHead(404, CORS_ERR); res.end('expected /3dtiles-tools/tileset.json or /3dtiles-tools/tile/<relPath>');
