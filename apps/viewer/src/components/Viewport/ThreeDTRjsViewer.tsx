@@ -465,15 +465,17 @@ const Scene = forwardRef<ViewerHandle, { loadArgs: LoadArgs }>(function Scene({ 
       const up = ellipsoidForAnchor.getPositionToNormal(anchor, new THREE.Vector3());
       const helper = Math.abs(up.y) < 0.99 ? new THREE.Vector3(0, 1, 0) : new THREE.Vector3(1, 0, 0);
       const east = new THREE.Vector3().crossVectors(helper, up).normalize();
-      // (east, north, up) is right-handed (up = east × north); (east, up, north) swaps the last two
-      // columns, which is LEFT-handed — a mirror, not a rotation, so setFromRotationMatrix() below
-      // produced a flipped/wrong "up" for the placed content (reported live on a Potree local dataset).
-      // The third column needs to be south (= east × up), matching this app's own "(E,U,-N)" glTF
-      // convention (see potree-live.js's serveTileGlb comment) instead of north.
-      const south = new THREE.Vector3().crossVectors(east, up).normalize();
+      const north = new THREE.Vector3().crossVectors(up, east).normalize();
+      // A tileset's OWN local frame is Z-up, not Y-up — glTF content (Y-up per spec) already went
+      // through the standard Y-up→Z-up conversion one level below `tiles.group` when it was loaded as
+      // a tile, and every already-working root `transform` in this codebase confirms it: geo.js's
+      // enuMatrix (used for every real COPC/Potree georef) is column-major [East, North, Up, origin] —
+      // local X→east, Y→north, Z→UP. The previous version of this fix put `up` in the Y column, which
+      // is off by a 90° tip (verified live: the Potree "Lion 2.0" preset landed with its head on the
+      // ground instead of pointing up) — `up` belongs in the THIRD column, matching enuMatrix exactly.
       localAnchorRef.current.copy(anchor);
       tiles.group.position.copy(anchor);
-      tiles.group.quaternion.setFromRotationMatrix(new THREE.Matrix4().makeBasis(east, up, south));
+      tiles.group.quaternion.setFromRotationMatrix(new THREE.Matrix4().makeBasis(east, north, up));
       tiles.group.updateWorldMatrix(true, false);
       (tiles as any).getBoundingSphere(sphere);
       sphere.applyMatrix4(tiles.group.matrixWorld);
