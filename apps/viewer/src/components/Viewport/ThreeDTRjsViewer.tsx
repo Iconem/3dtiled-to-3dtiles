@@ -166,8 +166,16 @@ function Globe({ basemap }: { basemap: 'google' | 'osm' | 'none' }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [basemap]);
   if (!pluginArgs) return null;
+  // key={basemap}: GeneratedSurfacePlugin has no API to swap its `overlay` post-construction, so a
+  // basemap change unregisters the old plugin instance and registers a fresh one (see makeBasemapOverlay
+  // above) — but the plugin's own `dispose()` only releases overlay texture LOCKS for already-loaded
+  // tiles, it never evicts their meshes. Those tiles keep the OLD overlay's texture baked into
+  // `material.map` forever (until they happen to fall out of the LRU cache from panning/zooming), so
+  // switching imagery left a patchwork of old-and-new tiles rather than a clean swap ("3DTRJS doing a
+  // weird thing when switching xyz/tms tiles"). Forcing a full remount is the only reliable way to
+  // guarantee every tile re-fetches against the new overlay.
   return (
-    <TilesRendererR3F onLoadModel={(e: any) => buildBoundsTrees(e.scene)}>
+    <TilesRendererR3F key={basemap} onLoadModel={(e: any) => buildBoundsTrees(e.scene)}>
       <TilesPlugin plugin={GeneratedSurfacePlugin as any} args={pluginArgs as any} />
     </TilesRendererR3F>
   );
@@ -222,8 +230,64 @@ function GoogleGlobe({ ktxLoader }: { ktxLoader: KTX2Loader }) {
 function TilesetGizmo({ tilesRef, pickScene }: { tilesRef: React.MutableRefObject<TilesRendererImpl | null>; pickScene: THREE.Object3D | null }) {
   const on = useViewerStore((s) => s.tilesetGizmoOn);
   const mode = useViewerStore((s) => s.gizmoMode);
+  const [proxy, setProxy] = useState<THREE.Object3D | null>(null);
+  // Baseline transform captured whenever the gizmo (re)anchors. TransformControls attached directly to
+  // `tilesRef.current.group` renders its handles at the GROUP's own local position — for georeferenced
+  // content that's (0,0,0)-ish (the real ECEF placement is baked into the loaded tile hierarchy's OWN
+  // transform, several levels below `group`), i.e. near Earth's center, nowhere close to what's actually
+  // on screen ("gizmo doesn't work, only for local-origin tilesets" — those happen to have their content
+  // sitting near (0,0,0) already, so group's own position coincides with the visible geometry). Drag a
+  // proxy positioned at the tileset's actual bounding-sphere center instead, and re-apply the proxy's
+  // motion — translated, and rotated/scaled AROUND that pivot rather than the group's own distant local
+  // origin — onto the real group transform.
+  const baseGroupPos = useRef(new THREE.Vector3());
+  const baseGroupQuat = useRef(new THREE.Quaternion());
+  const baseGroupScale = useRef(new THREE.Vector3(1, 1, 1));
+  const basePivot = useRef(new THREE.Vector3());
+
+  useEffect(() => {
+    const tiles = tilesRef.current;
+    if (!on || !proxy || !tiles) return;
+    const sphere = new THREE.Sphere();
+    tiles.group.updateWorldMatrix(true, false);
+    const pivot = (tiles as any).getBoundingSphere(sphere)
+      ? sphere.center.clone().applyMatrix4(tiles.group.matrixWorld)
+      : tiles.group.getWorldPosition(new THREE.Vector3());
+    basePivot.current.copy(pivot);
+    baseGroupPos.current.copy(tiles.group.position);
+    baseGroupQuat.current.copy(tiles.group.quaternion);
+    baseGroupScale.current.copy(tiles.group.scale);
+    proxy.position.copy(pivot);
+    proxy.quaternion.identity();
+    proxy.scale.set(1, 1, 1);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [on, mode, proxy]);
+
+  const handleChange = useCallback(() => {
+    const tiles = tilesRef.current;
+    if (!proxy || !tiles) return;
+    const pivot = basePivot.current;
+    const dPos = proxy.position.clone().sub(pivot);
+    const dq = proxy.quaternion;
+    const r = baseGroupPos.current.clone().sub(pivot).applyQuaternion(dq);
+    tiles.group.position.copy(pivot).add(r).add(dPos);
+    tiles.group.quaternion.copy(dq).multiply(baseGroupQuat.current);
+    tiles.group.scale.set(
+      baseGroupScale.current.x * proxy.scale.x,
+      baseGroupScale.current.y * proxy.scale.y,
+      baseGroupScale.current.z * proxy.scale.z,
+    );
+    tiles.group.updateMatrixWorld(true);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [proxy]);
+
   if (!on || !pickScene || !tilesRef.current) return null;
-  return <TransformControls object={tilesRef.current.group} mode={mode} />;
+  return (
+    <>
+      <object3D ref={setProxy} />
+      {proxy && <TransformControls object={proxy} mode={mode} onChange={handleChange} />}
+    </>
+  );
 }
 
 function CropGizmo({ tilesRef, pickScene }: { tilesRef: React.MutableRefObject<TilesRendererImpl | null>; pickScene: THREE.Object3D | null }) {
@@ -296,6 +360,9 @@ const Scene = forwardRef<ViewerHandle, { loadArgs: LoadArgs }>(function Scene({ 
   // frameToTileset, read by applyZOffsetInternal. null for non-georeferenced content (flat world-Y is
   // already correct "up" there — it's only wrong for content sitting elsewhere on the globe's surface).
   const upDirRef = useRef<THREE.Vector3 | null>(null);
+  // Base position `applyZOffsetInternal` nudges away from — (0,0,0) normally, or the ENU anchor
+  // `frameToTileset` places a non-georeferenced tileset at (see below) when one has been applied.
+  const localAnchorRef = useRef<THREE.Vector3>(new THREE.Vector3());
   // Last-framed tileset bounding-sphere center — re-applied as the pivot/target whenever `controlMode`
   // switches to a control scheme that wasn't mounted at load time (e.g. loading in 'globe' mode, then
   // switching to 'orbit' afterward). Without this, a freshly-mounted OrbitControls initializes its own
@@ -310,8 +377,9 @@ const Scene = forwardRef<ViewerHandle, { loadArgs: LoadArgs }>(function Scene({ 
   // offset applied in the same weird CRS rather than ENU". Move along the cached local-up direction
   // instead when one is available.
   const applyZOffsetInternal = useCallback((tiles: TilesRendererImpl, v: number) => {
-    if (upDirRef.current) tiles.group.position.set(0, 0, 0).addScaledVector(upDirRef.current, v);
-    else tiles.group.position.y = v;
+    const anchor = localAnchorRef.current;
+    if (upDirRef.current) tiles.group.position.copy(anchor).addScaledVector(upDirRef.current, v);
+    else tiles.group.position.set(anchor.x, anchor.y + v, anchor.z);
   }, []);
 
   const controlMode = useViewerStore((s) => s.controlMode);
@@ -375,6 +443,34 @@ const Scene = forwardRef<ViewerHandle, { loadArgs: LoadArgs }>(function Scene({ 
     if (!(tiles as any).getBoundingSphere(sphere)) return;
     tiles.group.updateWorldMatrix(true, false);
     sphere.applyMatrix4(tiles.group.matrixWorld);
+
+    // A tileset with no real geographic placement loads with its own local origin near (0,0,0) — bake
+    // the user's Local Frame lon/lat/alt in as an ENU anchor so the globe/basemap machinery below (which
+    // all key off "is the bounding sphere far from world origin") treats it the same as real
+    // georeferenced content instead of hiding the globe for it entirely ("3DTRJS should also display the
+    // globe for local tilesets, at the user-defined lon/lat/alt"). Skip this for content that's ALREADY
+    // georeferenced (its own tileset.json root transform already placed it on the real ellipsoid) —
+    // re-anchoring that would visibly relocate already-correct content.
+    const ellipsoidForAnchor = (tiles as any).ellipsoid;
+    if (sphere.center.length() <= 6378137 * 0.5 && ellipsoidForAnchor) {
+      const { lon, lat, alt } = store.getState().localFrame;
+      const anchor = new THREE.Vector3();
+      ellipsoidForAnchor.getCartographicToPosition(THREE.MathUtils.degToRad(lat), THREE.MathUtils.degToRad(lon), alt, anchor);
+      const up = ellipsoidForAnchor.getPositionToNormal(anchor, new THREE.Vector3());
+      const helper = Math.abs(up.y) < 0.99 ? new THREE.Vector3(0, 1, 0) : new THREE.Vector3(1, 0, 0);
+      const east = new THREE.Vector3().crossVectors(helper, up).normalize();
+      const north = new THREE.Vector3().crossVectors(up, east).normalize();
+      localAnchorRef.current.copy(anchor);
+      tiles.group.position.copy(anchor);
+      tiles.group.quaternion.setFromRotationMatrix(new THREE.Matrix4().makeBasis(east, up, north));
+      tiles.group.updateWorldMatrix(true, false);
+      (tiles as any).getBoundingSphere(sphere);
+      sphere.applyMatrix4(tiles.group.matrixWorld);
+    } else {
+      localAnchorRef.current.set(0, 0, 0);
+      tiles.group.quaternion.identity();
+    }
+
     // Cache the local "up" direction (the ellipsoid surface normal at the tileset's OWN, pre-offset
     // location) for applyZOffsetInternal below — must come from THIS bounding sphere, before the group
     // moves; a flat world-Y offset (the previous behavior) only means "up" for content sitting near the
@@ -777,9 +873,14 @@ const Scene = forwardRef<ViewerHandle, { loadArgs: LoadArgs }>(function Scene({ 
     },
     getExtractMatrix() {
       const tiles = tilesRef.current;
-      if (!tiles || tiles.group.position.lengthSq() === 0) return null;
-      const m = new THREE.Matrix4().makeTranslation(tiles.group.position.x, tiles.group.position.y, tiles.group.position.z);
-      return Array.from(m.elements);
+      if (!tiles) return null;
+      const g = tiles.group;
+      // Full TRS, not just translation — matches CesiumViewer's getExtractMatrix (which returns the
+      // whole modelMatrix). Position-only missed the local-frame ENU anchor's rotation (see
+      // frameToTileset) and any TilesetGizmo rotate/scale edit.
+      if (g.position.lengthSq() === 0 && g.quaternion.w === 1 && g.scale.x === 1 && g.scale.y === 1 && g.scale.z === 1) return null;
+      g.updateMatrix();
+      return Array.from(g.matrix.elements);
     },
     flyToCity(lon, lat, height) { setPendingFlyTo({ lon, lat, height }); },
     autoZoomToTileset() { frameToTileset(tilesRef.current); },

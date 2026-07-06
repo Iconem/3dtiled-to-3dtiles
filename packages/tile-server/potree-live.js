@@ -206,9 +206,17 @@ const getCtx = memoizeAsync(async (url) => {
       }
     };
 
-    // hierarchy=eager: drain every pending proxy chunk (whole hierarchy in RAM).
+    // hierarchy=eager: drain every pending proxy chunk (whole hierarchy in RAM). Bounded concurrency
+    // (mirrors the 1.x loadChunkRoots band fix above) — an unbounded Promise.all over every pending
+    // chunk in one shot can fire hundreds/thousands of simultaneous range reads against the remote
+    // source; a single connection reset/429 anywhere in that batch rejects the whole drain, which
+    // surfaces as a broken/patchy octree once cache=hierarchy is requested (subtree requests then see
+    // whatever partial `nodes` state existed at the moment of failure).
     const drainAll2 = async () => {
-      while (pendingChunks2.size) { const batch = [...pendingChunks2.keys()]; await Promise.all(batch.map(loadChunk2)); }
+      while (pendingChunks2.size) {
+        const batch = [...pendingChunks2.keys()];
+        await parallelMap(batch, loadChunk2, { concurrency: Math.min(defaultConcurrency(), 16) });
+      }
     };
 
     // Build avail from currently-loaded nodes (called fresh each subtree request).

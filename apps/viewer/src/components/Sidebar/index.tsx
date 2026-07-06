@@ -8,7 +8,6 @@ import BasemapSection from './BasemapSection';
 import TilesetLodSection from './TilesetLodSection';
 import CropExtractSection from './CropExtractSection';
 import LocalFrameSection from './LocalFrameSection';
-import IonAssetSection from './IonAssetSection';
 import type { ViewerHandle } from '@/lib/viewer-handle';
 import { DOCS_URL, MW } from '@/lib/formats';
 
@@ -59,7 +58,6 @@ export default function Sidebar({ activeHandleRef }: { activeHandleRef: React.Re
           <TilesetLodSection activeHandleRef={activeHandleRef} />
           <CropExtractSection activeHandleRef={activeHandleRef} />
           <LocalFrameSection activeHandleRef={activeHandleRef} />
-          <IonAssetSection activeHandleRef={activeHandleRef} />
         </div>
       </ScrollArea>
     </div>

@@ -100,12 +100,6 @@ interface ViewerStore {
   tilesetGizmoOn: boolean;
   setTilesetGizmoOn: (v: boolean) => void;
 
-  // Cesium Ion
-  ionAssetId: number;
-  ionToken: string;
-  setIonAssetId: (v: number) => void;
-  setIonToken: (v: string) => void;
-
   // Status / timing log / error
   statusLine: string;
   timingLog: string[];
@@ -198,11 +192,6 @@ export const useViewerStore = create<ViewerStore>((set, get) => ({
   setLocalFrame: (v) => set((s) => ({ localFrame: { ...s.localFrame, ...v } })),
   tilesetGizmoOn: false,
   setTilesetGizmoOn: (v) => set({ tilesetGizmoOn: v }),
-
-  ionAssetId: 4547222,
-  ionToken: '',
-  setIonAssetId: (v) => set({ ionAssetId: v }),
-  setIonToken: (v) => set({ ionToken: v }),
 
   statusLine: 'Ready. Select a preset or enter a tileset.json URL.',
   timingLog: [],
