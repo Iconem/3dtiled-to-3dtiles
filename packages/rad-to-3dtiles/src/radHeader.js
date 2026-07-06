@@ -84,6 +84,29 @@ export function parseRadHeader(buf) {
 }
 
 /**
+ * Parse just a RADC chunk's small leading header (magic + meta JSON) from a buffer that starts
+ * exactly AT the chunk (localStart=0 for a standalone probe fetch, or chunkStart for a full-buffer
+ * slice) — split out of parseRadcChunk so a small range-probe (a few KB) is enough to learn every
+ * property's offset/bytes, without needing the chunk's full (often multi-MB) payload in hand. Used
+ * by rad-live.js's topology-only pass to range-fetch just the properties it needs instead of the
+ * whole chunk. Returns `need`: how many bytes of `buf` (from localStart) the caller must have
+ * actually supplied for `meta`/`propDataStart` to be valid — if `buf.length - localStart < need`,
+ * the probe was too small and must be re-fetched larger.
+ *
+ * @returns {{ meta, count, propDataStart: number, need: number }} propDataStart is relative to localStart.
+ */
+export function parseRadcChunkHeader(buf, localStart = 0) {
+  if (readMagic(buf, localStart) !== MAGIC_RADC) {
+    throw new Error(`Expected RADC at buffer offset ${localStart}, got "${readMagic(buf, localStart)}"`);
+  }
+  const cJsonLen = readU32LE(buf, localStart + 4);
+  const need = pad8(8 + cJsonLen) + 8;
+  if (buf.length - localStart < need) return { meta: null, count: 0, propDataStart: 0, need };
+  const meta = JSON.parse(buf.slice(localStart + 8, localStart + 8 + cJsonLen).toString('utf8'));
+  return { meta, count: meta.count ?? meta.numSplats ?? 0, propDataStart: need, need };
+}
+
+/**
  * Parse one RADC chunk and decompress specified properties.
  *
  * @param {Buffer}   buf            full .rad buffer
@@ -94,18 +117,9 @@ export function parseRadHeader(buf) {
  */
 export function parseRadcChunk(buf, chunk, payloadBase, wantProperties = null) {
   const chunkStart = payloadBase + chunk.offset;
-  
-  // RADC: [magic 4][jsonLen 4][json][pad to 8][payloadBytes 8][payload]
-  if (readMagic(buf, chunkStart) !== MAGIC_RADC) {
-    throw new Error(`Expected RADC at offset ${chunkStart}, got "${readMagic(buf, chunkStart)}"`);
-  }
 
-  const cJsonLen   = readU32LE(buf, chunkStart + 4);
-  const meta       = JSON.parse(buf.slice(chunkStart + 8, chunkStart + 8 + cJsonLen).toString('utf8'));
-  const metaPadEnd = pad8(8 + cJsonLen);   // offset within chunk to payloadBytes field
-  const propDataStart = chunkStart + metaPadEnd + 8;  // offset in buf to first property data
-
-  const count = meta.count ?? meta.numSplats ?? 0;
+  const { meta, count, propDataStart: propDataOffsetFromChunkStart } = parseRadcChunkHeader(buf, chunkStart);
+  const propDataStart = chunkStart + propDataOffsetFromChunkStart;
   const props = new Map();
 
   for (const prop of (meta.properties ?? [])) {

@@ -4,12 +4,15 @@
  * RAD persists no per-tile spatial bounds and no top-level spatial index, so building the tileset
  * inherently requires reading EVERY chunk once: the LoD-tree topology comes from each chunk's
  * `child_count`/`child_start` columns, and each node's AABB from its `center` column. We do that in a
- * single, parallel, **HTTP-range** pass (one combined decode per chunk via `chunkBoundsAndTopology`),
- * then serve each tile's full SPZ-v2 GLB on demand:
+ * single, parallel, **HTTP-range** pass, then serve each tile's full SPZ-v2 GLB on demand:
  *
- *   tileset.json  → range-fetch the header, then range-fetch every chunk IN PARALLEL, decoding only
- *                   center + child columns (no SPZ encode, no gzip). Build the explicit tree.
- *   tile/<i>.glb  → range-fetch that ONE chunk and full-decode + SPZ-v2 encode it.
+ *   tileset.json  → range-fetch the header, then range-fetch just the 3 topology properties
+ *                   (center/child_count/child_start) of every chunk IN PARALLEL — no SPZ encode, no
+ *                   gzip, and (see fetchChunkTopology below) no need to download the OTHER 4
+ *                   properties (alpha/rgb/scales/orientation/sh1) a chunk carries either. Build the
+ *                   explicit tree.
+ *   tile/<i>.glb  → range-fetch that ONE chunk's full bytes and full-decode + SPZ-v2 encode it (every
+ *                   property is needed here, so no selective fetch — see serveTileGlb).
  *
  * Range requests avoid ever buffering the whole (multi-GB) file and let chunks decode concurrently.
  * If the host doesn't support range (returns 200 for a ranged GET), we fall back to a single full
@@ -17,22 +20,59 @@
  * (a streaming-manifest .rad stores chunk data in separate files — use those directly / `/convert`).
  *
  * No lazy/fragment mode (2026-07-02 simplification): RAD has no persisted spatial index to make a
- * cheap "just the first few levels" read meaningful — `chunkBoundsAndTopology` needs each chunk's full
- * bytes regardless of how many levels you ask for, so a lazy N-level fragment costs nearly the same
- * range traffic as the full eager pass while adding a whole continuation-route code path. Measured
- * against the 1.28 GB `coit.rad` sample: eager (all 1000s of chunks) ≈ 9.7 s, the old 4-level lazy
- * fragment ≈ 7.6 s — not enough of a win to justify the complexity, so `cache=none` and `cache=hierarchy`
- * now both eager-scan once (cached per URL) and serve the same explicit tree.
+ * cheap "just the first few levels" read meaningful — the old whole-chunk `chunkBoundsAndTopology`
+ * needed each chunk's full bytes regardless of how many levels you ask for, so a lazy N-level fragment
+ * cost nearly the same range traffic as the full eager pass while adding a whole continuation-route
+ * code path (measured back then: eager ≈ 9.7s vs the old 4-level lazy fragment ≈ 7.6s — not worth it).
+ * `cache=none` and `cache=hierarchy` both eager-scan once (cached per URL) and serve the same tree.
+ *
+ * Per-chunk topology properties are a MINORITY of a chunk's bytes (measured on coit-40m-sh1-lod.rad:
+ * center 36.6% + child_count 1.5% + child_start 5.3% = 43.3%, vs. the 56.7% spent on alpha/rgb/scales/
+ * orientation/sh1 that the topology pass never reads) — the earlier eager-vs-lazy comparison above
+ * never questioned THIS axis, since the original `chunkBoundsAndTopology` always downloaded a chunk's
+ * full bytes to reach any property. `fetchChunkTopology` fixes that: probe a small prefix of the chunk
+ * to read its own embedded meta JSON (which lists every property's exact byte offset/length — see
+ * radHeader.js's parseRadcChunkHeader), then range-fetch ONLY the 3 wanted properties. Measured against
+ * the same 1.28GB coit-40m-sh1-lod.rad live over the real hosting CDN: the eager pass is bandwidth-
+ * bound there (~11 MB/s sustained regardless of concurrency, confirmed by firing 32 truly-parallel
+ * range GETs and timing them), so cutting bytes fetched by ~57% roughly halves time-to-first-tileset
+ * (measured ≈109s → ≈55s cold).
  *
  *   GET /stream/tileset.json?url=<.rad URL>&format=rad
  *   GET /stream/tile/<nodeIndex>.glb?url=<.rad URL>&format=rad
  */
-import { chunkBoundsAndTopology, encodeChunkGlb } from '../rad-to-3dtiles/src/index.js';
+import { inflateRawSync } from 'node:zlib';
+import { chunkBoundsAndTopology, encodeChunkGlb, topologyFromProps } from '../rad-to-3dtiles/src/index.js';
+import { parseRadcChunkHeader } from '../rad-to-3dtiles/src/radHeader.js';
 import { buildTileset } from '../rad-to-3dtiles/src/tilesetBuilder.js';
 import { parallelMap, defaultConcurrency, Source, memoizeAsync } from '../core/index.js';
 
 const pad8 = (n) => Math.ceil(n / 8) * 8;
 const HEADER_PROBE = 1 << 18;   // 256 KiB — enough for the RAD0 JSON header of large clouds
+const CHUNK_HEADER_PROBE = 1 << 13;   // 8 KiB — comfortably covers a RADC chunk's own meta JSON
+
+// Range-fetch just the topology properties of one chunk instead of its full bytes (see file header).
+// Falls back to a wider probe if 8 KiB doesn't cover an unusually large per-chunk meta JSON.
+async function fetchChunkTopology(src, chunk, payloadBase, chunkSize, ci, totalChunks) {
+  const chunkStart = payloadBase + chunk.offset;
+  let probeLen = Math.min(CHUNK_HEADER_PROBE, chunk.bytes);
+  let probe = await src.range(chunkStart, probeLen);
+  let head = parseRadcChunkHeader(probe, 0);
+  while (head.meta === null && probeLen < chunk.bytes) {
+    probeLen = Math.min(head.need, chunk.bytes);
+    probe = await src.range(chunkStart, probeLen);
+    head = parseRadcChunkHeader(probe, 0);
+  }
+  const { meta, count, propDataStart } = head;
+  const wanted = new Set(['center', 'child_count', 'child_start']);
+  const props = new Map();
+  await Promise.all((meta.properties ?? []).filter(p => wanted.has(p.property)).map(async (p) => {
+    const absStart = chunkStart + propDataStart + p.offset;
+    const compressed = await src.range(absStart, p.bytes);
+    props.set(p.property, inflateRawSync(compressed));
+  }));
+  return topologyFromProps(count, props, chunkSize, ci, totalChunks);
+}
 
 // Per-URL context: parsed header + node table with bounds/topology. Cached forever (.rad is immutable).
 // Tiles are NOT cached (range-fetched + encoded fresh; the HTTP client caches via response headers).
@@ -70,15 +110,19 @@ const getCtx = memoizeAsync(async (url) => {
     ? async (c) => src.range(payloadBase + c.offset, c.bytes)
     : async (c) => fileBuf.slice(payloadBase + c.offset, payloadBase + c.offset + c.bytes);
 
-  // Single parallel pass: per chunk, get its bytes (range or slice) and decode center + topology.
+  // Single parallel pass: per chunk, get just its topology properties and decode center + topology.
+  // Range-capable hosts use fetchChunkTopology (only ~43% of a chunk's bytes, see file header); the
+  // no-range fallback already has the whole file in memory, so it just slices out of that instead.
   const t0 = Date.now();
   const nodes = new Array(chunks.length);
   await parallelMap(chunks, async (chunk, ci) => {
-    const cbuf = await readChunk(chunk);
-    // Per-chunk buffer → chunk lives at offset 0 (payloadBase 0). Full-file fallback → real offsets.
-    const local = rangeSupported ? { offset: 0, bytes: chunk.bytes } : chunk;
-    const base  = rangeSupported ? 0 : payloadBase;
-    const { bounds, count, children } = chunkBoundsAndTopology(cbuf, local, base, chunkSize, ci, chunks.length);
+    let bounds, count, children;
+    if (rangeSupported) {
+      ({ bounds, count, children } = await fetchChunkTopology(src, chunk, payloadBase, chunkSize, ci, chunks.length));
+    } else {
+      const cbuf = await readChunk(chunk);
+      ({ bounds, count, children } = chunkBoundsAndTopology(cbuf, chunk, payloadBase, chunkSize, ci, chunks.length));
+    }
     nodes[ci] = { nodeIndex: ci, chunkIndex: ci, children, bounds, splatCount: count };
   }, { concurrency: Math.min(defaultConcurrency(), 16) });
 

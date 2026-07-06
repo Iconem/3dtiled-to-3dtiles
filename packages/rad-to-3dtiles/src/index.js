@@ -199,6 +199,16 @@ export function chunkBounds(buf, chunk, payloadBase) {
  */
 export function chunkBoundsAndTopology(chunkBuf, chunk, payloadBase, chunkSize, ci, totalChunks) {
   const { count, props } = parseRadcChunk(chunkBuf, chunk, payloadBase, ['center', 'child_count', 'child_start']);
+  return topologyFromProps(count, props, chunkSize, ci, totalChunks);
+}
+
+/**
+ * Same computation as chunkBoundsAndTopology, split out to take already-decompressed props
+ * directly — lets rad-live.js's topology-only pass range-fetch just `center`/`child_count`/
+ * `child_start` (well under half a chunk's bytes, see rad-live.js's getCtx) instead of the whole
+ * chunk, without duplicating this math.
+ */
+export function topologyFromProps(count, props, chunkSize, ci, totalChunks) {
   const positions = decodeF32LeBytes(props.get('center'), 3, count);
   const b = computeBounds(positions, count);
 

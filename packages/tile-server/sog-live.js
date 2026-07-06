@@ -41,24 +41,32 @@ const getCtx = memoizeAsync(async (url) => {
 });
 
 // Decode one chunk SOG (meta.json + WebPs) fetched into an in-memory FS — mirrors sogChunk.decodeChunk
-// but over HTTP. Cached per ctx with a small cap so repeated runs of the same chunk decode once.
+// but over HTTP. Cached per ctx as an in-flight PROMISE (not just the resolved table): a chunk backs
+// many leaf tiles at different offsets (Roman Parish: 5548 leaves share just 131 files), so a burst of
+// concurrent /stream/tile requests routinely lands several requests for the SAME fileIdx before the
+// first decode finishes — caching only post-decode let each one kick off its own ~1s WebP-decode
+// independently, multiplying real CPU-bound work. Caching the promise means every concurrent caller
+// awaits the one decode already underway.
 async function getChunkTable(ctx, fileIdx) {
-  if (ctx.chunks.has(fileIdx)) { const t = ctx.chunks.get(fileIdx); ctx.chunks.delete(fileIdx); ctx.chunks.set(fileIdx, t); return t; }
-  const rel = ctx.lod.filenames[fileIdx];                 // e.g. "1_0/meta.json"
-  const chunkDir = path.posix.dirname(rel);
-  const metaBuf = await fetchBuf(ctx.base + rel);
-  const meta = JSON.parse(metaBuf.toString('utf8'));
-  const fileSystem = new MemoryReadFileSystem();
-  const put = (name, bytes) => { fileSystem.set(name, bytes); fileSystem.set('./' + name, bytes); };
-  put('meta.json', new Uint8Array(metaBuf));
-  const names = new Set();
-  for (const k of Object.keys(meta)) { const f = meta[k]?.files; if (Array.isArray(f)) for (const n of f) names.add(n); }
-  await Promise.all([...names].map(async n => put(n, new Uint8Array(await fetchBuf(ctx.base + path.posix.join(chunkDir, n))))));
-  const tables = await readSplatFile({ filename: 'meta.json', inputFormat: 'sog', options: {}, params: [], fileSystem });
-  const table = tables[0];
-  ctx.chunks.set(fileIdx, table);
-  if (ctx.chunks.size > 12) ctx.chunks.delete(ctx.chunks.keys().next().value);   // evict oldest
-  return table;
+  if (ctx.chunks.has(fileIdx)) { const p = ctx.chunks.get(fileIdx); ctx.chunks.delete(fileIdx); ctx.chunks.set(fileIdx, p); return p; }
+  const promise = (async () => {
+    const rel = ctx.lod.filenames[fileIdx];                 // e.g. "1_0/meta.json"
+    const chunkDir = path.posix.dirname(rel);
+    const metaBuf = await fetchBuf(ctx.base + rel);
+    const meta = JSON.parse(metaBuf.toString('utf8'));
+    const fileSystem = new MemoryReadFileSystem();
+    const put = (name, bytes) => { fileSystem.set(name, bytes); fileSystem.set('./' + name, bytes); };
+    put('meta.json', new Uint8Array(metaBuf));
+    const names = new Set();
+    for (const k of Object.keys(meta)) { const f = meta[k]?.files; if (Array.isArray(f)) for (const n of f) names.add(n); }
+    await Promise.all([...names].map(async n => put(n, new Uint8Array(await fetchBuf(ctx.base + path.posix.join(chunkDir, n))))));
+    const tables = await readSplatFile({ filename: 'meta.json', inputFormat: 'sog', options: {}, params: [], fileSystem });
+    return tables[0];
+  })();
+  promise.catch(() => ctx.chunks.delete(fileIdx));   // don't poison the cache with a failed decode
+  ctx.chunks.set(fileIdx, promise);
+  if (ctx.chunks.size > 24) ctx.chunks.delete(ctx.chunks.keys().next().value);   // evict oldest
+  return promise;
 }
 
 // Build the 3D Tiles tree from lod.tree (bounds persisted → no decode). Each leaf LOD run becomes a
