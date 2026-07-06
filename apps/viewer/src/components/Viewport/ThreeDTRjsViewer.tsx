@@ -316,8 +316,14 @@ function CropGizmo({ tilesRef, pickScene }: { tilesRef: React.MutableRefObject<T
       const up = ellipsoid.getPositionToNormal(pos, new THREE.Vector3());
       const helper = Math.abs(up.y) < 0.99 ? new THREE.Vector3(0, 1, 0) : new THREE.Vector3(1, 0, 0);
       const east = new THREE.Vector3().crossVectors(helper, up).normalize();
-      const north = new THREE.Vector3().crossVectors(up, east).normalize();
-      box.quaternion.setFromRotationMatrix(new THREE.Matrix4().makeBasis(east, up, north));
+      // (east, north, up) is the standard right-handed ENU triad (up = east × north), so (east, up,
+      // north) — swapping the last two columns — is a LEFT-handed / mirrored basis: feeding that to
+      // setFromRotationMatrix() below produced a reflection, not a rotation, which quaternions can't
+      // represent correctly. The third column needs to be south (= east × up = -north) to keep the
+      // basis proper — matching the "(E,U,-N)" convention this app's glTF content is already built in
+      // (see potree-live.js's serveTileGlb comment).
+      const south = new THREE.Vector3().crossVectors(east, up).normalize();
+      box.quaternion.setFromRotationMatrix(new THREE.Matrix4().makeBasis(east, up, south));
       const dLat = THREE.MathUtils.degToRad(n - s), dLon = THREE.MathUtils.degToRad(e - w);
       const R = 6378137;
       box.scale.set(Math.max(1, dLon * R * Math.cos(centerCarto.lat)), Math.max(1, maxH - minH), Math.max(1, dLat * R));
@@ -459,10 +465,15 @@ const Scene = forwardRef<ViewerHandle, { loadArgs: LoadArgs }>(function Scene({ 
       const up = ellipsoidForAnchor.getPositionToNormal(anchor, new THREE.Vector3());
       const helper = Math.abs(up.y) < 0.99 ? new THREE.Vector3(0, 1, 0) : new THREE.Vector3(1, 0, 0);
       const east = new THREE.Vector3().crossVectors(helper, up).normalize();
-      const north = new THREE.Vector3().crossVectors(up, east).normalize();
+      // (east, north, up) is right-handed (up = east × north); (east, up, north) swaps the last two
+      // columns, which is LEFT-handed — a mirror, not a rotation, so setFromRotationMatrix() below
+      // produced a flipped/wrong "up" for the placed content (reported live on a Potree local dataset).
+      // The third column needs to be south (= east × up), matching this app's own "(E,U,-N)" glTF
+      // convention (see potree-live.js's serveTileGlb comment) instead of north.
+      const south = new THREE.Vector3().crossVectors(east, up).normalize();
       localAnchorRef.current.copy(anchor);
       tiles.group.position.copy(anchor);
-      tiles.group.quaternion.setFromRotationMatrix(new THREE.Matrix4().makeBasis(east, up, north));
+      tiles.group.quaternion.setFromRotationMatrix(new THREE.Matrix4().makeBasis(east, up, south));
       tiles.group.updateWorldMatrix(true, false);
       (tiles as any).getBoundingSphere(sphere);
       sphere.applyMatrix4(tiles.group.matrixWorld);

@@ -39,7 +39,9 @@ export default function Layout({ children }: LayoutProps<'/docs'>) {
       tree={source.getPageTree()}
       {...baseOptions()}
       links={[]}
-      sidebar={{ footer: <SidebarFooterLinks /> }}
+      // defaultOpenLevel starts counting from 1 (0 = every folder collapsed, fumadocs-ui's default) —
+      // "Guide" and "Reference notes" are both first-level folders, so 1 opens them both by default.
+      sidebar={{ footer: <SidebarFooterLinks />, defaultOpenLevel: 1 }}
     >
       {children}
     </DocsLayout>

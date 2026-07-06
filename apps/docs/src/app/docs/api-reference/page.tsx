@@ -1,6 +1,6 @@
 import fs from 'node:fs';
 import path from 'node:path';
-import { DocsBody, DocsDescription, DocsPage, DocsTitle } from 'fumadocs-ui/layouts/docs/page';
+import { DocsPage } from 'fumadocs-ui/layouts/docs/page';
 import type { Metadata } from 'next';
 import { ScalarClient } from './ScalarClient';
 
@@ -17,14 +17,13 @@ export default function Page() {
   const spec = readOpenApiSpec();
 
   return (
-    <DocsPage full>
-      <DocsTitle>API Reference</DocsTitle>
-      <DocsDescription className="mb-0">
-        Interactive reference for the tile-server&apos;s HTTP API, generated from its OpenAPI spec.
-      </DocsDescription>
-      <DocsBody className="max-w-none">
-        <ScalarClient spec={spec} />
-      </DocsBody>
+    // No <DocsBody> here on purpose — it applies Tailwind Typography's `prose` class, which is meant
+    // for MDX prose (headings/paragraphs/lists) and visibly fights Scalar's own carefully-styled
+    // 3-pane layout (oversized default SVG sizing, overridden heading/spacing rules, etc. — this is
+    // what "looks weird" turned out to be, compounded by the missing style.css import in
+    // ScalarClient.tsx). Also drop the breadcrumb/footer chrome — Scalar has its own header already.
+    <DocsPage full breadcrumb={{ enabled: false }} footer={{ enabled: false }}>
+      <ScalarClient spec={spec} />
     </DocsPage>
   );
 }

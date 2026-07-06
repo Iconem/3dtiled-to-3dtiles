@@ -1,5 +1,10 @@
 'use client';
 
+// Without this the component renders with none of Scalar's own layout/theme CSS — no sidebar chrome,
+// no panel backgrounds, just the raw unstyled content flowing through whatever Fumadocs' global styles
+// happen to apply (the CDN-script integration in packages/tile-server/homepage-live.js gets this for
+// free via a plain <link>; the React component doesn't bundle its CSS automatically).
+import '@scalar/api-reference-react/style.css';
 import { ApiReferenceReact } from '@scalar/api-reference-react';
 import type { AnyApiReferenceConfiguration } from '@scalar/api-reference-react';
 
