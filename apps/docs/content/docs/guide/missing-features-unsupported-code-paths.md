@@ -9,11 +9,13 @@ A consolidated, honest list of what is **not** handled (and where it would go). 
 ### Format decode coverage
 - **Spherical harmonics (SH)** — every splat converter emits **DC only**. Sources carry more: RAD `sh1`,
   LCC `Shcoef.bin` (64 B/splat, packed-11, degree-3), SOG higher SH bands. View-dependent color is dropped.
-- **I3S** (draft): **Draco-only** geometry (gated), **LEPCC/PCSL** point clouds (gated — Autzen sample hits
-  this), textures/materials (dropped — geometry only), per-feature attributes (dropped), legacy per-node
-  `3dNodeIndexDocument` index (unsupported), **Point** (instance) & **Building** (composite) layers
-  (unsupported), **projected/vertical CRS** (only WGS84-geographic vertex placement is implemented), and
-  per-vertex **normals are left in the source frame** (not re-oriented to ECEF — affects lit shading only).
+- **I3S** (draft): mesh **Draco** geometry (gated). **LEPCC-compressed PointCloud** is now decoded live
+  (`packages/i3s-to-3dtiles/src/lepccDecode.js`, a pure-JS port of Esri's own OSS codec — see the I3S
+  reference page's LEPCC section) — no longer gated. Still dropped/unsupported: textures/materials
+  (geometry only), per-feature attributes, legacy per-node `3dNodeIndexDocument` index, **Point**
+  (instance) & **Building** (composite) layers, **projected/vertical CRS** (only WGS84-geographic vertex
+  placement is implemented), and per-vertex **normals left in the source frame** (not re-oriented to
+  ECEF — affects lit shading only).
 
 ### Parallelism & performance
 - **`WorkerPool` (worker_threads) tier not wired** — all converters use only the async-gzip + `parallelMap`
