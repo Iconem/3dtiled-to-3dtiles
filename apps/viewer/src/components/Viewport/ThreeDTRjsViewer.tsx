@@ -429,12 +429,34 @@ const Scene = forwardRef<ViewerHandle, { loadArgs: LoadArgs }>(function Scene({ 
   // <CameraTransition>'s ortho↔perspective swap also reads whichever of these is set to decide what
   // point in space should stay visually fixed during the transition (see onBeforeToggle below), so
   // keeping this in sync is what fixes BOTH "double-click doesn't re-pivot" and the ortho zoom jump.
-  const setControlsPivot = useCallback((point: THREE.Vector3) => {
+  const setControlsPivot = useCallback((point: THREE.Vector3, resetZoomState = false) => {
     const controls = controlsRef.current;
     if (!controls) return;
     if (controls.target) controls.target.copy(point);
     if (controls.pivotPoint) controls.pivotPoint.copy(point);
     if ('zoomPoint' in controls) { controls.zoomPoint.copy(point); controls.zoomPointSet = true; }
+    // Only used after a hard camera teleport (frameToTileset) — see call site for why this is NOT the
+    // default for every setControlsPivot caller (double-click-to-pivot, camera tween, etc. all want the
+    // controls' live interactive zoom/drag state left alone).
+    if (resetZoomState) {
+      // GlobeControls/EnvironmentControls.update() unconditionally clears `zoomPointSet` back to false
+      // BEFORE checking `zoomDirectionSet` inside `_setFrame()` (see EnvironmentControls.js's `update()`
+      // then `_setFrame()`) — `zoomDirectionSet` is only ever cleared by real pointer input, never by us
+      // repositioning the camera programmatically. Left stale from free navigation (e.g. the user
+      // scroll-zoomed way out to a whole-Earth view before hitting "Auto-zoom to tileset"), the very next
+      // controls tick after we jump the camera back near the tileset re-raycasts along that STALE
+      // direction from the camera's BRAND NEW position, produces a garbage `zoomPoint` on the opposite
+      // side of the globe, and then rotates/shifts the camera to keep THAT point fixed on screen while
+      // reconciling old-up vs. new-up — this is the actual mechanism behind "up is wrong after
+      // free-navigate then auto-zoom-to-tileset" (verified live: without this reset, `zoomDirectionSet`/
+      // `zoomPointSet` remained `true` with a stale `zoomPoint` millions of meters from the tileset after
+      // calling frameToTileset, and the camera visibly teleported to the wrong side of the Earth on the
+      // controls' next tick). Also drop any leftover drag/rotate/zoom state and cached zoom delta for the
+      // same reason — none of it describes anything meaningful about the camera's brand new position.
+      controls.zoomDirectionSet = false;
+      controls.zoomDelta = 0;
+      controls.resetState?.();
+    }
     controls.update?.();
   }, []);
 
@@ -560,7 +582,10 @@ const Scene = forwardRef<ViewerHandle, { loadArgs: LoadArgs }>(function Scene({ 
     // unconditionally here is harmless for that mode.
     if (surfaceUp && controlsRef.current?.up) controlsRef.current.up.copy(surfaceUp);
     lastSphereCenterRef.current = sphere.center.clone();
-    setControlsPivot(sphere.center);
+    // resetZoomState=true: this just hard-teleported the camera (a fresh load, or "Auto-zoom to
+    // tileset" after the user free-navigated far away) — see setControlsPivot's comment for why any
+    // stale zoom/drag state from before the jump must not survive into the controls' next tick.
+    setControlsPivot(sphere.center, true);
     setPickScene(tiles.group);
     invalidate();
     // eslint-disable-next-line react-hooks/exhaustive-deps
