@@ -7,6 +7,40 @@ description: "Roughly in the order we're tackling them:"
 
 Roughly in the order we're tackling them, grouped by theme below.
 
+## Summary
+
+- **Core: "fastest" point-cloud tiler** — proposed new project direction, not a format. Research pass
+  (not yet scoped/started) into whether this repo's converters could become the fastest raw-point-cloud
+  → COPC/3D Tiles tiler, by reusing PotreeConverter 2.0's counting-sort/out-of-core chunking approach.
+  Flags two open questions before committing: no benchmark yet against PotreeConverter 2.0/untwine, and
+  `MIERUNE/point-tiler` may already be prior art in the same niche.
+- **Tooling ideas** — port the middleware into a native 3DTilesRendererJS plugin (no separate server
+  process); a Tauri desktop companion app for local-first conversion + a personal dataset library
+  (Unreal integration); further out, a browser splat-transcoding UI, a georeferencing/geolocator step,
+  and a cross-platform splat aggregator; wire the real `3d-tiles-tools` package's implicit↔explicit and
+  glTF-to-3TILES packaging (only `upgrade` is wired so far).
+- **`potree-to-copc`** — assessed, blocked: no pure-JS/WASM LAZ *encoder* exists yet (only decoders).
+  Deferred until one is wired.
+- **Runtime (Node → browser)** — audit of what's browser-portable per converter; almost everything
+  already is except `remote-zip.js`'s SLPK unzip (`node:zlib` call with no browser equivalent).
+- **Rendering/viewer** — a drafted upstream feature request for `3d-tiles-rendererjs-3dgs-plugin` to
+  expose `lodInflate`/`lodSplatScale` SparkRenderer settings (currently worked around internally).
+- **Streaming architecture** — route `tiling=explicit` through the existing `implicit-to-explicit` tool
+  instead of bespoke per-adapter logic (design sketch only); a server-side progress endpoint for
+  `cache=hierarchy`/`cache=full` jobs.
+- **Testing & fixtures** — pin open-data test fixtures as versioned samples instead of relying on live
+  third-party hosts; find a real third-party `.3tz`/`.3dtiles` sample; re-verify `cache=all` against
+  newer formats; verify the uniform-crop flip table holds for non-georeferenced sources too.
+- **Encoding/extract** — WebP texture encode, `simplify`/`weld`/`quantize` geometry ops, encode support
+  on `/gltf`; `rtc_center`/decompress for ingesting *existing* remote 3D Tiles; a browser-native bbox
+  crop/subsample extract tool.
+- **Performance** — Draco+KTX2 decode speed (WebP instead of pngjs, reused decoder instances, worker
+  pool); the `WorkerPool` multicore tier isn't wired yet for any converter.
+- **Format coverage** — spherical harmonics (view-dependent color) for Gaussian splats: every splat
+  converter currently emits DC-only color. Design sketch covers what each format (RAD/LCC/SOG/GeoSplats)
+  stores and what the `KHR_gaussian_splatting` output extension already supports — LCC/SOG look like a
+  straightforward "carry the bytes through" job, RAD needs a "does it even store this" check first.
+
 ## Core: "fastest" point-cloud → COPC/3D Tiles tiler
 
 **New project direction (proposed, not a format).** Not a source format to ingest — a **proposed new
