@@ -207,3 +207,133 @@ thread, so a worker pool parallelizes them across cores. `core.WorkerPool` is th
 each converter just needs its tile loop ported (lcc is the worked example).
 
 ---
+
+## `/convert` — live any-format → 3D Tiles (implemented)
+
+The same server also exposes a generic endpoint that works for **every format the meta-converter
+supports** (potree, sog/streamed-SOG, rad, lcc, copc, i3s).
+
+#### The current implementation (offline conversion, cached, served live)
+
+`/convert` is a pragmatic stand-in that gets **every** format renderable today, before each
+per-format range adapter exists (so far COPC, Potree, streamed-SOG, LCC, and RAD all do — see
+["Streaming roadmap — per-format range adapters"](/docs/guide/streaming-architecture-design-log)).
+Where the range adapters are *per-tile*, `/convert` is *per-dataset*: on the
+**first** request it resolves the source to a local dataset (downloading remote inputs), runs the
+in-process `convert()` **once** (output cached on disk under the OS temp dir, keyed by
+`sha1(format|src)`), then serves the static 3D Tiles output. So it converts the **whole** hierarchy
+and **all** tile content up front, then streams from that cache — not range-streamed, but genuinely
+on-demand and format-agnostic. Subsequent requests (and restarts) hit the warm cache instantly.
+
+```sh
+npm run serve:tiles
+#   GET /convert/tileset.json?url=<SRC>[&format=<fmt>]   → tileset (content URIs rewritten absolute)
+#   GET /convert/<key>/<path>                            → static tile / subtree / sub-tileset file
+```
+
+- `<SRC>` may be a **remote URL** *or* a **local path** (file or dataset dir). Remote directory
+  formats are mirrored with the sibling files each converter reads — Potree 2.0 (`metadata.json` +
+  `hierarchy.bin` + `octree.bin`), LCC (`meta.lcc` + `index.bin`/`data.bin`), SOG (`lod-meta.json` +
+  every chunk `meta.json` + its WebP textures). Single-file formats (COPC/RAD/SLPK) download the one file.
+- `&format=` is optional — auto-detected from the path/extension (pass it for remote directory
+  formats where the index filename isn't decisive, or to override).
+- `&tiling=implicit|explicit` (COPC & Potree) chooses the tree encoding — implicit (subtree files) or
+  an explicit nested tree. CLI: `--tiling=…`; API: `opts.tiling`. Defaults: COPC implicit, Potree
+  explicit. Same flag works for the offline converters.
+- `&centroids=1` (point clouds get this for free) renders **splat** datasets (RAD/SOG/LCC) as a
+  POINTS tileset of splat **centroids** — so renderers without `KHR_gaussian_splatting` support can
+  still display the scene. See [Centroids-only](#centroids-only-splats-as-point-clouds) below (same page).
+- The served **root** tileset has its relative `uri`s rewritten to absolute `/convert/<key>/…` so
+  content resolves regardless of how the viewer bases the query-string URL; nested sub-tilesets are
+  served at their real paths so their own relative URIs already resolve.
+- For big COPC, prefer `/stream?format=copc` (true range streaming) over `/convert` (downloads the
+  whole `.laz`).
+
+**Remote source notes / limits:**
+- The **same remote support is shared by the CLI and JS API** (`packages/convert/fetch-source.js`):
+  `3dtiled https://host/scene/metadata.json out/` and `convert('https://…', out)` download the source
+  (+ the sibling files the format needs) to a temp dir, then convert. Local path or remote URL works
+  identically across CLI, JS API, and the `/convert` middleware.
+- Mirroring is server-side, so **no browser CORS** applies — but the source must serve **HTTP range
+  206** for `/copc` and `/potree`, and **must not redirect in a way that drops the `Range` header**
+  (e.g. some IGN LiDAR HD URLs 302 to an OVH bucket → range lost). `/convert` downloads in full so it
+  tolerates that.
+- **I3S** remote = `.slpk` **file** only; live **REST** SceneServer services (gzipped node-page tree)
+  aren't mirrored yet — extract the `.slpk` / mirror the service locally and pass the directory.
+- Use a **raw** file URL, not a hosting page — GitHub `…/blob/…#L2` returns HTML; use the
+  `raw.githubusercontent.com` URL (or `?raw=1`).
+- Don't mix protocols in a browser: an `https://` viewer page can't fetch an `http://localhost`
+  tileset (mixed-content block). Serve the viewer over the same scheme as the tile-server.
+
+viewer.html ships pills for each: **🛰 Potree / RAD / SOG / LCC / COPC →3DT (live)**.
+
+#### Centroids-only: splats as point clouds
+
+Gaussian-splat formats (**RAD / SOG / LCC**) normally emit `KHR_gaussian_splatting` GLB tiles, which
+many 3D-Tiles clients can't render. `--centroids-only` (CLI) / `?centroids=1` (middleware) instead
+emits a plain glTF **POINTS** tileset of the splat **centroids** — POSITION + COLOR_0 only, dropping
+scale / rotation / gaussian opacity — placed in the exact same frame as the splat tiles. So any
+point-cloud-capable renderer (CesiumJS, 3DTilesRendererJS, cesium-for-unreal, …) can display a
+tiled-splat scene as points.
+
+```sh
+# offline conversion
+3dtiled scene.rad out/ --centroids-only           # POINTS tileset instead of splats
+# live middleware
+GET /convert/tileset.json?url=<SRC>&centroids=1    # cached separately from the splat variant
+```
+
+Point-cloud inputs (COPC/Potree) are already POINTS, so the flag is a no-op for them. The output is a
+standard POINTS tileset with **no** `KHR_gaussian_splatting` extension advertised.
+
+## `/3dtiles-self-contained` — serve `.3tz` / `.3dtiles` packages in-place
+
+```sh
+# Open a .3tz package directly in any 3D Tiles viewer without extracting it:
+GET http://localhost:3001/3dtiles-self-contained/tileset.json?url=/abs/path/to/scene.3tz
+GET http://localhost:3001/3dtiles-self-contained/tiles/0/0/0.glb?url=/abs/path/to/scene.3tz
+```
+
+`?url=` also takes a **local filesystem path** (resolved relative to the tile-server's own CWD, not
+fetched over HTTP) alongside `http(s)://` — unique among the adapters here, which all `fetch()` and so
+need an absolute URL. Working example against this repo's bundled sample package:
+```sh
+GET http://localhost:3001/3dtiles-self-contained/tiles/node_7.glb?url=sample-data%2Finput%2F3DTILES-PACKAGES%2Ftastier.3dtiles&format=3dtiles-pkg
+```
+
+`.3tz` is a ZIP file with a `@3dtilesIndex1@` binary index that maps every tile path to its offset
+in the ZIP, enabling O(1) random-access reads (no full-file scan). This project parses the index on
+first open, then serves each tile with a single `fs.read()` at the stored offset — equivalent to
+`npx 3d-tiles-tools serve` but in-process, with CORS open and no additional CLI.
+
+`.3dtiles` is an SQLite database (`key TEXT, content BLOB`). Requires `better-sqlite3`:
+```sh
+pnpm add -w better-sqlite3   # needs C++ build toolchain
+```
+
+**Create packages** — this repo ships a dependency-free packer (`scripts/pack-3dtiles.mjs`, ZIP+STORED
+for `.3tz`, sql.js for `.3dtiles`), or use the official `3d-tiles-tools`:
+```sh
+# In-repo packer (no external deps): writes <out>.3tz AND <out>.3dtiles
+node scripts/pack-3dtiles.mjs sample-data/output/rad/tastier500k-3dtiles-from-rad sample-data/input/3DTILES-PACKAGES/tastier
+
+# Official tool (CesiumGS) — `convert` replaces the old packageCreate/databaseToTileset commands:
+npx 3d-tiles-tools convert -i ./tileset/ -o ./scene.3tz        # ZIP package
+npx 3d-tiles-tools convert -i ./tileset/ -o ./scene.3dtiles    # SQLite package
+#   --inputTilesetJsonFileName <name>   when the top-level JSON isn't called tileset.json
+#   input/output may be a dir, a tileset.json, a .3tz, a .3dtiles, or a .zip containing tileset.json
+```
+
+A ready-made sample is built into `sample-data/input/3DTILES-PACKAGES/tastier.{3tz,3dtiles}` (from the
+tastier RAD splat tileset) — open it via `GET /3dtiles-self-contained/tileset.json?url=sample-data/input/3DTILES-PACKAGES/tastier.3tz`.
+
+#### Packaging-format specifications
+
+| Format | What it is | Spec |
+|--------|-----------|------|
+| **`.3tz`** | ZIP with a `@3dtilesIndex1@` binary index for random access; STORED (uncompressed) tile entries | [erikdahlstrom/3tz-specification](https://github.com/erikdahlstrom/3tz-specification) · Maxar `MAXAR_content_3tz` |
+| **`.3dtiles`** | SQLite DB, `media(key TEXT, content BLOB)`; keys are relative POSIX paths | [3D Tiles package format proposal — CesiumGS/3d-tiles#727](https://github.com/CesiumGS/3d-tiles/issues/727) ([PDF spec 1.0.0](https://github.com/CesiumGS/3d-tiles/issues/727)) |
+
+Tooling & discussion: [`3d-tiles-tools convert`](https://github.com/CesiumGS/3d-tiles-tools#convert) ·
+[extended package server — CesiumGS/3d-tiles-tools#86](https://github.com/CesiumGS/3d-tiles-tools/pull/86).
+Local notes: [`3tz-3dtiles-packages.md`](/docs/references/3tz-3dtiles-packages).

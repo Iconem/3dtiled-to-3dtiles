@@ -74,10 +74,24 @@ curl -L "https://data.geopf.fr/telechargement/download/LiDARHD-NUALID/NUALHD_1-0
 
 ## Open-Data 3D Tiles sample datasets
 
-Two public repositories provide ready-to-use OGC 3D Tiles datasets for testing converters,
-viewers, and tools — as opposed to the bundled non-3D-Tiles source data above, these are already 3D
-Tiles, useful for exercising the `implicit-to-explicit` / `upgrade` tileset-level tools. Both are used
-by this project's **Tools** mode in the viewer.
+Cesium and partner organizations, plus a handful of public repositories, provide ready-to-use OGC
+3D Tiles datasets for testing converters, viewers, and tools — as opposed to the bundled
+non-3D-Tiles source data above, these are already 3D Tiles, useful for exercising the
+`implicit-to-explicit` / `upgrade` tileset-level tools. Several are used by this project's
+**Tools** mode in the viewer.
+
+**CesiumGS open data (Ion)** — https://cesium.com/platform/cesium-ion/content/
+- Assets marked "open data" are publicly accessible with any Ion account token.
+- Examples: Google Photorealistic 3D Tiles (assetId 2275207), Bing Imagery basemap.
+
+**More public 3D Tiles / 3DGS / OSM-3D endpoints** — see the curated list in
+[blosm#498](https://github.com/vvoovv/blosm/issues/498) (3D Tiles + Gaussian-splat + city-model sources).
+
+**Esri I3S samples (for `i3s-to-3dtiles`)** — [loaders.gl I3S test data](https://github.com/visgl/loaders.gl/tree/master/modules/i3s/test/data)
+has both `.slpk` packages and **raw REST/file-server layouts** (`3dSceneLayer.json` + `nodepages/` + `nodes/`
+trees on disk — the converter reads those directly, no unzip). Mix of `3DObject`/`IntegratedMesh` (mesh),
+`PointCloud`, and Draco-compressed layers (Draco/LEPCC are gated out). Local samples live in
+`sample-data/input/I3S-SLPK/` (NYC buildings mesh ✓, Autzen point cloud → LEPCC, gated).
 
 ### bertt/cesium_3dtiles_samples
 
@@ -128,15 +142,15 @@ root.content.uri: content/{level}_{x}_{y}.glb
 
 <https://github.com/CesiumGS/3d-tiles-samples>
 
-Hosted at `https://raw.githubusercontent.com/CesiumGS/3d-tiles-samples/main/1.1/`.
-
-Comprehensive reference samples for all 3D Tiles 1.1 features:
+Hosted at `https://raw.githubusercontent.com/CesiumGS/3d-tiles-samples/main/1.1/`
+(raw GitHub, CORS-friendly, verified 200) — comprehensive reference samples for all 3D Tiles 1.1
+features:
 
 | Directory | Features |
 |-----------|----------|
 | `TilesetWithDiscreteLOD/` | Explicit tree, mesh LOD |
 | `TilesetWithTreeBillboards/` | Point instancing |
-| `TilesetWithRequestVolume/` | Request volumes |
+| `TilesetWithRequestVolume/` | Request volumes (also: mesh + point cloud, `1.0/TilesetWithRequestVolume/`) |
 | `TilesetWithMultipleContents/` | Multiple contents per tile |
 | `TilesetWithVariousMetadata/` | Metadata schemas |
 | `SparseImplicitQuadtree/` | QUADTREE implicit, sparse, `{"constant":0}` availability |
@@ -151,11 +165,15 @@ Morton-2D (QUADTREE) and Morton-3D (OCTREE) decode paths.
 
 ### Other open datasets used in this project
 
+All three city mesh tilesets below use RGF93/Lambert-93 or WGS84 coordinates and are served with
+CORS — they work in `viewer.html` via the built-in city mesh presets.
+
 | Dataset | URL | Format | Used as |
 |---------|-----|--------|---------|
 | Lille photomesh | `https://webimaging.lillemetropole.fr/externe/maillage/2016_mel_10cm/3dtiles/pyramid/tileset.json` | 3D Tiles 1.0 explicit, `.b3dm` | `upgrade` tool demo |
-| Strasbourg photomesh | `https://s3.eu-west-2.wasabisys.com/ems-sgct-photomaillage/ODACIT/EMS_PM2022/tileset.json` | 3D Tiles | DIRECT preset |
-| Clermont-Ferrand | `https://3d.craig.fr/datasets/Clermont/3dtiles/tileset.json` | 3D Tiles | DIRECT preset |
+| Strasbourg Od@CiT | `https://s3.eu-west-2.wasabisys.com/ems-sgct-photomaillage/ODACIT/EMS_PM2022/tileset.json` | 3D Tiles 1.0, explicit tiling, **REPLACE**, b3dm photogrammetry mesh | DIRECT preset |
+| Clermont-Ferrand (CRAIG) | `https://3d.craig.fr/datasets/Clermont/3dtiles/tileset.json` | 3D Tiles 1.0, explicit, **REPLACE**, b3dm | DIRECT preset |
+| Lille Métropole | `https://webimaging.lillemetropole.fr/externe/maillage/2016_mel_10cm/3dtiles/tileset.json` | 3D Tiles 1.0, explicit, **REPLACE**, b3dm | DIRECT preset |
 
 #### Lille pyramid tileset
 
@@ -168,21 +186,6 @@ Tile content: *.b3dm  (Batched 3D Model, 3D Tiles 1.0)
 - Large photogrammetry mesh of Lille, France (10 cm resolution).
 - Use the `upgrade` tool to serve b3dm tiles as GLB on-demand without pre-converting.
 - The `pyramid/` subdirectory is a sub-tileset of the full dataset.
-
-### Notes on QUADTREE vs OCTREE
-
-The `implicit-to-explicit` tool in this project supports both:
-
-| Scheme | Children/node | Morton | Key format | Bounding volume |
-|--------|--------------|--------|------------|-----------------|
-| OCTREE | 8 | 3D (x,y,z interleaved) | `level-x-y-z` | `box` |
-| QUADTREE | 4 | 2D (x,y interleaved) | `level-x-y-0` | `region` (lon/lat) |
-
-Geographic datasets (lon/lat CRS) use QUADTREE + `region` bounding volumes. Local-frame
-datasets (COPC, Potree) use OCTREE + `box` bounding volumes.
-
-QUADTREE subtree URI templates from pg2b3dm use underscore separators:
-`subtrees/{level}_{x}_{y}.subtree` — the tool handles both `_` and `/` separators.
 
 ---
 

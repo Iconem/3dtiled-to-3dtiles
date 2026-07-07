@@ -5,6 +5,108 @@ description: "Roughly in the order we're tackling them:"
 
 Roughly in the order we're tackling them:
 
+- [ ] **Feature request draft — expose SparkRenderer LoD options in `3d-tiles-rendererjs-3dgs-plugin`.**
+  **Target repo:** https://github.com/WilliamLiu-1997/3D-Tiles-RendererJS-3DGS-Plugin
+
+  **Title:** Allow passing `lodInflate` / `lodSplatScale` (and other SparkRenderer LoD settings) through
+  `sparkRendererOptions`.
+
+  **Body:** The plugin's `sparkRendererOptions` currently forwards a fixed allowlist to the shared
+  SparkRenderer: `premultipliedAlpha, encodeLinear, maxStdDev, minPixelRadius, maxPixelRadius,
+  minAlpha, enable2DGS, preBlurAmount, blurAmount, clipXY, focalAdjustment, sortRadial,
+  minSortIntervalMs, depthTest, depthWrite`. It does **not** include the SparkRenderer LoD controls
+  that SparkJS's own viewer sets, notably:
+  - `lodInflate` (default `true` in SparkJS's viewer) — inflate LoD splats so opacity ≤ 1.0; visibly
+    improves blending of coarse/merged LoD splats.
+  - `lodSplatScale` — scales the active-splat budget / LoD detail.
+
+  **Why it matters:** when rendering 3D Tiles tilesets whose content is baked LoD Gaussian splats
+  (e.g. converted from SparkJS `.RAD` or PlayCanvas Streamed SOG), the coarse tiles are pre-merged
+  representatives. Without `lodInflate`, those coarse splats render under-opaque and don't blend the
+  way they do in SparkJS's native viewer, so the same data looks sparser/spikier through the plugin
+  than in `sparkjs.dev`'s explore viewer.
+
+  **Current workaround:** reach the shared renderer via `getSparkRendererForScene(scene)` and set
+  `spark.lodInflate = true; spark.lodSplatScale = …; spark.lodDirty = true;` directly. This works but
+  relies on internal properties rather than the public `sparkRendererOptions` surface.
+
+  **Request:** add `lodInflate` and `lodSplatScale` (and ideally the cone-foveation settings
+  `coneFov0/coneFov/coneFoveate/behindFoveate`) to the `sparkRendererOptions` allowlist, and to
+  `updateSharedSparkRendererOptions`, so they can be set declaratively at plugin construction and at
+  runtime.
+
+  *This repo (`3dtiles-converters`) applies the `getSparkRendererForScene` workaround in `viewer.html`
+  (`applySparkLodSettings`) until the option is exposed.*
+- [ ] **New project direction (proposed, not a format): "fastest" point-cloud → COPC/3D Tiles tiler.**
+  Not a source format to ingest — a **proposed new project direction**: could this repo's own
+  converters (or a new sibling tool) become the fastest tiler for raw point clouds into COPC or
+  3D Tiles output, taking inspiration from Potree's own tiling approach. This is a
+  **market/feasibility research note** (WebSearch pass, 2026-07-06) — it summarizes public technical
+  writing and one repo's own README claims, **not** first-hand user feedback gathered from this
+  project's users. Treat the "community sentiment" items below as what's publicly written, not a survey.
+
+  **How Potree's own converter achieves its speed (technical read, not sentiment):**
+  - **PotreeConverter 2.0's approach is documented in a peer-reviewed paper**: Schütz, Ohrhallinger & Wimmer,
+    ["Fast Out-of-Core Octree Generation for Massive Point Clouds"](https://www.cg.tuwien.ac.at/research/publications/2020/SCHUETZ-2020-MPC/)
+    (Computer Graphics Forum, 2020). Core technique: a **hierarchical counting sort** to split the point
+    cloud into small out-of-core chunks first (cheap, single-pass, parallelizable), then build per-chunk
+    LOD via exchangeable subsampling strategies (a fast approximate blue-noise sampler, or a plain uniform
+    random sampler) bottom-up. Reported throughput: **up to ~9M points/sec** (uniform sampling) or **~6M
+    points/sec** (blue-noise), including out-of-core disk I/O — benchmarked at generating an LOD structure
+    for **18 billion points in 1h17m**. This is a **published, citable technical result**, not community
+    hearsay.
+  - **Independently, PotreeConverter's own GitHub README claims 2.0 is 10-50x faster than 1.7 on SSDs**,
+    attributing most of the gain to emitting **~3 output files total instead of thousands-to-millions** —
+    fewer files means filesystem operations (copy/upload/delete) that used to take hours/days drop to
+    seconds/minutes. That's the tool authors' own claim, not independently reproduced here.
+  - Net technical read: the speed story is less about a novel geometric algorithm and more about (a) an
+    out-of-core chunking pass designed for parallelism from the start, and (b) minimizing filesystem
+    overhead by consolidating output into few large files rather than many small ones — both principles
+    this repo's own streaming/tiled formats (COPC, streamed-SOG, LCC) already lean on for the *output*
+    side; the gap would be on the *tiling/build* side for raw, untiled point-cloud input.
+
+  **How COPC-focused tools compare (untwine/entwine/PDAL):**
+  - **untwine** (Hobu Inc., the PDAL maintainers) is the tool actually recommended for building COPC at
+    scale: per its own project material, for point clouds **exceeding 500 million points, untwine runs
+    2-5x faster than `pdal translate`**, crediting a **parallelized, single-pass chunking algorithm** that
+    builds the clustered octree index directly, with **under 5% storage overhead** versus the source LAZ.
+    It works **bottom-up** rather than entwine's (its predecessor's) top-down approach.
+    ([hobuinc/untwine](https://github.com/hobuinc/untwine))
+    Sources: [CAD Interop's COPC writeup](https://www.cadinterop.com/en/formats/cloud-point/copc.html),
+    [untwine GitHub](https://github.com/hobuinc/untwine).
+  - **entwine** (`connormanning/entwine`) is the older, more general EPT/point-cloud organizer that
+    untwine's own docs position themselves as a faster, COPC-specific successor to for the large-scale case.
+  - No independent third-party head-to-head *benchmark* (untwine vs. PotreeConverter 2.0 vs. a hypothetical
+    new tool) turned up in this pass — the untwine-vs-`pdal-translate` and PotreeConverter-2.0-vs-1.7
+    numbers above are each tool's **own** reported comparison, not a neutral bake-off. Worth flagging before
+    treating either as a hard target to beat.
+
+  **Public community commentary found (actual sentiment, not just tool-vendor claims):**
+  - [`visgl/loaders.gl` issue #2911](https://github.com/visgl/loaders.gl/issues/2911) tracks COPC tiled-loader
+    support as background/ongoing work — reflects COPC still being treated as an emerging, not-yet-universally
+    -supported format in the wider JS geospatial-viewer ecosystem, consistent with this repo's own choice to
+    build a live COPC adapter rather than assume off-the-shelf tooling covers it.
+    Related loader-quality discussion (`visgl/deck.gl` discussion #7454 on point-cloud layer performance,
+    and a Cesium Community forum thread on FPS drops rendering sparse point-cloud 3D Tiles) point at
+    **tileset-traversal and per-tile-fragment-count** as recurring real-world pain points **on the render
+    side**, not the build/tiling side — i.e. even a fast tiler can produce tilesets that render poorly if
+    node/point density per tile isn't tuned for the target GPU fragment budget. Worth folding into any
+    "fastest tiler" design goal: fast *and* well-tiled are separate axes.
+  - [MIERUNE/point-tiler](https://github.com/MIERUNE/point-tiler) (Rust, Rayon-based parallelism, targets
+    3D Tiles 1.1 directly from LAS/LAZ/CSV) is a recent (found via this search pass) independent example of
+    someone else already pursuing a similar "fast point-cloud → 3D Tiles" goal — worth a direct look/comparison
+    before scoping this repo's own effort, since it may already cover some of the same ground.
+
+  **Feasibility read for this repo specifically:** the repo's own `ambition.md` already names "be the
+  fastest point-cloud — and eventually splat — tiler, by reusing the octree-computation principles behind
+  Potree 2.0's converter" as a longer-running goal. This research pass supports that direction being
+  technically groundable (Potree 2.0's own published paper gives concrete algorithmic principles to reuse:
+  out-of-core parallel chunking + few-large-files output; untwine shows the same principles hold specifically
+  for COPC-shaped output) but flags two things worth resolving before committing: (1) no neutral benchmark
+  exists yet comparing this repo's own converters' build speed against PotreeConverter 2.0 or untwine — that
+  would be the natural first step to even know the starting gap; (2) `MIERUNE/point-tiler` looks like
+  already-published prior art aimed at the same COPC/3D-Tiles-from-raw-point-cloud niche and should be
+  evaluated before assuming this would be a novel effort.
 - [ ] **Composable `tiling=explicit`.** The still-open, more invasive half of an earlier item (see
   "Streaming endpoint consolidation" in the [Design log](/docs/guide/streaming-architecture-design-log)):
   route `&tiling=explicit` for COPC/Potree-2.0
@@ -193,7 +295,8 @@ splat or generic point/mesh format worth adding an adapter for — none surfaced
 independently researched (a web-search-depth pass, not a spec audit like the sources in
 `docs-references/`), so treat as a starting point, not a verdict:
 - **Niantic Scaniverse** — exports single-file GLB/USDZ/OBJ/PLY splat or mesh scans; no multi-file tiled
-  hierarchy format found *today*. Worth revisiting: SPZ's own roadmap (see "SPZ v4/v5 roadmap" below)
+  hierarchy format found *today*. Worth revisiting: SPZ's own roadmap (see the "SPZ v5 (upcoming)"
+  entry in [Candidate source formats](/docs/guide/candidate-source-formats-roadmap-not-yet-supported))
   states v5 aims to add **spatial chunking and LOD** — Scaniverse is SPZ's reference exporter, so a
   future Scaniverse export could plausibly become tiled once v5 ships.
 - **ESRI tiled data** beyond I3S (already supported) — didn't find another ESRI *tiled point-cloud/mesh*
@@ -214,25 +317,5 @@ independently researched (a web-search-depth pass, not a spec audit like the sou
   confirmed directly). Plausibly a *tiled HLOD* splat format given DJI Reality targets large drone-scale
   captures (the same scale problem GeoSplats/RAD/LCC solve with HLOD), but unverified — flagged here as
   a format worth investigating once a live viewer link is found, not a confirmed adapter target.
-
-**SPZ v4/v5 roadmap** (primary source: [Niantic Spatial's own v4 announcement](https://www.nianticspatial.com/blog/spz4),
-published 2026-05-05 — supersedes the earlier secondhand radiancefields.com summary this section used
-to cite). **v4, shipped:** six parallel ZSTD streams (one per attribute: positions/colors/scales/
-rotations/alphas/SH) replacing the old single GZip stream — "**compresses about 3-5x faster**" (an
-8.5 GB/34M-point PLY benchmark: 3 min 26 s on v3 vs. 1 min 8 s on v4) and "**loads roughly 1.5-2x
-faster**", while still landing "**10x smaller than uncompressed PLYs**". Also: the old **10-million-point
-cap is gone**; SH support goes to **degree 4** (from degree 3) with configurable quantization (3-8 bits,
-5 recommended); a new "NGSP"-magic extensible header carries vendor extensions (e.g. an Adobe
-camera-control extension); and **old (pre-v4) readers fail gracefully** on the new magic bytes rather
-than misparsing — v4 itself reads every older SPZ file. Adoption stat cited: "**800,000 SPZ files in
-the last two months**."
-
-**v5, roadmap only — no design specifics or date given:** the post names, verbatim, "**streaming and
-progressive loading**" and "**spatial chunking and LOD**" as "directions on our radar", alongside
-further SH-quantization refinement and more vendor extensions. No bit layout, chunk scheme, LOD tier
-count, or streaming protocol is specified — it's a roadmap bullet list, not a spec draft. That's the
-same tiled/HLOD problem this repo's own streaming adapters (GeoSplats, RAD, LCC, streamed-SOG) already
-solve today, just heading toward a single-vendor-defined *file* format instead of a 3D-Tiles-hierarchy
-one — worth a re-check once v5 actually publishes something concrete to read against, not before.
 
 ---

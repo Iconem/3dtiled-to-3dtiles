@@ -3,14 +3,14 @@
   "defaultOpen": true,
   "pages": [
     "ambition",
-    "viewer",
     "cli-usage",
     "architecture-the-materialization-continuum-cache-none-hierar",
     "related-tilers-prior-art-reference-implementations",
     "todo-future-work",
+    "candidate-source-formats-roadmap-not-yet-supported",
+    "viewer",
     "sample-data",
     "dependencies",
-    "candidate-source-formats-roadmap-not-yet-supported",
     "streaming-architecture-design-log",
     "appendix-per-format-schema-diagrams"
   ]

@@ -250,9 +250,9 @@ Already-3D-Tiles sources, loaded directly (no conversion/streaming adapter invol
 
 These pseudo-format pills route to their own live adapters (`/stream?format=geosplats`, `/bing`,
 `/threemx`) but currently have no named preset assets wired into `formats.ts` — they're driven by a
-manual URL entry in the viewer instead. See [`maptiler-geosplats.md`](/docs/references/maptiler-geosplats),
-the [Bing Maps 3D](/docs/guide/streaming-architecture-design-log) section of the design log,
-and `streaming-adapter-plans.md` for what each adapter does.
+manual URL entry in the viewer instead. See [`maptiler-geosplats.md`](/docs/references/maptiler-geosplats)
+and the [Bentley 3MX and Bing Maps 3D](/docs/guide/streaming-architecture-design-log) section of the
+design log for what each adapter does.
 
 ### Tools mode datasets (implicit-to-explicit / upgrade)
 
