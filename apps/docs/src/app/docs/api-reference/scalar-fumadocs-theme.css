@@ -1,0 +1,132 @@
+/* Custom Scalar theme matching this site's Fumadocs "vitepress" preset (apps/docs/src/app/global.css)
+ * so the embedded API reference reads as the same product as the surrounding docs, not a bolted-on
+ * third-party widget. Used with `theme: 'none'` (ScalarClient.tsx) — Scalar ships no color/typography
+ * preset of its own in that mode, so every `--scalar-*` variable below is load-bearing, not an override.
+ *
+ * Mirrors packages/tile-server/homepage-live.js's own copy of this file (same product, same palette,
+ * kept in sync manually since the two apps don't share a build) — the color/font values are lifted
+ * directly from fumadocs-ui's vitepress.css preset + apps/docs' Inter font, not hand-picked.
+ */
+:root {
+  --scalar-font: 'Inter', ui-sans-serif, system-ui, sans-serif, 'Apple Color Emoji', 'Segoe UI Emoji',
+    'Segoe UI Symbol', 'Noto Color Emoji';
+  --scalar-font-code: 'Geist Mono', ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas,
+    'Liberation Mono', 'Courier New', monospace;
+
+  --scalar-radius: 0.375rem;
+  --scalar-radius-lg: 0.5rem;
+  --scalar-radius-xl: 0.75rem;
+
+  --scalar-heading-1: 24px;
+  --scalar-page-description: 16px;
+  --scalar-heading-2: 20px;
+  --scalar-heading-3: 16px;
+  --scalar-heading-4: 16px;
+  --scalar-heading-5: 16px;
+  --scalar-heading-6: 16px;
+  --scalar-paragraph: 16px;
+  --scalar-small: 14px;
+  --scalar-mini: 13px;
+  --scalar-micro: 12px;
+  --scalar-bold: 600;
+  --scalar-semibold: 500;
+  --scalar-regular: 400;
+  --scalar-font-size-1: 21px;
+  --scalar-font-size-2: 16px;
+  --scalar-font-size-3: 14px;
+  --scalar-font-size-4: 13px;
+  --scalar-font-size-5: 12px;
+  --scalar-font-size-6: 12px;
+  --scalar-font-size-7: 10px;
+  --scalar-line-height-1: 32px;
+  --scalar-line-height-2: 24px;
+  --scalar-line-height-3: 20px;
+  --scalar-line-height-4: 18px;
+  --scalar-line-height-5: 16px;
+  --scalar-font-normal: 400;
+  --scalar-font-medium: 500;
+  --scalar-font-bold: 700;
+  --scalar-text-decoration: underline;
+  --scalar-text-decoration-hover: underline;
+  --scalar-link-font-weight: inherit;
+  --scalar-sidebar-indent: 20px;
+  --scalar-sidebar-padding: 12px;
+  --scalar-border-width: 1px;
+}
+
+/* Light — fumadocs-ui vitepress.css `@theme` block */
+.light-mode {
+  color-scheme: light;
+  --scalar-background-1: hsl(0, 0%, 100%); /* --color-fd-background */
+  --scalar-background-2: hsl(240, 6%, 97%); /* --color-fd-secondary */
+  --scalar-background-3: hsl(0, 0%, 94.1%); /* --color-fd-accent */
+  --scalar-background-accent: hsla(226, 55%, 45%, 0.1);
+
+  --scalar-color-1: hsl(240, 6%, 25%); /* --color-fd-foreground */
+  --scalar-color-2: hsl(240, 6%, 50%); /* --color-fd-muted-foreground */
+  --scalar-color-3: hsl(240, 6%, 50%);
+  --scalar-color-accent: hsl(226, 55%, 45%); /* --color-fd-primary */
+
+  --scalar-border-color: hsl(0, 0%, 89.8%); /* --color-fd-border */
+
+  --scalar-button-1: hsl(226, 55%, 45%);
+  --scalar-button-1-color: hsl(0, 0%, 98%);
+  --scalar-button-1-hover: hsl(226, 55%, 38%);
+
+  --scalar-link-color: hsl(226, 55%, 45%);
+  --scalar-link-color-hover: hsl(226, 55%, 38%);
+  --scalar-color-accent: hsl(226, 55%, 45%);
+
+  --scalar-scrollbar-color: rgba(0, 0, 0, 0.18);
+  --scalar-scrollbar-color-active: rgba(0, 0, 0, 0.36);
+  --scalar-shadow-1: 0 1px 3px 0 rgba(0, 0, 0, 0.11);
+  --scalar-shadow-2: rgba(0, 0, 0, 0.08) 0px 13px 20px 0px, rgba(0, 0, 0, 0.08) 0px 3px 8px 0px,
+    hsl(0, 0%, 89.8%) 0px 0 0 0.5px;
+}
+
+/* Dark — fumadocs-ui vitepress.css `.dark` block (this site's default) */
+.dark-mode {
+  color-scheme: dark;
+  --scalar-background-1: hsl(240, 7%, 11%); /* --color-fd-background */
+  --scalar-background-2: hsl(0, 0%, 13%); /* --color-fd-muted */
+  --scalar-background-3: hsl(0, 0%, 15%); /* --color-fd-accent */
+  --scalar-background-accent: hsla(234, 100%, 83%, 0.1);
+
+  --scalar-color-1: hsl(60, 100%, 98%); /* --color-fd-foreground */
+  --scalar-color-2: hsl(240, 4%, 65%); /* --color-fd-muted-foreground */
+  --scalar-color-3: hsl(240, 4%, 65%);
+  --scalar-color-accent: hsl(234, 100%, 83%); /* --color-fd-primary */
+
+  --scalar-border-color: hsl(240, 4%, 19%); /* --color-fd-border */
+
+  --scalar-button-1: hsl(234, 100%, 83%);
+  --scalar-button-1-color: hsl(240, 7%, 11%);
+  --scalar-button-1-hover: hsl(234, 100%, 76%);
+
+  --scalar-link-color: hsl(234, 100%, 83%);
+  --scalar-link-color-hover: hsl(234, 100%, 90%);
+
+  --scalar-scrollbar-color: rgba(255, 255, 255, 0.18);
+  --scalar-scrollbar-color-active: rgba(255, 255, 255, 0.36);
+  --scalar-shadow-1: 0 1px 3px 0 rgb(0, 0, 0, 0.1);
+  --scalar-shadow-2: 0 0 0 0.5px var(--scalar-border-color), rgba(15, 15, 15, 0.2) 0px 3px 6px,
+    rgba(15, 15, 15, 0.4) 0px 9px 24px;
+}
+
+/* Sidebar — alias to the same palette (Scalar's own presets do this too; 'none' ships no aliasing) */
+.light-mode,
+.dark-mode {
+  --scalar-sidebar-background-1: var(--scalar-background-1);
+  --scalar-sidebar-border-color: var(--scalar-border-color);
+  --scalar-sidebar-color-1: var(--scalar-color-1);
+  --scalar-sidebar-color-2: var(--scalar-color-2);
+  --scalar-sidebar-color-active: var(--scalar-color-accent);
+  --scalar-sidebar-item-hover-background: var(--scalar-background-3);
+  --scalar-sidebar-item-hover-color: var(--scalar-color-1);
+  --scalar-sidebar-item-active-background: var(--scalar-background-accent);
+  --scalar-sidebar-search-background: var(--scalar-background-2);
+  --scalar-sidebar-search-border-color: var(--scalar-border-color);
+  --scalar-sidebar-search-color: var(--scalar-color-2);
+  --scalar-tooltip-background: var(--scalar-background-3);
+  --scalar-tooltip-color: var(--scalar-color-1);
+}

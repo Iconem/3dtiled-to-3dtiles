@@ -1,10 +1,14 @@
 'use client';
 
-// Without this the component renders with none of Scalar's own layout/theme CSS — no sidebar chrome,
-// no panel backgrounds, just the raw unstyled content flowing through whatever Fumadocs' global styles
-// happen to apply (the CDN-script integration in packages/tile-server/homepage-live.js gets this for
-// free via a plain <link>; the React component doesn't bundle its CSS automatically).
+// Without this the component renders with none of Scalar's own layout CSS — no sidebar chrome, no
+// panel backgrounds, just the raw unstyled content flowing through whatever Fumadocs' global styles
+// happen to apply. `theme: 'none'` below means this stylesheet's own color/font presets are what's
+// disabled, NOT this import — style.css also carries Scalar's structural/layout rules (flex, spacing,
+// component classes) that have nothing to do with theming and are still needed.
 import '@scalar/api-reference-react/style.css';
+// Our own `--scalar-*` variable set matching this site's Fumadocs vitepress theme — see the file's own
+// comment. Imported AFTER style.css so its variables win the cascade.
+import './scalar-fumadocs-theme.css';
 import { ApiReferenceReact } from '@scalar/api-reference-react';
 import type { AnyApiReferenceConfiguration } from '@scalar/api-reference-react';
 
@@ -22,7 +26,7 @@ export function ScalarClient({ spec }: { spec: Record<string, unknown> }) {
     content: spec,
     layout: 'modern',
     defaultOpenAllTags: true,
-    theme: 'default',
+    theme: 'none',
     hideClientButton: false,
     showSidebar: true,
     showDeveloperTools: 'localhost',
