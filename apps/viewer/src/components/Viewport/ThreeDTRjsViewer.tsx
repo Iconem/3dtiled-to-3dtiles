@@ -375,6 +375,18 @@ const Scene = forwardRef<ViewerHandle, { loadArgs: LoadArgs }>(function Scene({ 
   // `.target` at the default (0,0,0) — for georeferenced (ECEF-scale) content that's ~Earth's center,
   // not the tileset ("orbit pivot/target should be the tileset origin, not earth center").
   const lastSphereCenterRef = useRef<THREE.Vector3 | null>(null);
+  // Whether THIS load needed the synthetic ENU anchor below (null = not yet determined). Decided ONCE,
+  // on the fresh-load call, from the tileset's true native bounding sphere (still near local origin at
+  // that point) — and then REUSED as-is on every later re-frame (e.g. "Auto-zoom to tileset"). Re-testing
+  // `sphere.center.length()` on a later call is unsound: by then `tiles.group`'s transform already IS the
+  // anchor we applied, so the (now world-space) sphere sits near the real ellipsoid surface regardless of
+  // whether this content is genuinely georeferenced or was only synthetically anchored here — indistinguishable
+  // from the "real georeferenced" case, so a later call would wrongly take the `else` branch below and
+  // reset `tiles.group.quaternion` to identity, wiping the east/north/up basis while leaving position at
+  // the anchor point. That is the exact mechanism behind "up is wrong after clicking Auto-zoom" even with
+  // zero free navigation in between — reproduces in every controls mode because it happens before any
+  // controls code ever runs.
+  const needsEnuAnchorRef = useRef<boolean | null>(null);
 
   // Z-offset used to be a flat `group.position.y = v` — correct only for local/non-georeferenced
   // content near the world origin. For real georeferenced content sitting somewhere else on the
@@ -465,7 +477,7 @@ const Scene = forwardRef<ViewerHandle, { loadArgs: LoadArgs }>(function Scene({ 
   // exactly under that default view direction never appears (reported as "3DTRJS shows nothing").
   // Frame the camera on the root tile's bounding sphere as soon as it's known, and sync whichever
   // controls are active (orbit target, or globe/environment controls' internal state) to match.
-  const frameToTileset = useCallback((tiles: TilesRendererImpl | null) => {
+  const frameToTileset = useCallback((tiles: TilesRendererImpl | null, isFreshLoad = false) => {
     if (!tiles) return;
     const sphere = new THREE.Sphere();
     if (!(tiles as any).getBoundingSphere(sphere)) return;
@@ -480,7 +492,10 @@ const Scene = forwardRef<ViewerHandle, { loadArgs: LoadArgs }>(function Scene({ 
     // georeferenced (its own tileset.json root transform already placed it on the real ellipsoid) —
     // re-anchoring that would visibly relocate already-correct content.
     const ellipsoidForAnchor = (tiles as any).ellipsoid;
-    if (sphere.center.length() <= 6378137 * 0.5 && ellipsoidForAnchor) {
+    // Decide (and cache) this ONLY on the fresh-load call — see needsEnuAnchorRef's own comment for why
+    // re-deriving it from `sphere.center.length()` on a later re-frame call is unsound.
+    if (isFreshLoad) needsEnuAnchorRef.current = sphere.center.length() <= 6378137 * 0.5 && !!ellipsoidForAnchor;
+    if (needsEnuAnchorRef.current && ellipsoidForAnchor) {
       const { lon, lat, alt } = store.getState().localFrame;
       const anchor = new THREE.Vector3();
       ellipsoidForAnchor.getCartographicToPosition(THREE.MathUtils.degToRad(lat), THREE.MathUtils.degToRad(lon), alt, anchor);
@@ -981,7 +996,7 @@ const Scene = forwardRef<ViewerHandle, { loadArgs: LoadArgs }>(function Scene({ 
           // load the SAME global tileset URL) is about to issue its OWN flyToCity right after load()
           // — this async auto-frame (fires once the tileset.json fetch resolves) would otherwise land
           // AFTER and override that flyTo with the tileset's own (possibly world-sized) bounding sphere.
-          onLoadRootTileset={() => { if (!loadArgs?.skipAutoFrame) frameToTileset(tilesRef.current); }}
+          onLoadRootTileset={() => { if (!loadArgs?.skipAutoFrame) frameToTileset(tilesRef.current, true); }}
           onLoadModel={onLoadContentModel}
           onLoadError={(e: any) => {
             // `tile === null` means the ROOT tileset.json itself failed (nothing will ever show) —
