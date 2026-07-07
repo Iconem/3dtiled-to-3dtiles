@@ -17,6 +17,15 @@ COPC, Potree 1.x/2.0, EPT, I3S/SLPK, streamed-SOG, LCC, RAD, 3D Tiles packages, 
 | **Nexus** `.nxs/.nxz` | CNR-ISTI (3DHOP) · heritage/academic | mesh (+pts) | error-tagged **DAG of patches** | ✅ **HTTP Range by design** | `nexus3d`/`nexus.js` + Corto (MIT) | best heritage fit; DAG→tileset maps cleanly — see the full assessment below |
 | **SuperMap S3M** `.s3mb+.scp` | SuperMap · China GIS (open spec T/CAGIS) | mesh (+WebP/KTX2) | LOD pyramid under `.scp` | ✅ HTTP per LOD/tile | [s3m-spec](https://github.com/SuperMap/s3m-spec) + **official S3M↔3D Tiles tool** | low risk; converter already exists, but **adoption outside China is low** (SuperMap-internal; OGC 3D Tiles dominates internationally) — deprioritize. Samples referenced in [SuperMap/s3m-spec](https://github.com/SuperMap/s3m-spec) but no direct URLs. |
 
+**Watch:**
+
+- **Upcoming Niantic SPZ-v5** — with HLOD + stream support
+- **DJI Terra / DJI Reality** — DJI's photogrammetry/splat reconstruction software; ships a web viewer
+at `3dviewer.dji.com` (the specific link checked was **stale/unreachable**, so this couldn't be
+confirmed directly). Plausibly a *tiled HLOD* splat format given DJI Reality targets large drone-scale
+captures (the same scale problem GeoSplats/RAD/LCC solve with HLOD), but unverified — flagged here as
+a format worth investigating once a live viewer link is found, not a confirmed adapter target.
+
 **Discarded:**
 - **Autodesk ReCap `.rcp/.rcs`** — confirmed **no open reader OR writer** (not in PDAL/CloudCompare/PCL/Open3D; FME has a *writer only*, via Autodesk's closed SDK, no reader — so a remote `.rcp` can't even be ingested, since it needs local relative paths to `.rcs`). **Autodesk can't natively consume OGC 3D Tiles either**: Cesium is **Bentley's** since 2024 — native 3D Tiles import lives in **MicroStation/iTwin**, not Autodesk; Autodesk's only Cesium link is a **Revit→3D Tiles *exporter***, not an importer (AutoCAD/Civil3D/Navisworks/InfraWorks have no 3D Tiles import). Realistic bridge is a future **"→ E57/LAS/LAZ" export** tool (formats ReCap *does* ingest: E57, LAS/LAZ, PTS, PTX, XYZ, PLY) → ReCap Pro → `.rcp` → AutoCAD — not an `.rcp` writer. ([ReCap supported formats](https://help.autodesk.com/view/RECAP/ENU/?guid=supported_file_formats) · [Cesium Revit add-in (exporter)](https://cesium.com/blog/2024/12/03/cesium-design-tiler-and-revit-add-in/) · [no open RCS/RCP reader](https://www.cadinterop.com/en/formats/cloud-point/rcs-rcp.html))
 

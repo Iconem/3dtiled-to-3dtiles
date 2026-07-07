@@ -1,6 +1,6 @@
 ---
 title: "Existing tilers (reference implementations)"
-description: "Producing the tiled inputs (offline tilers): point-cloud tilers (PotreeConverter, py3dtiles,"
+description: "Producing the tiled inputs (offline tilers): pointcloud tilers (PotreeConverter, PDAL), mesh and splat hlod converters"
 ---
 
 Reference catalogue of **offline** tilers that produce the tiled inputs this project converts to (or

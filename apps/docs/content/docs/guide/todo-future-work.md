@@ -5,51 +5,6 @@ description: "Roughly in the order we're tackling them:"
 
 Roughly in the order we're tackling them, grouped by theme below.
 
-## `potree-to-copc` (assessed — blocked on a JS LAZ encoder)
-
-Potree and COPC are both octrees, so the hierarchy/metadata is a near 1:1 map and the read side is
-ready (the readers extract points + the octree + the `cloud.js`/metadata **CRS**). The blocker is the
-**write**: COPC mandates LAZ, and there is **no pure-JS LAZ encoder** (`laz-perf`'s WASM build is
-decode-only; `copc.js` is read-only). Realistic paths: compile a Rust crate
-([copc-rs](https://github.com/pka/copc-rs) / [copc-converter](https://github.com/360-geo/copc-converter)
-with `laz-rs`) to **WASM**, or shell out to [PDAL `writers.copc`](https://pdal.io/en/stable/stages/writers.copc.html)
-/ [copc-lib](https://github.com/RockRobotic/copc-lib). Deferred until a JS/WASM LAZ writer is wired.
-
-## Runtime (Node today / browser-capable?)
-
-All converters run on **Node today** (`fs` for I/O, Node `zlib` for SPZ gzip). The *decoders* are
-mostly portable; the Node-only parts are I/O + compression + workers, which `core` abstracts.
-
-| Converter | Decoder portability | Node-only gate(s) → browser path |
-|-----------|---------------------|----------------------------------|
-| **rad** | pure JS (Buffer math) | `fs` → fetch/File; SPZ `zlib.gzip` → `CompressionStream('gzip')`. Browser-capable. |
-| **sog** | **WASM** (`webp.wasm` via splat-transform — a web SDK) | `fs`/`MemoryReadFileSystem` → its `UrlReadFileSystem` already works in-browser. Browser-capable. |
-| **lcc** | pure JS (DataView) | `fs` → fetch. Browser-capable. |
-| **copc** | **WASM** (`laz-perf`) | `fs` → fetch; `proj4` is browser-ok. Browser-capable. |
-| **potree** | pure JS | `fs` → fetch; **2.0 BROTLI needs a WASM brotli** (no standard browser API — DEFAULT encoding is fine). Mostly browser-capable. |
-| **i3s** | JS + zip | `fs`/zip → fetch + a browser zip lib. Browser-capable (draft). |
-| **output GLB** | `@gltf-transform/core` | works in Node and browser. |
-
-Common gates: **gzip** (SPZ) → browser `CompressionStream`; **brotli** (Potree 2.0) → needs WASM;
-**parallelism** `worker_threads` → Web Workers (same task shape); WebP/LAZ decoders are *already* WASM.
-
-```mermaid
-flowchart LR
-  subgraph IN["Source spatial trees (LoD pre-tiled)"]
-    RAD["RAD · LoD merge tree<br/>(SparkJS build-lod)"]
-    SOG["Streamed SOG · binary tree<br/>(PlayCanvas)"]
-    LCC["LCC · Unit grid × LODs<br/>(XGRIDS)"]
-    COPC["COPC · octree<br/>(LiDAR)"]
-  end
-  RAD -->|"decode columns"| DEC
-  SOG -->|"readSog → DataTable"| DEC
-  LCC -->|"32 B/splat decode"| DEC
-  COPC -->|"LAZ decode"| DEC
-  DEC["per-node splat arrays<br/>pos · color · opacity · rot(xyzw) · scale"] --> ENC["spzGlb.js<br/>SPZ-v2 + GLB<br/>(KHR_gaussian_splatting + _spz_2)"]
-  ENC --> TS["3D Tiles HLOD tree<br/>interior = grouping · leaf chain = REPLACE LODs"]
-  TS --> V["viewer.html<br/>CesiumJS + 3DTilesRendererJS/SparkJS"]
-```
-
 ## Core: "fastest" point-cloud → COPC/3D Tiles tiler
 
 **New project direction (proposed, not a format).** Not a source format to ingest — a **proposed new
@@ -122,6 +77,90 @@ would be the natural first step to even know the starting gap; (2) `MIERUNE/poin
 already-published prior art aimed at the same COPC/3D-Tiles-from-raw-point-cloud niche and should be
 evaluated before assuming this would be a novel effort.
 
+
+## Tooling ideas
+
+- [ ] **Port the middleware into 3DTilesRendererJS itself.** Today `packages/tile-server` sits in
+  front of 3DTilesRendererJS/CesiumJS as an HTTP layer; the longer-term idea is a 3DTilesRendererJS
+  **plugin** (in the spirit of its existing `ImplicitTilingPlugin`/`GaussianSplatPlugin`) that lets the
+  renderer consume COPC, Potree, streamed-SOG, LCC, etc. **directly** — any 3D-Tiles-consuming app
+  gets native support for these tiled formats without running a separate server process.
+
+- [ ] **local desktop companion app for the middleware.** A Tauri app, distinct in
+  shape from the `packages/tile-server` middleware above (that one is a live, no-storage, arbitrary-
+  `<fmt>` pass-through server) — this would be local-first and personal instead: pick any source dataset
+  in a format this repo already converts, convert it to 3D Tiles **on disk**, keep a local library of
+  converted datasets, and serve them from a local HTTP server so their URL can be copied elsewhere —
+  named explicitly for **Unreal Engine integration** (UE's Cesium-for-Unreal plugin, or similar, consumes
+  a 3D Tiles URL directly). A gallery/browse view of already-converted local datasets would make it read
+  as a personal dataset library, not a one-shot CLI wrapper. Purely an idea at this point — no design
+  work, no scoping, not started.
+
+- [ ] Further out: a browser/server tiled-splat transcoding UI in the spirit of SuperSplat's splat-transform
+  tooling; a **georeferencing/geolocator** step for splats that don't ship one, along the lines of
+  WilliamLiu's `3dtiles-inspector` or MapTiler GeoSplats'; and an **aggregator** unifying the
+  export/interchange formats of other splat platforms, behind the same 3D Tiles pipeline. A
+  longer-running goal underneath all of this: be the **fastest** point-cloud — and eventually splat —
+  tiler, by reusing the octree-computation principles behind Potree 2.0's converter (see the Potree
+  sections throughout this doc, e.g. [`potree-to-3dtiles`](/docs/guide/cli-usage#potree-to-3dtiles) and
+  [`/stream`](/docs/guide/planning/streaming-architecture-design-log)).
+
+- [ ] **Real `3d-tiles-tools`: implicit↔explicit and glTF-to-3TILES packaging still missing.** The real,
+  unscoped `3d-tiles-tools` npm package is now an actual dependency (`packages/3dtiles-tools`) and its
+  tileset **upgrade** (1.0→1.1) is wired as `tool=upgrade-real` on `/3dtiles-tools` — see the Design log
+  for how that landed and why it's a batch-then-serve-from-cache operation (the real package only
+  supports local filesystem/`.3tz`/`.3dtiles` sources, no remote/streaming API). Still open: the same
+  real package's **implicit↔explicit** conversion and **glTF-to-3TILES packaging** operations aren't
+  wired to anything — worth the same `tool=<name>` treatment once there's a concrete need, following the
+  `upgrade-real` pattern (mirror a remote source to a local temp dir first if needed, run the real
+  package once, serve the result statically from a cache dir).
+
+
+## `potree-to-copc` (assessed — blocked on a JS LAZ encoder)
+
+Potree and COPC are both octrees, so the hierarchy/metadata is a near 1:1 map and the read side is
+ready (the readers extract points + the octree + the `cloud.js`/metadata **CRS**). The blocker is the
+**write**: COPC mandates LAZ, and there is **no pure-JS LAZ encoder** (`laz-perf`'s WASM build is
+decode-only; `copc.js` is read-only). Realistic paths: compile a Rust crate
+([copc-rs](https://github.com/pka/copc-rs) / [copc-converter](https://github.com/360-geo/copc-converter)
+with `laz-rs`) to **WASM**, or shell out to [PDAL `writers.copc`](https://pdal.io/en/stable/stages/writers.copc.html)
+/ [copc-lib](https://github.com/RockRobotic/copc-lib). Deferred until a JS/WASM LAZ writer is wired.
+
+## Runtime (Node today / browser-capable?)
+
+All converters run on **Node today** (`fs` for I/O, Node `zlib` for SPZ gzip). The *decoders* are
+mostly portable; the Node-only parts are I/O + compression + workers, which `core` abstracts.
+
+| Converter | Decoder portability | Node-only gate(s) → browser path |
+|-----------|---------------------|----------------------------------|
+| **rad** | pure JS (Buffer math) | `fs` → fetch/File; SPZ `zlib.gzip` → `CompressionStream('gzip')`. Browser-capable. |
+| **sog** | **WASM** (`webp.wasm` via splat-transform — a web SDK) | `fs`/`MemoryReadFileSystem` → its `UrlReadFileSystem` already works in-browser. Browser-capable. |
+| **lcc** | pure JS (DataView) | `fs` → fetch. Browser-capable. |
+| **copc** | **WASM** (`laz-perf`) | `fs` → fetch; `proj4` is browser-ok. Browser-capable. |
+| **potree** | pure JS | `fs` → fetch; **2.0 BROTLI needs a WASM brotli** (no standard browser API — DEFAULT encoding is fine). Mostly browser-capable. |
+| **i3s** | JS + zip | `fs`/zip → fetch + a browser zip lib. Browser-capable (draft). |
+| **output GLB** | `@gltf-transform/core` | works in Node and browser. |
+
+Common gates: **gzip** (SPZ) → browser `CompressionStream`; **brotli** (Potree 2.0) → needs WASM;
+**parallelism** `worker_threads` → Web Workers (same task shape); WebP/LAZ decoders are *already* WASM.
+
+```mermaid
+flowchart LR
+  subgraph IN["Source spatial trees (LoD pre-tiled)"]
+    RAD["RAD · LoD merge tree<br/>(SparkJS build-lod)"]
+    SOG["Streamed SOG · binary tree<br/>(PlayCanvas)"]
+    LCC["LCC · Unit grid × LODs<br/>(XGRIDS)"]
+    COPC["COPC · octree<br/>(LiDAR)"]
+  end
+  RAD -->|"decode columns"| DEC
+  SOG -->|"readSog → DataTable"| DEC
+  LCC -->|"32 B/splat decode"| DEC
+  COPC -->|"LAZ decode"| DEC
+  DEC["per-node splat arrays<br/>pos · color · opacity · rot(xyzw) · scale"] --> ENC["spzGlb.js<br/>SPZ-v2 + GLB<br/>(KHR_gaussian_splatting + _spz_2)"]
+  ENC --> TS["3D Tiles HLOD tree<br/>interior = grouping · leaf chain = REPLACE LODs"]
+  TS --> V["viewer.html<br/>CesiumJS + 3DTilesRendererJS/SparkJS"]
+```
+
 ## Rendering / viewer
 
 - [ ] **Feature request draft — expose SparkRenderer LoD options in `3d-tiles-rendererjs-3dgs-plugin`.**
@@ -170,11 +209,6 @@ evaluated before assuming this would be a novel effort.
   the tool.) `viewer.html`'s Tools → implicit-to-explicit demo now includes a Potree and a COPC example
   against our own prebuilt output as a stopgap — that's the tool working *against* our formats offline,
   not the live routing described here.
-- [ ] **Port the middleware into 3DTilesRendererJS itself.** Today `packages/tile-server` sits in
-  front of 3DTilesRendererJS/CesiumJS as an HTTP layer; the longer-term idea is a 3DTilesRendererJS
-  **plugin** (in the spirit of its existing `ImplicitTilingPlugin`/`GaussianSplatPlugin`) that lets the
-  renderer consume COPC, Potree, streamed-SOG, LCC, etc. **directly** — any 3D-Tiles-consuming app
-  gets native support for these tiled formats without running a separate server process.
 
   **Design sketch (not implemented) — what's portable vs. Node-only.** Surveyed what each
   `packages/tile-server/*-live.js` adapter actually leans on:
@@ -215,18 +249,6 @@ evaluated before assuming this would be a novel effort.
   (`cache=full`) loops need a job-progress endpoint the viewer can poll (the timing-log modal already
   renders client milestones).
 
-## Tooling ideas
-
-- [ ] **Idea (not scoped): a local desktop companion app for the middleware.** A Tauri app, distinct in
-  shape from the `packages/tile-server` middleware above (that one is a live, no-storage, arbitrary-
-  `<fmt>` pass-through server) — this would be local-first and personal instead: pick any source dataset
-  in a format this repo already converts, convert it to 3D Tiles **on disk**, keep a local library of
-  converted datasets, and serve them from a local HTTP server so their URL can be copied elsewhere —
-  named explicitly for **Unreal Engine integration** (UE's Cesium-for-Unreal plugin, or similar, consumes
-  a 3D Tiles URL directly). A gallery/browse view of already-converted local datasets would make it read
-  as a personal dataset library, not a one-shot CLI wrapper. Purely an idea at this point — no design
-  work, no scoping, not started.
-
 ## Testing & fixtures
 
 - [ ] **Test fixtures from open data.** Pin the small, `sample-data/`-friendly open datasets this repo
@@ -246,18 +268,6 @@ evaluated before assuming this would be a novel effort.
   (see "`/extract`" above) was verified against georeferenced real-world tiles for LCC/SOG/RAD. Not yet
   separately verified: whether the same flip table holds for a **non-georeferenced** (local-frame, no
   ENU→ECEF root transform) source of each format — worth a dedicated pass before trusting it universally.
-
-## 3D Tiles tooling
-
-- [ ] **Real `3d-tiles-tools`: implicit↔explicit and glTF-to-3TILES packaging still missing.** The real,
-  unscoped `3d-tiles-tools` npm package is now an actual dependency (`packages/3dtiles-tools`) and its
-  tileset **upgrade** (1.0→1.1) is wired as `tool=upgrade-real` on `/3dtiles-tools` — see the Design log
-  for how that landed and why it's a batch-then-serve-from-cache operation (the real package only
-  supports local filesystem/`.3tz`/`.3dtiles` sources, no remote/streaming API). Still open: the same
-  real package's **implicit↔explicit** conversion and **glTF-to-3TILES packaging** operations aren't
-  wired to anything — worth the same `tool=<name>` treatment once there's a concrete need, following the
-  `upgrade-real` pattern (mirror a remote source to a local temp dir first if needed, run the real
-  package once, serve the result statically from a cache dir).
 
 ## Encoding / extract
 
@@ -295,17 +305,6 @@ evaluated before assuming this would be a novel effort.
 
 ## Format coverage
 
-- [ ] **3MX siblings** — add Bentley **ContextCapture / Scalable Mesh** (`.3sm`) next to 3MX
-  ([Bentley docs](https://docs.bentley.com/LiveContent/web/ContextCapture%20Help-v18/en/GUID-569C1E44-D86A-4942-9ABE-36C33FB5A7EB.html);
-  cf. [OctopusET/mxmxmx2tiles](https://github.com/OctopusET/mxmxmx2tiles)). Working 3MX test: Tende
-  village (dept06).
-- [ ] **I3S: remaining gaps.** Mesh **Draco** geometry compression has no decoder (gated); DDS/KTX2/
-  Basis-encoded textures have no decoder (JPEG/PNG base-color textures ARE embedded already); per-feature
-  attributes are dropped (no `EXT_mesh_features`/metadata mapping); the legacy per-node
-  `3dNodeIndexDocument` index (pre-1.7) isn't read; **Point** (symbol/instance) and **Building**
-  (composite) layers aren't handled (only `IntegratedMesh`/`3DObject`/`PointCloud`); only WGS84-geographic
-  vertex placement is implemented (**projected/vertical CRS** placement is not); and per-vertex
-  **normals are left in the source frame** (not re-oriented to ECEF — affects lit shading only).
 - [ ] **Spherical harmonics (view-dependent color) for Gaussian splats.** Every splat converter
   (RAD/LCC/SOG/GeoSplats) currently emits **DC-only** color — the source formats' higher-order SH bands
   are decoded-and-discarded (or never touched) on the way to a 3D Tiles GLB, so specular/view-dependent
@@ -357,35 +356,5 @@ evaluated before assuming this would be a novel effort.
     per-converter cost is likely the extra GLB payload size (degree-3 = 15 extra VEC3-float attributes
     per splat) more than decode complexity. This is a sketch to scope future work, not a commitment to
     a specific implementation order or timeline.
-
-### Inspected, no tiled splat/generic format found
-
-A quick pass over other capture/scanner ecosystems, looking for a *tiled* (multi-file, LOD-hierarchy)
-splat or generic point/mesh format worth adding an adapter for — none surfaced. Not deeply
-independently researched (a web-search-depth pass, not a spec audit like the sources in
-`docs-references/`), so treat as a starting point, not a verdict:
-- **Niantic Scaniverse** — exports single-file GLB/USDZ/OBJ/PLY splat or mesh scans; no multi-file tiled
-  hierarchy format found *today*. Worth revisiting: SPZ's own roadmap (see the "SPZ v5 (upcoming)"
-  entry in [Candidate source formats](/docs/guide/planning/candidate-source-formats-roadmap-not-yet-supported))
-  states v5 aims to add **spatial chunking and LOD** — Scaniverse is SPZ's reference exporter, so a
-  future Scaniverse export could plausibly become tiled once v5 ships.
-- **ESRI tiled data** beyond I3S (already supported) — didn't find another ESRI *tiled point-cloud/mesh*
-  format distinct from I3S worth a separate adapter. Note ESRI's **3D Tiles Server** product (distinct
-  from I3S) *does* publish Gaussian-splat 3D Tiles directly — see the I3S section above; that's not a
-  new format to adapt, it's already OGC 3D Tiles.
-- **Bentley/other Bentley services** — ContextCapture emits **3MX** (already supported); didn't find a
-  second Bentley tiled format beyond that and standard **Cesium 3D Tiles** (already the target format).
-- **Autodesk ReCap `.rcp`/`.rcs`** — already tracked as blocked (see the point-cloud adapter tiers
-  above): no open reader/writer, not itself a *tiled* container in the sense the other formats here are.
-- **Laser scanner vendors (Leica, Faro, Matterport)** — proprietary single-project registration formats
-  (Leica `.lgs`/e57 export, Faro `.fls`/`.fws`, Matterport's own cloud pipeline); no publicly documented
-  *tiled* multi-LOD format surfaced for any of the three.
-- **Gauzilla Pro** — a Gaussian-splat viewer/tool, not a distinct tiled storage format of its own (reads/
-  writes standard PLY/SPZ-family splat files as far as could be found).
-- **DJI Terra / DJI Reality** — DJI's photogrammetry/splat reconstruction software; ships a web viewer
-  at `3dviewer.dji.com` (the specific link checked was **stale/unreachable**, so this couldn't be
-  confirmed directly). Plausibly a *tiled HLOD* splat format given DJI Reality targets large drone-scale
-  captures (the same scale problem GeoSplats/RAD/LCC solve with HLOD), but unverified — flagged here as
-  a format worth investigating once a live viewer link is found, not a confirmed adapter target.
 
 ---
