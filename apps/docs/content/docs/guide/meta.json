@@ -3,6 +3,7 @@
     "supported-formats",
     "cli-usage",
     "architecture-caching",
+    "architecture-generic",
     "/api-reference",
     "existing-tilers",
     "viewer",

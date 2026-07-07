@@ -1,1 +1,0 @@
-{ "name": "ply-converter-host", "private": true, "dependencies": { "3dgs-ply-3dtiles-converter": "^0.5.7" } }
