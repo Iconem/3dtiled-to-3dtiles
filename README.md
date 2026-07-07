@@ -14,7 +14,7 @@ converters' live counterpart): point it at a `<format>` source URL and it serves
 *live*, so any 3D-Tiles-compatible client — browser/JS viewers, CesiumJS or its native plugins
 (Unreal, Unity, Nvidia Omniverse, Open-3d-Engine), GIS software (QGIS, ESRI etc), anything that speaks the OGC standard — can consume any of these tiled
 formats **without a pre-conversion step**, with tile-hierarchy/content **caching** and **prefetching**
-tunable per use case (`cache=none|hierarchy|all`). `viewer.html` (CesiumJS + 3DTilesRendererJS) is the
+tunable per use case (`cache=none|hierarchy|all`). The viewer (CesiumJS + 3DTilesRendererJS) is the
 reference client, and doubles as a **bbox + geometric-error-aware crop/extract** tool (`/extract/*`) for
 pulling a sub-region, with user-controlled Geometric Error target precision, of any of these formats back out as LAS/COPC/GLB/SPZ/SOG/PLY.
 

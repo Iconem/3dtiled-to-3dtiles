@@ -15,24 +15,10 @@
     "dev:docs": "pnpm --filter docs dev",
     "serve:tiles": "node packages/tile-server/server.js --port 3001",
     "serve:live": "node packages/tile-server/server.js --port 3001",
-    "build": "pnpm --filter 3d-tiled build",
-    "dev:legacy": "concurrently -n web,tiles -c cyan,magenta \"npm:dev:web-legacy\" \"npm:serve:tiles\"",
-    "dev:web-legacy": "vite",
-    "build:legacy": "vite build",
-    "serve:legacy": "vite preview --port 3000"
-  },
-  "dependencies": {
-    "3d-tiles-renderer": "0.4.28",
-    "3d-tiles-rendererjs-3dgs-plugin": "0.1.13",
-    "@sparkjsdev/spark": "2.1.0",
-    "cesium": "1.142.0",
-    "sql.js": "^1.14.1",
-    "three": "0.180.0"
+    "build": "pnpm --filter 3d-tiled build"
   },
   "devDependencies": {
-    "concurrently": "^9.1.0",
-    "vite": "^6.0.0",
-    "vite-plugin-cesium": "^1.2.23"
+    "concurrently": "^9.1.0"
   },
   "pnpm": {
     "onlyBuiltDependencies": [

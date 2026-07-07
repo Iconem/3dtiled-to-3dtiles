@@ -134,18 +134,18 @@ Workspace-only dependency: `3dtiles-convert-core` (shared octree/geo helpers).
 | `vite-plugin-cesium` | Cesium static asset copying |
 | `typescript` | type checking |
 
-### Legacy `vanilla-viewer.html` (root)
+### Legacy `vanilla-viewer.html`
 
-The repo-root `viewer.html` (the original standalone page, distinct from `apps/viewer`'s own bundled
-copy) shares the same runtime dependencies listed above — Cesium, three, `3d-tiles-renderer`, the 3DGS
-plugin, SparkJS, `vite-plugin-cesium` — as genuine npm packages bundled by Vite (`vite-plugin-cesium`
-copies Cesium's static assets; `three` is deduped via `resolve.dedupe`), **not** CDN-loaded. See
-[Viewer](/docs/guide/viewer) for how it's served.
+The original, pre-React standalone page now lives entirely inside `apps/viewer/vanilla-viewer.html`,
+built as a second Vite entry point alongside the React app — it shares that package's own dependencies
+listed above (Cesium, three, `3d-tiles-renderer`, the 3DGS plugin, SparkJS, `vite-plugin-cesium`) as
+genuine npm packages bundled by Vite (`vite-plugin-cesium` copies Cesium's static assets; `three` is
+deduped via `resolve.dedupe`), **not** CDN-loaded. There is no separate root copy or root-level deps for
+it anymore. See [Viewer](/docs/guide/viewer) for how it's served.
 
-Dev-tooling-only root deps (`vite`, `concurrently`, `sql.js` for `.3dtiles` package reading) don't
-carry their own table — `concurrently` runs `pnpm dev`'s viewer+docs+tile-server processes in
-parallel, `vite` is shared build tooling, `sql.js` is used both by the legacy viewer's package reading
-and by `packages/convert` (see above).
+The only root-level dev dependency is `concurrently`, which runs `pnpm dev`'s viewer+docs+tile-server
+processes in parallel; `sql.js` (used for `.3dtiles` package reading) lives in `packages/convert`'s own
+`package.json` (see above), not the root.
 
 ## Docs site
 

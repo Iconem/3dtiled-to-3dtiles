@@ -1,3 +1,8 @@
+---
+title: "Architecture: Generic"
+description: "Monorepo layout, Parallelism model, browser readiness"
+---
+
 # Architecture — 3dtiled-to-3dtiles monorepo
 
 ## Goals

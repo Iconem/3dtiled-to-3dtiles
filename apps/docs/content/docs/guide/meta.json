@@ -4,7 +4,7 @@
     "cli-usage",
     "architecture-caching",
     "architecture-generic",
-    "/api-reference",
+    "[API Playground (embedded)](/docs/api-reference)",
     "existing-tilers",
     "viewer",
     "todo-future-work",

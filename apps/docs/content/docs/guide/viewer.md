@@ -24,14 +24,11 @@ below for the app itself.
 The **original**, pre-React reference viewer — kept as a from-scratch fallback that needs nothing but
 Vite (no Node backend beyond the tile-server, no component framework). All its deps (Cesium, three,
 3d-tiles-renderer, @sparkjsdev/spark, the 3DGS plugin) are **npm dependencies bundled by Vite — no CDN,
-works fully offline**. Served at `/vanilla-viewer` by `apps/viewer`'s own dev server/build (above) — the
-repo-root copy of the same file (`viewer.html`) also still runs completely standalone via a separate,
-untouched legacy path if you want zero dependency on `apps/viewer` even existing:
-
-```sh
-pnpm run dev:legacy    # vite dev server → http://localhost:3000/ (redirects to viewer.html; serves sample-data/)
-# pnpm run build:legacy  # static offline bundle in dist/
-```
+works fully offline**. Served at `/vanilla-viewer` by `apps/viewer`'s own dev server/build (above),
+sharing that package's own `package.json` deps and `vite.config.ts`. (There used to be a second,
+repo-root copy of this file with its own standalone Vite config and duplicated dependencies in the root
+`package.json` — removed once `apps/viewer` folded `vanilla-viewer.html` into its own build; `apps/viewer`
+is now the only place it lives.)
 
 pnpm uses `pnpm-workspace.yaml` + `.npmrc` (`node-linker=hoisted`, so the meta-converter's
 `import('rad-to-3dtiles')` resolves like npm's flat layout); npm uses the `workspaces` field. Either works.

@@ -48,8 +48,8 @@ jobs:
           labels: ${{ steps.meta.outputs.labels }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
-          # Only consumed by the `viewer` target's ARG (see Dockerfile) — harmlessly ignored by the
-          # other two matrix targets, which never declare that ARG. Bakes the production tile-server's
-          # own Traefik-routed domain into the published viewer image's static bundle.
-          build-args: |
-            VITE_TILE_SERVER_URL=https://3dtiler.prod.heritagewatch.ai
+          # No VITE_TILE_SERVER_URL build-arg here on purpose: per-deployment tile-server/docs origins
+          # are configured at container-start via the RUNTIME TILE_SERVER_URL/DOCS_URL env vars (see
+          # Dockerfile's viewer-build stage comment + apps/viewer/docker-entrypoint.sh's env-config.js
+          # regeneration) — a published, reusable image should not have one deployment's domain baked
+          # into it at build time.
