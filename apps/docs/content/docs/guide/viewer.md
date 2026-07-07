@@ -1,0 +1,273 @@
+---
+title: "Viewer (Cesium & 3DTRJS)"
+description: "Running this repo day-to-day: two ports, the vanilla-viewer, and the standalone React viewer app."
+---
+
+### Running this repo day-to-day: two ports
+
+```sh
+pnpm install    # installs the whole workspace
+pnpm dev        # http://localhost:3000  (3D Tiled — the React app, + /vanilla-viewer + /docs folded in)
+                # http://localhost:3001  (tile-server middleware — the only other port you need)
+```
+
+`pnpm dev` runs `apps/viewer`'s own Vite dev server (`dev:viewer`) alongside the tile-server
+(`serve:tiles`) and the Fumadocs site's own Next dev server (`dev:docs`, port 3002 — that process still
+runs, it's just no longer something you navigate to directly: `apps/viewer`'s Vite config proxies
+`/docs` and its asset/API routes through to it). `apps/viewer`'s own build also folds in the legacy
+standalone `vanilla-viewer.html` (below) as a second page at `/vanilla-viewer`, so it ships in the same
+`dist/` and needs no separate server either. See [3D Tiled](#3d-tiled-standalone-react-viewer-appsviewer-shadcnui-r3f-one-push-wip-first-pass)
+below for the app itself.
+
+### `vanilla-viewer.html` — offline, self-contained via Vite, no React/build tooling needed
+
+The **original**, pre-React reference viewer — kept as a from-scratch fallback that needs nothing but
+Vite (no Node backend beyond the tile-server, no component framework). All its deps (Cesium, three,
+3d-tiles-renderer, @sparkjsdev/spark, the 3DGS plugin) are **npm dependencies bundled by Vite — no CDN,
+works fully offline**. Served at `/vanilla-viewer` by `apps/viewer`'s own dev server/build (above) — the
+repo-root copy of the same file (`viewer.html`) also still runs completely standalone via a separate,
+untouched legacy path if you want zero dependency on `apps/viewer` even existing:
+
+```sh
+pnpm run dev:legacy    # vite dev server → http://localhost:3000/ (redirects to viewer.html; serves sample-data/)
+# pnpm run build:legacy  # static offline bundle in dist/
+```
+
+pnpm uses `pnpm-workspace.yaml` + `.npmrc` (`node-linker=hoisted`, so the meta-converter's
+`import('rad-to-3dtiles')` resolves like npm's flat layout); npm uses the `workspaces` field. Either works.
+
+`vite-plugin-cesium` copies Cesium's Workers/Assets/Widgets and sets `CESIUM_BASE_URL`; `three` is
+de-duplicated (`resolve.dedupe`) so SparkJS + the 3DGS plugin share one instance (replacing the old
+esm.sh `?external=three` trick). Verified: **0 CDN requests** — Cesium, the 3DTRJS globe, and Gaussian
+splat streaming all load from `node_modules`. The dev server serves `sample-data/output/**` too, so the
+built-in presets (which point at `http://localhost:3000/sample-data/...`) resolve against the same origin.
+
+Additional online viewers:
+- **COPC**: [viewer.copc.io](https://viewer.copc.io), [lidar-viewer.gishub.org](https://lidar-viewer.gishub.org)
+- **3D Tiles**: CesiumJS sandbox, [3D-Tiles-RendererJS](https://github.com/NASA-AMMOS/3DTilesRendererJS)
+
+`viewer.html` includes a **3DTilesRendererJS mode** (toggle the `3DTRJS` button) backed by Three.js.
+For Gaussian splat streaming, it uses [3D-Tiles-RendererJS-3DGS-Plugin](https://github.com/WilliamLiu-1997/3D-Tiles-RendererJS-3DGS-Plugin)
+which streams `.rad`/SPZ content via `@sparkjsdev/spark`:
+
+```sh
+npm install 3d-tiles-rendererjs-3dgs-plugin three 3d-tiles-renderer @sparkjsdev/spark
+```
+
+```js
+import { TilesRenderer } from '3d-tiles-renderer';
+import { GaussianSplatPlugin } from '3d-tiles-rendererjs-3dgs-plugin';
+
+const tiles = new TilesRenderer('http://localhost:3000/tileset.json');
+tiles.registerPlugin(new GaussianSplatPlugin({
+  renderer, scene,
+  minRaycastOpacity: 0.1,
+  sparkRendererOptions: { focalAdjustment: 2 },
+}));
+scene.add(tiles.group);
+```
+
+> The viewer bundles this plugin (and SparkJS) as local npm deps via Vite — shared `three@0.180`
+> through `resolve.dedupe`, no CDN. `npm run dev` serves it offline.
+
+`viewer.html` consolidates all controls into a right **sidebar** (Renderer · Basemap · Tileset &
+LoD · Navigation · Local frame · Ion · Snippet), including a **Max SSE (px)** input that drives
+CesiumJS `maximumScreenSpaceError` and 3DTRJS `errorTarget`, and a **🪲 Debug tiles** toggle that
+draws bounding volumes coloured by octree depth in both renderers. The preset bar includes the
+**◈ GSplat 1/2** reference splat tilesets from the
+[3DTilesRendererJS-3DGS-Plugin](https://github.com/WilliamLiu-1997/3DTilesRendererJS-3DGS-Plugin)
+demo data (PLY→3D Tiles). For deeper tileset inspection (tree, bounds, per-tile stats) alongside
+this viewer, see [3DTiles-Inspector](https://github.com/WilliamLiu-1997/3DTiles-Inspector).
+
+### 3D Tiled — standalone React viewer (`apps/viewer`), shadcn/ui, R3F, one push, WIP first pass
+
+A ground-up port of `viewer.html` into a real React app, named **3D Tiled** — the repo-root `viewer.html`
+stays as-is, unaffected; this app carries its own copy (`vanilla-viewer.html`, served at `/vanilla-viewer`)
+instead of depending on the legacy path. `pnpm --filter 3d-tiled dev` → `http://localhost:3000` — this
+IS `pnpm dev` now (added to `.claude/launch.json` as `"viewer"`, `dev:viewer` root script; see "Running
+this repo day-to-day" above). Stack: Vite + React 19 + TypeScript +
+Tailwind v4, shadcn/ui (hand-vendored `src/components/ui/*`, default dark theme, not a port of
+viewer.html's own hand-tuned palette), **nuqs** for the shareable URL-param slice (format/mode/cache/
+prefetch/transform/tiling/renderer/preset — the address bar is a bookmarkable link to a given view;
+the fully-resolved tileset URL itself deliberately stays out of it, see `state/urlState.ts`'s comment
+for why), **Zustand** for everything else (crop bbox, camera-derived readouts, status/timing log).
+
+- **CesiumJS side** (`components/Viewport/CesiumViewer.tsx`): plain imperative `Cesium.Viewer` in a
+  `useEffect`, functionally identical to viewer.html's `initCesium()`. Resium was tried first per the
+  original plan; dropped in favor of this — see the file's own comment.
+- **3DTRJS side** (`components/Viewport/ThreeDTRjsViewer.tsx`): uses `3d-tiles-renderer`'s **official
+  `/r3f` export** (`<TilesRenderer>`, `<TilesPlugin>`, `<GlobeControls>`, `<EnvironmentControls>`,
+  `<CameraTransition>`) instead of hand-rolled three.js — a real capability of the upstream package,
+  not previously used anywhere in this repo. `GaussianSplatPlugin` registers only for splat assets.
+  drei's `<TransformControls>` on a box mesh is the crop-box gizmo (first pass: translate mode,
+  approximate — see the file's `CropGizmo` comment). No imagery overlay on the background globe yet
+  (a plain wireframe sphere placeholder) and no auto-fly-to-loaded-content — both documented gaps.
+- Both renderers stay mounted (CSS-hidden, not unmounted) when you switch the RENDERER pill — matches
+  viewer.html's `#cesium-container`/`#three-container` behavior — and the last-loaded tileset URL
+  replays into whichever one you switch to (`App.tsx`'s `url.renderer` effect).
+
+**Real bugs found and fixed while building this** (all upstream/tooling issues, not React-port
+artifacts — kept here since they'd bite anyone doing the equivalent Vite+Cesium+pnpm-monorepo setup):
+- `vite-plugin-cesium`'s default `cesiumBuildRootPath` is the **relative** path
+  `node_modules/cesium/Build`, resolved against the dev server's cwd. Works for the root app (cesium
+  is right there) but not a nested `apps/*` package under pnpm's hoisting (cesium lives in the
+  **monorepo root**'s `node_modules`, not `apps/viewer/node_modules`) — every Cesium static asset
+  (`Widgets/widgets.css`, the skybox JPGs, `approximateTerrainHeights.json`, …) 404'd. Worse: Vite's
+  default SPA fallback served `index.html` (200, `text/html`) instead of a real 404, and Cesium's
+  WebGL texture pipeline tried to decode that HTML as an image — crashing the **entire render loop**
+  with an opaque `InvalidStateError: the source image could not be decoded`, not a per-asset failure.
+  Fixed by pointing the plugin at cesium's actual resolved location (`vite.config.ts`) and adding
+  `appType: 'mpa'` (same fix the root app's `vite.config.mjs` already documents for a related
+  tile-server gotcha) so a real 404 surfaces instead of being masked.
+- The raw `mt1.google.com` "Google Hybrid" tile hotlink used as the default basemap sometimes answers
+  with an HTML error page instead of image bytes, hitting the exact same Cesium crash independently —
+  default basemap changed to OSM (a properly public tile service); Google stays selectable.
+- TopBar's mount effect only auto-loaded a preset when the URL had **none** selected — meaning a
+  reloaded/shared link (which always has `?preset=…` from the previous session) silently never
+  fired the actual tileset load, since the resolved URL is deliberately not persisted (see above).
+
+**Not yet done** (first-pass, tracked as follow-up, not attempted to fully match viewer.html feature-
+for-feature in one pass): 3DTRJS auto-fly-to-content on load, 3DTRJS basemap imagery overlay, Ion
+asset loading on the 3DTRJS side, Cesium `shadeless`/brightness shading ported but not yet re-verified
+against baked-lighting photogrammetry content, crop-gizmo precision (approximate ENU conversion, no
+face-handle resize yet — translate only).
+
+---
+
+## Live demo datasets — what's behind each viewer pill
+
+> This is **not** the same as [Sample Data](/docs/guide/sample-data), which covers the repo's own
+> bundled/downloadable `sample-data/` directory (curl commands, local conversion). This section is
+> specifically "here's what's behind each clickable pill in the live viewer" — many of the same
+> upstream sources are shared between the two, but this section's job is the pill → source mapping.
+
+The viewer's top-bar preset pills (COPC, Potree, SOG, LCC, GeoSplats, RAD, 3D Tiles, Packages, I3S,
+3MX, Bing) each carry one or more named, clickable datasets, defined in `apps/viewer/src/lib/formats.ts`.
+The sections below document exactly what each one is and where it comes from, pulled directly from that file.
+
+### COPC ☁
+
+Point-cloud octree, streamed live via `/stream?format=copc`.
+
+| Pill | Source |
+|------|--------|
+| **Autzen** | `https://s3.amazonaws.com/hobu-lidar/autzen-classified.copc.laz` |
+| **Eiffel** | `https://data.geopf.fr/telechargement/download/LiDARHD-NUALID/NUALHD_1-0__LAZ_LAMB93_KE_2025-06-06/LHD_FXX_0648_6863_PTS_LAMB93_IGN69.copc.laz` |
+| **Texas** | `https://data.opengeos.org/USGS_LPC_TX_CoastalRegion_2018_A18_stratmap18-50cm-2995201a1.copc.laz` |
+
+### Potree 🌲
+
+Point-cloud octree (1.x and 2.0), streamed live via `/stream?format=potree`.
+
+| Pill | Source |
+|------|--------|
+| **Lion 2.0** | `https://potree.org/pointclouds/lion/metadata.json` — potree.org's own hosted Potree-2.0 build of the lion scan |
+| **Lion Takanawa 1.x** | `https://raw.githubusercontent.com/potree/potree/develop/pointclouds/lion_takanawa/cloud.js` — potree/potree's own bundled example |
+| **Lion Takanawa LAZ** | `https://raw.githubusercontent.com/potree/potree/develop/pointclouds/lion_takanawa_laz/cloud.js` — same scan, tiled-LAZ nodes |
+| **Vol Total** | `https://raw.githubusercontent.com/potree/potree/develop/pointclouds/vol_total/cloud.js` — Potree's own "Sorvilier" Swiss survey (courtesy sigeom sa); label kept from the original preset name |
+| **Geghard (iconem)** | `https://api.iconem.com/s/rIdPkRfOmEdRtgsoO08TgNt9MSxh-woC/cloud.js` |
+
+### SOG ⬢
+
+Streamed-SOG (PlayCanvas LOD splats), streamed live via `/stream?format=sog`.
+
+| Pill | Source |
+|------|--------|
+| **Skatepark** | `https://code.playcanvas.com/examples_data/example_skatepark_02/lod-meta.json` — PlayCanvas's own SOG example asset |
+| **Roman Parish** | `https://code.playcanvas.com/examples_data/example_roman_parish_02/lod-meta.json` — PlayCanvas's own SOG example asset |
+| **Arrival jaffa3 (.lod)** | `https://ugc.arrival.space/71585765/14ae36863868a5f74fbc29389e156bc5f18e0d7a612af78c492cd84cfa4a9c44_jaffa3_1777965648677_LOD/lod-meta.json` — Arrival.Space's `.lod` format, which is byte-shape-identical to streamed-SOG, so the SOG adapter reads it directly |
+
+### LCC ◆
+
+XGRIDS Lixel CyberColor splats, streamed live via `/stream?format=lcc`.
+
+| Pill | Source |
+|------|--------|
+| **Big Mirror** | `https://raw.githubusercontent.com/willeastcott/assets/main/lcc/bigmirror/meta.lcc` |
+| **Guan Temple (zip)** | `https://da9i2vj1xvtoc.cloudfront.net/lcc-pub/fine_v2/Guan_Temple.zip` — whole LCC file set bundled as one zip (XGRIDS' own CDN); `lcc-live.js` range-reads the zip entries directly |
+
+> A third dataset, "PentHouse", was removed 2026-07-06: its bucket is missing the required `Data.bin`
+> (confirmed `index.bin`'s own LOD offset table references byte ranges up to ~316 MB into it, but only
+> a much smaller `environment.bin` actually exists there) — every tile request 404s, and no complete
+> public mirror was found. Re-add if a fixed/alternate host turns up.
+
+### RAD ✦
+
+SparkJS BhattLod Gaussian-splat LoD, streamed live via `/stream?format=rad`.
+
+| Pill | Source |
+|------|--------|
+| **Coit** | `https://wlt-ai-cdn.art/spark-2.0/rad/coit-40m-sh1-lod.rad` — William Liu's own CDN (the RAD/BhattLod format author) |
+| **Tastier** | `https://wlt-ai-cdn.art/tastier_rad_500/0524c1a1-abf2-4969-ae40-9981ee836536_500k-lod.rad` — same CDN |
+| **WIP PLY-RAD · Elevator** | `input/PLY/Elevator-lod.rad` — local sample-data only; no public source found (private/internal PLY-derived test asset) |
+| **WIP PLY-RAD · Svirnas** | `input/PLY/SvirnasAlyt-lod.rad` — local sample-data only; no public source found |
+
+### I3S 🧱
+
+Esri Indexed 3D Scene Layer (mesh and point-cloud layers), streamed live via `/stream?format=i3s`.
+
+| Pill | Source |
+|------|--------|
+| **NYC Buildings (SceneServer)** | `https://tiles.arcgis.com/tiles/P3ePLMYs2RVChkJx/arcgis/rest/services/Buildings_New_York_3D/SceneServer` — Esri's own official, live-hosted "Buildings New York 3D" service (item `3653d502714248f8b81a34faba956bdb`, owner `esri_3d`, built from NYC DoITT's 2014 building survey) |
+| **ArcGIS Rancho Mesh v17 (.slpk)** | `https://www.arcgis.com/sharing/rest/content/items/e0dfde9f11054aac8e15edbb8aa1631d/data` — the v17 dataset ESRI's own Scene Viewer showcases publicly (Fire Station No. 3), with known-good textures |
+| **ArcGIS Rancho Mesh v17 (SceneServer)** | `https://tiles.arcgis.com/tiles/z2tnIkrLQ2BRzr6P/arcgis/rest/services/Rancho_Mesh_v17/SceneServer` |
+| **ArcGIS Moro Bay LiDAR (.slpk)** (point cloud) | `https://www.arcgis.com/sharing/rest/content/items/496552d059644b4892c51ad06bdba8e2/data` — LEPCC-compressed positions, decoded live |
+| **ArcGIS Moro Bay LiDAR SceneServer** (point cloud) | `https://tiles.arcgis.com/tiles/z2tnIkrLQ2BRzr6P/arcgis/rest/services/Moro_Bay_LiDAR/SceneServer` |
+| **ArcGIS USGSNYC 2014 LiDAR SceneServer** (point cloud) | `https://tiles.arcgis.com/tiles/z2tnIkrLQ2BRzr6P/arcgis/rest/services/USGSNYC_2014_LiDAR/SceneServer` |
+
+See [`i3s-spec.md`](/docs/references/i3s-spec) and the I3S section of [CLI usage](/docs/guide/cli-usage)
+for the LEPCC decode / texture-embedding details behind these.
+
+### 3D Tiles ◈ (DIRECT presets)
+
+Already-3D-Tiles sources, loaded directly (no conversion/streaming adapter involved).
+
+| Pill | Source |
+|------|--------|
+| **3DT · GSplat 1 (WL)** | `https://raw.githubusercontent.com/WilliamLiu-1997/3DTilesRendererJS-3DGS-Plugin/main/data/gaussianSplat1/tileset.json` |
+| **3DT · GSplat 2 (WL)** | `https://raw.githubusercontent.com/WilliamLiu-1997/3DTilesRendererJS-3DGS-Plugin/main/data/gaussianSplat2/tileset.json` |
+| **3DT · Strasbourg** | `https://s3.eu-west-2.wasabisys.com/ems-sgct-photomaillage/ODACIT/EMS_PM2022/tileset.json` |
+| **3DT · Clermont** | `https://3d.craig.fr/datasets/Clermont/3dtiles/tileset.json` |
+| **3DT · Lille** | `https://webimaging.lillemetropole.fr/externe/maillage/2016_mel_10cm/3dtiles/tileset.json` |
+| **3DT · Marseille (root.json)** | `https://d3h9zulrmcj1j6.cloudfront.net/Marseille_Cesium/root.json` |
+| **3DT · CesiumGS discrete-LOD** | `https://raw.githubusercontent.com/CesiumGS/3d-tiles-samples/main/1.0/TilesetWithDiscreteLOD/tileset.json` |
+| **3DT · Google Photorealistic** | `https://tile.googleapis.com/v1/3dtiles/root.json?key=…` (Google's public photorealistic 3D Tiles) |
+| **3DT · ESRI Portcoast (mesh)** | `https://tiles.arcgis.com/tiles/V6ZHFr6zdgNZuVG0/arcgis/rest/services/Portcoast_industrial/3DTilesServer/tileset.json` |
+| **3DT · ESRI Mantes-la-Jolie (splat)** | `https://tiles.arcgis.com/tiles/uujCiiEZAflDbdxE/arcgis/rest/services/Collégiale_Mantes_la_Jolie_Drone_3D_Gaussian_Splat/3DTilesServer/tileset.json` — ESRI's ArcGIS 3D Tiles Server publishing `KHR_gaussian_splatting`/SPZ splats directly, outside I3S |
+| **3DT · Agisoft Jam (Cloud)** | Agisoft Cloud's `cloud.agisoft.com` tileset, routed through this repo's `/proxy` endpoint (Agisoft sends no CORS headers, so a browser can't fetch it directly) |
+
+### Packages 📦 (Tools mode)
+
+`.3tz`/`.3dtiles` self-contained packages, served in-place via `/3dtiles-self-contained`.
+
+| Pill | Source |
+|------|--------|
+| **tastier .3tz (ZIP+index)** | `sample-data/input/3DTILES-PACKAGES/tastier.3tz` (bundled) |
+| **tastier .3dtiles (SQLite)** | `sample-data/input/3DTILES-PACKAGES/tastier.3dtiles` (bundled) |
+| **loaders.gl test.3tz (mesh)** | `sample-data/input/3DTILES-PACKAGES/loadersgl-test.3tz` (bundled) |
+
+### GeoSplats ✨, Bing 3D 🗺, 3MX 🏛
+
+These pseudo-format pills route to their own live adapters (`/stream?format=geosplats`, `/bing`,
+`/threemx`) but currently have no named preset assets wired into `formats.ts` — they're driven by a
+manual URL entry in the viewer instead. See [`maptiler-geosplats.md`](/docs/references/maptiler-geosplats),
+the [Bing Maps 3D](/docs/guide/streaming-architecture-design-log) section of the design log,
+and `streaming-adapter-plans.md` for what each adapter does.
+
+### Tools mode datasets (implicit-to-explicit / upgrade)
+
+The **⚙ Tools** mode's demo datasets (`TOOLS_DATASETS` in `formats.ts`), used to exercise the
+tileset-level transforms rather than a format converter:
+
+| Tool | Pill | Source |
+|------|------|--------|
+| `implicit-to-explicit` | Utrecht 3D (QT+b3dm→glb) | `https://bertt.github.io/cesium_3dtiles_samples/samples/utrecht3d/tileset.json` |
+| `implicit-to-explicit` | Delaware 1.1 (QT+glb+metadata) | `https://bertt.github.io/cesium_3dtiles_samples/samples/1.1/delaware/tileset.json` |
+| `implicit-to-explicit` | Grenoble Trees 1.1 (instanced glb) | `https://bertt.github.io/cesium_3dtiles_samples/samples/1.1/grenoble_trees/tileset.json` |
+| `implicit-to-explicit` | Potree · Lion 2.0 (octree→explicit) | this repo's own converted output, `output/potree/lion_p2/tileset.json` |
+| `implicit-to-explicit` | COPC · Autzen (octree→explicit) | this repo's own converted output, `output/copc/autzen-3dtiles-from-copc/tileset.json` |
+| `upgrade` | Lille Pyramid (b3dm→glb) | `https://webimaging.lillemetropole.fr/externe/maillage/2016_mel_10cm/3dtiles/pyramid/tileset.json` |
+
+These same bertt.github.io / CesiumGS sample tilesets are documented in more depth (tileset structure,
+implicit-tiling schemes) on the [Sample Data](/docs/guide/sample-data) page's
+"Open-Data 3D Tiles sample datasets" section.

@@ -82,67 +82,13 @@ harmonization below targets the *live* path.
 > premature unification would risk. It's noted here as the natural endgame, to be taken per-format only
 > when there's a concrete reason.
 
-### Harmonization plan (live path) — chosen scope: shared services + unified live
-
-Per-format `*-live.js` files currently duplicate cross-cutting code: georef math (`llhToEcef` +
-`enuMatrix` in copc/potree/lcc/i3s — 4 copies), CORS/fetch/`rangeGet`, near-identical octree tileset
-builders (copc & potree), `serveTileGlb` origin-shift+swizzle, and `handle<Fmt>` routing boilerplate.
-
-Target — a **`FormatDriver`** capturing only format-specific knowledge, with generic machinery around it:
-
-```
-FormatDriver (per format — the ONLY thing that varies)
-  open(source)            → { rootBox, transform, scheme: octree|quadtree|explicit, caps }
-  availability(coordBlock)→ which (L,x,y,z) exist        (octree/quadtree; loads chunks lazily)
-  children(nodeId)        → [{ id, box, geometricError, hasContent }]   (explicit)
-  content(nodeId)         → { positions|mesh|splat buffers }   → shared GLB encoder
-
-Generic services (core/):
-  core/geo.js        ENU/ECEF + proj4 georef            (kills the 4× duplication)
-  core/source.js     Source: .range / .ranges(parallel) / .full, probe 206 once
-  core/octree.js     implicit tileset + subtree builder, coord↔box   (copc+potree share)
-  core/explicit.js   N-level fragment builder + external refs        (rad+i3s share)
-  core/glb.js        origin-shift + swizzle + points/mesh/splat encode
-  core/serve.js      LiveServer(driver): root + subtree + tile + fragment + prefetch
-  core/materialize.js  wraps a driver by cache scope: none | hierarchy | full
-  core/http.js       one route matcher for every format
-```
-
-`prefetch=N` generalizes COPC's fire-and-forget warmup to *every* lazy format and makes it a dial —
-this is the answer to "combine the benefits of lazy and eager."
-
-### Endpoint rework — **done** (2026-07-02)
-
-One primary endpoint, dispatching **in-process** (no redirect — the old 307 to `/stream`/`/convert`
-this section originally proposed was replaced by a direct call once `/stream` learned to read `cache=`
-itself, so the query string just carries through unchanged):
-
-```
-GET /tiles/tileset.json?url=<SRC>&format=<auto|copc|potree|sog|lcc|rad|i3s|package>
-                         &cache=<none|hierarchy|full>   &prefetch=<N>   &tiling=<implicit|explicit>
-
-cache=none|hierarchy → /stream (same cache= param)   cache=full → /convert
-```
-
-The old format-pinned aliases (`/copc`, `/potree`, `/sog`, `/lcc`, `/rad`, `/i3s`) are **gone** — they
-were a strict subset of what `/stream/tileset.json?format=<fmt>` already did (verified: for COPC/Potree
-they didn't even forward `hierarchy`/`prefetch`, so `cache=hierarchy` was silently unreachable through
-them). `/3dtiles-tools` stays as its own endpoint (a tileset-level *transform*, not a format converter).
-
-**Not yet done** (see [TODO / Future work](#todo--future-work)): live `tiling=explicit` routing
-*through* the existing `implicit-to-explicit` tool for octree formats (COPC/Potree), so the LIVE
-`/stream?tiling=explicit` path shares one explicit-tiling code path instead of each octree adapter
-having its own bespoke `buildTilesetExplicit`. What shipped now is more modest:
-- Potree 1.x's `tiling=explicit` was simplified to fully materialize the tree in one response (no more
-  per-format lazy-fragment continuation needing its own routes).
-- RAD and I3S (2026-07-02): removed their lazy-fragment continuation entirely (`/stream/rad/subtree/`,
-  `/stream/i3s/node|tile/…&lazy=1`) — neither format has a persisted spatial index to make a partial
-  read meaningfully cheaper than a full eager scan, so `cache=none`/`cache=hierarchy` are now
-  equivalent for both, always fully materializing (same simplification as Potree 1.x above).
-- **Offline-only**, not the live path above: `viewer.html`'s Tools → `implicit-to-explicit` demo now
-  includes one Potree and one COPC example, pointing the *existing* tool directly at their prebuilt
-  octree output — this demonstrates the tool against our own formats but doesn't change how live
-  `/stream?tiling=explicit` builds its tree.
+> **Harmonization plan, endpoint rework, and phasing** — the design discussion for *how* the live path
+> got harmonized (the `FormatDriver` sketch, the shared `core/` services, the endpoint consolidation,
+> and the chosen Phases 1–3 rollout) has moved into the
+> [Design log](/docs/guide/streaming-architecture-design-log) as a single continuous narrative, since
+> it's a historical record of a completed migration rather than an ongoing architectural concern. The
+> live `tiling=explicit` routing-through-`implicit-to-explicit` item that was still open there is
+> tracked in [TODO / Future work](/docs/guide/todo-future-work).
 
 ### Factory / composability ideas (future)
 
@@ -211,77 +157,26 @@ Composability goal: `source → convert → [centroids] → [gltf: draco/ktx2 de
 > no native binary. Draco/meshopt decode use the **documented** `draco3dgltf` / `meshoptimizer` dependency
 > registration (glTF-Transform deliberately doesn't bundle those WASM decoders).
 
-#### Future work (noted, not yet built)
-
-- **Encode ops** — **done**: geometry (`/stream?transform=meshopt|draco`) AND **KTX2 textures
-  in-process** (`/stream?transform=ktx` [ETC1S] · `ktx-uastc` [UASTC]; `compressGlb({ktx,uastc})`) via the
-  **`ktx2-encoder` WASM basis encoder** + our pngjs/jpeg-js source decoder — **no native `toktx`**. Still
-  to add: **WebP** texture encode (needs a WASM webp encoder; `textureCompress(webp)` would pull `sharp`),
-  `simplify` / `weld` / `quantize`, and exposing encode on the `/gltf` proxy (not just `/stream`).
-- **`rtc_center` / decompress for ingestion** — apply per-tile to *existing remote 3D Tiles* so consumers
-  that can't read Draco/KTX2/`CESIUM_RTC` (e.g. blender **BLOSM**) can load them.
-- **Bing `td1` → explicit lazy fragments — DONE** — `/bing` reads Bing's `td1` implicit manifest + `st`
-  subtree availability and emits **explicit** 3D Tiles fragments with web-mercator-correct `region`s (4
-  faces = quadrants; lon linear; lat = atan(sinh(mercator-y))), flipping `y→reverseY` to fetch
-  `mtx`/`st` from Bing. This replaces both the old `mtx<quadkey>` probe (couldn't find Bing's deep-only
-  tiles) and a naive implicit passthrough (Cesium can't do `MICROSOFT_webmercator_subdivision`, so it
-  culled deep tiles). No API key needed. Verified content reaches Rome at 12.57°E/41.90°N. Related:
-  [s1dny/bing-maps-tile-downloader](https://github.com/s1dny/bing-maps-tile-downloader/) — offline
-  downloader for the same Bing `tf=3dv4` tiles (vs. our live `td1` → 3D Tiles proxy).
-- **Browser-native bbox crop / subsample extract** — pull a cropped/decimated copy of a tiled asset
-  (point cloud, mesh, or splat) by an OBB defined in the viewer — BLOSM-style but JS/browser-native.
-  See [[dump-tiles-feature-idea]] (memory). **Refinement-aware traversal**: for **ADD** octrees (COPC/Potree)
-  accumulate all points down to the desired geometric error within the OBB; for **REPLACE** trees (3D Tiles
-  mesh) descend only where a parent's GE still exceeds the target. **Point clouds** → **hand-written LAS**
-  (streamable, O(1) RAM even for 500 GB via header back-patch — `core/las-writer.js`, built) → shell to
-  **`pdal writers.copc` / untwine** (out-of-core) for LAZ/COPC. **Meshes** → merge tile GLBs (geometry+UV+
-  texture) via glTF-Transform → a binary mesh (glb/USD/USDZ). No JS/WASM LAS *writer* exists (node-las is
-  archived; entwine/untwine are C++-only) and `laz-perf` WASM is decode-only — so hand-write + native CLI.
-- **3MX siblings** — add Bentley **ContextCapture / Scalable Mesh** (`.3sm`) next to 3MX
-  ([Bentley docs](https://docs.bentley.com/LiveContent/web/ContextCapture%20Help-v18/en/GUID-569C1E44-D86A-4942-9ABE-36C33FB5A7EB.html);
-  cf. [OctopusET/mxmxmx2tiles](https://github.com/OctopusET/mxmxmx2tiles)). Working 3MX test: Tende village (dept06).
-- **Server-side per-cache progress** — the eager-drain (`cache=hierarchy`) and convert (`cache=full`) loops
-  need a job-progress endpoint the viewer can poll (the timing-log modal already renders client milestones).
-- **Fastest JS point-cloud tiler** — a Potree-2.0-architecture out-of-core tiler (counting-sort on Morton
-  codes → pre-allocated layout → scatter+spill) in JS, emitting COPC/Potree/3D Tiles.
-- **Speed**: the per-tile Draco+KTX2 decode (~250 ms/tile) can be cut by (1) **passing KTX2 through
-  untouched** when the consumer reads it, (2) emitting **WebP** (WASM encoder) instead of `pngjs` PNG,
-  (3) reusing decoder/transcoder instances across tiles, (4) a worker-thread pool. pngjs PNG-encode of the
-  ~1.4 MB RGBA is the main avoidable cost.
-
 > **`centroids` per format** — works for **SOG / LCC / RAD** (the tiled-splat formats). Verified: the
 > tileset omits the splat extension and each tile is a POINTS GLB (SOG 724 B vs 1160 B splat for the same
 > run; LCC, RAD likewise). For RAD the flag rides on the absolute `/stream/rad/subtree/…` + `/stream/tile/…`
 > URIs the lazy fragments emit. COPC/Potree are point clouds already.
 
-### Phasing (chosen: Phases 1–3; Phase 4 deferred) — **Phases 1–3 IMPLEMENTED**
+> **Encode ops, ingestion decompress, and other forward-looking items for this pipeline** have moved to
+> [TODO / Future work](/docs/guide/todo-future-work)'s active list (encode-ops remainder, `rtc_center`/
+> decompress for ingestion, browser-native bbox crop, 3MX siblings, server-side per-cache progress,
+> Draco+KTX2 decode speed). The **Bing `td1` → explicit lazy fragments** work described in an earlier
+> draft of this section is done — see the dedicated
+> [Bing Maps 3D → 3D Tiles](/docs/guide/streaming-architecture-design-log) section in the design log.
+> The **fastest JS point-cloud tiler** idea is tracked in
+> [Candidate source formats](/docs/guide/candidate-source-formats-roadmap-not-yet-supported)'s research note.
 
-1. ✅ **Shared services, no behavior change** — `core/geo.js` (ENU/ECEF + proj4 georef, was duplicated
-   4×), `core/source.js` (`Source`: range / parallel `ranges` / full / probe-once), `core/http.js`
-   (CORS + `sendJson`/`sendGlb`/…). Wired into copc/potree/lcc/i3s/rad/sog. Verified: COPC still
-   georeferenced, tiles byte-identical, RAD 765/765 after the `Source` rewire.
-2. ✅ **Unify the octree builder** — `core/octree.js` `buildImplicitTileset()` shared by COPC + Potree
-   (was near-identical in both). Verified byte-identical output (COPC availableLevels 9, Potree 2.0 25,
-   424 B subtrees). *(The explicit-fragment unification for RAD+I3S was left in-place — both verified
-   working — to avoid churn; it folds naturally into the driver model when Phase 4 happens.)*
-3. ✅ **Single `cache=none|hierarchy|full` axis + `/tiles` endpoint.** `/tiles/tileset.json?cache=`
-   dispatches **in-process** to `/stream` (`none`/`hierarchy`) or `/convert` (`full`) — originally a 307
-   redirect translating `cache=` to a separate `hierarchy=` query param on `/stream`; both the redirect
-   and the second vocabulary are gone as of 2026-07-02 (`/stream` reads `cache=` directly, so the query
-   string just carries through). No `prebuilt` mode (point the viewer directly at an offline-built
-   tileset). `cache=hierarchy` (a real eager-drain into the shared ctx, so warm subtrees reuse it) is
-   wired for **all** live converters with a hierarchy — **COPC, Potree 2.0, Potree 1.x, RAD, I3S**
-   (SOG/LCC are single-index, always-eager). `prefetch=N` warms N levels (COPC). Verified: routing,
-   eager/lazy per format, RAD eager = full 765-tile explicit tree vs lazy fragments, and all coverage
-   harnesses (RAD 765, Potree2 1624, I3S 5882) still pass.
-4. *(deferred)* `bake(driver)` to power offline from the same drivers — offline converters stay as-is.
-
-> **Note — offline converters conserved.** Per the push/pull split above, the offline `*-to-3dtiles`
-> packages (which walk the format hierarchy top-down and emit the full tree) are deliberately left
-> untouched: they work and are correct. Only the live (pull) path was harmonised.
+> **Phasing (Phases 1–3, chosen scope) and the harmonization rollout** are documented as a completed
+> historical migration in the [Design log](/docs/guide/streaming-architecture-design-log) rather than
+> here — offline converters remain conserved as described above; only the live (pull) path was
+> harmonised.
 
 ---
-
 
 ### Parallelism (per converter)
 

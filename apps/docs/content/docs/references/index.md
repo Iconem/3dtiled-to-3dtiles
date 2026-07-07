@@ -20,7 +20,7 @@ implicit tiling — a direct 1:1 mapping. CRS is stored as WKT in a VLR (LASF_Pr
 is in local dataset coordinates.
 
 **RAD (SparkJS Gaussian Splat LoD)** — SparkJS binary streaming format for BhattLod Gaussian
-splat scenes. See structure in the rad-to-3dtiles section above.
+splat scenes. See structure in the [rad-to-3dtiles](/docs/guide/cli-usage#rad-to-3dtiles) section of CLI usage.
 
 ### RAD: PackedSplats or ExtSplats?
 
@@ -75,7 +75,8 @@ CesiumJS and 3DTilesRendererJS:
   match renderer expectations.** *(This describes the original **`--ge-basis=featuresize`** approach,
   kept below for the design rationale. The undershoot noted at the end of this bullet is why the
   **default basis is now `spatial`** — `bboxDiag/∛splatCount` — instead; `featuresize` is opt-in
-  legacy. See "Missing features" above.)* Each tile records a feature size =
+  legacy. See the RAD `geometricError` note in the
+  [Design log](/docs/guide/streaming-architecture-design-log).)* Each tile records a feature size =
   `mean over splats of max(scaleₓ,scaleᵧ,scale_z) × 3` (≈ SparkJS BhattLod `featureSize`),
   then the builder collapses these to **one error per LoD level** (mean featureSize at each depth,
   forced strictly decreasing). This mirrors the
@@ -200,11 +201,12 @@ trees on disk — the converter reads those directly, no unzip). Mix of `3DObjec
 | `i3s-spec.md` | 🟡 Esri I3S (Indexed 3D Scene Layer / SLPK) — **draft converter `i3s-to-3dtiles/`** (validated on `Buildings_NewYork_v18.slpk` → 5882 tiles, see below): explicit nodepages + uncompressed `DefaultGeometrySchema` mesh / point cloud only. Ref: github.com/esri/i3s-spec |
 | `streaming-adapter-plans.md` | Implementation plans for candidate adapters — **Bentley 3MX** (`3MXBO`/OpenCTM) and **Bing Maps 3D** (`tf=3dv4` GLB+Draco+KTX2, quadtree) — plus feasibility verdicts for **Nexus** (moderate, postponed) and **Autodesk ReCap** (blocked). Research-backed. |
 
-> `streaming-architecture-design-log.md` (design log for the live-streaming harmonization — lazy
+> The [Design log](/docs/guide/streaming-architecture-design-log) (live-streaming harmonization — lazy
 > hierarchy, the `cache = none/hierarchy/full` continuum, push/pull, per-format wiring + parallel
-> hierarchy build) has moved into the **Guide**, next to
+> hierarchy build, plus a running historical record of completed migrations) lives in the **Guide**,
+> a companion narrative to
 > ["Architecture: the materialization continuum"](/docs/guide/architecture-the-materialization-continuum-cache-none-hierar)
-> — it's a companion narrative to that section, not a per-format reference doc.
+> rather than a per-format reference doc.
 
 #### Upstream specs & reference implementations
 

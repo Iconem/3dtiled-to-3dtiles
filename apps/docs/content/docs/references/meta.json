@@ -1,6 +1,8 @@
 {
   "title": "Per-format reference docs",
   "pages": [
+    "index",
+    "3d-gaussian-splatting-extension-lineage",
     "3tz-3dtiles-packages",
     "copc-format",
     "gltf-2.1-complex-scenes",

@@ -1,138 +1,51 @@
 ---
-title: "Converters"
-description: "All viewer deps (Cesium, three, 3d-tiles-renderer, @sparkjsdev/spark, the 3DGS plugin) are npm"
+title: "CLI usage"
+description: "npm-workspaces monorepo. Each input format is an independent converter with its own deps"
 ---
 
-### Running this repo day-to-day: two ports
+npm-workspaces monorepo. Each input format is an **independent converter** with its own deps
+(install just the one you need); a shared **core** holds the common machinery; a **meta-converter**
+detects any input and dispatches.
 
-```sh
-pnpm install    # installs the whole workspace
-pnpm dev        # http://localhost:3000  (3D Tiled — the React app, + /vanilla-viewer + /docs folded in)
-                # http://localhost:3001  (tile-server middleware — the only other port you need)
+```
+packages/
+  core/      3dtiles-convert-core   — shared: SPZ-v2 GLB + POINTS GLB encoders (async gzip),
+                                      parallelMap + WorkerPool, format detection
+  convert/   3dtiles-convert        — meta-converter; exposes the `3dtiled` CLI + a JS/TS API
+  rad-to-3dtiles/  sog-to-3dtiles/  lcc-to-3dtiles/  copc-to-3dtiles/  potree-to-3dtiles/  i3s-to-3dtiles/
+                                    — the per-format converters (each its own package + deps)
 ```
 
-`pnpm dev` runs `apps/viewer`'s own Vite dev server (`dev:viewer`) alongside the tile-server
-(`serve:tiles`) and the Fumadocs site's own Next dev server (`dev:docs`, port 3002 — that process still
-runs, it's just no longer something you navigate to directly: `apps/viewer`'s Vite config proxies
-`/docs` and its asset/API routes through to it). `apps/viewer`'s own build also folds in the legacy
-standalone `vanilla-viewer.html` (below) as a second page at `/vanilla-viewer`, so it ships in the same
-`dist/` and needs no separate server either. See [3D Tiled](#3d-tiled-standalone-react-viewer-appsviewer-shadcnui-r3f-one-push-wip-first-pass)
-below for the app itself.
+All packages live under `packages/` (npm-workspaces members). Run `npm install` once at the repo root
+to link the `3dtiles-convert-core` workspace symlink and each converter's deps.
 
-### `vanilla-viewer.html` — offline, self-contained via Vite, no React/build tooling needed
+*Naming:* per-format converters keep the descriptive **`<fmt>-to-3dtiles`** convention (not scoped
+`@scope/<fmt>`); the two shared packages are the unscoped `3dtiles-convert-core` / `3dtiles-convert`.
 
-The **original**, pre-React reference viewer — kept as a from-scratch fallback that needs nothing but
-Vite (no Node backend beyond the tile-server, no component framework). All its deps (Cesium, three,
-3d-tiles-renderer, @sparkjsdev/spark, the 3DGS plugin) are **npm dependencies bundled by Vite — no CDN,
-works fully offline**. Served at `/vanilla-viewer` by `apps/viewer`'s own dev server/build (above) — the
-repo-root copy of the same file (`viewer.html`) also still runs completely standalone via a separate,
-untouched legacy path if you want zero dependency on `apps/viewer` even existing:
+## Meta-converter — convert anything
 
 ```sh
-pnpm run dev:legacy    # vite dev server → http://localhost:3000/ (redirects to viewer.html; serves sample-data/)
-# pnpm run build:legacy  # static offline bundle in dist/
-```
-
-pnpm uses `pnpm-workspace.yaml` + `.npmrc` (`node-linker=hoisted`, so the meta-converter's
-`import('rad-to-3dtiles')` resolves like npm's flat layout); npm uses the `workspaces` field. Either works.
-
-`vite-plugin-cesium` copies Cesium's Workers/Assets/Widgets and sets `CESIUM_BASE_URL`; `three` is
-de-duplicated (`resolve.dedupe`) so SparkJS + the 3DGS plugin share one instance (replacing the old
-esm.sh `?external=three` trick). Verified: **0 CDN requests** — Cesium, the 3DTRJS globe, and Gaussian
-splat streaming all load from `node_modules`. The dev server serves `sample-data/output/**` too, so the
-built-in presets (which point at `http://localhost:3000/sample-data/...`) resolve against the same origin.
-
-Additional online viewers:
-- **COPC**: [viewer.copc.io](https://viewer.copc.io), [lidar-viewer.gishub.org](https://lidar-viewer.gishub.org)
-- **3D Tiles**: CesiumJS sandbox, [3D-Tiles-RendererJS](https://github.com/NASA-AMMOS/3DTilesRendererJS)
-
-`viewer.html` includes a **3DTilesRendererJS mode** (toggle the `3DTRJS` button) backed by Three.js.
-For Gaussian splat streaming, it uses [3D-Tiles-RendererJS-3DGS-Plugin](https://github.com/WilliamLiu-1997/3D-Tiles-RendererJS-3DGS-Plugin)
-which streams `.rad`/SPZ content via `@sparkjsdev/spark`:
-
-```sh
-npm install 3d-tiles-rendererjs-3dgs-plugin three 3d-tiles-renderer @sparkjsdev/spark
+npm install                                  # wire up the workspaces
+# CLI (auto-detects format):
+npm run convert -- <input> <outDir> [--format rad|sog|lcc|copc|potree|i3s] \
+                                    [--scale N] [--ge-scale N] [--ge-layer N] [-- <extra converter args>]
+# or directly:
+node packages/convert/cli.js sample-data/input/RAD/coit.rad sample-data/output/rad/coit-3dtiles-from-rad
 ```
 
 ```js
-import { TilesRenderer } from '3d-tiles-renderer';
-import { GaussianSplatPlugin } from '3d-tiles-rendererjs-3dgs-plugin';
-
-const tiles = new TilesRenderer('http://localhost:3000/tileset.json');
-tiles.registerPlugin(new GaussianSplatPlugin({
-  renderer, scene,
-  minRaycastOpacity: 0.1,
-  sparkRendererOptions: { focalAdjustment: 2 },
-}));
-scene.add(tiles.group);
+// JS/TS API — same detection + dispatch
+import { convert, detectFormat, supportedFormats } from '3dtiles-convert';
+await convert('path/to/input', 'out/dir', { geScale: 2, onLog: s => process.stdout.write(s) });
 ```
 
-> The viewer bundles this plugin (and SparkJS) as local npm deps via Vite — shared `three@0.180`
-> through `resolve.dedupe`, no CDN. `npm run dev` serves it offline.
+> Each `<fmt>-to-3dtiles` converter already lives under `packages/<fmt>-to-3dtiles/` and exports a
+> uniform `convert(input, outDir, opts)`; the meta-converter's registry dispatches to it **in-process**
+> (a plain `import`) by default. Child-process spawn is only a fallback for callers passing
+> format-specific CLI flags (`opts.extraArgs`) the in-process options object doesn't model yet — not a
+> sign of an incomplete migration. See [ARCHITECTURE.md](ARCHITECTURE.md).
 
-`viewer.html` consolidates all controls into a right **sidebar** (Renderer · Basemap · Tileset &
-LoD · Navigation · Local frame · Ion · Snippet), including a **Max SSE (px)** input that drives
-CesiumJS `maximumScreenSpaceError` and 3DTRJS `errorTarget`, and a **🪲 Debug tiles** toggle that
-draws bounding volumes coloured by octree depth in both renderers. The preset bar includes the
-**◈ GSplat 1/2** reference splat tilesets from the
-[3DTilesRendererJS-3DGS-Plugin](https://github.com/WilliamLiu-1997/3DTilesRendererJS-3DGS-Plugin)
-demo data (PLY→3D Tiles). For deeper tileset inspection (tree, bounds, per-tile stats) alongside
-this viewer, see [3DTiles-Inspector](https://github.com/WilliamLiu-1997/3DTiles-Inspector).
-
-### 3D Tiled — standalone React viewer (`apps/viewer`), shadcn/ui, R3F, one push, WIP first pass
-
-A ground-up port of `viewer.html` into a real React app, named **3D Tiled** — the repo-root `viewer.html`
-stays as-is, unaffected; this app carries its own copy (`vanilla-viewer.html`, served at `/vanilla-viewer`)
-instead of depending on the legacy path. `pnpm --filter 3d-tiled dev` → `http://localhost:3000` — this
-IS `pnpm dev` now (added to `.claude/launch.json` as `"viewer"`, `dev:viewer` root script; see "Running
-this repo day-to-day" above). Stack: Vite + React 19 + TypeScript +
-Tailwind v4, shadcn/ui (hand-vendored `src/components/ui/*`, default dark theme, not a port of
-viewer.html's own hand-tuned palette), **nuqs** for the shareable URL-param slice (format/mode/cache/
-prefetch/transform/tiling/renderer/preset — the address bar is a bookmarkable link to a given view;
-the fully-resolved tileset URL itself deliberately stays out of it, see `state/urlState.ts`'s comment
-for why), **Zustand** for everything else (crop bbox, camera-derived readouts, status/timing log).
-
-- **CesiumJS side** (`components/Viewport/CesiumViewer.tsx`): plain imperative `Cesium.Viewer` in a
-  `useEffect`, functionally identical to viewer.html's `initCesium()`. Resium was tried first per the
-  original plan; dropped in favor of this — see the file's own comment.
-- **3DTRJS side** (`components/Viewport/ThreeDTRjsViewer.tsx`): uses `3d-tiles-renderer`'s **official
-  `/r3f` export** (`<TilesRenderer>`, `<TilesPlugin>`, `<GlobeControls>`, `<EnvironmentControls>`,
-  `<CameraTransition>`) instead of hand-rolled three.js — a real capability of the upstream package,
-  not previously used anywhere in this repo. `GaussianSplatPlugin` registers only for splat assets.
-  drei's `<TransformControls>` on a box mesh is the crop-box gizmo (first pass: translate mode,
-  approximate — see the file's `CropGizmo` comment). No imagery overlay on the background globe yet
-  (a plain wireframe sphere placeholder) and no auto-fly-to-loaded-content — both documented gaps.
-- Both renderers stay mounted (CSS-hidden, not unmounted) when you switch the RENDERER pill — matches
-  viewer.html's `#cesium-container`/`#three-container` behavior — and the last-loaded tileset URL
-  replays into whichever one you switch to (`App.tsx`'s `url.renderer` effect).
-
-**Real bugs found and fixed while building this** (all upstream/tooling issues, not React-port
-artifacts — kept here since they'd bite anyone doing the equivalent Vite+Cesium+pnpm-monorepo setup):
-- `vite-plugin-cesium`'s default `cesiumBuildRootPath` is the **relative** path
-  `node_modules/cesium/Build`, resolved against the dev server's cwd. Works for the root app (cesium
-  is right there) but not a nested `apps/*` package under pnpm's hoisting (cesium lives in the
-  **monorepo root**'s `node_modules`, not `apps/viewer/node_modules`) — every Cesium static asset
-  (`Widgets/widgets.css`, the skybox JPGs, `approximateTerrainHeights.json`, …) 404'd. Worse: Vite's
-  default SPA fallback served `index.html` (200, `text/html`) instead of a real 404, and Cesium's
-  WebGL texture pipeline tried to decode that HTML as an image — crashing the **entire render loop**
-  with an opaque `InvalidStateError: the source image could not be decoded`, not a per-asset failure.
-  Fixed by pointing the plugin at cesium's actual resolved location (`vite.config.ts`) and adding
-  `appType: 'mpa'` (same fix the root app's `vite.config.mjs` already documents for a related
-  tile-server gotcha) so a real 404 surfaces instead of being masked.
-- The raw `mt1.google.com` "Google Hybrid" tile hotlink used as the default basemap sometimes answers
-  with an HTML error page instead of image bytes, hitting the exact same Cesium crash independently —
-  default basemap changed to OSM (a properly public tile service); Google stays selectable.
-- TopBar's mount effect only auto-loaded a preset when the URL had **none** selected — meaning a
-  reloaded/shared link (which always has `?preset=…` from the previous session) silently never
-  fired the actual tileset load, since the resolved URL is deliberately not persisted (see above).
-
-**Not yet done** (first-pass, tracked as follow-up, not attempted to fully match viewer.html feature-
-for-feature in one pass): 3DTRJS auto-fly-to-content on load, 3DTRJS basemap imagery overlay, Ion
-asset loading on the 3DTRJS side, Cesium `shadeless`/brightness shading ported but not yet re-verified
-against baked-lighting photogrammetry content, crop-gizmo precision (approximate ENU conversion, no
-face-handle resize yet — translate only).
-
----
+## Per-format converters
 
 ### copc-to-3dtiles
 
@@ -171,8 +84,6 @@ by reading their internal spatial metadata directly rather than relying on the 3
 This is worth exploring to simplify the pipeline and eliminate the proj4 dependency for
 native-CRS outputs.
 
----
-
 ### rad-to-3dtiles
 
 Converts SparkJS `.RAD` Gaussian Splat LoD files to 3D Tiles 1.1 with `KHR_gaussian_splatting` GLB tiles.
@@ -208,7 +119,7 @@ out-rad/
 > breaking `pnpm install --frozen-lockfile`, since pnpm can't reconcile an unresolvable optional dep
 > against the lockfile). For `.3tz`/`.3dtiles` today, convert to a plain tileset dir then use the
 > in-repo packer (`scripts/pack-3dtiles.mjs`) or `npx 3d-tiles-tools convert`, both documented under
-> `/3dtiles-self-contained` below.
+> [`/3dtiles-self-contained`](/docs/guide/ambition#3dtiles-self-contained--serve-3tz--3dtiles-packages-in-place) in Ambition.
 
 **Live `/stream` (no pre-conversion)** — `packages/tile-server/rad-live.js`, served at
 `GET /stream/tileset.json?url=<.rad>&format=rad`:
@@ -222,8 +133,6 @@ out-rad/
 This defers the expensive per-tile decode+encode+gzip (which `/convert` runs for the *whole* dataset
 up front) to on-demand, so tiles stream as the camera requests them. Only **monolithic** `.rad` files
 stream (a streaming-manifest `.rad` has no embedded chunk data); `/convert` produces identical tiles.
-
----
 
 ### sog-to-3dtiles
 
@@ -268,7 +177,7 @@ frame (`RX+90°`), matching the RAD path.
 
 That this path renders cleanly is itself proof the **SPZ-v2/GLB encoder and tree builder are
 correct** — so when the RAD path looked wrong, the bug had to be in the *RAD decode*, not the
-shared encoder. (It was: see [RAD column layouts](#rad-column-byte-layouts-the-spiky-render-bug).)
+shared encoder.
 
 **Output:**
 ```
@@ -278,13 +187,11 @@ out-sog/
 ```
 
 > **Status:** validated end-to-end on PlayCanvas's `example_skatepark_02` & `example_roman_parish_02`
-> (see Sample Data below). Decoded tiles contain real splats — varied positions, valid scales,
+> (see [Sample Data](/docs/guide/sample-data)). Decoded tiles contain real splats — varied positions, valid scales,
 > unit quaternions, proper opacity — confirming the WebP CPU decode + decode conventions
 > (quaternion `rot_0=w`, log scales, logit opacity, SH0→color). geometricError halves cleanly
 > root→leaf (e.g. skatepark `17.8 → 8.9 → … → 0.0`). Bundled `.sog` environments are skipped
 > (best-effort) since the spec's chunks are unbundled.
-
----
 
 ### lcc-to-3dtiles
 
@@ -322,8 +229,6 @@ required per its White Paper (see the doc).
 > **License note:** the LCC White Paper requires displaying "Data Organization Format originated
 > from XGRIDS" and publishing derivatives under terms no less open. This converter reads the format;
 > downstream products must carry that attribution.
-
----
 
 ### i3s-to-3dtiles  🟡 **DRAFT — mesh validated on real data**
 
@@ -402,7 +307,7 @@ REST service URL directly for streaming). All four verified live against `/strea
 
 > **Reference — 3D Tiles ⇄ 3D Tiles tooling:** CesiumGS's
 > **[`3d-tiles-tools`](https://github.com/CesiumGS/3d-tiles-tools)** is the canonical toolbox for
-> tileset-level operations, several of which overlap our "3D Tiles → 3D Tiles" plans:
+> tileset-level operations, several of which overlap this repo's "3D Tiles → 3D Tiles" plans:
 > - **`upgrade`** — legacy → 3D Tiles 1.0/1.1 (`asset.version`, `url`→`uri`, `refine` upper-case, glTF
 >   1.0→2.0, and with `--targetVersion 1.1` converts PNTS/B3DM/I3DM/CMPT content to glTF; drops
 >   `3DTILES_content_gltf`).
@@ -411,10 +316,9 @@ REST service URL directly for streaming). All four verified live against `/strea
 > - **`b3dmToGlb` / `i3dmToGlb` / `cmptToGlb` / `convertB3dmToGlb` / `convertPntsToGlb` /
 >   `convertI3dmToGlb` / `splitCmpt`** — extract or convert legacy tile content to glTF.
 >
-> Our [`3D Tiles → 3D Tiles`](#3d-tiles--3d-tiles-transcodes) transcodes are the live/streaming-flavored
-> counterparts (implicit→explicit, legacy upgrade); use `3d-tiles-tools` for full offline pipelines.
-
----
+> The [`3D Tiles → 3D Tiles`](/docs/guide/ambition#3d-tiles--3d-tiles-transcodes) transcodes in Ambition
+> are the live/streaming-flavored counterparts (implicit→explicit, legacy upgrade); use `3d-tiles-tools`
+> for full offline pipelines.
 
 ### potree-to-3dtiles
 
@@ -461,7 +365,22 @@ Both COPC and Potree are octree hierarchies, so **implicit** is the natural defa
 tileset JSON, subtrees served on demand). Pass `explicit` only when the client doesn't support
 3D Tiles 1.1 implicit tiling (e.g. legacy CesiumJS < 1.96 or simple tile fetchers).
 
----
+## Individual converter (à la carte quick reference)
+
+Each converter also runs standalone (only its own deps) — this is a compact index into the
+per-format sections above, not new information:
+
+```sh
+node packages/rad-to-3dtiles/src/index.js    <coit.rad>            sample-data/output/rad/<name>-3dtiles-from-rad
+node packages/sog-to-3dtiles/src/index.js    <scene-dir>           sample-data/output/sog/<name>-3dtiles-from-sog
+node packages/lcc-to-3dtiles/src/index.js    <lcc-dir>             sample-data/output/lcc/<name>-3dtiles-from-lcc
+node packages/copc-to-3dtiles/src/index.js   <input.copc.laz>      sample-data/output/copc/<name>-3dtiles-from-copc
+node packages/potree-to-3dtiles/src/index.js <potree-dir>          sample-data/output/potree/<name>
+node packages/i3s-to-3dtiles/src/index.js    <extracted-slpk-dir>  sample-data/output/i3s/<name>   # draft
+```
+
+> Output convention: regenerate into **`sample-data/output/<fmt>/…`** (the viewer presets and
+> `tools-inspector` scripts point there).
 
 ## Offline tilers — building tiled hierarchies (point clouds, splats, meshes)
 
@@ -575,7 +494,7 @@ it's **moving bytes**: disk → RAM → (PCIe) → VRAM → back. So:
 
 #### Is COPC building the same as Potree 2.0? (corrected — they are NOT equally fast)
 
-I over-simplified earlier. The right framing: the **output container** differs (COPC = one indexed LAZ
+The right framing: the **output container** differs (COPC = one indexed LAZ
 with an EPT-style octree + hierarchy page; Potree = a directory of node files), but more importantly the
 **implementations differ enormously in speed**, and "PDAL builds COPC" hides which engine does it:
 
@@ -584,7 +503,7 @@ with an EPT-style octree + hierarchy page; Potree = a directory of node files), 
   there is for LAS/LAZ → octree, and saturates disk bandwidth.
 - **PDAL `writers.copc`** is part of PDAL's general **pipeline** engine. It is *not* the same optimized
   out-of-core counting-sort builder — it's a more general, less parallel writer, and in practice users
-  report it is **much slower** than PotreeConverter 2.0 (matching your experience). PDAL's strength is
+  report it is **much slower** than PotreeConverter 2.0. PDAL's strength is
   generality (filters, reprojection, formats), not raw octree-build throughput.
 - **untwine** (hobuinc) is the **fast, dedicated COPC builder** — a two-phase "bin points into temp
   files per cell, then assemble" out-of-core approach, multi-threaded, designed to bound memory on huge
@@ -616,3 +535,116 @@ scatter to per-node temp buffers, spill over-quota points to children, Poisson-s
 (4) emit COPC (one indexed LAZ), Potree (node files), or 3D Tiles (pnts/glb) from the same in-memory
 node table. Bound memory with per-cell temp files (untwine-style) for clouds larger than RAM; optionally
 offload the per-chunk sort/decimate to the GPU when the chunk fits in VRAM.
+
+## `/stream` lazy-loading status (geometry vs hierarchy)
+
+Two independent questions for a streaming adapter: is **geometry** fetched per-tile on demand (vs.
+converting everything up front), and is the **hierarchy/tree itself** built on demand (vs. reading the
+whole index/hierarchy at cold load)? Geometry-on-demand is universal here; hierarchy-on-demand is the
+hard part, and matters for **huge clouds** where reading the entire hierarchy before the first tile is
+the bottleneck.
+
+**Tiles vs hierarchy** — (1) **tile geometry** is fetched on demand for *every* format (universal).
+(2) the **hierarchy** is the hard part. Each live converter exposes the `cache` axis (`none`=lazy,
+`hierarchy`=eager-drain, `full`=`/convert`). The columns below: how tile geometry is fetched, the
+lazy hierarchy strategy, whether the **hierarchy build is parallel** (bounded HTTP range/page fetches —
+the lever for *massive multi-page* datasets), whether **tile fetches are parallel range**, and the
+measured cold start.
+
+| `/stream` source | Tile geometry | Lazy hierarchy | Parallel hierarchy build | Parallel tile fetch | `cache=hierarchy` (eager) | Cold start |
+|---|:---:|:---:|:---:|:---:|:---:|---|
+| **Potree 2.0** (`metadata.json`) | ✅ range `octree.bin` | ✅ lazy implicit | ✅ bounded (`ensureBlock2`/drain `Promise.all`) | ✅ per-tile | ✅ drain all chunks | instant (lazy==eager byte-identical, 1624 nodes) |
+| **COPC** (`.copc.laz`) | ✅ range node block | ✅ lazy implicit | ✅ bounded (`ensureForSubtree`/`drainAll`) | ✅ per-tile | ✅ drain all pages (shared ctx) | instant (+bg prefetch) |
+| **Potree 1.x `.hrc`** (`cloud.js`) | ✅ per-node fetch | ✅ lazy implicit | ✅ **bounded parallel** (`loadChunkRoots`, was sequential) | per-node | ✅ `drainAll` whole `.hrc` | ~0.2 s (302 M-pt; was ~80 s) |
+| **RAD** (`.rad`) | ✅ range chunk | ✅ lazy explicit (4-lvl frags) | ✅ **bounded parallel** per BFS level (was sequential) | ✅ per-chunk | ✅ full explicit tree (1 parallel pass) | **0.015 s** (50 M; was 9.6 s) |
+| **I3S** (`3dSceneLayer`/`.slpk`) | ✅ per-node geometry | ✅ lazy explicit (4-lvl frags) | ✅ **bounded parallel** page-load per level (was recursive-serial) | per-node | ✅ all node-pages (parallel batches) | ~0.2 s (lazy & eager both 5882/5882) |
+| **Potree 1.4 inline** (`cloud.js`) | ✅ per-node | ➖ tree inline in `cloud.js` | n/a (one file) | per-node | ➖ no-op (single file) | instant |
+| **streamed-SOG** (`lod-meta.json`) | ✅ per-chunk WebP | ➖ full tree in one JSON | n/a (one file) | per-tile | ➖ no-op (`none`≡`hierarchy`) | fast — nothing to defer |
+| **LCC** (`meta.lcc`) | ✅ range `data.bin` | ➖ flat grid (`index.bin`) | n/a (one file) | ✅ per-tile | ➖ no-op (`none`≡`hierarchy`) | fast — flat grid |
+| **Packages** (`.3tz`/`.3dtiles`) | ✅ range / sql.js | ➖ passthrough | n/a | ✅ / ➖ | ➖ as authored | instant |
+
+Legend: ✅ done · ➖ not applicable / single-index (nothing to parallelize or defer) · "lazy implicit" =
+tiny implicit root, each `.subtree` built on demand from only the chunk(s) it needs · "lazy explicit" =
+root fragment of N levels, boundary children are external-tileset refs fetched as the camera refines in.
+
+**Parallel hierarchy build** (the massive-multi-page lever): the eager/drain paths always used
+`Promise.all`; the **lazy fragment builders are now bounded-parallel too** — RAD loads each BFS level
+concurrently, I3S loads each node-page level concurrently (then builds the fragment synchronously, no
+`seen` race), and Potree 1.x loads each `.hrc` band concurrently (`loadChunkRoots`). All capped at
+`min(cpus−1, 16)` via `core/parallel.js` `parallelMap` so a deep multi-page fragment can't burst
+hundreds of simultaneous range requests. **Parallel tile fetch** is inherent — the renderer requests
+many tiles at once and Node serves them concurrently; a single tile is one range read + decode.
+
+All lazy paths verified to reach the **same node set as eager** after parallelization: Potree 2.0
+byte-identical (1624 nodes), RAD 765/765 reachable, I3S 5882/5882 content tiles.
+
+### Multi-page hierarchies: the native chunking unit per format (and why we prefetch)
+
+Lazy hierarchy is only possible when the **format itself chunks its hierarchy** into independently
+fetchable pieces. This is the same idea everywhere, with different names — and 3D Tiles has *both* output
+forms of it: **`.subtree` files** (implicit) and **external `tileset.json` references** (explicit). The
+job of each adapter is to map the *source* format's chunking unit onto one of those two 3D Tiles forms.
+
+| Format | Native hierarchy chunking unit (per spec) | Maps to 3D Tiles | Lazy? |
+|---|---|:--:|:--:|
+| **3D Tiles** | `.subtree` (implicit, `subtreeLevels` deep) · external `tileset.json` (explicit) | — (native) | ✅ |
+| **COPC** | **hierarchy pages** — EPT-style; root page in the COPC info, child pages referenced by offset/size (COPC is "COG for point clouds"; pages are its analog of COG overviews) | implicit `.subtree` | ✅ |
+| **Potree 2.0** | **hierarchy chunks** in `hierarchy.bin` — `firstChunkSize` + type-2 **proxy** nodes pointing to child chunks | implicit `.subtree` | ✅ |
+| **Potree 1.x** | **`.hrc` files** — one per `hierarchyStepSize` band; boundary nodes reference the next `.hrc` | implicit `.subtree` | ✅ |
+| **I3S** | **node pages** — `nodepages/{n}.json`, fixed `nodesPerPage` (default 64); contiguous node-index ranges | explicit external tileset (`/i3s/node/`) | ✅ |
+| **RAD** | **no separate index** — topology is *distributed in the chunks* (each chunk's `child_count`/`child_start`); the `.rad` JSON header only lists chunk byte-ranges | explicit external tileset (`/rad/subtree/`) | ✅ (defer chunk reads; header lists all chunks) |
+| **streamed-SOG** | **none** — `lod-meta.json` carries the **whole** spatial tree in one file | (whole tree at once) | ➖ monolithic |
+| **LCC** | **none** — `Index.bin` is a flat per-Unit array (`Total Units = fileSize / indexDataSize`), no page structure | (whole grid at once) | ➖ monolithic |
+
+So **yes** — COPC pages, I3S node pages, Potree chunks/`.hrc` are all the same multi-page concept as
+3D Tiles subtrees/external-tilesets, which is exactly why those formats support true lazy hierarchy.
+**SOG and LCC do not** (rechecked against the specs): their index is a single monolithic file with no
+sub-pages, so there is no portion to defer — `cache=hierarchy ≡ cache=none` for them (both fetch+parse
+the one index; "no-op" means the eager knob has nothing extra to do). For a *very large* SOG/LCC that
+single index is genuinely not free to parse — but the **format provides no paging to exploit**, so the
+honest answer is "out of our hands until the format chunks its index." (RAD is the in-between case: its
+header lists every chunk, which is O(chunks) and unavoidable, but the expensive topology+bounds are read
+lazily per 4-level fragment.)
+
+**Why prefetch.** With a chunked hierarchy, `cache=none` reads only the page(s) a request needs, so the
+*first* request into a new region pays a fetch. `prefetch=N` warms the next N levels in the background so
+the renderer usually finds them already resident — combining a lazy cold start with eager-like
+refinement. It is meaningful only where there *are* pages to warm: **COPC, Potree 2.0, Potree 1.x**
+(octree-lazy). For RAD/I3S the 4-level fragment is itself a prefetch unit. SOG/LCC have no pages → n/a.
+
+> **Can we avoid reading availability/`getCtx` up front *and* not pay it lazily either?**
+> Largely yes. For the **octree/quadtree implicit** formats (Potree 2.0, COPC, Potree 1.x) `getCtx` no
+> longer reads the whole hierarchy — only the root chunk/page — and each `.subtree` is generated from
+> just the chunk(s) that block needs, so the up-front cost is gone and the per-subtree cost is bounded
+> (a few range reads, not the whole index). For the **explicit** formats (RAD, I3S) we emit N-level
+> fragments whose boundary children are external-tileset refs, so the same bound applies. The only
+> remaining strictly-eager cases are SOG/LCC, where the entire index is a single small file you must
+> read anyway — there is no sub-index to defer, so laziness buys nothing.
+
+> **Why lazy cold-starts but slightly slower *subsequent* tiles — and how to get both.**
+> Eager fills all availability in RAM once, so every later `.subtree`/child lookup is a pure in-memory
+> hit. Lazy defers that, so the *first* request into a new region pays a chunk/page fetch. Two mitigations,
+> both kept in the middleware so you get fast cold start **and** warm refinement:
+> 1. **Background prefetch** — after the root tileset is served, COPC fires a fire-and-forget
+>    `ensureForSubtree(0,0,0,0)`; the first levels are usually warm before the renderer asks.
+> 2. **Per-URL `getCtx` cache** — once a chunk/page is loaded it stays resident, so a region is fetched
+>    at most once; repeat passes are in-memory.
+>
+> Both eager and lazy implementations are retained rather than replaced: implicit formats keep the eager
+> full-hierarchy reader behind the scenes for the offline converter, and **I3S exposes `&lazy=1`** (lazy
+> explicit fragments) vs. its default parallel-eager full tree — so you can pick minimal cold start or
+> a complete in-RAM tree per request.
+
+> **Note — huge clouds need lazy hierarchy, not just lazy geometry.** Building the full tree up front
+> doesn't scale: a 100 M-splat RAD or a 302 M-point Potree 1.7 cloud otherwise reads its entire
+> hierarchy/index before showing anything (measured ~80 s for the latter, 9.6 s for a 50 M-splat RAD).
+> Lazy hierarchy collapses both to well under a second.
+
+## Octree key convention
+
+The implicit `level-x-y-z` tile coordinates are derived from each node's **bounding-box
+position** relative to the root box — not from the node-name bit-decomposition. Potree's
+own naming uses bit0→Z, bit1→Y, bit2→X (opposite of the 3D Tiles OCTREE convention of
+bit0→X, bit1→Y, bit2→Z). Using the box position is convention-agnostic and self-validating
+(verified: 0 box mismatches on all tested datasets). The same `coordsOfBox()` derivation is
+used in both the offline converters and the live stream adapters.

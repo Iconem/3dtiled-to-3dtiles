@@ -6,7 +6,8 @@ description: "Roughly in the order we're tackling them:"
 Roughly in the order we're tackling them:
 
 - [ ] **Composable `tiling=explicit`.** The still-open, more invasive half of an earlier item (see
-  "Streaming endpoint consolidation" in Done, below): route `&tiling=explicit` for COPC/Potree-2.0
+  "Streaming endpoint consolidation" in the [Design log](/docs/guide/streaming-architecture-design-log)):
+  route `&tiling=explicit` for COPC/Potree-2.0
   *through* the existing `/3dtiles-tools?tool=implicit-to-explicit` tool against their own implicit
   `/stream` output, instead of each format's live adapter keeping a bespoke `buildTilesetExplicit`.
   Deferred until the consolidation above has settled — untested whether `implicit-to-explicit`'s generic
@@ -74,12 +75,15 @@ Roughly in the order we're tackling them:
   demo our own repo-packed `sample-data/input/3DTILES-PACKAGES/tastier.{3tz,3dtiles}` — we don't have a
   publicly-hosted example of either package format found in the wild to verify `/3dtiles-self-contained`
   against a real third-party `.3tz`/`.3dtiles` file, not just our own packer's output.
-- [ ] **`/convert`-equivalent for `3d-tiles-tools`.** `3d-tiles-tools` (the real, unscoped npm package —
-  see the dependencies note above) isn't wired up as a dependency anywhere in this repo despite being
-  referenced in prose. Worth a `/convert`-style endpoint that shells out to / calls it directly (tileset
-  upgrade, implicit↔explicit, glTF-to-3TILES packaging, etc. — whatever it covers that our own
-  `/3dtiles-tools` endpoint's hand-rolled `implicit-to-explicit`/`upgrade` ops don't), mirroring how
-  `/convert` relates to `/stream`: one endpoint per capability tier.
+- [ ] **Real `3d-tiles-tools`: implicit↔explicit and glTF-to-3TILES packaging still missing.** The real,
+  unscoped `3d-tiles-tools` npm package is now an actual dependency (`packages/3dtiles-tools`) and its
+  tileset **upgrade** (1.0→1.1) is wired as `tool=upgrade-real` on `/3dtiles-tools` — see the Design log
+  for how that landed and why it's a batch-then-serve-from-cache operation (the real package only
+  supports local filesystem/`.3tz`/`.3dtiles` sources, no remote/streaming API). Still open: the same
+  real package's **implicit↔explicit** conversion and **glTF-to-3TILES packaging** operations aren't
+  wired to anything — worth the same `tool=<name>` treatment once there's a concrete need, following the
+  `upgrade-real` pattern (mirror a remote source to a local temp dir first if needed, run the real
+  package once, serve the result statically from a cache dir).
 - [ ] **Test `/stream?cache=all`.** Recent verification passes (threemx/geosplats migration, uniform
   crop, ArcGIS I3S) only exercised `cache=none`. `cache=all` (routes to `/convert`, preprocess + cache
   the whole dataset) shares the same underlying adapters but hasn't been separately re-verified against
@@ -88,6 +92,48 @@ Roughly in the order we're tackling them:
   (see "`/extract`" above) was verified against georeferenced real-world tiles for LCC/SOG/RAD. Not yet
   separately verified: whether the same flip table holds for a **non-georeferenced** (local-frame, no
   ENU→ECEF root transform) source of each format — worth a dedicated pass before trusting it universally.
+- [ ] **Encode ops remainder** — geometry encode (`/stream?transform=meshopt|draco`) and in-process
+  KTX2 texture encode (`/stream?transform=ktx|ktx-uastc`) are done; still to add: **WebP** texture
+  encode (needs a WASM webp encoder; `textureCompress(webp)` would pull in `sharp`, which we
+  deliberately avoid), `simplify` / `weld` / `quantize` geometry ops, and exposing encode on the
+  `/gltf` proxy (currently only `/stream` has it).
+- [ ] **`rtc_center` / decompress for ingestion** — apply the existing per-tile decompress pipeline to
+  *existing remote 3D Tiles* (not just our own output) so consumers that can't read Draco/KTX2/
+  `CESIUM_RTC` (e.g. blender **BLOSM**) can load them.
+- [ ] **Browser-native bbox crop / subsample extract** — pull a cropped/decimated copy of a tiled asset
+  (point cloud, mesh, or splat) by an OBB defined in the viewer — BLOSM-style but JS/browser-native.
+  See the dump-tiles feature idea (memory). **Refinement-aware traversal**: for **ADD** octrees
+  (COPC/Potree) accumulate all points down to the desired geometric error within the OBB; for
+  **REPLACE** trees (3D Tiles mesh) descend only where a parent's GE still exceeds the target. **Point
+  clouds** → **hand-written LAS** (streamable, O(1) RAM even for 500 GB via header back-patch —
+  `core/las-writer.js`, built) → shell to **`pdal writers.copc` / untwine** (out-of-core) for
+  LAZ/COPC. **Meshes** → merge tile GLBs (geometry+UV+texture) via glTF-Transform → a binary mesh
+  (glb/USD/USDZ). No JS/WASM LAS *writer* exists (node-las is archived; entwine/untwine are C++-only)
+  and `laz-perf` WASM is decode-only — so hand-write + native CLI.
+- [ ] **3MX siblings** — add Bentley **ContextCapture / Scalable Mesh** (`.3sm`) next to 3MX
+  ([Bentley docs](https://docs.bentley.com/LiveContent/web/ContextCapture%20Help-v18/en/GUID-569C1E44-D86A-4942-9ABE-36C33FB5A7EB.html);
+  cf. [OctopusET/mxmxmx2tiles](https://github.com/OctopusET/mxmxmx2tiles)). Working 3MX test: Tende
+  village (dept06).
+- [ ] **Server-side per-cache progress** — the eager-drain (`cache=hierarchy`) and convert
+  (`cache=full`) loops need a job-progress endpoint the viewer can poll (the timing-log modal already
+  renders client milestones).
+- [ ] **Draco+KTX2 decode speed** — the per-tile decode (~250 ms/tile) can be cut by (1) **passing
+  KTX2 through untouched** when the consumer reads it, (2) emitting **WebP** (WASM encoder) instead of
+  `pngjs` PNG, (3) reusing decoder/transcoder instances across tiles, (4) a worker-thread pool. pngjs
+  PNG-encode of the ~1.4 MB RGBA is the main avoidable cost.
+- [ ] **I3S: remaining gaps.** Mesh **Draco** geometry compression has no decoder (gated); DDS/KTX2/
+  Basis-encoded textures have no decoder (JPEG/PNG base-color textures ARE embedded already); per-feature
+  attributes are dropped (no `EXT_mesh_features`/metadata mapping); the legacy per-node
+  `3dNodeIndexDocument` index (pre-1.7) isn't read; **Point** (symbol/instance) and **Building**
+  (composite) layers aren't handled (only `IntegratedMesh`/`3DObject`/`PointCloud`); only WGS84-geographic
+  vertex placement is implemented (**projected/vertical CRS** placement is not); and per-vertex
+  **normals are left in the source frame** (not re-oriented to ECEF — affects lit shading only).
+- [ ] **`WorkerPool` (`worker_threads`) tier not wired.** All converters currently use only the
+  async-gzip + `parallelMap` tier (main-thread decode on the libuv pool) — see
+  ["Parallelism (per converter)"](/docs/guide/architecture-the-materialization-continuum-cache-none-hierar)
+  for the per-converter breakdown of what's worker-extractable. True multicore decode (the WASM/CPU-bound
+  decoders — LAZ, WebP, brotli) is unused headroom; the pure-JS decoders (rad, lcc, potree) stand to gain
+  the most since they're single-core-bound today.
 - [ ] **Spherical harmonics (view-dependent color) for Gaussian splats.** Every splat converter
   (RAD/LCC/SOG/GeoSplats) currently emits **DC-only** color — the source formats' higher-order SH bands
   are decoded-and-discarded (or never touched) on the way to a 3D Tiles GLB, so specular/view-dependent
@@ -139,109 +185,6 @@ Roughly in the order we're tackling them:
     per-converter cost is likely the extra GLB payload size (degree-3 = 15 extra VEC3-float attributes
     per splat) more than decode complexity. This is a sketch to scope future work, not a commitment to
     a specific implementation order or timeline.
-
-## Done
-
-Completed items, moved out of the active list above but kept for history/context.
-
-- [x] ~~`copc-to-3dtiles`: `--explicit` flag~~ (one tile per COPC node instead of 3D Tiles 1.1 implicit
-  tiling, for viewers without implicit-tiling support) — **done**: both the offline converter and
-  `/stream?format=copc` already take `--tiling explicit|implicit` / `?tiling=explicit`, default
-  implicit. (This item had gone stale in the TODO list after being implemented.)
-- [x] ~~Streaming endpoint consolidation~~ — **done** (2026-07-02): `/stream` reads `cache=none|hierarchy`
-  (not `hierarchy=eager|lazy`); the old per-format aliases (`/copc`, `/potree`, `/sog`, `/lcc`, `/rad`,
-  `/i3s`) are gone (verified redundant with `/stream/tileset.json?format=<fmt>`); `/tiles` dispatches
-  to `/stream`/`/convert` in-process instead of a 307 redirect; Potree 1.x's `tiling=explicit`, and RAD
-  and I3S entirely, were simplified to full materialization instead of per-chunk/lazy-fragment
-  continuation routes; `/dump` was renamed `/extract` (clearer, less overloaded name). See "Endpoint
-  rework" above and the CHANGELOG.
-- [x] ~~Migrate `/threemx` and `/geosplats` into `/tiles`~~ — **done** (2026-07-02): both are now
-  `/stream`'s `ADAPTERS` registry entries (`format=threemx`/`format=geosplats`), so they get the
-  unified `cache=`/`/tiles` vocabulary like every other format. The old standalone `/threemx`,
-  `/geosplats` endpoints are gone. 3MX keeps its own lazy per-`.3mxb` continuation route
-  (`/stream/threemx/node/<path>.json`) — unlike RAD/I3S, 3MX is a genuine DAG with no persisted
-  spatial index, so eager-scanning the whole tree isn't cheap.
-- [x] ~~Dockerize the server~~ — **done** (2026-07-02, extended 2026-07-03): `Dockerfile` (multi-stage:
-  `tile-server` + `viewer` + `docs`), `docker-compose.yml`, and `.github/workflows/docker-publish.yml`
-  (builds + pushes all three to **GHCR** on release, plus a `:main` tag on every push).
-  `docker compose up --build` runs the whole stack. Verified end-to-end (all three
-  images build, all three containers serve real traffic — including a live ArcGIS SceneServer tileset
-  through the containerized tile-server, and real Fumadocs pages through the `docs` container). Building
-  this surfaced four real, pre-existing bugs, all fixed alongside it: `pnpm-lock.yaml` was out of sync
-  with `copc-to-3dtiles/package.json` (see the `@cesium/3d-tiles-tools` note above), Docker builds
-  ignored `.npmrc`'s `node-linker=hoisted` (which the converters' cross-package imports depend on),
-  `vite build` silently never bundled `viewer.html`/`vanilla-viewer.html` at all (only its own
-  `index.html` redirect stub) — fixed via `build.rollupOptions.input` + `build.target: 'esnext'`
-  (top-level await) in `vite.config.mjs`/`vite.config.ts` — and (2026-07-03) `apps/docs`'s
-  `next start` couldn't find its own `next` binary in the final runtime stage (hoisted node-linker puts
-  it in the ROOT `node_modules/.bin`, not `apps/docs/node_modules/.bin`, and that stage never copies
-  `pnpm-workspace.yaml` for `pnpm run start` to resolve the workspace root either) — fixed by putting
-  the root `.bin` on `PATH` and invoking `next` directly, skipping pnpm in that stage.
-  `docker-compose.yml` itself stays reverse-proxy-agnostic (plain `ports:` on all three, no assumed
-  setup) — wiring it behind Traefik/Caddy/nginx with real domains is left to whoever deploys it; the
-  compose file's own comment on the `docs` service spells out which paths need to route there instead
-  of to `viewer` if you do.
-- [x] ~~Fumadocs migration~~ — **done** (scaffolded 2026-07-02, functionally complete 2026-07-06).
-  `apps/docs` (a proper pnpm workspace member, `pnpm --filter docs dev` on port 3002) is a real, building
-  Fumadocs/Next.js site: `README.md`'s 18 `##` sections and all 25 `docs-references/*.md` files are
-  chunked into `content/docs/guide/*.md` and `content/docs/references/*.md` respectively (mechanical
-  per-file/per-section split, `.md` not `.mdx` so `<SRC>`-style placeholder syntax throughout this repo's
-  prose doesn't get misparsed as JSX) — verified rendering correctly (sidebar nav, in-page TOC, code
-  blocks, checkboxes/strikethrough) via a full `next build` + dev-server check. The 18 guide + 25
-  reference files are now cross-linked (`format-comparison.md` links every format to its reference-page
-  mirror, `documentation.md` cross-references, 11+ files carry internal `/docs/guide/`/`/docs/references/`
-  links), and the root `README.md` was trimmed to a pitch + quickstart pointing at the docs site (see
-  the Docker item above) — the docs site is now the canonical source, not README.
-- [x] ~~Add a generic CORS proxy~~ — **done** (2026-07-02): `/proxy?url=<source>`, tileset-aware
-  `content.uri` rewriting so nested children keep routing through it. Fixes the Agisoft Jam pill (its
-  host sends no CORS header at all, on any resource). See "`/proxy`" above.
-- [x] ~~I3S: SLPK support~~ — **done**. The SLPK-archive code path already existed in `i3s-live.js`
-  (`@loaders.gl/i3s`'s `parseSLPKArchive`) but only ever triggered on a URL literally ending in `.slpk`
-  — ArcGIS Online's own download endpoint (`.../content/items/<id>/data`) has no `.slpk` anywhere in the
-  URL (the real filename only shows up in a `Content-Disposition` header). Fixed 2026-07-02: sniff the
-  first bytes for the PKZIP magic (`PK`) when the URL doesn't already look like JSON, so any zip-shaped
-  response is detected regardless of URL shape.
-- [x] ~~I3S: mesh textures rendering black~~ — **done** (2026-07-02). Two separate things were wrong:
-  (1) textures were **never implemented** at all — `uv0` was decoded from the geometry buffer and then
-  silently dropped before reaching the glTF writer, and no texture image was ever fetched (an explicit,
-  documented scope-gate, not a bug). Added: `materialDefinitions`/`textureSetDefinitions` lookup (picks
-  a browser-native `jpg`/`png` format when the layer offers one; DDS/KTX2/Basis-only layers are gated
-  out the same way Draco/LEPCC are — geometry still renders, untextured), texture fetch via the same
-  per-node resource bucket geometry uses (`nodes/<res>/textures/<name>.bin`, uniform across the SLPK/
-  REST-dir/live-SceneServer source modes), and a `TEXCOORD_0` accessor + embedded image/material in
-  `glbBuild.js`. (2) A genuine **pre-existing bug** in `glbBuild.js`'s binary-buffer assembly: the
-  running byte offset was reset to each bufferView's own padded length (`offset = padded`) instead of
-  accumulating (`offset += padded`) — a no-op for 2-view outputs (POSITION+COLOR_0 point clouds) but
-  silently corrupting every bufferView from the 3rd onward once meshes had POSITION+NORMAL+COLOR_0 (and
-  worse once TEXCOORD_0+image were added) — the actual root cause of the reported all-black textures.
-  Verified live against the real ArcGIS Rancho Mesh SceneServer (JPEG magic bytes at the correct offset,
-  full-color textured mesh rendering in the viewer).
-- [x] ~~I3S: LEPCC decompression~~ — **done** (2026-07-06). Ported Esri's own open-source
-  `github.com/Esri/lepcc` (Apache-2.0) XYZ decoder to pure JS (`packages/i3s-to-3dtiles/src/
-  lepccDecode.js`) — the earlier "no public bitstream spec / no open-source decoder" note was wrong;
-  Esri does publish a small, actively-maintained reference decoder, just not under the LERC name.
-  Verified against real ArcGIS-hosted PointCloud layers (Moro Bay LiDAR, USGSNYC 2014 LiDAR): checksum
-  + blob-size match, decoded coordinates sane vs. the layer's own extent. See the I3S reference page's
-  "LEPCC point-cloud decoding" section for the format writeup. Scope: XYZ position only — RGB/Intensity
-  are separate LEPCC blob types, not yet ported (no dataset found so far that both declares one AND
-  actually serves the underlying attribute resource — Moro Bay's own `RGB` attribute 404s server-side
-  despite being advertised in its schema). Fixing this also surfaced a SEPARATE, unrelated bug: every
-  I3S PointCloud tileset (LEPCC or not) was silently building as root-only, because PointCloud node
-  pages express children via `firstChild`+`childCount` instead of mesh layers' explicit `children:[…]`
-  array — fixed the same day, see "I3S: PointCloud tree" below.
-- [x] ~~I3S: PointCloud tree building as root-only~~ — **done** (2026-07-06). Root-caused: PointCloud
-  node pages (I3S v2.0) carry `firstChild`+`childCount`, not the `children:[idx…]` array mesh node
-  pages use — the tile builder only ever read `.children`, so every point-cloud tileset (live
-  SceneServer or `.slpk`) silently stopped at the root. This was also the real explanation for an
-  earlier "Moro Bay `.slpk` exposes a single root node" finding — same bug, not a property of that
-  archive. Fixed via a shared `childIndices()` helper in `i3sParse.js`, used by both `i3s-live.js` and
-  the offline draft converter. Verified: Moro Bay SceneServer 1 → 13,775 tiles, its `.slpk` 1 → 2,624.
-- [x] ~~Standalone React + Vite viewer app~~ — **done** (2026-07-06). `apps/viewer` (React) now has full
-  feature parity with the legacy `viewer.html`/`vanilla-viewer.html`: all 11 format preset pills
-  (COPC/Potree/SOG/LCC/GeoSplats/RAD/3D Tiles/Packages/I3S/3MX/Bing), renderer choice (Cesium/3DTRJS),
-  basemap/terrain, LOD controls, crop & extract (format-aware as of 2026-07-06), Local Frame, and
-  navigation are all ported. The legacy HTML files are kept only as historical reference — no unique
-  functionality remains there that isn't also in `apps/viewer`.
 
 ### Inspected, no tiled splat/generic format found
 

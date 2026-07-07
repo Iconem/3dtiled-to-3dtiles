@@ -42,16 +42,9 @@ surface from the `three-demo` source, and how its progressive-loading model comp
 SOG/GeoSplats octree LOD).
 
 **Implemented adapters (plans: [streaming-adapter-plans.md](/docs/references/streaming-adapter-plans)):**
-- ✅ **Bentley 3MX** — `GET /stream/tileset.json?format=threemx&url=<Scene.3mx | root.3mxb>`. Parses `3MXBO` node trees,
-  serves lazy external-tileset fragments per `.3mxb`, decodes **OpenCTM (MG1/LZMA)** geometry via vendored
-  js-openctm → glTF + JPEG baseColor. Verified live against the colorwlof/Unity-3mxb fixture (textured GLB
-  tiles render; decoded bbox matches node bbMin/bbMax). Georef via SRS+SRSOrigin when present.
-- ✅ **Bing Maps 3D** — `GET /bing/tileset.json?root=<quadkey>&g=<genid>&maxLevel=<L>[&decompress=1]`.
-  `tf=3dv4` GLB (Draco + KTX2, ECEF in node matrix) served as-is; quadtree of quadkeys as lazy fragments,
-  availability by HTTP probe, geographic `region` bounding volumes. Verified live (Berlin, keyless `g=15340`).
-  The lazy fragments are their own route, `GET /bing/fragment/<face>-<level>-<x>-<y>.json?g=<genid>` —
-  a partial explicit tileset continuing the tree from that boundary node; `tileset.json`'s deep tiles
-  reference these by absolute URL, fetched only as the camera refines in. Example: `/bing/fragment/0-3-3-2.json?g=15530`.
+Bentley 3MX and Bing Maps 3D are both fully implemented and live — see the dedicated
+[Bentley 3MX and Bing Maps 3D](/docs/guide/streaming-architecture-design-log) sections in the design
+log for the full implementation detail. Still not implemented:
 - **Nexus** `.nxs/.nxz` — *moderate, postponed*: header parse + Corto decode exist in JS but are WebGL/Worker-coupled (port needed), Corto not on npm, DAG→tree mapping is the thorny bit.
 
 ### 2.5D terrain (separate track, future)

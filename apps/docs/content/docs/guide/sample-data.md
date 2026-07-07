@@ -6,7 +6,7 @@ description: "curl -L https://wlt-ai-cdn.art/spark-2.0/rad/coit-40m-sh1-lod.rad 
 > This page covers the repo's own bundled/downloadable `sample-data/` source files (curl commands,
 > local conversion) plus open-data 3D Tiles for exercising tileset-level tools. For what's wired
 > directly into the **live viewer's** clickable preset pills, see
-> [Live demo datasets](/docs/guide/live-demo-datasets).
+> [Live demo datasets](/docs/guide/viewer#live-demo-datasets--whats-behind-each-viewer-pill).
 
 ### RAD (Gaussian Splat LoD)
 
@@ -189,4 +189,4 @@ QUADTREE subtree URI templates from pg2b3dm use underscore separators:
 For the datasets this repo's own converters read *from* (COPC/Potree/SOG/RAD/LCC/I3S sources, not
 already-3D-Tiles), see the sections above. For a tour of what's wired into the live viewer's preset
 pills specifically (including these same open-data 3D Tiles as its DIRECT presets), see
-[Live demo datasets](/docs/guide/live-demo-datasets).
+[Live demo datasets](/docs/guide/viewer#live-demo-datasets--whats-behind-each-viewer-pill).

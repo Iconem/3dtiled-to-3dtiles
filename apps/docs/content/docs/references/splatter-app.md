@@ -10,7 +10,7 @@ reverse-engineered or reproduced here. Tested against a real 103M-splat scene ho
 
 ## Status: not a candidate source format (yet)
 
-Unlike every other format in [`format-comparison.md`](/docs/guide/format-comparison), Splatter isn't a
+Unlike every other format in the [format comparison](/docs/guide/ambition#format-comparison), Splatter isn't a
 **file format** at all — it's a **hosted rendering service**. Content is addressed by an opaque `splatId`
 resolved against splatter.app's own backend; there is no published, standalone wire format a converter
 could point at (`.splat`/`.ply`/`.sog`/`.spz`/etc. are not it — whatever bytes actually stream over the
