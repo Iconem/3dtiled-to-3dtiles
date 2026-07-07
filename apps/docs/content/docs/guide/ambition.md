@@ -19,15 +19,6 @@ tunable per use case (`cache=none|hierarchy|all`). `viewer.html` (CesiumJS + 3DT
 reference client, and doubles as a **bbox + geometric-error-aware crop/extract** tool (`/extract/*`) for
 pulling a sub-region, with user-controlled Geometric Error target precision, of any of these formats back out as LAS/COPC/GLB/SPZ/SOG/PLY.
 
-**Where this is going next.** Two items that used to be listed here as "concrete and addressable" are
-now done: **containerizing the server** (`Dockerfile` + `docker-compose.yml` + a GHCR-publishing GitHub
-Actions workflow — `docker compose up --build` runs the whole stack) and a first pass at the
-**Fumadocs** documentation site (`apps/docs`, `pnpm --filter docs dev`) — `README.md`'s sections and
-every [`docs-references/`](docs-references/) file are chunked into it and verified building/rendering;
-the guide and reference sections are now cross-linked (e.g. `format-comparison.md` links every format to
-its reference-page mirror) and the migration is complete — the docs site, not this README, is the
-canonical source going forward. Both are tracked in [TODO / Future work](#todo--future-work) below.
-
 Further out: a browser/server tiled-splat transcoding UI in the spirit of SuperSplat's splat-transform
 tooling; a **georeferencing/geolocator** step for splats that don't ship one, along the lines of
 WilliamLiu's `3dtiles-inspector` or MapTiler GeoSplats'; and an **aggregator** unifying the

@@ -56,6 +56,15 @@ Roughly in the order we're tackling them:
     instead of Express-style request handlers, and replacing the one `node:zlib` call. This is a design
     sketch, not a scoped work estimate — actually landing it means picking one format (COPC is the
     simplest tree) as a proof of concept before generalizing the pattern to the rest.
+- [ ] **Idea (not scoped): a local desktop companion app for the middleware.** A Tauri app, distinct in
+  shape from the `packages/tile-server` middleware above (that one is a live, no-storage, arbitrary-
+  `<fmt>` pass-through server) — this would be local-first and personal instead: pick any source dataset
+  in a format this repo already converts, convert it to 3D Tiles **on disk**, keep a local library of
+  converted datasets, and serve them from a local HTTP server so their URL can be copied elsewhere —
+  named explicitly for **Unreal Engine integration** (UE's Cesium-for-Unreal plugin, or similar, consumes
+  a 3D Tiles URL directly). A gallery/browse view of already-converted local datasets would make it read
+  as a personal dataset library, not a one-shot CLI wrapper. Purely an idea at this point — no design
+  work, no scoping, not started.
 - [ ] **Test fixtures from open data.** Pin the small, `sample-data/`-friendly open datasets this repo
   already references throughout (Autzen, Eiffel COPC tiles, Skatepark/Roman Parish streamed-SOG,
   Tastier RAD, Geghard, Tende 3MX, …) as versioned fixtures — either vendored into their own small

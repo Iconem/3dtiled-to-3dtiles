@@ -3,10 +3,10 @@
   "defaultOpen": true,
   "pages": [
     "ambition",
+    "format-comparison",
     "vision-towards-a-titiler-for-3d-now-live-for-every-supported",
     "architecture-the-materialization-continuum-cache-none-hierar",
     "streaming-architecture-design-log",
-    "format-comparison",
     "related-tilers-prior-art-reference-implementations",
     "monorepo-usage",
     "todo-future-work",
