@@ -5,6 +5,61 @@ Format loosely follows [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+### Fixed — 2026-07-07 (`main`: 3DTRJS wrong up-orientation on repeat Auto-zoom)
+- **Root cause**: `frameToTileset` (`apps/viewer/src/components/Viewport/ThreeDTRjsViewer.tsx`) decides
+  whether a tileset needs the synthetic ENU anchor (for non-georeferenced local content, e.g. Potree
+  "Lion 2.0") by checking whether its bounding sphere — transformed by `tiles.group`'s CURRENT matrix —
+  sits near world origin. Sound on the first call (fresh load), but the anchor branch then moves
+  `tiles.group` onto the real ellipsoid, so any LATER call (e.g. clicking "Auto-zoom to tileset" again,
+  with zero navigation in between) sees that same sphere near the real ellipsoid surface —
+  indistinguishable from genuinely georeferenced content — and wrongly resets the rotation to identity
+  while leaving the position at the anchor point. Reproduced in every controls mode (Globe/Orbit/
+  Environment) since the bug lives entirely before any controls code runs.
+- **Fix**: decide (and cache) whether a tileset needs the ENU anchor only once, on the fresh-load call
+  (`frameToTileset` now takes an `isFreshLoad` flag), and reuse that cached decision on every later
+  re-frame instead of re-deriving it from an already-moved sphere.
+- A preceding, separate real bug was also fixed along the way: `GlobeControls`/`EnvironmentControls`
+  (from `3d-tiles-renderer`) track a `zoomDirectionSet`/`zoomPoint` pair internally that's only ever
+  cleared by real pointer input — after free-navigating far from a tileset and then hard-teleporting the
+  camera back (`frameToTileset`), the controls' next tick re-raycast along that stale direction from the
+  camera's new position and reoriented around a garbage point. `setControlsPivot` now optionally resets
+  that state, used specifically by `frameToTileset`'s hard camera teleport.
+- Verified live: Lion 2.0 stays upright across repeated Auto-zoom clicks in all three controls modes;
+  real georeferenced content (COPC Autzen) is unaffected across the same repeat-click test.
+
+### Docs — 2026-07-07 (`main`: vitepress theme, sidebar regroup, full MDX conversion, Scalar theming)
+- Switched the Fumadocs UI theme to the `vitepress` preset.
+- Sidebar reorganized: "Guide" and "Per-format reference docs" are now plain (non-clickable) separator
+  labels with their pages inlined; the per-format clusters (3DTiles+glTF, Pointclouds, Mesh/Generic,
+  3DGS Splats, Others) are real collapsible folders, open by default; planning/roadmap docs
+  (dependencies, TODO, candidate formats, sample data, design log, appendix) live in a new
+  "Reference & Planning" folder, collapsed by default.
+- Large content reorg/cleanup pass across `guide/`/`references/` — reordered and regrouped CLI usage,
+  ambition/supported-formats, related tilers, TODO/future-work, and candidate-source-formats sections;
+  moved sections between pages to their more logical home (e.g. the offline-tilers catalogue into
+  "Existing tilers", I3S open-data samples into "Sample Data").
+- **Converted every `content/docs/*.md` file to `.mdx`** so Fumadocs' `InlineTOC` component (now on all
+  large guide/reference pages) actually renders — fumadocs-mdx silently strips all raw JSX/HTML in plain
+  `.md` files, which `InlineTOC` needs. Escaped/fixed everything that broke on the conversion: GFM
+  `<https://...>` autolinks (MDX's tag-sniffer mis-parses the URL's `/`), same-line
+  `<details><summary>...` (MDX's JSX tag-balancer needs `<details>` on its own line before a blank-line +
+  fenced-code boundary), a raw `<!-- -->` HTML comment (→ `{/* */}`), and one bare struct-literal-shaped
+  brace expression in prose that was valid enough JS to compile but threw `ReferenceError` at build time
+  (`stream-sog` parses as a subtraction). Verified with a full production build, not just a parser check.
+- Re-themed the embedded (`/docs/api-reference`) and external (tile-server `/playground`) Scalar API
+  reference to `theme: 'none'` + a hand-written `--scalar-*` variable set matching the vitepress palette
+  exactly (same primary/background/border/foreground values, Inter font) — both now read as the same
+  product as the surrounding docs instead of a visually distinct third-party widget.
+- Fixed the "Demo Viewer" card on `/docs` (was hardcoded to the API Reference link by mistake) to use
+  the expanded `process.env.VIEWER_URL`.
+- Removed two orphaned early-prototype scratch files (`ref-convert-core.js`, `ref-gsplat1.json`) and the
+  stale duplicate root `viewer.html`/`vite.config.mjs` (the real, Docker-shipped copy has lived in
+  `apps/viewer` since an earlier "consolidate dev ports" pass) along with their root `package.json` deps.
+- Removed the `VITE_TILE_SERVER_URL` production-domain build-arg from `docker-publish.yml` — per-
+  deployment tile-server/docs origins are already configurable at container start via the runtime
+  `TILE_SERVER_URL`/`DOCS_URL` env vars, so a published, reusable image shouldn't have one deployment's
+  domain baked in at build time.
+
 ### Fixed/Added — 2026-07-03 (`main`: uniform crop, CORS proxy, I3S SLPK+textures, Agisoft pill)
 - **Uniform splat-crop flip.** Replaced the hardcoded `isLcc` special-case in `extract-live.js` with a
   documented `SPLAT_FLIP_BAKED = {lcc, sog}` table + `splatFlip()` — discovered SOG had the identical
