@@ -2,12 +2,12 @@
   "title": "3DGS Splats",
   "defaultOpen": true,
   "pages": [
-    "spz-format",
+    "spz",
     "streamed-sog",
     "sog",
-    "lcc-format",
-    "maptiler-geosplats",
-    "rad-format-notes",
-    "splatter-app"
+    "lcc",
+    "geosplats",
+    "rad",
+    "splatter"
   ]
 }

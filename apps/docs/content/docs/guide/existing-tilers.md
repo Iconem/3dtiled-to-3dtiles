@@ -1,5 +1,5 @@
 ---
-title: "Related tilers (prior art / reference implementations)"
+title: "Existing tilers (reference implementations)"
 description: "Producing the tiled inputs (offline tilers): point-cloud tilers (PotreeConverter, py3dtiles,"
 ---
 
@@ -41,6 +41,7 @@ Tip: store any per-point scalar field (e.g. a CloudCompare C2C distance) in the 
   gocesiumtiler-win-x64.exe file -out ./out-1.1 -version 1.1 pointcloud.1.4.las
   gocesiumtiler-win-x64.exe file -version 1.1 -o Exports/$m -e EPSG:32648 --resolution 1 --subsample 1 $m.las
   ```
+- **[MIERUNE/point-tiler](https://github.com/MIERUNE/point-tiler)**: A tool for converting PointCloud data (las/laz and csv) into "3D Tiles v1.1".
 - **[yeyan00/potree23dtiles](https://github.com/yeyan00/potree23dtiles)** — Potree → 3D Tiles (the
   closest analogue to our `potree-to-3dtiles`; cross-checked our 2.0 decode against it).
 - **[ept-tools](https://github.com/connormanning/ept-tools)** — LAS → EPT → 3D Tiles.

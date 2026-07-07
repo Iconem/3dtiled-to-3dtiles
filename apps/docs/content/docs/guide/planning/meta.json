@@ -3,10 +3,9 @@
   "defaultOpen": false,
   "pages": [
     "dependencies",
-    "todo-future-work",
-    "candidate-source-formats-roadmap-not-yet-supported",
+    "candidate-source-formats",
     "sample-data",
-    "streaming-architecture-design-log",
-    "appendix-per-format-schema-diagrams"
+    "design-log",
+    "appendix-schema-diagrams"
   ]
 }

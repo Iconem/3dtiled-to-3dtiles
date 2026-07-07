@@ -4,8 +4,8 @@
   "pages": [
     "3d-tiles-format",
     "KHR_gaussian_splatting",
-    "gltf-2.1-complex-scenes",
-    "3d-gaussian-splatting-extension-lineage",
+    "gltf-2.1",
+    "3dgs-extension-lineage",
     "3tz-3dtiles-packages",
     "usd-gaussian-splats"
   ]

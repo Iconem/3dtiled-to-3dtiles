@@ -1,10 +1,12 @@
 {
   "pages": [
-    "ambition",
+    "supported-formats",
     "cli-usage",
-    "architecture-the-materialization-continuum-cache-none-hierar",
-    "related-tilers-prior-art-reference-implementations",
+    "architecture-caching",
+    "/api-reference",
+    "existing-tilers",
     "viewer",
+    "todo-future-work",
     "planning"
   ]
 }
