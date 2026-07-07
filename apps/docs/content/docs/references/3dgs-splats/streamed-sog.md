@@ -1,6 +1,6 @@
 ---
-title: "Streamed SOG — PlayCanvas LOD format"
-description: "Streamed SOG splits a Gaussian splat scene into spatial chunks at multiple levels of"
+title: "Streamed SOG — (Playcanvas Supersplat)"
+description: "Streamed SOG splits a Gaussian splat scene into spatial chunks at multiple LoDs"
 ---
 
 > Source: https://developer.playcanvas.com/user-manual/gaussian-splatting/formats/streamed-sog/

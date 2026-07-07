@@ -105,4 +105,16 @@ only public source), the observable public API surface:
 - Requires an explicit WebGL2 context (`canvas.getContext('webgl2', options)`), passed into
   `new THREE.WebGLRenderer({ canvas, context })`.
 
+
+### Other specs (no dedicated converter row above)
+
+Extension/format specs referenced by the tables above but not themselves a distinct converter target:
+
+| Format | Canonical spec(s) | Local mirror |
+|--------|-------------------|--------------|
+| **SPZ / glTF splat exts** | [SPZ](https://github.com/nianticlabs/spz) · [KHR_gaussian_splatting](https://github.com/CesiumGS/glTF/tree/proposal-KHR_gaussian_splatting) | [`spz-format.md`](/docs/references/3dgs-splats/spz-format) · [`KHR_gaussian_splatting.md`](/docs/references/3dtiles-gltf/KHR_gaussian_splatting) |
+| **USD splats (ParticleField)** | [OpenUSD v26.03](https://aousd.org/blog/openusd-v26-03/) · [ParticleField3DGaussianSplat](https://openusd.org/release/user_guides/schemas/usdVol/ParticleField3DGaussianSplat.html) | [`usd-gaussian-splats.md`](/docs/references/3dtiles-gltf/usd-gaussian-splats) |
+| **glTF 2.1 (complex scenes)** | [Khronos blog](https://www.khronos.org/blog/introducing-gltf-2.1-with-complex-scenes) · [64-bit GLB / indices #2594](https://github.com/KhronosGroup/glTF/issues/2594) | [`gltf-2.1-complex-scenes.md`](/docs/references/3dtiles-gltf/gltf-2.1-complex-scenes) |
+
+
 ---

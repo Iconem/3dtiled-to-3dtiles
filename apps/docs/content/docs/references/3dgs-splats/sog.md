@@ -1,6 +1,6 @@
 ---
-title: "SOG — Spatially Ordered Gaussians"
-description: "SOG is PlayCanvas's compact container for 3D Gaussian Splat data. It stores per-Gaussian"
+title: "SOG (Playcanvas Supersplat)"
+description: "SOG is PlayCanvas's compact container for 3D Gaussian Splat data, stored as WebP image textures"
 ---
 
 > Source: https://developer.playcanvas.com/user-manual/gaussian-splatting/formats/sog/

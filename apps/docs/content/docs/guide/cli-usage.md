@@ -294,7 +294,7 @@ required per its White Paper (see the doc).
 > from XGRIDS" and publishing derivatives under terms no less open. This converter reads the format;
 > downstream products must carry that attribution.
 
-### i3s-to-3dtiles  🟡 **DRAFT — mesh validated on real data**
+### i3s-to-3dtiles 
 
 Converts the **supported subset** of Esri **[I3S](/docs/references/mesh-generic/i3s-spec)** (Indexed 3D Scene
 Layer) → 3D Tiles 1.1. Validated on `Buildings_NewYork_v18.slpk` → **5882 glTF TRIANGLES tiles** that
