@@ -2,16 +2,20 @@
   "title": "Per-format reference docs",
   "pages": [
     "index",
+    "---3DTiles + glTF---",
     "3d-tiles-format",
     "KHR_gaussian_splatting",
     "gltf-2.1-complex-scenes",
     "3d-gaussian-splatting-extension-lineage",
     "3tz-3dtiles-packages",
     "usd-gaussian-splats",
+    "---Pointclouds---",
     "copc-format",
     "potree-format",
+    "---Mesh/Generic---",
     "i3s-spec",
     "nexus-format",
+    "---3DGS Splats---",
     "spz-format",
     "streamed-sog",
     "sog",
@@ -19,6 +23,7 @@
     "maptiler-geosplats",
     "rad-format-notes",
     "splatter-app",
+    "---Others---",
     "loaders-gl-tile-converter"
   ]
 }
