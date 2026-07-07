@@ -3,6 +3,8 @@ title: "3dtiled Supported Formats"
 description: "Set of Node.js SDK/CLI, standalone-packaged, converters: and middleware on-the-fly HLOD conversion (hierarchy/tile content)"
 ---
 
+<InlineTOC items={toc} />
+
 ## Introduction: The intent (online, range-streamed)
 
 This started as a set of Node.js SDK/CLI, standalone-packaged, **converters**: take a *tiled / LoD source format* — HLOD Hierarchical Level of Detail, tiled point clouds, meshes, or 3D Gaussian splats (COPC, Potree, I3S, stream-SOG, LCC, RAD, 3MX, GeoSplats, …) — and
@@ -30,7 +32,7 @@ re-encoded or re-sorted. Like TiTiler for COG: zero re-tiling, zero copy.
 
 > The intent: fully online, fetching only the required portions of the underlying format hierarchy
 > to build the 3D Tiles JSON hierarchy, then — when GLB tiles are requested — fetching via range
-> requests the corresponding {copc, stream-sog, lcc, potree, etc} contiguous memory block just to
+> requests the corresponding `{copc, stream-sog, lcc, potree, etc}` contiguous memory block just to
 > build the requested tile.
 
 The end state is the same model generalised to every internally-tiled format

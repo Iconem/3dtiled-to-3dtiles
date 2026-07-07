@@ -31,7 +31,7 @@ partition cell · **Unit** = group of Nodes sharing one Index · **Level** = one
 (`COMPRESS`), `fileType`, `attributes[]` (per-property min/max for dequant: position, normal,
 color, shcoef, opacity, scale, + env* variants).
 Observed sample `Guan_Temple`: version 3.0, 11.4M splats, 4 levels, `indexDataSize` 68
-(= index uint32 4 + 4 levels × {PointsCount u32, Offset u64, Size u32 = 16} = 68).
+(= index uint32 4 + 4 levels × `{PointsCount u32, Offset u64, Size u32}` = 16, total = 68).
 
 ## Index.bin (per Unit, little-endian, `indexDataSize` bytes)
 `index` u32 · then per LOD level: `PointsCount` u32, `LODOffset` u64 (into Data.bin),
