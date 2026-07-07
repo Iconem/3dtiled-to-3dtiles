@@ -16,7 +16,7 @@ resolved against splatter.app's own backend; there is no published, standalone w
 could point at (`.splat`/`.ply`/`.sog`/`.spz`/etc. are not it — whatever bytes actually stream over the
 wire are a private implementation detail of the closed `splatter-three` package). That makes it a
 **dead end for `→ 3D Tiles` conversion** today: there's nothing to parse. It's tracked here (rather than
-in [`candidate-source-formats-roadmap-not-yet-supported.md`](/docs/guide/candidate-source-formats-roadmap-not-yet-supported))
+in [`candidate-source-formats-roadmap-not-yet-supported.md`](/docs/guide/planning/candidate-source-formats-roadmap-not-yet-supported))
 as a **rendering-technique reference** instead — see [Related tilers](/docs/guide/related-tilers-prior-art-reference-implementations)
 for how its progressive-loading/hit-testing ideas compare to this repo's own SOG/GeoSplats octree LOD.
 

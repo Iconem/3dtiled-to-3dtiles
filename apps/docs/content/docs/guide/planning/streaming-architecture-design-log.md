@@ -148,7 +148,7 @@ them). `/3dtiles-tools` stays as its own endpoint (a tileset-level *transform*, 
 Live `tiling=explicit` routing *through* the existing `implicit-to-explicit` tool for octree formats
 (COPC/Potree) — so the LIVE `/stream?tiling=explicit` path shares one explicit-tiling code path instead
 of each octree adapter having its own bespoke `buildTilesetExplicit` — remains open (see
-[TODO / Future work](/docs/guide/todo-future-work)). What shipped now is more modest:
+[TODO / Future work](/docs/guide/planning/todo-future-work)). What shipped now is more modest:
 - Potree 1.x's `tiling=explicit` was simplified to fully materialize the tree in one response (no more
   per-format lazy-fragment continuation needing its own routes).
 - RAD and I3S (2026-07-02): removed their lazy-fragment continuation entirely (`/stream/rad/subtree/`,
@@ -310,7 +310,7 @@ this differently from the plan's guess: `/bing` reads Bing's own `td1`/`st` mani
 (discovered during the build) rather than relying on blind recursive probing.
 
 Nexus (`.nxs/.nxz`) remains postponed — see
-[Candidate source formats](/docs/guide/candidate-source-formats-roadmap-not-yet-supported).
+[Candidate source formats](/docs/guide/planning/candidate-source-formats-roadmap-not-yet-supported).
 
 ---
 
@@ -330,7 +330,7 @@ own `SpzWriter` and the Niantic SPZ reference:
 - **Header / block order** — magic, version, numPoints, shDegree, fractionalBits; planar blocks positions→alpha→rgb→scales→rotations. All correct.
 
 **Root cause — SPZ version. The extension is locked to SPZ v2; we were emitting v3.** Tracing the
-extension's [inception](/docs/references/3d-gaussian-splatting-extension-lineage) shows
+extension's [inception](/docs/references/3dtiles-gltf/3d-gaussian-splatting-extension-lineage) shows
 `KHR_gaussian_splatting_compression_spz_2` is **pinned to SPZ v2** (the `_2` is the SPZ format
 version — a KHR extension cannot float across SPZ versions for IP/portability reasons, so it is
 deliberately fixed). The two SPZ versions differ in the **rotation block**:
@@ -355,7 +355,7 @@ plugin. Re-run the converter on your `.rad` files to regenerate v2 tilesets.
 > If a future tiler/decoder targets SPZ v3, restore the 4-byte `packQuaternionSmallestThree`
 > encoder (in this file's git history) and set `SPZ_VERSION = 3` — but only under a v3-capable
 > extension, never under `_spz_2`. See the dedicated
-> [3D Gaussian Splatting extension lineage](/docs/references/3d-gaussian-splatting-extension-lineage) section for
+> [3D Gaussian Splatting extension lineage](/docs/references/3dtiles-gltf/3d-gaussian-splatting-extension-lineage) section for
 > the full history and links.
 
 ### COPC point clouds look "upside down" in 3DTRJS Env controls (fine in Globe)
@@ -446,7 +446,7 @@ every chunk **in parallel** decoding just its `center`/`child_count`/`child_star
 encode, no gzip) to build the explicit tree topology + AABBs, then range-fetch + fully decode +
 encode only the ONE chunk a requested tile needs. Cold-start cost is one parallel pass over the whole
 file's chunk headers, not the whole geometry — see
-[`rad-format-notes.md`](/docs/references/rad-format-notes) for the full rationale
+[`rad-format-notes.md`](/docs/references/3dgs-splats/rad-format-notes) for the full rationale
 on why RAD chunks aren't spatial tiles in the first place.
 
 Everything not on a range adapter is still fully renderable today via `/convert`.
@@ -456,7 +456,7 @@ Everything not on a range adapter is still fully renderable today via `/convert`
 [MapTiler GeoSplats](https://www.maptiler.com/geosplats/) is a georeferenced HLOD Gaussian-splat
 format with no published byte-spec — everything below was decoded from a real `model.json` +
 `metadata.json` pair and the SDK bundle (`@maptiler/geosplats`, `maptiler-geosplats.mjs`). Full
-format notes: [`maptiler-geosplats.md`](/docs/references/maptiler-geosplats).
+format notes: [`maptiler-geosplats.md`](/docs/references/3dgs-splats/maptiler-geosplats).
 
 ```sh
 #   GET /stream/tileset.json?format=geosplats&url=<model.json URL>[&lod=1..8]           → HLOD tileset
@@ -532,7 +532,7 @@ GET /extract/{las|glb|copc|tileset|zip|splat}?url=<tileset.json>&bbox=<west,sout
   `baked` self-flip) that format's own `/stream` adapter already committed to; the table is where that
   one bit of per-format knowledge lives, not scattered special-casing. Verified against real tile data
   for all three formats (LCC, SOG, RAD) via centroid-vs-declared-box sampling. **Not yet verified**: the
-  georeferenced vs. non-georeferenced case split for each format — see [TODO/Future work](/docs/guide/todo-future-work).
+  georeferenced vs. non-georeferenced case split for each format — see [TODO/Future work](/docs/guide/planning/todo-future-work).
 
 viewer.html's "CROP & EXTRACT" sidebar section drives this directly.
 
@@ -623,7 +623,7 @@ Status: PASS ✓  (0.57s for 11 chunks)
 
 **Browser runtime not built** — `fs` / `zlib` / `worker_threads` are Node-only; core's planned `fs-io`
 abstraction + `CompressionStream`/WASM-brotli paths don't exist yet (decoders are mostly portable). See
-[TODO / Future work](/docs/guide/todo-future-work) for the design sketch of porting the middleware into
+[TODO / Future work](/docs/guide/planning/todo-future-work) for the design sketch of porting the middleware into
 3DTilesRendererJS itself. **`.3tz`/`.3dtiles` packaging IS built in** (`scripts/pack-3dtiles.mjs`,
 dependency-free) and serving packages in-place is too (`/3dtiles-self-contained`, documented in
 [Ambition](/docs/guide/ambition)). **Tileset-level transforms** (version `upgrade` 1.0→1.1, `combine`
@@ -821,7 +821,7 @@ to the viewer (verified in-browser).
 Crawl GIS/CAD/VFX/heritage for missing tiled formats (Nexus, ReCap RCP, Bing/MSFS, terrain). Plan only.
 How to write LAS/LAZ from JS/Node — is there a PDAL for Node?
 **Outcome:** Researched + planned. Catalog of candidate formats (Nexus, OSGB, 3MX, S3M, Bing, terrain) with
-a priority ranking — see [Candidate source formats](/docs/guide/candidate-source-formats-roadmap-not-yet-supported).
+a priority ranking — see [Candidate source formats](/docs/guide/planning/candidate-source-formats-roadmap-not-yet-supported).
 Answered LAS/LAZ: hand-write LAS, shell out to `pdal`/`untwine` for LAZ/COPC (no PDAL-Node binding;
 laz-perf is decode-only).
 
@@ -876,7 +876,7 @@ reporting, browser-native bbox-crop→LAS→COPC, fastest JS point-cloud tiler.
 - **Multi-page COPC/Potree timing** — lazy/eager split is verified *correct* on local single-page/small
   samples; the dramatic cold-start win only shows on genuinely huge multi-page clouds.
 
-See [TODO / Future work](/docs/guide/todo-future-work) for the full active list.
+See [TODO / Future work](/docs/guide/planning/todo-future-work) for the full active list.
 
 ---
 
@@ -960,7 +960,7 @@ Crawl GIS/CAD/VFX/heritage for missing tiled formats (Nexus, ReCap RCP, Bing/MSF
 How to write LAS/LAZ from JS/Node — is there a PDAL for Node?
 **Outcome:** Researched + planned. Catalog of candidate formats (Nexus, OSGB, 3MX, S3M, Bing, terrain) with
 a priority ranking (later folded into
-[Candidate source formats](/docs/guide/candidate-source-formats-roadmap-not-yet-supported)). Answered
+[Candidate source formats](/docs/guide/planning/candidate-source-formats-roadmap-not-yet-supported)). Answered
 LAS/LAZ: hand-write LAS, shell out to `pdal`/`untwine` for LAZ/COPC (no PDAL-Node binding; laz-perf is
 decode-only).
 

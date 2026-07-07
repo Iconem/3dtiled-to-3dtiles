@@ -1,4 +1,10 @@
 {
   "title": "3dtiled-to-3dtiles",
-  "pages": ["index", "guide", "references"]
+  "pages": [
+    "index",
+    "---Guide---",
+    "...guide",
+    "---Per-format reference docs---",
+    "...references"
+  ]
 }

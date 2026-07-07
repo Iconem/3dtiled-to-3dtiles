@@ -136,7 +136,7 @@ face-handle resize yet — translate only).
 
 ## Live demo datasets — what's behind each viewer pill
 
-> This is **not** the same as [Sample Data](/docs/guide/sample-data), which covers the repo's own
+> This is **not** the same as [Sample Data](/docs/guide/planning/sample-data), which covers the repo's own
 > bundled/downloadable `sample-data/` directory (curl commands, local conversion). This section is
 > specifically "here's what's behind each clickable pill in the live viewer" — many of the same
 > upstream sources are shared between the two, but this section's job is the pill → source mapping.
@@ -215,7 +215,7 @@ Esri Indexed 3D Scene Layer (mesh and point-cloud layers), streamed live via `/s
 | **ArcGIS Moro Bay LiDAR SceneServer** (point cloud) | `https://tiles.arcgis.com/tiles/z2tnIkrLQ2BRzr6P/arcgis/rest/services/Moro_Bay_LiDAR/SceneServer` |
 | **ArcGIS USGSNYC 2014 LiDAR SceneServer** (point cloud) | `https://tiles.arcgis.com/tiles/z2tnIkrLQ2BRzr6P/arcgis/rest/services/USGSNYC_2014_LiDAR/SceneServer` |
 
-See [`i3s-spec.md`](/docs/references/i3s-spec) and the I3S section of [CLI usage](/docs/guide/cli-usage)
+See [`i3s-spec.md`](/docs/references/mesh-generic/i3s-spec) and the I3S section of [CLI usage](/docs/guide/cli-usage)
 for the LEPCC decode / texture-embedding details behind these.
 
 ### 3D Tiles ◈ (DIRECT presets)
@@ -250,8 +250,8 @@ Already-3D-Tiles sources, loaded directly (no conversion/streaming adapter invol
 
 These pseudo-format pills route to their own live adapters (`/stream?format=geosplats`, `/bing`,
 `/threemx`) but currently have no named preset assets wired into `formats.ts` — they're driven by a
-manual URL entry in the viewer instead. See [`maptiler-geosplats.md`](/docs/references/maptiler-geosplats)
-and the [Bentley 3MX and Bing Maps 3D](/docs/guide/streaming-architecture-design-log) section of the
+manual URL entry in the viewer instead. See [`maptiler-geosplats.md`](/docs/references/3dgs-splats/maptiler-geosplats)
+and the [Bentley 3MX and Bing Maps 3D](/docs/guide/planning/streaming-architecture-design-log) section of the
 design log for what each adapter does.
 
 ### Tools mode datasets (implicit-to-explicit / upgrade)
@@ -269,5 +269,5 @@ tileset-level transforms rather than a format converter:
 | `upgrade` | Lille Pyramid (b3dm→glb) | `https://webimaging.lillemetropole.fr/externe/maillage/2016_mel_10cm/3dtiles/pyramid/tileset.json` |
 
 These same bertt.github.io / CesiumGS sample tilesets are documented in more depth (tileset structure,
-implicit-tiling schemes) on the [Sample Data](/docs/guide/sample-data) page's
+implicit-tiling schemes) on the [Sample Data](/docs/guide/planning/sample-data) page's
 "Open-Data 3D Tiles sample datasets" section.

@@ -70,6 +70,22 @@ curl -L "https://data.geopf.fr/telechargement/download/LiDARHD-NUALID/NUALHD_1-0
 - **USGS 3DEP STAC** — https://planetarycomputer.microsoft.com/api/stac/v1/collections/3dep-lidar-copc
   Browser: https://radiantearth.github.io/stac-browser/#/external/planetarycomputer.microsoft.com/api/stac/v1/collections/3dep-lidar-copc
 
+### I3S (Esri SceneServer / SLPK)
+
+**I3S open-data samples** (beyond `Buildings_NewYork_v18.slpk`, mesh-only) — SLPK + hosted-service
+pairs for both integrated mesh and point-cloud layers, from Esri's own [`i3s-spec` sample data
+readme](https://github.com/Esri/i3s-spec/blob/master/docs/2.1/pcsl_ReadMe.md), the [ArcGIS JS SDK
+3D-object sample gallery](https://developers.arcgis.com/javascript/latest/sample-code/?tagged=3dobject),
+and the [ArcGIS 3D Tiles samples experience](https://experience.arcgis.com/experience/e2e1e497d13b41cab368c894fd9b3df7)
+(ArcGIS portal items — open each `item.html` link and use its "Download" button for the SLPK, or the
+REST service URL directly for streaming). All four verified live against `/stream?format=i3s`:
+- Integrated mesh (**works, fully textured**) — SLPK: [item `95a427c7a6ec4789b03c1a177366b54c`](https://3dcities.maps.arcgis.com/home/item.html?id=95a427c7a6ec4789b03c1a177366b54c) (`Rancho_Mesh_v18.slpk`, 285 MB) · service: [item `01eff699c8404a27a65e0877201136b4`](https://3dcities.maps.arcgis.com/home/item.html?id=01eff699c8404a27a65e0877201136b4) → `https://tiles.arcgis.com/tiles/z2tnIkrLQ2BRzr6P/arcgis/rest/services/Rancho_Mesh_v18/SceneServer`. The SLPK link is ArcGIS Online's own download endpoint (`.../content/items/<id>/data`) — no `.slpk` anywhere in the URL (only in a `Content-Disposition` header), which the adapter didn't originally detect as an archive at all; both this and the texture support were fixed 2026-07-02, verified byte-identical (same JPEG at the same buffer offset) against both the SLPK and the SceneServer URL for the same underlying dataset.
+- Point cloud (**LEPCC-compressed — now decoded, both work**) — SLPK: [item `496552d059644b4892c51ad06bdba8e2`](https://www.arcgis.com/home/item.html?id=496552d059644b4892c51ad06bdba8e2) (`Moro_Bay_LiDAR.slpk`, 578 MB, 2,624 tiles) · service: [item `908d6b986f314d51b1ff50b3bc321dfd`](https://www.arcgis.com/home/item.html?id=908d6b986f314d51b1ff50b3bc321dfd) → `https://tiles.arcgis.com/tiles/z2tnIkrLQ2BRzr6P/arcgis/rest/services/Moro_Bay_LiDAR/SceneServer` (13,775 tiles). Position decodes correctly (checksum + extent-verified); RGB doesn't render yet — it's a separate LEPCC blob type not yet ported, and this specific dataset's `RGB` attribute resource 404s server-side anyway despite being advertised in its schema. A second point-cloud sample (item `fc3f4a4919394808830cd11df4631a54`, `BARNEGAT_BAY_LiDAR_UTM`) is also LEPCC — every real ArcGIS point-cloud SceneServer sample found so far uses it, since it's Esri's own default point-cloud codec.
+- **Live ArcGIS SceneServer REST support added** (2026-07-02) to test the "service" URLs above directly
+  (previously the adapter only read a static `3dSceneLayer.json`/SLPK tree, not the REST API's
+  `?f=json`-based resource paths) — see `arcgisSceneServerReader()` in `i3s-live.js`.
+- Also referenced: portal item `fc3f4a4919394808830cd11df4631a54` (point cloud) and `001bb7ee3ce44ae5a8a15bef72f4404a` (integrated mesh) — not yet run against `i3s-to-3dtiles`/`/stream?format=i3s`, listed here as further samples to pull in.
+
 ---
 
 ## Open-Data 3D Tiles sample datasets

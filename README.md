@@ -48,12 +48,12 @@ on GitHub under [`apps/docs/content/docs/guide/`](apps/docs/content/docs/guide/)
 Guide pages (mirrors this README's original section breakdown, one page each):
 
 - [Introduction](apps/docs/content/docs/guide/introduction.md) · [Ambition](apps/docs/content/docs/guide/ambition.md) · [Format comparison](apps/docs/content/docs/guide/format-comparison.md)
-- [Related tilers / prior art](apps/docs/content/docs/guide/related-tilers-prior-art-reference-implementations.md) · [Monorepo & usage](apps/docs/content/docs/guide/monorepo-usage.md) · [TODO / Future work](apps/docs/content/docs/guide/todo-future-work.md)
-- [Architecture: the materialization continuum](apps/docs/content/docs/guide/architecture-the-materialization-continuum-cache-none-hierar.md) · [Converters](apps/docs/content/docs/guide/converters.md) · [Sample Data](apps/docs/content/docs/guide/sample-data.md)
-- [Dependencies](apps/docs/content/docs/guide/dependencies.md) · [Performance & parallelism](apps/docs/content/docs/guide/performance-parallelism.md) · [Candidate source formats](apps/docs/content/docs/guide/candidate-source-formats-roadmap-not-yet-supported.md)
+- [Related tilers / prior art](apps/docs/content/docs/guide/related-tilers-prior-art-reference-implementations.md) · [Monorepo & usage](apps/docs/content/docs/guide/monorepo-usage.md) · [TODO / Future work](apps/docs/content/docs/guide/planning/todo-future-work.md)
+- [Architecture: the materialization continuum](apps/docs/content/docs/guide/architecture-the-materialization-continuum-cache-none-hierar.md) · [Converters](apps/docs/content/docs/guide/converters.md) · [Sample Data](apps/docs/content/docs/guide/planning/sample-data.md)
+- [Dependencies](apps/docs/content/docs/guide/planning/dependencies.md) · [Performance & parallelism](apps/docs/content/docs/guide/performance-parallelism.md) · [Candidate source formats](apps/docs/content/docs/guide/planning/candidate-source-formats-roadmap-not-yet-supported.md)
 - [Documentation (findings, format notes)](apps/docs/content/docs/guide/documentation.md) · [3D Gaussian Splatting extension lineage](apps/docs/content/docs/guide/3d-gaussian-splatting-extension-lineage.md)
 - [Vision: towards a TiTiler for 3D](apps/docs/content/docs/guide/vision-towards-a-titiler-for-3d-now-live-for-every-supported.md) · [Known blockers](apps/docs/content/docs/guide/known-blockers-how-to-overcome-them.md)
-- [Missing features & unsupported code-paths](apps/docs/content/docs/guide/missing-features-unsupported-code-paths.md) · [Appendix: per-format schema diagrams](apps/docs/content/docs/guide/appendix-per-format-schema-diagrams.md)
+- [Missing features & unsupported code-paths](apps/docs/content/docs/guide/missing-features-unsupported-code-paths.md) · [Appendix: per-format schema diagrams](apps/docs/content/docs/guide/planning/appendix-per-format-schema-diagrams.md)
 
 Format-spec deep-dives (canonical sources + hand-distilled local notes), readable directly on GitHub
 under [`docs-references/`](docs-references/) — e.g.
@@ -177,7 +177,7 @@ A running, dated log of what's shipped recently, what's still open, and a survey
 capture/scanner ecosystems checked for tiled formats worth adding (none found so far worth an adapter).
 Includes the SPZ v4/v5 roadmap notes (Niantic Spatial's compression format used for splat tiles here).
 
-See the [TODO / Future work guide](apps/docs/content/docs/guide/todo-future-work.md) for the full,
+See the [TODO / Future work guide](apps/docs/content/docs/guide/planning/todo-future-work.md) for the full,
 dated list.
 
 ## Architecture: the materialization continuum (`cache = none · hierarchy · full`)
@@ -198,7 +198,7 @@ Small, `sample-data/`-friendly fixtures and curl commands for RAD (Gaussian spla
 (PlayCanvas), and COPC (LiDAR) — real public/open datasets (Coit Tower, Autzen Stadium, IGN LiDAR HD,
 PlayCanvas example scenes, etc), used by the converters' own README examples and the viewer's preset bar.
 
-See the [Sample Data guide](apps/docs/content/docs/guide/sample-data.md) for the full curl commands and
+See the [Sample Data guide](apps/docs/content/docs/guide/planning/sample-data.md) for the full curl commands and
 source links.
 
 ## Dependencies
@@ -206,7 +206,7 @@ source links.
 A short table of the handful of non-obvious shared npm dependencies (`copc`, `@gltf-transform/core`,
 `proj4`, `@sparkjsdev/spark`) and which converters use them.
 
-See the [Dependencies guide](apps/docs/content/docs/guide/dependencies.md) for the full table.
+See the [Dependencies guide](apps/docs/content/docs/guide/planning/dependencies.md) for the full table.
 
 ## Performance & parallelism
 
@@ -219,12 +219,12 @@ the current, accurate per-converter picture (supersedes older performance notes 
 
 ## Candidate source formats — roadmap (not yet supported)
 
-A ranked crawl (Tier 1–4, by openness × feasibility × remote-consumability) of GIS/CAD-AEC/VFX/heritage
-tiled formats not yet ingested — Nexus, OSGB, SuperMap S3M, Cesium quantized-mesh terrain, OpenUSD/USDZ,
-Bentley iModel/iTwin, and blocked cases like Autodesk ReCap. Includes a separate 2.5D terrain track
+A ranked crawl (Candidates vs. Discarded, by openness × feasibility × remote-consumability) of
+GIS/CAD-AEC/VFX/heritage tiled formats not yet ingested — SPZ v5, Splatter, 2.5D terrain, OSGB, Nexus,
+SuperMap S3M — and blocked cases like Autodesk ReCap. Includes a separate 2.5D terrain track
 (DEM raster → TIN → 3D Tiles/quantized-mesh).
 
-See the [Candidate source formats guide](apps/docs/content/docs/guide/candidate-source-formats-roadmap-not-yet-supported.md)
+See the [Candidate source formats guide](apps/docs/content/docs/guide/planning/candidate-source-formats-roadmap-not-yet-supported.md)
 for the full tier breakdown and implemented-adapter notes (3MX, Bing Maps 3D, Nexus).
 
 ## 3D Gaussian Splatting extension lineage
@@ -269,5 +269,5 @@ for the full, itemized list.
 
 Mermaid diagrams of each source format's LoD/hierarchy tree (RAD, Streamed SOG, LCC, COPC).
 
-See the [Appendix guide](apps/docs/content/docs/guide/appendix-per-format-schema-diagrams.md) for the
+See the [Appendix guide](apps/docs/content/docs/guide/planning/appendix-per-format-schema-diagrams.md) for the
 full diagrams.

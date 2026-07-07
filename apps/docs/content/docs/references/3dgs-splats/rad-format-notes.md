@@ -331,7 +331,7 @@ CesiumJS and 3DTilesRendererJS:
   kept below for the design rationale. The undershoot noted at the end of this bullet is why the
   **default basis is now `spatial`** — `bboxDiag/∛splatCount` — instead; `featuresize` is opt-in
   legacy. See the RAD `geometricError` note in the
-  [Design log](/docs/guide/streaming-architecture-design-log).)* Each tile records a feature size =
+  [Design log](/docs/guide/planning/streaming-architecture-design-log).)* Each tile records a feature size =
   `mean over splats of max(scaleₓ,scaleᵧ,scale_z) × 3` (≈ SparkJS BhattLod `featureSize`),
   then the builder collapses these to **one error per LoD level** (mean featureSize at each depth,
   forced strictly decreasing). This mirrors the

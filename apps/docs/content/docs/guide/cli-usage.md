@@ -3,6 +3,8 @@ title: "CLI usage"
 description: "npm-workspaces monorepo. Each input format is an independent converter with its own deps"
 ---
 
+## npm-workspaces monorepo
+
 npm-workspaces monorepo. Each input format is an **independent converter** with its own deps
 (install just the one you need); a shared **core** holds the common machinery; a **meta-converter**
 detects any input and dispatches.
@@ -45,6 +47,23 @@ await convert('path/to/input', 'out/dir', { geScale: 2, onLog: s => process.stdo
 > format-specific CLI flags (`opts.extraArgs`) the in-process options object doesn't model yet — not a
 > sign of an incomplete migration. See [ARCHITECTURE.md](ARCHITECTURE.md).
 
+## Individual converter (à la carte quick reference)
+
+Each converter also runs standalone (only its own deps) — this is a compact index into the
+per-format sections below, not new information:
+
+```sh
+node packages/rad-to-3dtiles/src/index.js    <coit.rad>            sample-data/output/rad/<name>-3dtiles-from-rad
+node packages/sog-to-3dtiles/src/index.js    <scene-dir>           sample-data/output/sog/<name>-3dtiles-from-sog
+node packages/lcc-to-3dtiles/src/index.js    <lcc-dir>             sample-data/output/lcc/<name>-3dtiles-from-lcc
+node packages/copc-to-3dtiles/src/index.js   <input.copc.laz>      sample-data/output/copc/<name>-3dtiles-from-copc
+node packages/potree-to-3dtiles/src/index.js <potree-dir>          sample-data/output/potree/<name>
+node packages/i3s-to-3dtiles/src/index.js    <extracted-slpk-dir>  sample-data/output/i3s/<name>   # draft
+```
+
+> Output convention: regenerate into **`sample-data/output/<fmt>/…`** (the viewer presets and
+> `tools-inspector` scripts point there).
+
 ## Per-format converters
 
 ### copc-to-3dtiles
@@ -83,6 +102,51 @@ root-to-leaf verbatim. Viewers like opengeos' lidar-viewer likely position COPC 
 by reading their internal spatial metadata directly rather than relying on the 3D Tiles CRS.
 This is worth exploring to simplify the pipeline and eliminate the proj4 dependency for
 native-CRS outputs.
+
+### potree-to-3dtiles
+
+Converts a **Potree** octree point cloud → 3D Tiles (glTF **POINTS** tiles). Auto-detects
+**2.0** (`metadata.json` + `hierarchy.bin` + `octree.bin`) and **1.x** (`cloud.js` + `.hrc` +
+per-node `.bin`).
+
+```sh
+cd packages/potree-to-3dtiles && npm install
+node src/index.js path/to/potree-dir ./out-potree
+```
+
+**How it works:** the Potree octree (`r`, `r0`..`r7`, …) maps 1:1 to a 3D Tiles tree with
+**`refine: ADD`** (children add denser detail in sub-octants, like COPC); `geometricError` = point
+spacing per depth (`rootSpacing / 2^depth`). 2.0 decode is authoritative (`hierarchy.bin` 22 B/node:
+`type u8, childMask u8, numPoints u32, byteOffset u64, byteSize u64`; positions `int32×3·scale+offset`;
+DEFAULT + BROTLI via Node's `zlib`). Points are emitted relative to the dataset centre (float32-safe).
+
+**Validated on real datasets** (2026-06-22):
+
+| Sample | Potree | Result |
+|--------|--------|--------|
+| iTowns `lion` | 2.0 (**BROTLI**) | ✅ 1624 tiles / **3,954,696 pts = `metadata.points` exactly** (Morton-decoded position+rgb) |
+| `lion_takanawa` | 1.x **v1.7** (`.hrc` + chunked `data/r/…`) | ✅ 167 tiles / 272,768 pts (per-node origin) |
+| `vol_total` | 1.x **v1.4** (inline `hierarchy`, flat `data/<name>.bin`) | ✅ 42 tiles |
+| `lion_takanawa_laz` | 1.x **v1.4 + LAZ** (`pointAttributes:"LAZ"`, flat `data/<name>.laz`) | ✅ 200 tiles — **tiled LAZ** octree (one .laz per node, laz-perf) |
+
+> **Status:** 🟢 **operational for Potree 2.0 (DEFAULT + BROTLI) and 1.x (v1.7 `.hrc` + v1.4 inline),
+> with `.bin` and tiled-`.laz` nodes.** 2.0 BROTLI positions/rgb are Morton-decoded; 1.x points are
+> quantised per-node-origin; LAZ nodes are decoded with laz-perf (via `copc`). Output is **not
+> geo-referenced** (local origin; add a root transform downstream). Samples in
+> `sample-data/input/POTREE/`. Reference: [yeyan00/potree23dtiles](https://github.com/yeyan00/potree23dtiles) + Potree `DecoderWorker_brotli.js`.
+
+**Implicit vs explicit tiling — available on all four surfaces:**
+
+| Surface | Default | Option |
+|---------|---------|--------|
+| Dedicated CLI (`node src/index.js … --tiling=explicit`) | implicit | `--tiling=explicit` |
+| Meta CLI (`node packages/convert/cli.js … --tiling=explicit`) | implicit | `--tiling=explicit` |
+| `/convert` middleware | implicit | `&tiling=explicit` |
+| `/stream` middleware | implicit | `&tiling=explicit` |
+
+Both COPC and Potree are octree hierarchies, so **implicit** is the natural default (smaller
+tileset JSON, subtrees served on demand). Pass `explicit` only when the client doesn't support
+3D Tiles 1.1 implicit tiling (e.g. legacy CesiumJS < 1.96 or simple tile fetchers).
 
 ### rad-to-3dtiles
 
@@ -136,8 +200,8 @@ stream (a streaming-manifest `.rad` has no embedded chunk data); `/convert` prod
 
 ### sog-to-3dtiles
 
-Converts a PlayCanvas **[Streamed SOG](/docs/references/streamed-sog)** dataset (`lod-meta.json`
-+ per-chunk unbundled [SOG](/docs/references/sog) dirs) to 3D Tiles 1.1 with the same
+Converts a PlayCanvas **[Streamed SOG](/docs/references/3dgs-splats/streamed-sog)** dataset (`lod-meta.json`
++ per-chunk unbundled [SOG](/docs/references/3dgs-splats/sog) dirs) to 3D Tiles 1.1 with the same
 `KHR_gaussian_splatting` + `_compression_spz_2` GLB tiles as the RAD path.
 
 > **Arrival.Space `.lod` uses this same streamed-SOG format.** An Arrival entity's `lodParameter.glbUrl`
@@ -187,7 +251,7 @@ out-sog/
 ```
 
 > **Status:** validated end-to-end on PlayCanvas's `example_skatepark_02` & `example_roman_parish_02`
-> (see [Sample Data](/docs/guide/sample-data)). Decoded tiles contain real splats — varied positions, valid scales,
+> (see [Sample Data](/docs/guide/planning/sample-data)). Decoded tiles contain real splats — varied positions, valid scales,
 > unit quaternions, proper opacity — confirming the WebP CPU decode + decode conventions
 > (quaternion `rot_0=w`, log scales, logit opacity, SH0→color). geometricError halves cleanly
 > root→leaf (e.g. skatepark `17.8 → 8.9 → … → 0.0`). Bundled `.sog` environments are skipped
@@ -195,7 +259,7 @@ out-sog/
 
 ### lcc-to-3dtiles
 
-Converts an XGRIDS **[LCC](/docs/references/lcc-format)** dataset (`meta.lcc` + `Index.bin` +
+Converts an XGRIDS **[LCC](/docs/references/3dgs-splats/lcc-format)** dataset (`meta.lcc` + `Index.bin` +
 `Data.bin` [+ `Shcoef.bin`]) to 3D Tiles with the same `KHR_gaussian_splatting` + `_spz_2` GLB tiles.
 
 ```sh
@@ -232,7 +296,7 @@ required per its White Paper (see the doc).
 
 ### i3s-to-3dtiles  🟡 **DRAFT — mesh validated on real data**
 
-Converts the **supported subset** of Esri **[I3S](/docs/references/i3s-spec)** (Indexed 3D Scene
+Converts the **supported subset** of Esri **[I3S](/docs/references/mesh-generic/i3s-spec)** (Indexed 3D Scene
 Layer) → 3D Tiles 1.1. Validated on `Buildings_NewYork_v18.slpk` → **5882 glTF TRIANGLES tiles** that
 place correctly in NYC: I3S geographic-layer vertices are `(Δlon°, Δlat°, Δheight_m)` relative to the
 node OBB centre, converted per-vertex to ECEF (stored relative to the centre for float32 precision,
@@ -284,19 +348,9 @@ and overlaps mature tools (loaders.gl, Cesium ion).
 > (mesh/points/instances only, per above); ArcGIS's **3D Tiles Server** product does, as plain OGC
 > 3D Tiles, sitting entirely outside I3S's own format.
 
-**I3S open-data samples** (beyond `Buildings_NewYork_v18.slpk`, mesh-only) — SLPK + hosted-service
-pairs for both integrated mesh and point-cloud layers, from Esri's own [`i3s-spec` sample data
-readme](https://github.com/Esri/i3s-spec/blob/master/docs/2.1/pcsl_ReadMe.md), the [ArcGIS JS SDK
-3D-object sample gallery](https://developers.arcgis.com/javascript/latest/sample-code/?tagged=3dobject),
-and the [ArcGIS 3D Tiles samples experience](https://experience.arcgis.com/experience/e2e1e497d13b41cab368c894fd9b3df7)
-(ArcGIS portal items — open each `item.html` link and use its "Download" button for the SLPK, or the
-REST service URL directly for streaming). All four verified live against `/stream?format=i3s`:
-- Integrated mesh (**works, fully textured**) — SLPK: [item `95a427c7a6ec4789b03c1a177366b54c`](https://3dcities.maps.arcgis.com/home/item.html?id=95a427c7a6ec4789b03c1a177366b54c) (`Rancho_Mesh_v18.slpk`, 285 MB) · service: [item `01eff699c8404a27a65e0877201136b4`](https://3dcities.maps.arcgis.com/home/item.html?id=01eff699c8404a27a65e0877201136b4) → `https://tiles.arcgis.com/tiles/z2tnIkrLQ2BRzr6P/arcgis/rest/services/Rancho_Mesh_v18/SceneServer`. The SLPK link is ArcGIS Online's own download endpoint (`.../content/items/<id>/data`) — no `.slpk` anywhere in the URL (only in a `Content-Disposition` header), which the adapter didn't originally detect as an archive at all; both this and the texture support (see the scope table above) were fixed 2026-07-02, verified byte-identical (same JPEG at the same buffer offset) against both the SLPK and the SceneServer URL for the same underlying dataset.
-- Point cloud (**LEPCC-compressed — now decoded, both work**) — SLPK: [item `496552d059644b4892c51ad06bdba8e2`](https://www.arcgis.com/home/item.html?id=496552d059644b4892c51ad06bdba8e2) (`Moro_Bay_LiDAR.slpk`, 578 MB, 2,624 tiles) · service: [item `908d6b986f314d51b1ff50b3bc321dfd`](https://www.arcgis.com/home/item.html?id=908d6b986f314d51b1ff50b3bc321dfd) → `https://tiles.arcgis.com/tiles/z2tnIkrLQ2BRzr6P/arcgis/rest/services/Moro_Bay_LiDAR/SceneServer` (13,775 tiles). Position decodes correctly (checksum + extent-verified); RGB doesn't render yet — it's a separate LEPCC blob type not yet ported, and this specific dataset's `RGB` attribute resource 404s server-side anyway despite being advertised in its schema. A second point-cloud sample (item `fc3f4a4919394808830cd11df4631a54`, `BARNEGAT_BAY_LiDAR_UTM`) is also LEPCC — every real ArcGIS point-cloud SceneServer sample found so far uses it, since it's Esri's own default point-cloud codec.
-- **Live ArcGIS SceneServer REST support added** (2026-07-02) to test the "service" URLs above directly
-  (previously the adapter only read a static `3dSceneLayer.json`/SLPK tree, not the REST API's
-  `?f=json`-based resource paths) — see `arcgisSceneServerReader()` in `i3s-live.js`.
-- Also referenced: portal item `fc3f4a4919394808830cd11df4631a54` (point cloud) and `001bb7ee3ce44ae5a8a15bef72f4404a` (integrated mesh) — not yet run against `i3s-to-3dtiles`/`/stream?format=i3s`, listed here as further samples to pull in.
+See [I3S open-data samples](/docs/guide/planning/sample-data#i3s-esri-sceneserver--slpk) for a
+curated list of hosted ArcGIS I3S mesh/point-cloud SLPK + SceneServer endpoints, all verified live
+against `/stream?format=i3s`.
 
 > **Reference — bidirectional I3S ⇄ 3D Tiles converter:** loaders.gl's
 > **[`@loaders.gl/tile-converter`](https://github.com/visgl/loaders.gl/tree/master/modules/tile-converter)**
@@ -320,221 +374,9 @@ REST service URL directly for streaming). All four verified live against `/strea
 > are the live/streaming-flavored counterparts (implicit→explicit, legacy upgrade); use `3d-tiles-tools`
 > for full offline pipelines.
 
-### potree-to-3dtiles
-
-Converts a **Potree** octree point cloud → 3D Tiles (glTF **POINTS** tiles). Auto-detects
-**2.0** (`metadata.json` + `hierarchy.bin` + `octree.bin`) and **1.x** (`cloud.js` + `.hrc` +
-per-node `.bin`).
-
-```sh
-cd packages/potree-to-3dtiles && npm install
-node src/index.js path/to/potree-dir ./out-potree
-```
-
-**How it works:** the Potree octree (`r`, `r0`..`r7`, …) maps 1:1 to a 3D Tiles tree with
-**`refine: ADD`** (children add denser detail in sub-octants, like COPC); `geometricError` = point
-spacing per depth (`rootSpacing / 2^depth`). 2.0 decode is authoritative (`hierarchy.bin` 22 B/node:
-`type u8, childMask u8, numPoints u32, byteOffset u64, byteSize u64`; positions `int32×3·scale+offset`;
-DEFAULT + BROTLI via Node's `zlib`). Points are emitted relative to the dataset centre (float32-safe).
-
-**Validated on real datasets** (2026-06-22):
-
-| Sample | Potree | Result |
-|--------|--------|--------|
-| iTowns `lion` | 2.0 (**BROTLI**) | ✅ 1624 tiles / **3,954,696 pts = `metadata.points` exactly** (Morton-decoded position+rgb) |
-| `lion_takanawa` | 1.x **v1.7** (`.hrc` + chunked `data/r/…`) | ✅ 167 tiles / 272,768 pts (per-node origin) |
-| `vol_total` | 1.x **v1.4** (inline `hierarchy`, flat `data/<name>.bin`) | ✅ 42 tiles |
-| `lion_takanawa_laz` | 1.x **v1.4 + LAZ** (`pointAttributes:"LAZ"`, flat `data/<name>.laz`) | ✅ 200 tiles — **tiled LAZ** octree (one .laz per node, laz-perf) |
-
-> **Status:** 🟢 **operational for Potree 2.0 (DEFAULT + BROTLI) and 1.x (v1.7 `.hrc` + v1.4 inline),
-> with `.bin` and tiled-`.laz` nodes.** 2.0 BROTLI positions/rgb are Morton-decoded; 1.x points are
-> quantised per-node-origin; LAZ nodes are decoded with laz-perf (via `copc`). Output is **not
-> geo-referenced** (local origin; add a root transform downstream). Samples in
-> `sample-data/input/POTREE/`. Reference: [yeyan00/potree23dtiles](https://github.com/yeyan00/potree23dtiles) + Potree `DecoderWorker_brotli.js`.
-
-**Implicit vs explicit tiling — available on all four surfaces:**
-
-| Surface | Default | Option |
-|---------|---------|--------|
-| Dedicated CLI (`node src/index.js … --tiling=explicit`) | implicit | `--tiling=explicit` |
-| Meta CLI (`node packages/convert/cli.js … --tiling=explicit`) | implicit | `--tiling=explicit` |
-| `/convert` middleware | implicit | `&tiling=explicit` |
-| `/stream` middleware | implicit | `&tiling=explicit` |
-
-Both COPC and Potree are octree hierarchies, so **implicit** is the natural default (smaller
-tileset JSON, subtrees served on demand). Pass `explicit` only when the client doesn't support
-3D Tiles 1.1 implicit tiling (e.g. legacy CesiumJS < 1.96 or simple tile fetchers).
-
-## Individual converter (à la carte quick reference)
-
-Each converter also runs standalone (only its own deps) — this is a compact index into the
-per-format sections above, not new information:
-
-```sh
-node packages/rad-to-3dtiles/src/index.js    <coit.rad>            sample-data/output/rad/<name>-3dtiles-from-rad
-node packages/sog-to-3dtiles/src/index.js    <scene-dir>           sample-data/output/sog/<name>-3dtiles-from-sog
-node packages/lcc-to-3dtiles/src/index.js    <lcc-dir>             sample-data/output/lcc/<name>-3dtiles-from-lcc
-node packages/copc-to-3dtiles/src/index.js   <input.copc.laz>      sample-data/output/copc/<name>-3dtiles-from-copc
-node packages/potree-to-3dtiles/src/index.js <potree-dir>          sample-data/output/potree/<name>
-node packages/i3s-to-3dtiles/src/index.js    <extracted-slpk-dir>  sample-data/output/i3s/<name>   # draft
-```
-
-> Output convention: regenerate into **`sample-data/output/<fmt>/…`** (the viewer presets and
-> `tools-inspector` scripts point there).
-
-## Offline tilers — building tiled hierarchies (point clouds, splats, meshes)
-
-Reference catalogue of **offline** tilers that produce the tiled inputs this project converts to (or
-serves as) OGC 3D Tiles. The converters above consume the *outputs* of these tools (COPC, Potree,
-streamed-SOG, RAD, I3S); this section records how those inputs are produced.
-
-### Point-cloud tilers
-
-#### Potree (PotreeConverter)
-
-Intensity must be `0–65535` and named `Intensity` in the LAS (e.g. CloudCompare LAS 1.2 v2 export).
-
-```bash
-# Standard: projection as UTM string
-PotreeConverter.exe pointcloud.las -o cloud_Potree -p index --projection "+proj=utm +zone=31 +datum=WGS84 +units=m +no_defs "
-# Set spacing
-PotreeConverter.exe scan.las -p index -o out --scale 0.0001 --overwrite
-# Include normals (from ascii or ply)
-PotreeConverter.exe ptc.xyz -f xyzrgbXYZ -a RGB NORMAL -o out -p index --overwrite
-PotreeConverter.exe ptc.ply -a RGB NORMAL -o out -p index
-# Include Intensity in output attributes
-PotreeConverter.exe cloud.las --output-attributes RGB INTENSITY --intensity-range 0 65536 --material INTENSITY --overwrite -p cloud -o out
-```
-
-Tip: store any per-point scalar field (e.g. a CloudCompare C2C distance) in the LAS `Intensity` field
-(2-byte int, 65536 values) to display it in Potree's intensity mode. Rename the scalar field to
-`Intensity` before LAS export. (Older CloudCompare LAS 1.4 export had a [min/max-xyz=0 header bug](https://github.com/CloudCompare/CloudCompare/issues/1845) — use CC 2.13+.)
-
-#### Building OGC/Cesium 3D Tiles from point clouds
-
-- **[py3dtiles](https://py3dtiles.org/v7.0.0/cli.html#convert)** ([repo](https://gitlab.com/py3dtiles/py3dtiles/)) — `py3dtiles convert cloud.las --out /tmp/dst`; supports tileset `merge`; [docker images](https://hub.docker.com/r/py3dtiles/py3dtiles); mesh tiling planned ([v7 notes](https://oslandia.com/en/2024/03/25/py3dtiles-v7-0-0-est-de-sortie-des-fonctionnalites-et-une-communaute-qui-se-developpe/)).
-- **[gocesiumtiler](https://github.com/mfbonfigli/gocesiumtiler)** — fast Go LAS → 3D Tiles (1.0/1.1).
-  ```bash
-  gocesiumtiler-win-x64.exe file -out ./out-1.1 -version 1.1 pointcloud.1.4.las
-  gocesiumtiler-win-x64.exe file -version 1.1 -o Exports/$m -e EPSG:32648 --resolution 1 --subsample 1 $m.las
-  ```
-- **[potree23dtiles](https://github.com/yeyan00/potree23dtiles)** — Potree → 3D Tiles.
-- **[ept-tools](https://github.com/connormanning/ept-tools)** — LAS → EPT → 3D Tiles.
-- **[Gaia3D/mago-3d-tiler](https://github.com/Gaia3D/mago-3d-tiler)** — point clouds + meshes → 3D Tiles.
-- Terrain: **[Gaia3D/mago-3d-terrainer](https://github.com/Gaia3D/mago-3d-terrainer)** or [cesium-terrain-builder-docker](https://github.com/tum-gis/cesium-terrain-builder-docker) (quantized-mesh from GeoTIFF).
-- Older (reference only): [entium](https://github.com/commaai/entium), [cesium.entwine.io](https://github.com/connormanning/cesium.entwine.io), [mattshax/cesium_pnt_generator](https://github.com/mattshax/cesium_pnt_generator), [tum-gis/cesium-point-cloud-generator](https://github.com/tum-gis/cesium-point-cloud-generator).
-
-#### Building COPC via PDAL
-
-[COPC](https://copc.io/) (Cloud-Optimized Point Cloud) replaces EPT; produced/consumed by
-[PDAL](https://pdal.io/), [pdal-wrench](https://github.com/PDAL/wrench), [untwine](https://github.com/hobuinc/untwine).
-This repo streams COPC directly (`/stream?format=copc`).
-
-```json
-[ "input.las", { "type": "writers.copc", "filename": "output.copc.laz" } ]
-```
-
-#### Pipelines / dashboards
-
-- **[geosolutions-it/digital-twin-toolbox](https://github.com/geosolutions-it/digital-twin-toolbox)** — self-hosted point-cloud / shapefile 3D-tiling pipeline dashboard aggregating several tools.
-
-### Gaussian-splat tilers (→ LoD trees of splats)
-
-| Tool | Output | Notes |
-|------|--------|-------|
-| **PlayCanvas [splat-transform](https://github.com/playcanvas/splat-transform)** (SuperSplat) | **streamed-SOG** (`lod-meta.json` + per-chunk WebP) | Binary spatial tree (AABB split), per-leaf LOD runs. Consumed by `sog-to-3dtiles` / `/stream?format=sog`. |
-| **World Labs [SparkJS](https://sparkjs.dev/docs/lod-getting-started/) `build-lod`** (BhattLod) | **`.RAD`** LoD merge tree | Variable fanout (~1.5–1.75), downsampled merged representative splats per node. Consumed by `rad-to-3dtiles` / `/stream?format=rad`. Blog: [Spark 2.0 — spatially partitioned LoD](https://www.worldlabs.ai/blog/spark-2.0). |
-| **[William Liu — 3DGS-PLY-3DTiles-Converter](https://github.com/WilliamLiu-1997/3DTilesRendererJS-3DGS-Plugin)** | 3D Tiles of glb splats | PLY → 3D Tiles directly (the geometric-error model our RAD tileset builder mirrors). |
-
-> **LCC** (XGRIDS Lixel CyberColor) is intentionally **not** listed here: there is no open-source
-> *tiler* that produces `.lcc` — the format is generated by XGRIDS' proprietary Lixel software/devices.
-> Only the [whitepaper spec](https://github.com/xgrids/LCCWhitepaper) and a reader
-> ([LCC-Web-SDK](https://github.com/xgrids/LCC-Web-SDK)) are public. This repo *reads* `.lcc`
-> (`lcc-to-3dtiles` / `/stream?format=lcc`); see [`lcc-format.md`](/docs/references/lcc-format).
-
-### Why is PotreeConverter 2.0 so fast?
-
-PotreeConverter 2.0 ([repo](https://github.com/potree/PotreeConverter)) is largely **I/O- and
-counting-bound, not GPU-bound** — it runs on the CPU. Its speed comes from a **3-pass,
-counting-sort-style** build that avoids per-point tree descent:
-
-1. **Counting pass** — stream all points once, compute a fine regular grid (Morton/octant index from
-   quantized coordinates), and **histogram** how many points fall in each cell. A flat-array increment
-   per point — cache-friendly, trivially parallel over chunks.
-2. **Allocate** — from the counts, decide the octree node layout up front (which cells become nodes,
-   their byte offsets in the output) so there is no dynamic tree growth during the heavy pass.
-3. **Distribution pass** — stream the points again and **scatter** each into its node's pre-allocated
-   slot by its precomputed Morton index. Nodes over a target point budget **spill** the excess down to
-   children; coarse levels keep a Poisson-disk / subsample so every level is renderable.
-
-The wins vs. insert-one-point-at-a-time octrees: two **linear streaming passes** with sequential disk
-reads (no random tree-walk per point); **Morton-code bucketing** turns spatial placement into integer
-math; **batch parallelism** over fixed chunks with a final merge; the layout is known before writing,
-so output is one large sequential write. It's a **radix/counting sort on Morton codes**, not a
-comparison tree build — hence near-linear scaling that saturates disk bandwidth.
-
-#### Could a GPU make it faster? (and the RAM→VRAM question)
-
-For the *binning/sort* math, yes — GPUs do Morton-code radix sorts extremely well (this is exactly
-what GPU point/particle sorters and GPU BVH builders do). But for a **whole-dataset out-of-core tiler**
-(billions of points that don't fit in RAM, let alone VRAM), the bottleneck is **not** the arithmetic —
-it's **moving bytes**: disk → RAM → (PCIe) → VRAM → back. So:
-
-- **PCIe transfer dominates.** A 10 B-point cloud at ~16 B/point ≈ 160 GB. You can't hold it in VRAM
-  (24–80 GB), so you'd stream chunks host→device, sort/bin on GPU, read back, and merge — the PCIe
-  round-trips (tens of GB/s) plus disk (a few GB/s NVMe) set the wall-clock. The GPU sort finishes long
-  before the next chunk arrives → you're **transfer-bound**, and the GPU mostly idles.
-- **Where GPU genuinely helps:** when the working set *does* fit in VRAM (≤ a few hundred M points), or
-  for the **per-chunk** sort/bin/decimate kernels inside an otherwise CPU-orchestrated out-of-core
-  pipeline (overlap copy with compute via double-buffering + CUDA streams). Then the GPU radix sort +
-  Poisson-disk subsample per chunk can beat the CPU by a wide margin.
-- **Net:** for 10 B points, a GPU won't give a 10× end-to-end win because RAM↔VRAM + disk dominate; it
-  can still help the per-chunk hot loops if you keep data resident and hide transfers. The biggest
-  lever remains **fast sequential I/O + counting sort + chunk parallelism** — exactly Potree 2.0's design.
-
-#### Is COPC building the same as Potree 2.0? (corrected — they are NOT equally fast)
-
-The right framing: the **output container** differs (COPC = one indexed LAZ
-with an EPT-style octree + hierarchy page; Potree = a directory of node files), but more importantly the
-**implementations differ enormously in speed**, and "PDAL builds COPC" hides which engine does it:
-
-- **PotreeConverter 2.0** is a *purpose-built, heavily-parallel* out-of-core tiler (the counting-sort /
-  Morton-histogram + pre-allocate + scatter-with-spill described above). It's about the fastest thing
-  there is for LAS/LAZ → octree, and saturates disk bandwidth.
-- **PDAL `writers.copc`** is part of PDAL's general **pipeline** engine. It is *not* the same optimized
-  out-of-core counting-sort builder — it's a more general, less parallel writer, and in practice users
-  report it is **much slower** than PotreeConverter 2.0. PDAL's strength is
-  generality (filters, reprojection, formats), not raw octree-build throughput.
-- **untwine** (hobuinc) is the **fast, dedicated COPC builder** — a two-phase "bin points into temp
-  files per cell, then assemble" out-of-core approach, multi-threaded, designed to bound memory on huge
-  clouds. If you want fast COPC, reach for `untwine` (PDAL can shell out to it), not `writers.copc`.
-- **entwine** (connormanning) builds EPT (not COPC) with a similar out-of-core spatial-binning design;
-  mature and reasonably fast, but EPT is a directory of many files rather than one COPC LAZ.
-
-So: the *algorithm family* (spatial bin → chunked write) is shared, but **only some implementations are
-counting-sort-fast**. PotreeConverter 2.0 and untwine are in that tier; `pdal writers.copc` is not.
-
-> ⚠️ The notes below on `py3dtiles` / `gocesiumtiler` / `mago-3d-tiler` are **best-effort from
-> general knowledge, not benchmarked here** — treat as hypotheses to verify:
-> - **py3dtiles** (Python) — convenient, supports tileset merge & docker; Python + multiprocessing
->   makes it generally **slower** than the C++/Go tilers on very large clouds (GIL/serialization
->   overhead), though fine for moderate sizes.
-> - **gocesiumtiler** (Go) — concurrent (goroutines), typically **fast** and a good middle ground;
->   compiled, parallel, simple LAS→3D Tiles. Often the pragmatic fast choice for 3D Tiles output.
-> - **mago-3d-tiler** (Java) — broad input support (point clouds + meshes); JVM, multi-threaded;
->   performance is decent but I have **no measured comparison** vs PotreeConverter 2.0.
->
-> Bottom line you can rely on: for raw octree-build speed, **PotreeConverter 2.0** (Potree output) and
-> **untwine** (COPC output) are the proven-fast tier; `pdal writers.copc` is the slow one you hit.
-
-#### Toward an out-of-core LAS/LAZ → 3D Tiles / COPC / Potree tiler (note)
-
-A future fast tiler in this repo would reuse exactly this methodology: (1) stream LAS/LAZ once to
-histogram a Morton grid; (2) pre-allocate the octree layout + per-node byte offsets; (3) stream again,
-scatter to per-node temp buffers, spill over-quota points to children, Poisson-subsample coarse levels;
-(4) emit COPC (one indexed LAZ), Potree (node files), or 3D Tiles (pnts/glb) from the same in-memory
-node table. Bound memory with per-cell temp files (untwine-style) for clouds larger than RAM; optionally
-offload the per-chunk sort/decimate to the GPU when the chunk fits in VRAM.
+See [Related tilers (prior art / reference implementations)](/docs/guide/related-tilers-prior-art-reference-implementations)
+for the catalogue of **offline** tilers that produce the tiled inputs these converters consume (COPC,
+Potree, streamed-SOG, RAD, I3S), including the "why is PotreeConverter 2.0 so fast" deep dive.
 
 ## `/stream` lazy-loading status (geometry vs hierarchy)
 

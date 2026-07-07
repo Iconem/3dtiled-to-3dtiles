@@ -1,0 +1,5 @@
+{
+  "title": "Pointclouds",
+  "defaultOpen": true,
+  "pages": ["copc-format", "potree-format"]
+}

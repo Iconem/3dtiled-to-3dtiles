@@ -1,0 +1,12 @@
+{
+  "title": "Reference & Planning",
+  "defaultOpen": false,
+  "pages": [
+    "dependencies",
+    "todo-future-work",
+    "candidate-source-formats-roadmap-not-yet-supported",
+    "sample-data",
+    "streaming-architecture-design-log",
+    "appendix-per-format-schema-diagrams"
+  ]
+}

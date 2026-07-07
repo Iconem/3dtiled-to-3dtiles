@@ -85,10 +85,10 @@ harmonization below targets the *live* path.
 > **Harmonization plan, endpoint rework, and phasing** — the design discussion for *how* the live path
 > got harmonized (the `FormatDriver` sketch, the shared `core/` services, the endpoint consolidation,
 > and the chosen Phases 1–3 rollout) has moved into the
-> [Design log](/docs/guide/streaming-architecture-design-log) as a single continuous narrative, since
+> [Design log](/docs/guide/planning/streaming-architecture-design-log) as a single continuous narrative, since
 > it's a historical record of a completed migration rather than an ongoing architectural concern. The
 > live `tiling=explicit` routing-through-`implicit-to-explicit` item that was still open there is
-> tracked in [TODO / Future work](/docs/guide/todo-future-work).
+> tracked in [TODO / Future work](/docs/guide/planning/todo-future-work).
 
 ### Factory / composability ideas (future)
 
@@ -163,16 +163,16 @@ Composability goal: `source → convert → [centroids] → [gltf: draco/ktx2 de
 > URIs the lazy fragments emit. COPC/Potree are point clouds already.
 
 > **Encode ops, ingestion decompress, and other forward-looking items for this pipeline** have moved to
-> [TODO / Future work](/docs/guide/todo-future-work)'s active list (encode-ops remainder, `rtc_center`/
+> [TODO / Future work](/docs/guide/planning/todo-future-work)'s active list (encode-ops remainder, `rtc_center`/
 > decompress for ingestion, browser-native bbox crop, 3MX siblings, server-side per-cache progress,
 > Draco+KTX2 decode speed). The **Bing `td1` → explicit lazy fragments** work described in an earlier
 > draft of this section is done — see the dedicated
-> [Bing Maps 3D → 3D Tiles](/docs/guide/streaming-architecture-design-log) section in the design log.
+> [Bing Maps 3D → 3D Tiles](/docs/guide/planning/streaming-architecture-design-log) section in the design log.
 > The **fastest JS point-cloud tiler** idea is tracked in
-> [Candidate source formats](/docs/guide/candidate-source-formats-roadmap-not-yet-supported)'s research note.
+> [Candidate source formats](/docs/guide/planning/candidate-source-formats-roadmap-not-yet-supported)'s research note.
 
 > **Phasing (Phases 1–3, chosen scope) and the harmonization rollout** are documented as a completed
-> historical migration in the [Design log](/docs/guide/streaming-architecture-design-log) rather than
+> historical migration in the [Design log](/docs/guide/planning/streaming-architecture-design-log) rather than
 > here — offline converters remain conserved as described above; only the live (pull) path was
 > harmonised.
 
@@ -217,7 +217,7 @@ supports** (potree, sog/streamed-SOG, rad, lcc, copc, i3s).
 
 `/convert` is a pragmatic stand-in that gets **every** format renderable today, before each
 per-format range adapter exists (so far COPC, Potree, streamed-SOG, LCC, and RAD all do — see
-["Streaming roadmap — per-format range adapters"](/docs/guide/streaming-architecture-design-log)).
+["Streaming roadmap — per-format range adapters"](/docs/guide/planning/streaming-architecture-design-log)).
 Where the range adapters are *per-tile*, `/convert` is *per-dataset*: on the
 **first** request it resolves the source to a local dataset (downloading remote inputs), runs the
 in-process `convert()` **once** (output cached on disk under the OS temp dir, keyed by
@@ -336,4 +336,4 @@ tastier RAD splat tileset) — open it via `GET /3dtiles-self-contained/tileset.
 
 Tooling & discussion: [`3d-tiles-tools convert`](https://github.com/CesiumGS/3d-tiles-tools#convert) ·
 [extended package server — CesiumGS/3d-tiles-tools#86](https://github.com/CesiumGS/3d-tiles-tools/pull/86).
-Local notes: [`3tz-3dtiles-packages.md`](/docs/references/3tz-3dtiles-packages).
+Local notes: [`3tz-3dtiles-packages.md`](/docs/references/3dtiles-gltf/3tz-3dtiles-packages).

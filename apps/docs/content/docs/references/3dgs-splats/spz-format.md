@@ -163,5 +163,5 @@ When `shDegree > 0`, additional uint8 data follows rotations. Not used by this c
 ## References
 
 - Niantic SPZ C++ source: https://github.com/nianticlabs/spz
-- KHR_gaussian_splatting_compression_spz_2 extension: [KHR_gaussian_splatting.md](/docs/references/KHR_gaussian_splatting#compression-extension-khr_gaussian_splatting_compression_spz_2)
-- SparkJS PackedSplats/ExtSplats byte layouts: [rad-format-notes.md](/docs/references/rad-format-notes)
+- KHR_gaussian_splatting_compression_spz_2 extension: [KHR_gaussian_splatting.md](/docs/references/3dtiles-gltf/KHR_gaussian_splatting#compression-extension-khr_gaussian_splatting_compression_spz_2)
+- SparkJS PackedSplats/ExtSplats byte layouts: [rad-format-notes.md](/docs/references/3dgs-splats/rad-format-notes)

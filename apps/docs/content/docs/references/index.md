@@ -5,7 +5,7 @@ description: "Per-format reference docs — deep-dive format specs and design lo
 
 ### Formats
 
-See [3D Tiles format](/docs/references/3d-tiles-format) for the full writeup of 3D Tiles 1.1
+See [3D Tiles format](/docs/references/3dtiles-gltf/3d-tiles-format) for the full writeup of 3D Tiles 1.1
 itself (implicit tiling, `KHR_gaussian_splatting`, REPLACE vs ADD refinement, QUADTREE vs OCTREE).
 
 **COPC (Cloud Optimized Point Cloud)** — A LAZ 1.4 file with a specific VLR/EVLR layout that
@@ -17,7 +17,7 @@ is in local dataset coordinates.
 
 **RAD (SparkJS Gaussian Splat LoD)** — SparkJS binary streaming format for BhattLod Gaussian
 splat scenes. See structure in the [rad-to-3dtiles](/docs/guide/cli-usage#rad-to-3dtiles) section
-of CLI usage, and [`rad-format-notes.md`](/docs/references/rad-format-notes) for the full format
+of CLI usage, and [`rad-format-notes.md`](/docs/references/3dgs-splats/rad-format-notes) for the full format
 writeup (Spark 2.0 LoD system, PackedSplats/ExtSplats byte layouts, geometric error tuning).
 
 ### References
@@ -37,7 +37,7 @@ writeup (Spark 2.0 LoD system, PackedSplats/ExtSplats byte layouts, geometric er
 | `nexus-format.md` | 🟠 CNR-ISTI Nexus multiresolution mesh (DAG of patches) — **doc-referenced, no converter** (mesh, not splats; niche). Refs: github.com/cnr-isti-vclab/nexus, FastDec paper |
 | `i3s-spec.md` | 🟡 Esri I3S (Indexed 3D Scene Layer / SLPK) — **draft converter `i3s-to-3dtiles/`** (validated on `Buildings_NewYork_v18.slpk` → 5882 tiles, see below): explicit nodepages + uncompressed `DefaultGeometrySchema` mesh / point cloud only. Ref: github.com/esri/i3s-spec |
 
-> The [Design log](/docs/guide/streaming-architecture-design-log) (live-streaming harmonization — lazy
+> The [Design log](/docs/guide/planning/streaming-architecture-design-log) (live-streaming harmonization — lazy
 > hierarchy, the `cache = none/hierarchy/full` continuum, push/pull, per-format wiring + parallel
 > hierarchy build, plus a running historical record of completed migrations) lives in the **Guide**,
 > a companion narrative to
@@ -61,8 +61,8 @@ writeup (Spark 2.0 LoD system, PackedSplats/ExtSplats byte layouts, geometric er
 
 **PlayCanvas SOG / Streamed SOG (used by `sog-to-3dtiles`)**
 - [playcanvas/splat-transform](https://github.com/playcanvas/splat-transform) — SplatTransform: PlayCanvas's splat conversion library/CLI. `sog-to-3dtiles` uses its `readSog` (CPU `webp.wasm` decode) to turn each SOG chunk into a `DataTable`. Authors Streamed SOG datasets too.
-- [SOG format spec](https://developer.playcanvas.com/user-manual/gaussian-splatting/formats/sog/) — local notes: [`sog.md`](/docs/references/sog).
-- [Streamed SOG (LOD) spec](https://developer.playcanvas.com/user-manual/gaussian-splatting/formats/streamed-sog/) — local notes: [`streamed-sog.md`](/docs/references/streamed-sog).
+- [SOG format spec](https://developer.playcanvas.com/user-manual/gaussian-splatting/formats/sog/) — local notes: [`sog.md`](/docs/references/3dgs-splats/sog).
+- [Streamed SOG (LOD) spec](https://developer.playcanvas.com/user-manual/gaussian-splatting/formats/streamed-sog/) — local notes: [`streamed-sog.md`](/docs/references/3dgs-splats/streamed-sog).
 
 **3DTilesRendererJS Gaussian-splat ecosystem (WilliamLiu-1997)** — closest reference implementations to this repo's RAD path; studied to improve tiling:
 - [3DTilesRendererJS-3DGS-Plugin](https://github.com/WilliamLiu-1997/3DTilesRendererJS-3DGS-Plugin) — the `3d-tiles-rendererjs-3dgs-plugin` this viewer uses to render splats in 3DTRJS (parses `KHR_gaussian_splatting` + `_spz_2`, renders via SparkJS, one shared Spark renderer per scene/renderer, camera-relative rebasing, `sparkRendererOptions`, WebXR-aware). Its `data/gaussianSplat1` & `gaussianSplat2` are wired into this viewer's preset bar (**◈ GSplat 1/2**). Note its rendering tip: keep the globe in the **opaque** pass so it doesn't object-sort against transparent splats at the horizon.

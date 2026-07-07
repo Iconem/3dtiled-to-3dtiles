@@ -1,17 +1,10 @@
 {
-  "title": "Guide",
-  "defaultOpen": true,
   "pages": [
     "ambition",
     "cli-usage",
     "architecture-the-materialization-continuum-cache-none-hierar",
     "related-tilers-prior-art-reference-implementations",
-    "todo-future-work",
-    "candidate-source-formats-roadmap-not-yet-supported",
     "viewer",
-    "sample-data",
-    "dependencies",
-    "streaming-architecture-design-log",
-    "appendix-per-format-schema-diagrams"
+    "planning"
   ]
 }
