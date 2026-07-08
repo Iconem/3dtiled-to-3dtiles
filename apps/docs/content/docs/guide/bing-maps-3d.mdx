@@ -1,0 +1,211 @@
+---
+title: "Bing Maps 3D (reverse-engineered)"
+description: "How the live /bing adapter reverse-engineers Microsoft's undocumented tf=3dv4 tiled photogrammetry format into OGC 3D Tiles — URL scheme, td1 manifest, quadtree/subtree availability, web-mercator region math, and the tile GLB's own Draco+KTX2 content."
+---
+
+<InlineTOC items={toc} />
+
+## Overview
+
+**Bing Maps 3D** is Microsoft's tiled, city-scale photogrammetry mesh dataset — the same kind of
+content as Google's Photorealistic 3D Tiles or ESRI's ArcGIS 3D Tiles Server, served from Bing's own
+tile infrastructure. There is **no public specification** for either the tile manifest or the tile
+content format; everything on this page was reverse-engineered by downloading and parsing real
+manifests and tiles. There's no offline converter for Bing — nothing to convert, since Bing hosts and
+serves the data itself. This repo's `/bing` endpoint
+(`packages/tile-server/bing-live.js`) is a **live adapter**: it fetches Bing's own manifest/tile
+formats on demand and reshapes them into a standard OGC 3D Tiles stream, the same way `/stream` does
+for COPC/Potree/SOG/LCC/RAD/I3S.
+
+No Bing API key is required for the `tf=3dv4` 3D tiles — you're responsible for your own Bing Maps
+licensing terms; this page (and the adapter) only documents the technical format.
+
+## URL scheme
+
+### This repo's endpoints
+
+```
+GET /bing/tileset.json[?g=<genid>]
+GET /bing/fragment/<face>-<level>-<x>-<y>.json?g=<genid>
+GET /bing/tile/<face>-<level>-<x>-<y>.glb?g=<genid>[&decompress=1]
+```
+
+- `tileset.json` — the world root: 4 face nodes, each an external reference to its own root fragment.
+- `fragment/...` — a partial **explicit** 3D Tiles tileset continuing the tree from that node (see
+  [Lazy fragments](#from-implicit-to-explicit-lazy-fragments) below); the parent tileset's deep tiles
+  reference these by URL, fetched only as the camera refines in.
+- `tile/....glb` — a single tile's GLB, proxied from Bing as-is by default; `&decompress=1` routes it
+  through the same Draco/meshopt/KTX2 decode pipeline `/gltf` uses, for consumers that can't read
+  compressed glTF natively.
+
+### Bing's own endpoint (what we fetch from)
+
+```
+https://t.ssl.ak.tiles.virtualearth.net/tiles/<name>?g=<genid>&cmt=cmpr3d&tf=3dv4&n=z&fallback=none
+```
+
+`<name>` is one of:
+- `td1` — the root manifest (see below).
+- `mtx<face>-<level>-<x>-<reverseY>` — a tile's GLB.
+- `st<face>-<level>-<x>-<reverseY>` — a subtree's availability binary.
+
+| Param | Meaning |
+|---|---|
+| `g` | Generation/dataset id. **Drifts over time with no discovery API** — Microsoft doesn't publish how to look up a current value. This repo defaults to `15530` (`DEFAULT_G` in `bing-live.js`); override with `?g=` if it goes stale. An earlier default, `15340`, was verified working as of 2026-06-29 before drifting. |
+| `tf` | Tile format. `3dv4` = GLB (the target — see [Tile content](#tile-content-tf3dv4-glb)). `3dv3` = a zstd-compressed MTX/TIN variant whose post-inflate layout has never been publicly reverse-engineered — avoid it, always request `3dv4`. |
+| `cmt`, `n`, `fallback` | Bing-internal parameters, passed through as fixed constants (`cmpr3d`, `z`, `none`) — not otherwise understood, just required for a valid response. |
+
+Note the **`y` flip**: Bing's own tile/subtree names index `y` bottom-up in a way this repo calls
+`reverseY = 2^level − 1 − y` (see `MICROSOFT_reverse_y_template_uri` below) — our own URLs and
+`tileset.json` always use the standard (non-reversed) `y`; the adapter flips it only when it actually
+fetches from Bing.
+
+## Hierarchy: the `td1` manifest + quadtree
+
+Bing serves a standard **implicit-tiling** dataset rooted at a manifest named `td1`: a root tileset
+with **4 per-face children** (the web-mercator quadrants of the globe), each declaring a `QUADTREE`
+`implicitTiling` block with:
+
+- `subtreeLevels` — how many levels one `.subtree`-equivalent binary covers (observed: **7**).
+- `availableLevels` — the deepest level the face's data reaches (observed: **21**).
+- `region` — the face's geographic bounds in radians, `[W, S, E, N, minH, maxH]`.
+- Template URIs `mtx{face}-{level}-{x}-{reverseY}` (tile GLBs) and `st{face}-{level}-{x}-{reverseY}`
+  (subtree availability).
+- A root `geometricError` (falls back to `786432` if the manifest omits it); each face's own root GE
+  is half of that, and it halves again every level down (`GE(level) = rootGE / 2^level`).
+
+Two **Microsoft-proprietary extensions** sit on this manifest, and both are the reason this can't just
+be passed straight through to a 3D Tiles client:
+
+- **`MICROSOFT_reverse_y_template_uri`** — tile/subtree URIs index `y` **bottom-up**
+  (`reverseY = 2^level − 1 − y`), the opposite of the standard 3D Tiles/TMS convention.
+- **`MICROSOFT_webmercator_subdivision`** — each tile's children subdivide the parent's region in
+  **Web Mercator** space, not linear lat/lon. Latitude is therefore **non-linear** with tile Y.
+
+Cesium (and 3D Tiles implicit tiling generally) implements neither. The Web Mercator one is the
+practical blocker: passing Bing's implicit tiling straight through makes a generic 3D Tiles client
+subdivide each face's latitude *linearly*, so every deep tile gets the wrong `region` and gets culled
+by frustum/SSE checks — observed early on as **"zoom in on Rome and nothing loads."**
+
+**Subtree availability** itself is a completely standard 3D Tiles `subt` binary (24-byte header + JSON
++ binary chunks, `tileAvailability`/`contentAvailability`/`childSubtreeAvailability` bitstreams in
+**Morton order**) — Bing didn't invent anything there, it's the two extensions above that make a
+naive implicit passthrough fail.
+
+## From implicit to explicit: lazy fragments
+
+Since a generic client can't correctly subdivide Bing's own implicit tiling, `/bing` does the
+subdivision **itself** and emits a plain **explicit** 3D Tiles tree instead — with each tile's
+`boundingVolume.region` computed with the correct Web Mercator math:
+
+```
+lonW = faceW + (faceE − faceW) · (x / 2^level)          # longitude: linear
+lonE = faceW + (faceE − faceW) · ((x+1) / 2^level)
+
+mercB = asinh(tan(faceS)), mercT = asinh(tan(faceN))     # latitude: via Web Mercator y
+latS  = atan(sinh(mercB + (mercT − mercB) · (y / 2^level)))
+latN  = atan(sinh(mercB + (mercT − mercB) · ((y+1) / 2^level)))
+```
+
+Walking Bing's `st` subtree availability for an entire face up front (to build one giant explicit
+tree) would mean fetching and holding the whole hierarchy before showing anything. Instead, `/bing`
+builds the tree **lazily, in fragments**: each `/bing/fragment/<face>-<level>-<x>-<y>.json` request
+walks the relevant `st` subtree(s) and emits explicit tiles for up to **3 levels**
+(`LEVELS_PER_FRAGMENT`) below that node. At the cutoff level, instead of real children, a tile gets a
+single synthetic child whose `content.uri` points at the **next** fragment — so the tree only grows as
+the camera actually refines into a region, the same lazy-hierarchy idea this repo's other explicit
+adapters (RAD, I3S) use for their own multi-level fragments.
+
+Both `tile` and `content` availability are checked per-node against the relevant `st` bitstream before
+a tile (or its content reference) is emitted at all — nodes Bing doesn't actually have are simply
+omitted from the fragment, rather than requested and 404ing.
+
+## Tile content: `tf=3dv4` GLB
+
+A `tf=3dv4` tile is a **standard binary glTF 2.0**, confirmed by downloading and parsing a real tile:
+
+- **Geometry** — `KHR_draco_mesh_compression`-compressed mesh. Vertices are plain `FLOAT VEC3` in
+  **local meters**, relative to the tile's own origin (not world coordinates).
+- **Textures** — `KHR_texture_basisu` (KTX2/Basis Universal).
+- **Placement** — **ECEF (EPSG:4978) is baked directly into the glTF node's `matrix`** (translation =
+  the tile's origin in ECEF). The GLB itself is standard **glTF Y-up**; Cesium's default Y-up→Z-up
+  conversion, combined with that ECEF node matrix, places the tile correctly on the globe with **no
+  extra transform** from this repo's side (`transform` on the emitted 3D Tiles tile stays identity).
+  An earlier attempt at forcing `gltfUpAxis: "Z"` on the viewer side put geometry in the Indian Ocean —
+  the correct fix was leaving it at Cesium's Y-up default.
+- **Content type** — real-world photogrammetry mesh (verified against Rome: 900+ tiles rendering at
+  the correct location).
+
+Sniffing the first 4 bytes distinguishes the two known `tf` values: `67 6C 54 46` (`"glTF"`) = a real
+`tf=3dv4` GLB; `28 B5 2F FD` = zstd, i.e. the `tf=3dv3` MTX/TIN variant — **its post-inflate layout has
+never been publicly reverse-engineered**, so this repo always requests `tf=3dv4` and never touches
+`3dv3`.
+
+No per-tile triangle/vertex count is documented anywhere in this codebase — it wasn't measured, and
+plausibly varies a lot by region density, so no number is given here rather than guessing one.
+
+## What's actually been verified live
+
+| Claim | Evidence |
+|---|---|
+| No Bing API key required | Verified keyless against `g=15530`/`g=15340`. |
+| `td1` manifest + `st` subtree rewrite works end-to-end | Manifest extensions stripped, `mtx`/`st` templates rewritten to proxy through `/bing/{tile,subtree}/...`, subtree availability decodes correctly. |
+| A known-good tile round-trips | `/bing/tile/1-14-1141-4206.glb?g=15530` (Bing-side `reverseY` 12177) returns a real 203 KB glTF. |
+| Bing renders at the correct real-world location | Rome photogrammetry mesh, **900+ tiles**, confirmed on-globe (not offset — see the two bugs below). |
+| A level-12 fragment produces real content | `/bing/fragment/0-3-3-2.json?g=15530` yields 85 content tiles, one centered near 12.566°E/41.900°N. |
+| City fly-to presets load and render | Viewer pills for Roma (Colosseum, 12.4924°/41.8902°), Washington (Washington Monument, −77.0353°/38.8895°), and Berlin (Brandenburg Gate, 13.3777°/52.5163°) all load the same world tileset and fly the camera in. |
+
+**Two real placement bugs found and fixed along the way** (2026-06-29): (1) the viewer's
+local-vs-georeferenced auto-detection treated Bing's **world-spanning** `region` as local content
+(its bounding-sphere center sits near Earth's own center) and applied a local San-Francisco frame on
+top of it, shifting the whole mesh off-globe — fixed by also requiring a **compact bounding radius**
+(`< 1e6` m) before treating a tileset as "local." (2) A `gltfUpAxis: "Z"` override left over from
+another format's handling put Bing's already-correctly-ECEF-placed, Y-up geometry in the wrong place
+entirely (the Indian Ocean) — reverted, since Bing needs no up-axis override at all.
+
+## The original plan vs. what shipped
+
+The build didn't start from the `td1` manifest — that was discovered partway through. The original
+plan, before any manifest was known to exist, was:
+
+1. Accept a `g` (genid), an AOI bounding box, and a min/max zoom; probe a known-good quadkey at
+   startup to validate `g`.
+2. **Synthesize** an implicit `QUADTREE` tileset by hand (`subtreeLevels`, `availableLevels`, template
+   URIs) from that config, converting `(level, x, y) ↔ quadkey` with `childDigit = xBit + 2·yBit` per
+   level (the standard [Bing Tile System quadkey scheme](https://learn.microsoft.com/en-us/bingmaps/articles/bing-maps-tile-system)).
+3. Determine `.subtree` availability by **recursively HTTP-probing** Bing itself — treat a 404/empty
+   response as "absent" — and build `tileAvailability`/`contentAvailability`/`childSubtreeAvailability`
+   bitstreams from the probe results.
+4. Fetch content by converting `(level, x, y)` back to a quadkey-based URL and serving the GLB as-is.
+
+The central unknown going in was **child-availability discovery** — with no known manifest, blind
+recursive HTTP probing looked like the only option (the reference downloader,
+[s1dny/bing-maps-tile-downloader](https://github.com/s1dny/bing-maps-tile-downloader/), does something
+similar at a single fixed zoom). That approach turned out to be a dead end on its own: Bing's
+intermediate LODs are **0 bytes**, so probing from a shallow root pruned the entire tree — "one
+request, world shows nothing." **During implementation, the `td1` manifest and its `st` subtree
+binaries turned out to already exist** and to be standard, parseable 3D Tiles implicit-tiling
+artifacts — which is what shipped instead of the blind-probe design, and is the architecture described
+above.
+
+## Known limitations / open questions
+
+- **`g` (genid) drift** — no discovery API exists; the hardcoded default will eventually go stale and
+  need bumping (already happened once, `15340` → `15530`).
+- **`tf=3dv3` (MTX/zstd) is unimplemented on purpose** — its layout was never reverse-engineered past
+  the zstd envelope.
+- **No offline converter** — `/bing` is live-only; there's no `bing-to-3dtiles` batch tool, since
+  there's no local source file to convert (the content only exists as Bing's own hosted service).
+- **No documented per-tile geometry stats** (triangle/vertex counts, typical GLB size beyond the one
+  203 KB sample above) — not measured during development.
+- **Large-scale/global performance** (many concurrent deep fragments, total world tile count) hasn't
+  been separately load-tested — verification so far has been targeted city fly-tos, not a full-globe
+  crawl.
+
+## References
+
+- [Bing Maps Tile System (quadkey addressing)](https://learn.microsoft.com/en-us/bingmaps/articles/bing-maps-tile-system) — Microsoft's own public documentation of the *2D* tile/quadkey scheme (not the 3D format itself).
+- [s1dny/bing-maps-tile-downloader](https://github.com/s1dny/bing-maps-tile-downloader/) — an independent offline downloader for the same `tf=3dv4` tiles; `src/download.rs` (endpoint + quadkey construction) and `src/decompress.rs` (KTX2 decompression) were cross-referenced during this reverse-engineering pass.
+- [3D Tiles `ImplicitTiling` spec](https://github.com/CesiumGS/3d-tiles/blob/main/specification/ImplicitTiling/README.adoc) — the standard this repo's own `subt` parsing and explicit-tile emission are built against.
+- [Design log — "Bentley 3MX and Bing Maps 3D adapters"](/docs/guide/planning/design-log#bing-maps-3d--3d-tiles) — the original implementation plan, the hard parts identified up front, and how the shipped design diverged from it.
+- `packages/tile-server/bing-live.js` — the actual adapter implementation this page documents.
