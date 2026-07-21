@@ -117,6 +117,10 @@ export const FORMATS: FormatMeta[] = [
     { id: 'skatepark', label: 'Skatepark', src: 'https://code.playcanvas.com/examples_data/example_skatepark_02/lod-meta.json', out: 'output/sog/skatepark-3dtiles-from-sog' },
     { id: 'roman', label: 'Roman Parish', src: 'https://code.playcanvas.com/examples_data/example_roman_parish_02/lod-meta.json', out: 'output/sog/roman-parish-3dtiles-from-sog' },
     { id: 'arrival-jaffa', label: 'Arrival jaffa3 (.lod) ⬀', src: 'https://ugc.arrival.space/71585765/14ae36863868a5f74fbc29389e156bc5f18e0d7a612af78c492cd84cfa4a9c44_jaffa3_1777965648677_LOD/lod-meta.json' },
+    // Remote, stream-only community captures (splat-transform-authored streamed-SOG, CloudFront-hosted).
+    { id: 'oval-interior', label: 'Oval Interior Spaces ⬀', src: 'https://d28zzqy0iyovbz.cloudfront.net/b7c8d8c5/v1/lod-meta.json' },
+    { id: 'grace-cathedral-ext', label: 'Grace Cathedral SF ext (Vincent Woo) ⬀', src: 'https://d28zzqy0iyovbz.cloudfront.net/b8b1fd14/v1/lod-meta.json' },
+    { id: 'cathedral-interior', label: 'Cathedral Interior ⬀', src: 'https://d28zzqy0iyovbz.cloudfront.net/02d5f4eb/v3/lod-meta.json' },
   ] },
   { fmt: 'lcc', icon: '◆', label: 'LCC', type: 'splat', octree: false, stream: true, assets: [
     // Real public .lcc downloads (found via XGRIDS' own sample-data page,
