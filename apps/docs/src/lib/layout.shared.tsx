@@ -22,8 +22,12 @@ export const crossLinks: LinkItemType[] = ([
 export function baseOptions(): BaseLayoutProps {
   return {
     nav: {
-      // JSX supported
-      title: appName,
+      title: (
+        <span className="flex items-center gap-1.5">
+          <img src="/logo.svg" alt="" className="h-4 w-4" />
+          {appName}
+        </span>
+      ),
     },
     githubUrl: `https://github.com/${gitConfig.user}/${gitConfig.repo}`,
     links: crossLinks,

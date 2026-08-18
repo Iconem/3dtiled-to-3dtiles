@@ -173,7 +173,10 @@ export default function TopBar({ activeHandleRef }: { activeHandleRef: React.Ref
   return (
     <header className="flex flex-col gap-2 border-b bg-background/95 p-2">
       <div className="flex flex-wrap items-center gap-2">
-        <h1 className="mr-1 shrink-0 text-sm font-semibold">3D Tiled</h1>
+        <h1 className="mr-1 flex shrink-0 items-center gap-1.5 text-sm font-semibold">
+          <img src="/logo.svg" alt="" className="h-4 w-4" />
+          3D Tiled
+        </h1>
 
         <PillGroup tint="blue">
           {MODE_PILLS.map(([v, l]) => (
