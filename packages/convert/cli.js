@@ -5,6 +5,14 @@
  *   3dtiled <input> <outDir> [--format rad|sog|lcc|copc|potree|i3s]
  *           [--scale N] [--ge-scale N] [--ge-layer N] [--centroids-only] [-- <extra converter args>]
  *
+ *   3dtiled serve [<input>] [--port 3001] [--format <fmt>] [--lon <deg> --lat <deg>] [--alt m]
+ *           [--heading deg] [--place-scale N]
+ *     Start the live tile-server middleware and (with <input>) print the ready-to-paste 3D Tiles URL
+ *     for it — the "point Cesium for Unreal at a local dataset" one-liner. Remote streamable sources
+ *     get a /stream URL (nothing pre-converted); local paths and non-streamable formats get /convert
+ *     (converted once on first request, then cached). --lon/--lat append the tileset-level globe
+ *     placement params (see tile-server docs).
+ *
  * --centroids-only: for splat formats (rad/sog/lcc), emit a glTF POINTS tileset of splat centroids
  *   instead of KHR_gaussian_splatting tiles — renderable by point-cloud-only 3D Tiles viewers.
  *
@@ -21,8 +29,36 @@ const sepIdx = rawArgv.indexOf('--');
 const argv = sepIdx >= 0 ? rawArgv.slice(0, sepIdx) : rawArgv;
 const extraArgs = sepIdx >= 0 ? rawArgv.slice(sepIdx + 1) : [];
 
-const VALUE_FLAGS = new Set(['format', 'scale', 'ge-scale', 'ge-layer', 'tiling']);
+const VALUE_FLAGS = new Set(['format', 'scale', 'ge-scale', 'ge-layer', 'tiling', 'port', 'lon', 'lat', 'alt', 'heading', 'place-scale']);
 function flag(name) { const i = argv.indexOf(`--${name}`); return i >= 0 ? argv[i + 1] : undefined; }
+
+// ── `3dtiled serve` — start the tile-server and print the paste-into-any-client URL ──────────────
+if (argv[0] === 'serve') {
+  const input = argv.slice(1).find((a, i, arr) => !a.startsWith('--') && !(i > 0 && arr[i-1].startsWith('--') && VALUE_FLAGS.has(arr[i-1].slice(2))));
+  (async () => {
+    const port = Number(flag('port')) || Number(process.env.TILE_PORT) || 3001;
+    process.argv.push('--port', String(port));                 // server.js reads --port itself
+    await import('../tile-server/server.js');                  // starts listening on import
+    if (!input) return;
+    const { streamableFormats } = await import('../tile-server/stream-live.js');
+    const fmt = flag('format') || detectFormatByName(input) || (isRemote(input) ? null : await detectFormat(input).catch(() => null));
+    const streamable = isRemote(input) && fmt && streamableFormats.includes(fmt);
+    const params = new URLSearchParams({ url: input });
+    if (fmt) params.set('format', fmt);
+    for (const [k, f] of [['lon','lon'], ['lat','lat'], ['alt','alt'], ['heading','heading'], ['scale','place-scale']])
+      if (flag(f) != null) params.set(k, flag(f));
+    const pathName = streamable ? '/stream/tileset.json' : '/convert/tileset.json';
+    const { networkInterfaces } = await import('node:os');
+    const lan = Object.values(networkInterfaces()).flat().find(i => i && i.family === 'IPv4' && !i.internal)?.address;
+    console.log(`\n[3dtiled serve] ${fmt ?? '?'} via ${streamable ? '/stream (live range-streaming)' : '/convert (converted once on first request, then cached)'}`);
+    console.log(`\n  Paste this 3D Tiles URL into any client (CesiumJS, Cesium for Unreal/Unity, QGIS):`);
+    console.log(`\n    http://localhost:${port}${pathName}?${params}`);
+    if (lan) console.log(`    http://${lan}:${port}${pathName}?${params}   (same network)`);
+    if (flag('lon') == null) console.log(`\n  Tip: add --lon <deg> --lat <deg> [--alt m] [--heading deg] to place a local dataset on the globe.`);
+    console.log('');
+  })().catch(e => { console.error('[3dtiled serve]', e.message); process.exit(1); });
+} else {
+// ── default: convert path ─────────────────────────────────────────────────────────────────────────
 
 // positionals = tokens that aren't a --flag nor the value following a value-flag
 const positionals = [];
@@ -36,6 +72,7 @@ const outDir = positionals[1];
 
 if (!input || !outDir) {
   console.error(`Usage: 3dtiled <input> <outDir> [--format <fmt>] [--scale N] [--ge-scale N] [--ge-layer N] [--centroids-only] [-- extra args]
+       3dtiled serve [<input>] [--port 3001] [--lon <deg> --lat <deg>] [--alt m] [--heading deg]
   formats: ${supportedFormats.join(', ')}`);
   process.exit(1);
 }
@@ -57,3 +94,4 @@ if (!input || !outDir) {
   await convert(input, outDir, opts);
   console.log(`[3dtiled] done → ${outDir}/tileset.json`);
 })().catch(e => { console.error('[3dtiled] error:', e.message); process.exit(1); });
+}
