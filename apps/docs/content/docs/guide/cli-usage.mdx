@@ -66,6 +66,40 @@ node packages/i3s-to-3dtiles/src/index.js    <extracted-slpk-dir>  sample-data/o
 > Output convention: regenerate into **`sample-data/output/<fmt>/…`** (the viewer presets and
 > `tools-inspector` scripts point there).
 
+## Globe placement — attach a local dataset to a real location (`&lon=&lat=`)
+
+Any `/stream`, `/convert`, or `/tiles` `tileset.json` request accepts **placement query params** that
+attach a *local* (non-georeferenced) dataset to a real location on the globe, entirely at the
+**tileset level** — the served `tileset.json` gets a root ENU transform, so **any** 3D Tiles client
+(CesiumJS, **Cesium for Unreal/Unity**, QGIS, 3DTilesRendererJS) streams it in place with no
+viewer-side reorientation:
+
+```
+GET /stream/tileset.json?url=<SRC>&format=<fmt>
+      &lon=<deg>&lat=<deg>            # required pair — activates placement
+      [&alt=<m>]                      # ellipsoidal altitude (default 0)
+      [&heading=<deg>]                # compass heading, clockwise from north, about local Up
+      [&scale=<factor>]               # uniform scale (default 1)
+```
+
+Semantics:
+
+- The placement **composes on top of** the format adapter's own local-upright root transform (SOG's
+  RX(−90°), RAD's RX(180°), LCC's upright flip, …), so each format's Y-up/Z-up convention stays
+  normalized at the tileset level — the same GLB content renders upright in every client.
+- If the source carries its **own real georeference** (COPC/Potree CRS, LCC EPSG, …), the params are
+  **ignored** with a server-side warning — the dataset's own placement wins.
+- On `/convert` the placement is applied to the served JSON only, never baked into the on-disk cache,
+  so one cached conversion can be placed differently per request.
+- `geosplats` keeps its own placement params (`frame`/`yaw`/`alt`) and is excluded.
+
+Example — stream the (local-frame) Lion Takanawa Potree cloud onto the Eiffel Tower forecourt,
+rotated 45°, for Cesium for Unreal:
+
+```
+http://localhost:3001/stream/tileset.json?url=https%3A%2F%2Fraw.githubusercontent.com%2Fpotree%2Fpotree%2Fdevelop%2Fpointclouds%2Flion_takanawa%2Fcloud.js&format=potree&lon=2.2945&lat=48.8584&alt=100&heading=45
+```
+
 ## Per-format converters
 
 ### copc-to-3dtiles

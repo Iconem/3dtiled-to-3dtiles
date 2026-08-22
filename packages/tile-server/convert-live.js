@@ -24,7 +24,7 @@ import crypto from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 import { convert, detectFormat } from '../convert/index.js';
 import { isRemote, mirrorRemote } from '../convert/fetch-source.js';
-import { detectFormatByName } from '../core/index.js';
+import { detectFormatByName, applyPlacement } from '../core/index.js';
 
 const CACHE = path.join(os.tmpdir(), '3dtiles-live-cache');
 const CORS = { 'Access-Control-Allow-Origin': '*', 'Access-Control-Allow-Headers': '*' };
@@ -94,6 +94,10 @@ export async function handleConvert(req, res, u) {
     const outDir = await ensureConverted(src, fmt, key, { centroidsOnly: centroids, tiling });
     const tileset = JSON.parse(await fs.readFile(path.join(outDir, 'tileset.json'), 'utf8'));
     rewriteUris(tileset.root, `/convert/${key}/`);
+    // Same user-directed globe placement as /stream (&lon=&lat=[&alt=][&heading=][&scale=]) — applied
+    // to the served JSON only, never baked into the on-disk cache (so one cached convert can be
+    // placed differently per request).
+    if (fmt !== 'geosplats') applyPlacement(tileset.root, u.searchParams, `convert:${fmt}`);
     res.writeHead(200, { 'Content-Type': 'application/json', ...CORS });
     res.end(JSON.stringify(tileset));
     return true;

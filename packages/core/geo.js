@@ -53,6 +53,51 @@ function unwrapCompoundWkt(crs) {
   return crs.slice(start);
 }
 
+/** Column-major 4×4 multiply: (a·b) v = a (b v). Both flat 16-arrays in glTF/3D-Tiles layout. */
+export function mat4Multiply(a, b) {
+  const r = new Array(16).fill(0);
+  for (let c = 0; c < 4; c++) for (let row = 0; row < 4; row++)
+    for (let k = 0; k < 4; k++) r[c*4 + row] += a[k*4 + row] * b[c*4 + k];
+  return r;
+}
+
+/**
+ * User-directed globe placement for a LOCAL (non-georeferenced) tileset: ENU frame at (lon°, lat°,
+ * alt m) with an optional compass `heading` (degrees CLOCKWISE from north, rotating the dataset about
+ * local Up) and uniform `scale`. Returns the column-major root `transform`. Compose it ON TOP of a
+ * tileset's existing local-upright flip (mat4Multiply(placement, flip)) — the flip maps content →
+ * upright Z-up local, this maps upright local → ECEF.
+ */
+export function placementMatrix(lon, lat, alt = 0, heading = 0, scale = 1) {
+  const e = llhToEcef(lon, lat, alt);
+  let m = enuMatrix(lon, lat, e[0], e[1], e[2]);
+  if (heading) {                                   // compass CW → math-positive CCW about +Z (Up)
+    const h = -heading * DEG, c = Math.cos(h), s = Math.sin(h);
+    m = mat4Multiply(m, [c,s,0,0, -s,c,0,0, 0,0,1,0, 0,0,0,1]);
+  }
+  if (scale !== 1) m = mat4Multiply(m, [scale,0,0,0, 0,scale,0,0, 0,0,scale,0, 0,0,0,1]);
+  return m;
+}
+
+/** True iff a root `transform` already places content at ECEF scale (translation ≫ any local frame). */
+export const isEcefPlaced = (t) => !!t && Math.hypot(t[12], t[13], t[14]) > 1e6;
+
+/**
+ * Apply the user-directed placement query params (&lon=&lat=[&alt=][&heading=][&scale=]) to a tileset
+ * root. Composes placementMatrix ON TOP of any existing local-upright root transform (each format's
+ * own up-axis flip stays baked in), and refuses to override a source's own real georeference (its ECEF
+ * placement wins — pass no lon/lat to keep it). Returns true iff a placement was applied.
+ */
+export function applyPlacement(root, sp, tag = 'place') {
+  if (!sp.has('lon') || !sp.has('lat')) return false;
+  const lon = Number(sp.get('lon')), lat = Number(sp.get('lat'));
+  if (!Number.isFinite(lon) || !Number.isFinite(lat)) return false;
+  if (isEcefPlaced(root.transform)) { console.warn(`[${tag}] source is already georeferenced — ignoring &lon/&lat placement`); return false; }
+  const place = placementMatrix(lon, lat, Number(sp.get('alt') || 0), Number(sp.get('heading') || 0), Number(sp.get('scale') || 1));
+  root.transform = root.transform ? mat4Multiply(place, root.transform) : place;
+  return true;
+}
+
 /** Georeference a local origin via a proj4-parsable CRS/WKT → ENU→ECEF transform, or null. */
 export function georefFromCrs(origin, crs, tag = 'geo') {
   if (!crs) return null;
