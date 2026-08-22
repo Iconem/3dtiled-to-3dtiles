@@ -1,0 +1,61 @@
+name: Deploy docs to GitHub Pages
+
+# Static-exports the Fumadocs site (apps/docs) and publishes it to GitHub Pages on every push to
+# main. DOCS_STATIC_EXPORT=1 flips next.config.mjs to `output: 'export'` with the repo-name
+# basePath; search ships as a static Orama index (see apps/docs/src/app/api/search/route.ts).
+# One-time repo setup: Settings → Pages → Source: "GitHub Actions".
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'apps/docs/**'
+      - 'packages/tile-server/openapi.json'   # rendered by the docs' API-reference page
+      - '.github/workflows/docs-pages.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - run: pnpm install --frozen-lockfile
+
+      - run: pnpm --filter docs build
+        env:
+          DOCS_STATIC_EXPORT: '1'
+          # basePath defaults to /3dtiled-to-3dtiles in next.config.mjs; derive it from the repo name
+          # so forks deploy under their own project path without editing the config.
+          DOCS_BASE_PATH: /${{ github.event.repository.name }}
+
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: apps/docs/out
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4
