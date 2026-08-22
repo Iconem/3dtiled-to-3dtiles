@@ -94,12 +94,19 @@ const getCtx = memoizeAsync(async (url) => {
       // mark `loadedChunks` AFTER the chunk's nodes land in src.nodes. (The old code marked loaded
       // *before* awaiting, so a concurrent request would skip the chunk and index empty availability →
       // implicit refinement stalled until something else warmed the cache.) Returns the chunk boundaries.
+      // Boundaries are CACHED per chunk (chunkBoundaries): an already-loaded chunk must still hand its
+      // boundary children back so a LATER, deeper walk can traverse THROUGH it. (Returning [] for
+      // loaded chunks — the old behavior — killed the BFS at every re-visited chunk root: the root
+      // subtree loads chunk 'r' with a shallow depth target, then the level-3 subtree's walk starts at
+      // 'r', receives no boundaries, and never reaches the level-5 .hrc chunks → availability silently
+      // truncated at level stepSize-1, i.e. "Geghard stops streaming past level 4".)
       const inFlight = new Map();          // chunkName → Promise<boundaries[]>
+      const chunkBoundaries = new Map();   // chunkName → boundary[{name,box}] of the loaded chunk
       const loadOne = (cr) => {
-        if (loadedChunks.has(cr)) return Promise.resolve([]);
+        if (loadedChunks.has(cr)) return Promise.resolve(chunkBoundaries.get(cr) || []);
         if (inFlight.has(cr)) return inFlight.get(cr);
         const p = Promise.resolve(src.loadChunk(cr, src.boxOf(cr)))
-          .then(b => { loadedChunks.add(cr); inFlight.delete(cr); progressTick(url); return b || []; })
+          .then(b => { loadedChunks.add(cr); chunkBoundaries.set(cr, b || []); inFlight.delete(cr); progressTick(url); return b || []; })
           .catch(e => { inFlight.delete(cr); throw e; });
         inFlight.set(cr, p);
         return p;
@@ -365,7 +372,9 @@ export async function potreeSubtree(url, key) {
   const ctx = await getCtx(url);
   if (ctx.lazy) {                                // load only the .hrc chunk(s) this subtree block needs
     const { level, x, y, z } = keyToCoords(key);
-    await ctx.ensureBlock(ctx.nameForCoord(level, x, y, z), level, SUBTREE_LEVELS);
+    const rootName = ctx.nameForCoord(level, x, y, z);
+    await ctx.ensureBlock(rootName, level, SUBTREE_LEVELS);
+    if (process.env.POTREE_DEBUG) console.log(`[potree-dbg] subtree ${key} rootName=${rootName} availSet=${ctx.availSet.size} has(key)=${ctx.availSet.has(key)}`);
     return buildSubtreeBuffer(key, ctx.availSet, SUBTREE_LEVELS);
   }
   if (ctx.lazy2) {
