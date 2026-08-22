@@ -832,6 +832,94 @@
           }
         }
       }
+    },
+    "/stats/tileset.json": {
+      "get": {
+        "tags": [
+          "stats"
+        ],
+        "summary": "Hierarchy statistics of any tileset (depth/breadth walk)",
+        "description": "Walks a tileset tile tree - explicit children, 3D Tiles 1.1 implicit tiling (fetching + decoding .subtree availability), and external-tileset refs - returning per-level aggregates (tiles, content tiles, GE range) plus a bounded node dump for graph rendering. Works against this server's own /stream//convert//aggregate output or any remote tileset URL.",
+        "parameters": [
+          {
+            "name": "url",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "tileset.json URL to walk."
+          },
+          {
+            "name": "maxNodes",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "default": 4000,
+              "maximum": 20000
+            },
+            "description": "Node budget - the walk truncates (truncated:true) past it."
+          },
+          {
+            "name": "maxDepth",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "default": 32,
+              "maximum": 48
+            },
+            "description": "Depth cap."
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Stats JSON: totals, per-level aggregates, node dump"
+          },
+          "400": {
+            "description": "Missing url"
+          }
+        }
+      }
+    },
+    "/hierarchy": {
+      "get": {
+        "tags": [
+          "stats"
+        ],
+        "summary": "Depth/breadth visualization page (radial tree + per-level chart)",
+        "description": "Self-contained HTML page rendering /stats as a cosmograph-style radial depth/breadth graph, per-level breadth chart, KPI tiles and table. ?url= preloads a tileset; ?theme=dark|light overrides the OS color scheme.",
+        "parameters": [
+          {
+            "name": "url",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            },
+            "description": "tileset.json URL to preload."
+          },
+          {
+            "name": "theme",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "dark",
+                "light"
+              ]
+            },
+            "description": "Force color scheme."
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "HTML page"
+          }
+        }
+      }
     }
   }
 }

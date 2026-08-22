@@ -8,7 +8,8 @@ export { buildPointsGlb } from './points-glb.js';
 export { parallelMap, WorkerPool, defaultConcurrency } from './parallel.js';
 export { detectFormat, detectFormatByName } from './detect.js';
 export { keyToCoords, coordsToKey, octreeChildKeys, octreeSubCube, cubeToBox,
-         buildExplicitTree, buildSubtreeBuffer, subtreeRootKeys } from './tiling.js';
+         buildExplicitTree, buildSubtreeBuffer, subtreeRootKeys,
+         parseSubtreeBuffer, morton2Decode, morton3Decode } from './tiling.js';
 export { DEG, llhToEcef, ecefToLlh, enuFrame, enuMatrix, georefFromCrs, cgcs2000Lon0, lccGeoref, LCC_LOCAL_UPRIGHT, mat4Multiply, placementMatrix, isEcefPlaced, applyPlacement } from './geo.js';
 export { Source } from './source.js';
 export { CORS, sendJson, sendGlb, sendBin, sendErr } from './http.js';

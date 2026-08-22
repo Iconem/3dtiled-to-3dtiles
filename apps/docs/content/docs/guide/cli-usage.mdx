@@ -100,6 +100,18 @@ rotated 45°, for Cesium for Unreal:
 http://localhost:3001/stream/tileset.json?url=https%3A%2F%2Fraw.githubusercontent.com%2Fpotree%2Fpotree%2Fdevelop%2Fpointclouds%2Flion_takanawa%2Fcloud.js&format=potree&lon=2.2945&lat=48.8584&alt=100&heading=45
 ```
 
+## Hierarchy statistics & visualization (`/stats`, `/hierarchy`)
+
+`GET /stats/tileset.json?url=<any tileset.json>[&maxNodes=4000][&maxDepth=32]` walks a tileset's tile
+tree — explicit children, 3D Tiles 1.1 **implicit tiling** (fetching and decoding `.subtree`
+availability), and external-tileset refs — and returns per-level aggregates (tiles, content tiles, GE
+range) plus a bounded node dump. `GET /hierarchy?url=…[&theme=dark|light]` renders it as a
+**cosmograph-style radial depth/breadth graph** (rings = depth, dot = tile, color steps with depth)
+with a per-level breadth chart, KPI tiles, and a per-level table. Works against this server's own
+`/stream`, `/convert`, `/aggregate` output or any remote tileset — a truncated live adapter shows up
+immediately as a ring that stops early (this page would have caught the Potree 1.x `.hrc` depth-
+truncation bug at a glance).
+
 ## Per-format converters
 
 ### copc-to-3dtiles
