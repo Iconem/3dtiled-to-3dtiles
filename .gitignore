@@ -3,3 +3,5 @@ sample-data
 # local Claude Code agent config
 .claude/
 .bench-cache/
+*.log
+screens/

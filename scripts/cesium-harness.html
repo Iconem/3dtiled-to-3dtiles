@@ -1,0 +1,79 @@
+<!doctype html>
+<!-- cesium-harness.html — minimal STOCK CesiumJS client for verification screenshots.
+     Zero viewer-side reorientation/anchoring logic on purpose: whatever this shows is what ANY
+     3D-Tiles client (Cesium for Unreal/Unity, QGIS, …) gets from the served tileset alone — the
+     proof harness for the tileset-level placement params and the /aggregate meta-tileset.
+       cesium-harness.html?url=<tileset.json>[&url=<another>…][&zoom=<i>]  (zoom: child index to frame, default whole first tileset) -->
+<html lang="en"><head>
+<meta charset="utf-8" />
+<script src="https://cdn.jsdelivr.net/npm/cesium@1.126.0/Build/Cesium/Cesium.js"></script>
+<link href="https://cdn.jsdelivr.net/npm/cesium@1.126.0/Build/Cesium/Widgets/widgets.css" rel="stylesheet" />
+<style>html,body,#v{width:100%;height:100%;margin:0;padding:0;overflow:hidden}
+#hud{position:absolute;top:8px;left:8px;z-index:9;background:rgba(0,0,0,.65);color:#fff;
+font:13px system-ui;padding:6px 10px;border-radius:6px;max-width:80%;white-space:pre-line}</style>
+</head><body>
+<div id="v"></div><div id="hud">loading…</div>
+<script>
+window.READY = false; window.TILES = 0; window.ERRORS = [];
+const q = new URLSearchParams(location.search);
+const urls = q.getAll('url');
+const viewer = new Cesium.Viewer('v', {
+  animation: false, timeline: false, baseLayerPicker: false, geocoder: false, sceneModePicker: false,
+  navigationHelpButton: false, homeButton: false, fullscreenButton: false, infoBox: false, selectionIndicator: false,
+  requestRenderMode: false,
+  // token-free, offline imagery bundled with the Cesium build itself — always renders, even headless
+  baseLayer: Cesium.ImageryLayer.fromProviderAsync(
+    Cesium.TileMapServiceImageryProvider.fromUrl(Cesium.buildModuleUrl('Assets/Textures/NaturalEarthII'))),
+});
+viewer.scene.globe.enableLighting = false;
+const hud = document.getElementById('hud');
+(async () => {
+  try {
+    const tilesets = [];
+    for (const u of urls) {
+      const ts = await Cesium.Cesium3DTileset.fromUrl(u, { maximumScreenSpaceError: 12 });
+      ts.tileLoad.addEventListener(() => { window.TILES++; });
+      viewer.scene.primitives.add(ts);
+      tilesets.push(ts);
+    }
+    // &marker=lon,lat,alt[,label] — an independent red reference point (location co-location proof)
+    if (q.has('marker')) {
+      const [mlon, mlat, malt, mlbl] = q.get('marker').split(',');
+      viewer.entities.add({
+        position: Cesium.Cartesian3.fromDegrees(Number(mlon), Number(mlat), Number(malt || 0)),
+        point: { pixelSize: 14, color: Cesium.Color.RED, outlineColor: Cesium.Color.WHITE, outlineWidth: 3, disableDepthTestDistance: Number.POSITIVE_INFINITY },
+        label: mlbl ? { text: mlbl, font: '14px system-ui', pixelOffset: new Cesium.Cartesian2(0, -22), fillColor: Cesium.Color.WHITE, disableDepthTestDistance: Number.POSITIVE_INFINITY } : undefined,
+      });
+    }
+    if (tilesets.length) {
+      const zoomIdx = q.has('zoom') ? Number(q.get('zoom')) : 0;
+      const target = tilesets[Math.min(zoomIdx, tilesets.length - 1)];
+      // &fly=lon,lat,alt,range,pitchDeg — frame an arbitrary location; else &range/&pitch around the tileset
+      const pitch = Cesium.Math.toRadians(Number(q.get('pitch') ?? -30));
+      const hdg = Cesium.Math.toRadians(Number(q.get('camheading') ?? 0));
+      if (q.has('fly')) {
+        const [flon, flat, falt, frange, fpitch] = q.get('fly').split(',').map(Number);
+        viewer.camera.lookAt(Cesium.Cartesian3.fromDegrees(flon, flat, falt || 0),
+          new Cesium.HeadingPitchRange(hdg, Cesium.Math.toRadians(fpitch ?? -30), frange || 200));
+        viewer.camera.lookAtTransform(Cesium.Matrix4.IDENTITY);
+      } else {
+        const range = q.has('range') ? Number(q.get('range')) : undefined;
+        await viewer.zoomTo(target, range != null ? new Cesium.HeadingPitchRange(hdg, pitch, range) : undefined);
+      }
+      for (const t of tilesets) if (t.pointCloudShading) { t.pointCloudShading.attenuation = true; t.pointCloudShading.maximumAttenuation = 4; }
+    }
+    hud.textContent = urls.length + ' tileset(s) — waiting for tiles…';
+    // stock-Cesium-computed placement of each tileset root — the textual location proof in every shot
+    const where = tilesets.map((t, i) => {
+      const cc = Cesium.Cartographic.fromCartesian(t.boundingSphere.center);
+      return `ts${i}: lon ${Cesium.Math.toDegrees(cc.longitude).toFixed(4)}° lat ${Cesium.Math.toDegrees(cc.latitude).toFixed(4)}° h ${Math.round(cc.height)}m r ${Math.round(t.boundingSphere.radius)}m`;
+    }).join('  ·  ');
+    const check = setInterval(() => {
+      const t = tilesets[0];
+      hud.textContent = 'tiles loaded: ' + window.TILES + (t ? ' · tilesLoaded: ' + t.tilesLoaded : '') + '\n' + where;
+      if (tilesets.every(x => x.tilesLoaded) && window.TILES > 0) { window.READY = true; clearInterval(check); hud.textContent += ' · READY'; }
+    }, 500);
+  } catch (e) { window.ERRORS.push(String(e)); hud.textContent = 'ERROR: ' + e; }
+})();
+</script>
+</body></html>
