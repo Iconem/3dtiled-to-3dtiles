@@ -5,6 +5,46 @@ Format loosely follows [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+### Added / Fixed — 2026-08-22 (roadmap batch: potree depth fix · globe placement · Pages docs · /aggregate · /stats+/hierarchy · bench · `serve` CLI)
+- **Fixed: Potree 1.x live streaming truncated at hierarchy-chunk depth** (`potree-live.js`). An
+  already-loaded `.hrc` chunk returned empty boundaries from `loadOne`, so any subtree walk re-entering
+  a loaded chunk root (the level-3 subtree walking through chunk `r` after the root subtree loaded it
+  shallowly) never reached the next chunk generation — availability silently stopped at level
+  `stepSize−1`. Geghard (302 M pts, stepSize 5) refined to level 4 only; real depth 11+. Boundaries are
+  now cached per chunk so later, deeper walks traverse THROUGH loaded chunks. Verified live with a
+  client-style subtree BFS (`scripts/debug-potree-depth.mjs`): availability through level 11, deep
+  tiles decode, Potree 2.0 unaffected.
+- **Added: tileset-level globe placement** — `&lon=&lat=[&alt=][&heading=][&scale=]` on `/stream`,
+  `/convert` and `/tiles` `tileset.json` attaches a LOCAL dataset to a real location as a root ENU
+  transform composed ON TOP of each adapter's local-upright flip (SOG RX(−90°), RAD RX(180°), LCC
+  upright), so up-axis normalization + placement live in the tileset itself and any client (Cesium for
+  Unreal/Unity, QGIS, CesiumJS) streams it in place. Own-georef sources win (params ignored + warning).
+  `core/geo.js`: `mat4Multiply`, `placementMatrix`, `isEcefPlaced`, `applyPlacement`. Verified in stock
+  CesiumJS (`scripts/cesium-harness.html`): lion_takanawa upright at the Eiffel Tower, Cesium's own
+  computed lon/lat matching the params.
+- **Added: docs static export + GitHub Pages deploy** — `DOCS_STATIC_EXPORT=1` flips `apps/docs` to
+  `output:'export'` (repo-name basePath, trailingSlash); search becomes fumadocs' static Orama index
+  (works identically in dev); `.github/workflows/docs-pages.yml` deploys on push to main (one-time
+  repo setup: Settings → Pages → Source: GitHub Actions).
+- **Added: `/aggregate` meta-tileset endpoint** (MosaicJSON/STAC-style) — one tileset whose children
+  external-reference N given tileset URLs, bounding spheres derived from each child root
+  (box/sphere/region × transform), failures skipped into `asset.extras.failed`. Verified: Geghard +
+  placed lion + Marseille in one endpoint, rendered on two continents from the same URL in stock Cesium.
+- **Added: `/stats` hierarchy walker + `/hierarchy` visualization** — walks explicit trees, 3D Tiles 1.1
+  implicit tiling (`.subtree` decode via new `core` `parseSubtreeBuffer`), and external refs; renders a
+  cosmograph-style radial depth/breadth graph + per-level chart/table (light+dark, validated ordinal
+  ramp). Doubles as a live-adapter diagnostic — the pre-fix Geghard truncation reads as a ring that
+  stops at level 4.
+- **Added: reproducible converter benchmark** (`scripts/benchmark-converters.mjs` +
+  docs `guide/planning/benchmarks`) — first numbers: potree2 lion 1.01 M pts/s, RAD 0.94 M splats/s,
+  SOG 8.3 MB/s (single-core; the WorkerPool tier remains unwired headroom).
+- **Added: `3dtiled serve` subcommand** — starts the tile-server and prints the ready-to-paste
+  3D Tiles URL (localhost + LAN) for a given dataset, `/stream` vs `/convert` auto-picked, with
+  `--lon/--lat/--alt/--heading` placement flags — the local-first "point Cesium for Unreal at it"
+  one-liner (covers most of the Tauri-companion idea's value).
+- Verification tooling committed under `scripts/`: stock-Cesium harness, CDP screenshot driver
+  (real readiness waits, no puppeteer), Pages-emulating static server.
+
 ### Fixed — 2026-07-07 (`main`: 3DTRJS wrong up-orientation on repeat Auto-zoom)
 - **Root cause**: `frameToTileset` (`apps/viewer/src/components/Viewport/ThreeDTRjsViewer.tsx`) decides
   whether a tileset needs the synthetic ENU anchor (for non-georeferenced local content, e.g. Potree
