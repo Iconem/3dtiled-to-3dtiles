@@ -795,6 +795,43 @@
           }
         }
       }
+    },
+    "/aggregate/tileset.json": {
+      "get": {
+        "tags": [
+          "aggregate"
+        ],
+        "summary": "Meta-tileset over N child tilesets (MosaicJSON/STAC-style)",
+        "description": "Serves ONE 3D Tiles tileset whose children external-reference each given tileset URL, with per-child bounding spheres derived from each child root (fetched once, cached). Children can be any 3D-Tiles URL, including this server's own /stream, /convert, /bing or /3dtiles-self-contained endpoints - so one endpoint can mosaic COPC + Potree + LCC + RAD + remote 3D Tiles together. A local child can be globe-placed first via /stream's lon/lat placement params. Unreachable children are skipped and listed in asset.extras.failed.",
+        "parameters": [
+          {
+            "name": "urls",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Comma-separated child tileset.json URLs (each URL-encoded)."
+          },
+          {
+            "name": "url",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Repeated form: one child tileset.json URL per url= param."
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Meta tileset.json (root ADD-refine, children = external tilesets)"
+          },
+          "400": {
+            "description": "No child URLs given"
+          }
+        }
+      }
     }
   }
 }
