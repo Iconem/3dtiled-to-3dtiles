@@ -86,6 +86,11 @@ export default defineConfig({
     // `dev:app` script). Also folds in the legacy standalone page (`/vanilla-viewer`, was the
     // root-level vite.config.mjs on :3000).
     port: 3000,
+    // Fail loudly if 3000 is taken instead of auto-hopping onto the NEXT port — vite's default
+    // increment lands it on 3001 and silently steals the tile-server's port, which then crashes with
+    // EADDRINUSE and takes the whole `pnpm dev` stack down in a confusing way (observed live when an
+    // unrelated dev server held 3000). Override with `--port <n> --strictPort` when 3000 is busy.
+    strictPort: true,
     // Bind all interfaces (Vite defaults to localhost-only) so this is reachable from other devices
     // on the LAN at http://<this machine's LAN IP>:3000/ — the tile-server middleware already listens
     // on all interfaces by default (plain `.listen(PORT)`, no host arg), and formats.ts's MW/SDATA
