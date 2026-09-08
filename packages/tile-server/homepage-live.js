@@ -282,7 +282,11 @@ export async function handleHomepage(req, res, u) {
   }
   if (u.pathname === '/openapi.json') {
     try {
-      const spec = await fs.readFile(OPENAPI_PATH, 'utf8');
+      // {{DOCS_URL}} placeholder substituted at serve time (same no-committed-domains
+      // policy as REPO_URL/DOCS_URL above — the spec file must not pin a deployment);
+      // falls back to the repo's docs app when DOCS_URL isn't set.
+      const spec = (await fs.readFile(OPENAPI_PATH, 'utf8'))
+        .replaceAll('{{DOCS_URL}}', DOCS_URL || `${REPO_URL}/tree/main/apps/docs`);
       res.writeHead(200, CORS_JSON); res.end(spec);
     } catch {
       res.writeHead(500, CORS_JSON); res.end(JSON.stringify({ error: 'openapi.json not found' }));
