@@ -32,7 +32,7 @@
  * downloader for the same Bing `tf=3dv4` tiles (offline grab vs. our live `td1` → 3D Tiles proxy).
  */
 import { decompressGlb, sendJson, sendGlb, sendErr, CORS } from '../core/index.js';
-import { globeTileGlb, DEFAULT_GLOBE_MAX_LEVEL, BASEMAP_ATTRIBUTION } from './bing-globe.js';
+import { globeTileGlb, resolveBasemap, DEFAULT_GLOBE_MAX_LEVEL } from './bing-globe.js';
 
 const BING_HOST = 't.ssl.ak.tiles.virtualearth.net';
 const DEFAULT_G = '15530';
@@ -169,7 +169,8 @@ export async function bingTileset(g = DEFAULT_G, globe = {}) {
   return { asset: { version: '1.1',
                     // 3D Tiles clients surface asset.copyright — which is how the basemap raster's
                     // required attribution travels with the tileset instead of living in a viewer.
-                    ...(globeOn ? { copyright: BASEMAP_ATTRIBUTION } : {}) },
+                    // Resolved from the REQUESTED basemap, so &basemap=osm credits OSM, not Bing.
+                    ...(globeOn ? { copyright: resolveBasemap(globe.basemap).attribution } : {}) },
            geometricError: m.rootGE,
            root: { boundingVolume: { region }, geometricError: m.rootGE, refine: 'REPLACE', children },
            extensionsUsed: ['3DTILES_content_gltf'] };

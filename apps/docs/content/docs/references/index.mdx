@@ -81,11 +81,15 @@ writeup (Spark 2.0 LoD system, PackedSplats/ExtSplats byte layouts, geometric er
   geometric-error model described above — which is why the algorithm is now written out in this page
   rather than linked: the source is no longer citable.
 
-  The last public release survives as a **private** reconstruction (assembled from published npm
-  tarballs, not a GitHub fork; upstream was Apache-2.0, which permits this) at
-  `github.com/jo-chemla/3DGS-PLY-3DTiles-Converter` — kept for **building tilesets directly** from
-  PLY and for cross-checking this repo's output against the original implementation. Access on
-  request; deliberately not hyperlinked, since the repo is private and the link would 404.
+  **The package is still on npm**, though — build *and* source, as of **v0.6.5 (2026-08-31)**:
+  [`3dgs-ply-3dtiles-converter`](https://www.npmjs.com/package/3dgs-ply-3dtiles-converter). So you can
+  still build tilesets directly from PLY, and still read the geometric-error implementation, even
+  though the GitHub repo is gone:
+
+  ```sh
+  npx 3dgs-ply-3dtiles-converter@0.6.5 --help
+  npm pack 3dgs-ply-3dtiles-converter@0.6.5   # tarball ships the sources
+  ```
   </Callout>
 - [3DTiles-Inspector](https://github.com/WilliamLiu-1997/3DTiles-Inspector) — standalone web inspector for 3D Tiles / Gaussian-splat tilesets (root-transform edit, geometric-error & layer-multiplier scaling `1/16x–16x`, splat crop regions, `build_summary.json` round-trip). A good complement to this repo's `viewer.html` 🪲 Debug-tiles overlay.
 

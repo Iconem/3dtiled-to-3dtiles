@@ -4,3 +4,6 @@ build/
 dist/
 artifacts/
 *.tsbuildinfo
+
+# hutch drops an empty template-marker next to the project dir
+../.desktop.hutch-template.lock

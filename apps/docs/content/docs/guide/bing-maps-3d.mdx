@@ -55,26 +55,50 @@ face-lvl  global-z   mtx name              result
 ```
 
 So a raw `/bing/tileset.json` renders as **empty space** until you are practically at city scale — no
-horizon, no landmass, no sense of where you are. The fix is server-side rather than viewer-side, for
-the same reason the placement params are: a viewer-drawn basemap only helps *that* viewer, whereas a
-tileset that carries its own low-zoom content works in Cesium for Unreal/Unity, QGIS and CesiumJS
-alike.
+horizon, no landmass, no sense of where you are.
+
+### Why low zoom is a different product
+
+This is not a gap in the `tf=3dv4` dataset — it is the wrong question asked of it. Bing Maps' own 3D
+view does not draw photogrammetry at these zooms either: the textured mesh is a **deep-zoom-only**
+product covering selected cities, and everything above it is **raster imagery draped on terrain**.
+The two are separate delivery systems that meet around z13.
+
+So the shell reproduces what Bing itself does there — and can do it with **Bing's own raster tiles**,
+which turn out to be keyless, quadkey-addressed, and served from the *same host* as the mesh:
+
+```
+https://t.ssl.ak.tiles.virtualearth.net/tiles/a{quadkey}.jpeg?g=1
+```
+
+A quadkey is just the tile's `x`/`y` bits interleaved, one base-4 digit per zoom level — so it is a
+pure re-encoding of a slippy tile index, not a separate addressing scheme to reverse-engineer.
+
+### How the shell works
 
 For every tile with no Bing mesh at or above `globe` (default level 11), the server emits a
 **basemap-draped ellipsoid patch**. Because a Bing face-local `(level, x, y)` *is* the global mercator
-tile at `(level+1)`, the raster lookup is a direct 1:1 mapping — no resampling, no reprojection. `REPLACE`
-refinement then swaps the shell for real Bing mesh as soon as it exists, and keeps the shell where it
-never does (oceans, uncovered regions), so there is no hole at the transition.
+tile at `(level+1)`, the raster lookup is a direct 1:1 mapping — no resampling, no reprojection.
+`REPLACE` refinement then swaps the shell for real Bing mesh as soon as it exists, and keeps the shell
+where it never does (oceans, uncovered regions), so there is no hole at the transition.
+
+The fix is server-side rather than viewer-side, for the same reason the placement params are: a
+viewer-drawn basemap only helps *that* viewer, whereas a tileset carrying its own low-zoom content
+works in Cesium for Unreal/Unity, QGIS and CesiumJS alike.
 
 | Knob | Default | Meaning |
 |---|---|---|
 | `&globe=<level>` | `11` | deepest face-local level that gets a shell |
 | `&globe=off` | — | disable entirely (raw Bing, empty at low zoom) |
-| `&basemap=<tmpl>` | OpenStreetMap | raster URL template with `{z}/{x}/{y}`; also `BING_GLOBE_BASEMAP` |
+| `&basemap=bing` | ✅ default | Bing raster, quadkey-addressed, same host as the mesh, no key |
+| `&basemap=osm` | — | OpenStreetMap |
+| `&basemap=<tmpl>` | — | your own raster: `{z}`/`{x}`/`{y}` or `{q}` (quadkey). Also `BING_GLOBE_BASEMAP` |
 
-The basemap defaults to OpenStreetMap because it needs no token; its required attribution is emitted
-in the tileset's `asset.copyright`, which 3D Tiles clients surface. Point `&basemap=` at your own
-raster source to avoid depending on — or loading — OSM's tile servers.
+**Bing raster is the default** because it matches what it hands over to — aerial under aerial, rather
+than OSM's cartographic styling abruptly becoming photogrammetry — and it keeps the shell inside the
+same licensing posture as the rest of this adapter (you hold the Bing licensing; this is the technical
+path only). Whichever basemap is used, its attribution is emitted in the tileset's `asset.copyright`,
+resolved from the *requested* basemap, so `&basemap=osm` credits OpenStreetMap rather than Microsoft.
 
 Two properties worth knowing:
 

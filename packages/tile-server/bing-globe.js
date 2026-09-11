@@ -17,10 +17,14 @@
  * refinement swaps the shell for real Bing mesh where it exists, and keeps the shell where it doesn't
  * (oceans, uncovered regions) — so there is never a hole.
  *
- * BASEMAP SOURCE. Defaults to OpenStreetMap, which needs no token. It is a URL template, overridable
- * per-request (`&basemap=`) or per-deployment (`BING_GLOBE_BASEMAP`), so nothing pins a raster provider
- * into the repo and you can point it at your own tile server. Attribution rides along in the tileset's
- * `asset.copyright` — OSM requires it, and 3D Tiles clients surface that string.
+ * BASEMAP SOURCE. Defaults to **Bing's own raster tiles**, which is what Bing Maps itself draws at
+ * these zooms: the 3D photogrammetry mesh is a deep-zoom-only product, and everything above it is
+ * imagery draped on terrain. Those raster tiles are keyless, quadkey-addressed, and served from the
+ * SAME host as the `tf=3dv4` mesh — so the shell matches the mesh it hands over to (aerial under
+ * aerial, not cartography under aerial) and stays inside the same licensing posture as the rest of
+ * this adapter. `&basemap=osm` switches to OpenStreetMap, and any `{z}/{x}/{y}` or `{q}` URL template
+ * points it at your own tile server; `BING_GLOBE_BASEMAP` sets the per-deployment default. Whichever
+ * is used, its attribution rides in the tileset's `asset.copyright`, which 3D Tiles clients surface.
  *
  * COORDINATE CONVENTION — and why there is deliberately NO tile `transform` here. A 3D Tiles tile
  * transform is INHERITED by every descendant. The globe shell hangs on tiles that also parent real
@@ -42,8 +46,39 @@ import { buildGlb } from '../i3s-to-3dtiles/src/glbBuild.js';
 // Bing mesh starts at face-local level 12 (see scripts/debug-bing-coverage.mjs). Default the shell to
 // span everything shallower, so the handoff is seamless rather than leaving a gap of empty levels.
 export const DEFAULT_GLOBE_MAX_LEVEL = 11;
-const DEFAULT_BASEMAP = process.env.BING_GLOBE_BASEMAP || 'https://tile.openstreetmap.org/{z}/{x}/{y}.png';
-export const BASEMAP_ATTRIBUTION = process.env.BING_GLOBE_ATTRIBUTION || '© OpenStreetMap contributors';
+
+/**
+ * Named basemaps. `{q}` is a Bing quadkey; `{z}/{x}/{y}` is slippy-map addressing.
+ * Bing's raster endpoint takes no API key and lives on the same host as the 3D mesh.
+ */
+const BASEMAPS = {
+	bing: { url: 'https://t.ssl.ak.tiles.virtualearth.net/tiles/a{q}.jpeg?g=1', attribution: '© Microsoft Corporation — Bing Maps imagery' },
+	osm:  { url: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png',              attribution: '© OpenStreetMap contributors' },
+};
+const DEFAULT_BASEMAP = process.env.BING_GLOBE_BASEMAP || 'bing';
+
+/** Resolve a basemap name or raw URL template to { url, attribution }. */
+export function resolveBasemap(nameOrTemplate) {
+	const v = nameOrTemplate || DEFAULT_BASEMAP;
+	if (BASEMAPS[v]) return BASEMAPS[v];
+	return { url: v, attribution: process.env.BING_GLOBE_ATTRIBUTION || 'Basemap imagery © its respective provider' };
+}
+
+/** Attribution for the default basemap — what lands in the tileset's asset.copyright. */
+export const BASEMAP_ATTRIBUTION = resolveBasemap().attribution;
+
+/** Bing quadkey for a slippy tile: interleaves x/y bits, one base-4 digit per zoom level. */
+function quadKey(z, x, y) {
+	let qk = '';
+	for (let i = z; i > 0; i--) {
+		const mask = 1 << (i - 1);
+		let d = 0;
+		if (x & mask) d += 1;
+		if (y & mask) d += 2;
+		qk += d;
+	}
+	return qk;
+}
 
 const SEG = 16;                       // grid quads per side; 16 keeps a whole quadrant visibly curved
 const MAX_RASTER_CACHE = 4096;
@@ -69,7 +104,7 @@ export function rasterTileFor(region, level) {
 }
 
 async function fetchRaster(tmpl, { z, x, y }) {
-  const url = tmpl.replace('{z}', z).replace('{x}', x).replace('{y}', y);
+  const url = tmpl.replace('{z}', z).replace('{x}', x).replace('{y}', y).replace('{q}', quadKey(z, x, y));
   if (rasterCache.has(url)) return rasterCache.get(url);
   let out = null;
   try {
@@ -90,11 +125,12 @@ async function fetchRaster(tmpl, { z, x, y }) {
  * Build the textured ellipsoid patch GLB for one Bing tile region.
  * @param {number[]} region [W,S,E,N,minH,maxH] in radians (as bing-live's tileRegion emits)
  * @param {number} level face-local level
- * @param {string} [basemap] URL template with {z}/{x}/{y}
+ * @param {string} [basemap] named basemap ("bing" | "osm") or a {z}/{x}/{y} / {q} URL template
  */
-export async function globeTileGlb(region, level, basemap = DEFAULT_BASEMAP) {
+export async function globeTileGlb(region, level, basemap) {
+  const { url: tmpl } = resolveBasemap(basemap);
   const rt = rasterTileFor(region, level);
-  const key = `${basemap}|${rt.z}/${rt.x}/${rt.y}`;
+  const key = `${tmpl}|${rt.z}/${rt.x}/${rt.y}`;
   if (glbCache.has(key)) return glbCache.get(key);
 
   const [W, S, E, N] = region;
@@ -136,7 +172,7 @@ export async function globeTileGlb(region, level, basemap = DEFAULT_BASEMAP) {
     }
   }
 
-  const texture = await fetchRaster(basemap, rt);
+  const texture = await fetchRaster(tmpl, rt);
   // No raster? Emit an untextured matte patch rather than failing: a plain shell still gives the
   // horizon and silhouette that the whole feature exists to provide.
   const glb = Buffer.from(buildGlb({ mode: 'TRIANGLES', positions, normals, uvs, ...(texture ? { texture } : {}) }));
