@@ -293,7 +293,14 @@ export async function handleStats(req, res, u) {
   }
   if (u.pathname === '/hierarchy') {
     res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8', ...CORS });
-    res.end(HIERARCHY_HTML);
+    // The richer multi-tileset explorer lives in the viewer app (React/shadcn + d3-hierarchy), which
+    // is a separate deployment — so it is linked only when VIEWER_URL is actually configured, the
+    // same rule the homepage uses for never committing a guessed domain. This page stays the
+    // dependency-free single-tileset fallback that works with nothing but the server running.
+    const viewer = process.env.VIEWER_URL || '';
+    res.end(HIERARCHY_HTML.replace('<!--COMPARE_LINK-->', viewer
+      ? `<a class="compare" href="${viewer.replace(/\/$/, '')}/hierarchy">Compare several tilesets side by side →</a>`
+      : ''));
     return true;
   }
   return false;
@@ -370,10 +377,13 @@ const HIERARCHY_HTML = String.raw`<!doctype html>
   td { text-align: right; padding: 4px 8px; border-bottom: 1px solid var(--grid);
     font-variant-numeric: tabular-nums; color: var(--ink-1); }
   .status { color: var(--ink-3); font-size: 12.5px; margin: 30px 0; }
+  .compare { display: inline-block; margin-bottom: 12px; font-size: 12.5px; color: var(--accent); text-decoration: none; }
+  .compare:hover { text-decoration: underline; }
 </style></head>
 <body class="viz-root">
 <h1>Tileset hierarchy — depth &amp; breadth</h1>
 <div class="sub" id="sub">Point it at any tileset.json (this server’s /stream, /convert, /aggregate output or a remote URL). Node color steps with depth; dots mark tiles with content.</div>
+<!--COMPARE_LINK-->
 
 <div class="filters">
   <input type="text" id="url" placeholder="tileset.json URL — e.g. /stream/tileset.json?url=…&amp;format=potree" />

@@ -75,6 +75,9 @@ export default defineConfig({
       configureServer(server) {
         server.middlewares.use((req, res, next) => {
           if (req.url === '/vanilla-viewer') req.url = '/vanilla-viewer.html';
+          // Same extension-less alias for the hierarchy explorer (public/serve.json mirrors both
+          // rewrites for the production static server).
+          if (req.url === '/hierarchy') req.url = '/hierarchy.html';
           next();
         });
       },
@@ -120,6 +123,10 @@ export default defineConfig({
       input: {
         main: fileURLToPath(new URL('./index.html', import.meta.url)),
         'vanilla-viewer': fileURLToPath(new URL('./vanilla-viewer.html', import.meta.url)),
+        // The hierarchy explorer is its own entry, not a route in the main app: it only needs
+        // /stats + d3-hierarchy, and folding it into index.html would make every visit download
+        // Cesium, three and SparkJS to draw a graph.
+        hierarchy: fileURLToPath(new URL('./hierarchy.html', import.meta.url)),
       },
     },
   },
