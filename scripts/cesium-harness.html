@@ -65,7 +65,12 @@ const hud = document.getElementById('hud');
     hud.textContent = urls.length + ' tileset(s) — waiting for tiles…';
     // stock-Cesium-computed placement of each tileset root — the textual location proof in every shot
     const where = tilesets.map((t, i) => {
+      // fromCartesian returns undefined for a degenerate centre — which a WHOLE-GLOBE tileset (e.g.
+      // /bing with the low-zoom globe shell) genuinely has, its bounding sphere being the earth
+      // itself. Guard it: an unhandled throw here used to kill the readiness loop, so window.READY
+      // never flipped and screenshots timed out even though the tiles had rendered fine.
       const cc = Cesium.Cartographic.fromCartesian(t.boundingSphere.center);
+      if (!cc) return `ts${i}: global (r ${Math.round(t.boundingSphere.radius)}m)`;
       return `ts${i}: lon ${Cesium.Math.toDegrees(cc.longitude).toFixed(4)}° lat ${Cesium.Math.toDegrees(cc.latitude).toFixed(4)}° h ${Math.round(cc.height)}m r ${Math.round(t.boundingSphere.radius)}m`;
     }).join('  ·  ');
     const check = setInterval(() => {

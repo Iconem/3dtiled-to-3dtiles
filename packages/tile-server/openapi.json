@@ -632,6 +632,23 @@
               "default": false
             },
             "description": "Route tiles through the /gltf decode pipeline (Bing content is often Draco/KTX2-encoded)."
+          },
+          {
+            "name": "globe",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "default": "11"
+            },
+            "description": "Low-zoom globe shell: deepest face-local level that gets a basemap-draped ellipsoid patch (default 11), or \"off\" to disable. Bing mesh only starts at level 12, so without this every zoomed-out view is empty space."
+          },
+          {
+            "name": "basemap",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            },
+            "description": "Raster URL template with {z}/{x}/{y} for the globe shell. Defaults to OpenStreetMap (token-free); attribution is emitted in the tileset asset.copyright."
           }
         ],
         "responses": {
@@ -917,6 +934,47 @@
         "responses": {
           "200": {
             "description": "HTML page"
+          }
+        }
+      }
+    },
+    "/bing/globe/{key}.glb": {
+      "get": {
+        "tags": [
+          "bing"
+        ],
+        "summary": "GET /bing/globe/<face>-<level>-<x>-<y>.glb — low-zoom globe shell tile",
+        "description": "A basemap-draped ellipsoid patch covering one Bing tile region, synthesized because Bing has no mesh above face-local level 12. Absolute-ECEF positions, no tile transform (a transform would be inherited by the Bing subtree beneath). Referenced automatically by /bing/fragment; rarely fetched directly.",
+        "parameters": [
+          {
+            "name": "key",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "<face>-<level>-<x>-<y>, same addressing as /bing/tile"
+          },
+          {
+            "name": "g",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            },
+            "description": "Bing generation/session id."
+          },
+          {
+            "name": "basemap",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            },
+            "description": "Raster URL template with {z}/{x}/{y} for the globe shell. Defaults to OpenStreetMap (token-free); attribution is emitted in the tileset asset.copyright."
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "A textured GLB ellipsoid patch"
           }
         }
       }

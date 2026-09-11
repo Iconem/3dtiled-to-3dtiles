@@ -25,9 +25,10 @@ licensing terms; this page (and the adapter) only documents the technical format
 ### This repo's endpoints
 
 ```
-GET /bing/tileset.json[?g=<genid>]
-GET /bing/fragment/<face>-<level>-<x>-<y>.json?g=<genid>
+GET /bing/tileset.json[?g=<genid>][&globe=<maxLevel>|off][&basemap=<template>]
+GET /bing/fragment/<face>-<level>-<x>-<y>.json?g=<genid>[&globe=…][&basemap=…]
 GET /bing/tile/<face>-<level>-<x>-<y>.glb?g=<genid>[&decompress=1]
+GET /bing/globe/<face>-<level>-<x>-<y>.glb?g=<genid>[&basemap=…]
 ```
 
 - `tileset.json` — the world root: 4 face nodes, each an external reference to its own root fragment.
@@ -37,6 +38,53 @@ GET /bing/tile/<face>-<level>-<x>-<y>.glb?g=<genid>[&decompress=1]
 - `tile/....glb` — a single tile's GLB, proxied from Bing as-is by default; `&decompress=1` routes it
   through the same Draco/meshopt/KTX2 decode pipeline `/gltf` uses, for consumers that can't read
   compressed glTF natively.
+- `globe/....glb` — a synthesized low-zoom **globe shell** patch (see below).
+
+## The low-zoom globe shell
+
+Bing's 3D mesh **does not exist at low zoom.** The `td1` tree has *tiles* from level 0, but tile
+*content* only begins at face-local **level 12** (global mercator z13). Probed with
+`scripts/debug-bing-coverage.mjs` over London:
+
+```
+face-lvl  global-z   mtx name              result
+       0         1   mtx0-0-0-0            no mesh (0 B)
+      ...
+      11        12   mtx0-11-2046-1362     no mesh (0 B)
+      12        13   mtx0-12-4093-2724     GLB 155 KB   ← first content
+```
+
+So a raw `/bing/tileset.json` renders as **empty space** until you are practically at city scale — no
+horizon, no landmass, no sense of where you are. The fix is server-side rather than viewer-side, for
+the same reason the placement params are: a viewer-drawn basemap only helps *that* viewer, whereas a
+tileset that carries its own low-zoom content works in Cesium for Unreal/Unity, QGIS and CesiumJS
+alike.
+
+For every tile with no Bing mesh at or above `globe` (default level 11), the server emits a
+**basemap-draped ellipsoid patch**. Because a Bing face-local `(level, x, y)` *is* the global mercator
+tile at `(level+1)`, the raster lookup is a direct 1:1 mapping — no resampling, no reprojection. `REPLACE`
+refinement then swaps the shell for real Bing mesh as soon as it exists, and keeps the shell where it
+never does (oceans, uncovered regions), so there is no hole at the transition.
+
+| Knob | Default | Meaning |
+|---|---|---|
+| `&globe=<level>` | `11` | deepest face-local level that gets a shell |
+| `&globe=off` | — | disable entirely (raw Bing, empty at low zoom) |
+| `&basemap=<tmpl>` | OpenStreetMap | raster URL template with `{z}/{x}/{y}`; also `BING_GLOBE_BASEMAP` |
+
+The basemap defaults to OpenStreetMap because it needs no token; its required attribution is emitted
+in the tileset's `asset.copyright`, which 3D Tiles clients surface. Point `&basemap=` at your own
+raster source to avoid depending on — or loading — OSM's tile servers.
+
+Two properties worth knowing:
+
+- **No tile `transform`.** A 3D Tiles tile transform is inherited by all descendants, and Bing's GLBs
+  bake their own ECEF placement into the glTF node matrix — so a transform on a shell tile would
+  displace the entire Bing subtree beneath it. The shell instead stores absolute ECEF positions,
+  swizzled `(X, Z, −Y)` so Cesium's glTF→Z-up `RX(+90°)` restores them. The ~0.5 m float32
+  quantization that costs is irrelevant at levels where one tile spans 20 km or more.
+- **The poles stay empty.** Web-mercator only reaches ±85.05°, so the polar caps are outside the
+  tiling by construction, not missing data.
 
 ### Bing's own endpoint (what we fetch from)
 
