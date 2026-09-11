@@ -1,0 +1,140 @@
+---
+title: "Meta-tilesets: mosaicking N datasets into one endpoint (/aggregate)"
+description: "MosaicJSON/STAC-style aggregation over N tilesets, with spatial auto-nesting in either a web-mercator or a geodetic quadtree — and why Morton order is not a projection."
+---
+
+`/aggregate` answers one question: *"can I give a client a single URL that serves **all** our
+datasets?"* — 10 Angkor scans, San Pietro, Sacré-Cœur, a Geghard point cloud, in one tileset.
+
+It works because 3D Tiles supports this natively: a tile's `content.uri` may itself be another
+`tileset.json`. So the endpoint fetches each child's root, derives a bounding sphere and geometric
+error from it, and emits a parent whose children external-reference the child URLs.
+
+```
+GET /aggregate/tileset.json?url=<u1>&url=<u2>&…        # repeated form
+GET /aggregate/tileset.json?urls=<u1>,<u2>,…           # comma form (each URL-encoded)
+    [&nest=auto|mercator|geodetic|flat]  [&ttl=<seconds>]
+```
+
+Children can be **any** 3D-Tiles-serving URL — including this server's own `/stream`, `/convert`,
+`/bing` or `/3dtiles-self-contained`. That is the point: one mosaic can mix COPC + Potree + LCC + RAD
++ remote 3D Tiles, and a child with no georeference can be globe-placed first via
+[`/stream`'s placement params](/docs/guide/cli-usage). Unreachable
+children never kill the mosaic — they are skipped and listed in `asset.extras.failed`.
+
+## Flat is fine for 12 datasets and wrong for 500
+
+With a flat root, every dataset is a direct child. The moment the root refines, **all** of them are
+candidates — so at 500 datasets a client standing in Paris still considers Sydney.
+
+`nest` builds an intermediate hierarchy from nothing but each child's root bounding volume — centre
+and radius, which is all we can know without opening the datasets:
+
+```
+[group r=10km]           ← Versailles joins here
+  [group r=3km]          ← Sacré-Cœur joins here
+    [group r=2km]
+      • Eiffel
+      • Louvre
+```
+
+Two mechanisms then do the work, and it is worth being precise about which does what:
+
+- **Culling** handles *rendering* — a group whose bounding sphere misses the frustum is skipped.
+- **Geometric error** is what prevents the *fetch*. A group's GE is 2× its children's, so from orbit
+  a site-sized group subtends a fraction of a pixel and the renderer never traverses into it — which
+  means its children's `tileset.json` files are never requested at all.
+
+Each dataset is placed at the **deepest level whose cell still comfortably contains it** (4× slack),
+so a 200 m scan lands in its own city cell while a country-wide dataset stays shallow and is never
+split across cells. The trie is then path-compressed, so you get continent → country → city only
+where datasets actually diverge, not 16 levels of single-child nodes.
+
+`nest=auto` (the default) nests once there are **8 or more** children; below that a flat root is
+simpler and just as cullable.
+
+## Two schemes, because Morton order is *not* a projection
+
+<Callout type="info">
+**Morton (Z-order) is an addressing scheme** — interleave the bits of a cell's x/y — and it says
+nothing about which space those cells live in. Two different trees both use it, and they are not
+interchangeable.
+</Callout>
+
+| `nest=` | Grid | Matches |
+|---|---|---|
+| `mercator` (aliases `1`, `true`, `webmerc`, `quadtree`) | 2^L × 2^L over the **web-mercator** square, latitude clamped at ±85.05° | Bing/OSM/slippy-map tiles. A **Bing quadkey is exactly the base-4 Morton code** of the cell — so this lines a mosaic's grouping up with the raster basemap and with [`/bing`](/docs/guide/bing-maps-3d)'s own quadkeys. |
+| `geodetic` (aliases `morton`, `implicit`, `cesium`) | 2×1 cells at level 0, **longitude/latitude halved** per level | What **3D Tiles implicit tiling actually does**, and therefore what Cesium walks — its `GeographicTilingScheme`. |
+
+The geodetic case is the one people assume is mercator, and it isn't. The implicit-tiling spec
+subdivides the **root bounding volume in its own coordinate space**: for a `region`, "`x`, `y`, and
+`z` refer to `longitude`, `latitude`, and `height`", and each child extent is a plain arithmetic
+bisection of that range. Tiles *within* a level are then ordered along the Morton Z-curve — that is
+the only place Morton enters. No mercator anywhere.
+
+So: **Cesium's Morton order is not a web-mercator quadtree.** It is a geodetic quadtree indexed with
+Morton codes. Bing's quadkey is a mercator quadtree indexed with the same codes.
+
+Neither grouping is "wrong" — the nesting is a pure BVH either way, and any 3D Tiles client renders
+both identically. They simply cut different seams, so pick the one that matches what you are
+comparing against. Every group and dataset carries an `extras.cell` breadcrumb —
+
+```json
+"extras": { "cell": { "scheme": "geodetic", "key": "132000203123222", "morton": 436368298 } }
+```
+
+— so "why did this dataset end up here" has an answer from the tileset alone, without re-running the
+server.
+
+## Does it hold up at middleware scale?
+
+Yes, with one caveat that had to be fixed rather than assumed. Measured by
+`scripts/debug-aggregate-nesting.mjs` (500 synthetic datasets in 25 clusters, served from loopback):
+
+| | `mercator` | `geodetic` |
+|---|---|---|
+| Root fanout (from 500) | **4** | **2** |
+| Tree depth | 10 | 10 |
+| Group nodes | 359 | 357 |
+| Tree build, children cached | **2.4 ms** | **2.6 ms** |
+| Cold build incl. 500 child fetches | \~156 ms (loopback) | — |
+
+The tree build is negligible; the cost is entirely the N child round-trips. Hence two things:
+
+**Child fetches are pooled at 16.** This is measured, not defensive. Firing all 500 at once with a
+plain `Promise.allSettled` **lost more than half of them** — a mosaic came back with 232 datasets and
+268 bare `fetch failed` entries, still answering `200`, because failed children degrade into
+`asset.extras.failed` by design. It looked fine and was missing half the world, and the survivors
+varied run to run so the tree was not even reproducible. A 16-way pool fixes it outright: the
+children are independent round-trips, so 16 in flight already saturates the link and going wider only
+buys socket exhaustion.
+
+**Mosaics are cached whole, with a day-scale TTL** (`&ttl=`, default `86400` s), keyed on the exact
+child set plus nesting scheme; each child's fetched root is cached the same way. Assembling 500
+children must not happen per request — and a 3D Tiles client re-requests the root more than once per
+session. But a mosaic that can *never* notice a child moved is a stale-data bug waiting to happen,
+which is why the TTL is a day rather than forever. Failures get a much shorter TTL (60 s) so one dead
+host cannot pin a degraded mosaic for a day. `&ttl=0` bypasses the cache **in both directions** — use
+it while a dataset is actively being re-tiled.
+
+## Hand-built hierarchies still compose
+
+Auto-nesting derives grouping from geometry alone. If you want a *semantic* hierarchy — by campaign,
+by client, by year — nest the endpoint in itself: a child URL can be another `/aggregate` URL, since
+3D Tiles external references compose to any depth. Auto-nesting and hand-nesting mix freely, so a
+hand-authored "Cambodia" node can have an auto-nested mosaic of 40 Angkor scans underneath it.
+
+## Inspecting the result
+
+`/aggregate` output is a tileset like any other, so
+[`/stats` and the hierarchy explorer](/docs/guide/hierarchy-explorer) walk it directly — including
+following each child external reference — which is the quickest way to confirm a mosaic grouped the
+way you expected.
+
+## Limits worth knowing
+
+- Grouping uses each child's **root bounding sphere**. A dataset whose root volume is far larger than
+  its actual content (a loose root box) nests shallower than it deserves.
+- `region` bounding volumes are already ECEF per spec, so the child root transform is deliberately
+  not applied to them; box and sphere volumes are transformed into the parent frame.
+- There is no reprojection or CRS negotiation — every child must already resolve to ECEF.

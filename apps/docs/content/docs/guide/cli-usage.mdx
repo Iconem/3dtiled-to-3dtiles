@@ -112,6 +112,13 @@ with a per-level breadth chart, KPI tiles, and a per-level table. Works against 
 immediately as a ring that stops early (this page would have caught the Potree 1.x `.hrc` depth-
 truncation bug at a glance).
 
+Add `&sample=N` to also download N content tiles (stratified across depth) and report approximate
+triangle/point counts, glTF extensions, texture formats and compression — read from each GLB's JSON
+chunk only, so nothing is Draco/meshopt/SPZ-decoded. To **compare several tilesets side by side**,
+with leaf counts and geometric-error distribution, use the viewer app's React explorer at
+`/hierarchy` — see [Hierarchy explorer](/docs/guide/hierarchy-explorer) for how to read the graphs,
+and [Meta-tilesets](/docs/guide/meta-tilesets) for the `/aggregate` endpoint it inspects.
+
 ## Per-format converters
 
 ### copc-to-3dtiles

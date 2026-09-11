@@ -4,4 +4,6 @@ sample-data
 .claude/
 .bench-cache/
 *.log
+# stderr redirect files from locally-spawned dev servers — same category as *.log above
+*.err
 screens/

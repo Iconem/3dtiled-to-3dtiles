@@ -5,6 +5,66 @@ Format loosely follows [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+### Added / Fixed — 2026-09-11c (geodetic nesting · hierarchy explorer · desktop library · Potree write-up)
+- **Added: `/aggregate&nest=geodetic`, and the distinction it exists to make.** "Morton order" and
+  "web-mercator quadtree" are not the same thing: Morton (Z-order) is an *addressing* scheme —
+  interleave a cell's x/y bits — and says nothing about the projection. Bing's quadkey is the base-4
+  Morton code of a **web-mercator** cell; 3D Tiles implicit tiling (and therefore Cesium) subdivides
+  the **root bounding volume in its own coordinate space** — for a `region`, "`x`, `y`, and `z` refer
+  to `longitude`, `latitude`, and `height`", bisected arithmetically — i.e. a **geodetic** quadtree
+  (Cesium's `GeographicTilingScheme`, 2×1 cells at level 0) merely *indexed* with Morton codes. So
+  Cesium's Morton order is **not** a mercator quadtree. Both schemes are now offered (`mercator`
+  stays the `auto` default; `geodetic`/`morton`/`implicit`/`cesium` selects the other), and every
+  group and dataset carries an `extras.cell` breadcrumb (`scheme`, path `key`, `level`, `morton`) so
+  "why is this grouped here" is answerable from the tileset alone.
+- **Fixed: `/aggregate` silently lost more than half its children at scale.** Firing all children at
+  once with a plain `Promise.allSettled` is fine for 12 and broken for 500: a 500-dataset mosaic came
+  back with **232 datasets and 268 bare `fetch failed` entries** — still answering `200`, because
+  failed children degrade into `asset.extras.failed` by design. It looked fine and was missing half
+  the world, and the survivors varied run to run, so the tree was not even reproducible. Child
+  fetches now run through a **16-way pool**: 500/500, identical tree cold and warm.
+- **Fixed: flat `/aggregate` roots violated the decrease-on-refine rule.** The flat root took
+  `max(child GE)`, tying it to its largest child so both became selectable at the same SSE. Now ×2,
+  matching what the nested path always did. Caught by the new test's monotonicity assertion.
+- **Added: mosaic caching with a day-scale TTL** (`&ttl=`, default 86 400 s), keyed on the exact child
+  set plus scheme; each child's fetched root is cached the same way, failures at 60 s so one dead host
+  cannot pin a degraded mosaic for a day. `&ttl=0` bypasses the cache **in both directions** (an
+  earlier pass skipped only the write, which still served stale data — the one thing the flag exists
+  to prevent). Measured at 500 datasets: cold build ~156 ms (loopback, dominated by the N
+  round-trips), tree build **2.4 ms**, root fanout **4**, depth 10.
+- **Added: `scripts/debug-aggregate-nesting.mjs`** — 19 assertions over synthetic children served from
+  a throwaway localhost server, so it is reproducible and host-independent: flat/mercator/geodetic
+  shapes, Paris-groups-apart-from-Rome, country-scale-stays-shallow, GE monotonicity, cache-state
+  independence, and the 500-dataset scale run. It found both bugs above.
+- **Added: a React/shadcn hierarchy explorer** (`apps/viewer/hierarchy.html`, served at `/hierarchy`)
+  over `/stats` — the multi-tileset counterpart to the server's own single-tileset page. Top-down
+  tidy trees (`d3-hierarchy`) plus **overlaid** per-level charts for breadth, leaves and
+  geometric-error distribution, a comparison table, and content-sample panels. Layout comes from d3,
+  drawing does not: links are concatenated into one `<path>` and nodes batched **one path per depth
+  level**, so a 4 000-node tree is ~20 DOM elements and several fit on screen at once. Hue identifies
+  the tileset across every chart; lightness encodes depth. It is a **separate Vite entry**, not a
+  route in the main app — confirmed by the build, which emits a 25 kB `hierarchy` chunk with no
+  Cesium/three/Spark. Truncated walks are badged "hit node budget" so a budget cap never reads as a
+  shallow tileset.
+- **Added: desktop app — Library and Samples tabs.** Library tracks datasets as *source + options*
+  (not a built URL, so entries stay re-editable), with a cached `/stats` check per row; budget-capped
+  walks render as `≥N … (node budget reached)` in amber rather than as fact. Refresh is **sequential
+  by design** — it fans out to arbitrary third-party hosts, the same unbounded-concurrency trap
+  `/aggregate` just fixed. Samples ships a real public dataset per format (COPC, Potree, SOG, LCC,
+  RAD, I3S) with origins credited. Row icons are generated **format glyphs, not thumbnails** — a real
+  preview would mean a hidden Cesium view per row. Docs/viewer links resolve local-first: env var →
+  reachable localhost → public deployment.
+- **Docs: the Potree 1.x `.hrc` truncation bug is now written up in the format reference**, not only
+  the changelog — chunk trees, why **boundary nodes** are the only edge between chunk generations, and
+  why a re-entry guard that returns an empty list truncates a *lazy* walk at `stepSize − 1` with no
+  error at all (Geghard: level 4 against a real depth of 11). New pages: **Meta-tilesets**
+  (`/aggregate`) and **Hierarchy explorer** (`/stats`).
+- **Docs: transform-gizmo future work.** A free 6-DoF gizmo that bakes back into the
+  `&lon/&lat/&alt/&heading/&scale` params, with WilliamLiu's **3DTiles-Inspector** credited as the
+  closest prior art (same interaction; the difference worth keeping is ending at a *stateless URL*
+  rather than an edited tileset), plus the two traps: composing on top of each adapter's up-axis flip,
+  and origin-vs-centre anchoring.
+
 ### Added / Fixed — 2026-09-11b (aggregate spatial nesting · stats content sampling · Bing raster basemap)
 - **Added: `/aggregate` spatial auto-nesting** (`&nest=auto`, on from 8 children). A flat root is fine
   for a dozen datasets and wrong for 500: every child sat directly under the root, so the moment the

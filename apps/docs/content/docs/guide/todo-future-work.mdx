@@ -199,6 +199,34 @@ flowchart LR
 
 ## Rendering / viewer
 
+- [ ] **Interactive transform gizmo → bake the result into `/stream` placement params.**
+  Today's [globe placement](/docs/guide/cli-usage) is
+  *type-the-numbers*: `&lon=&lat=&alt=&heading=&scale=`. That is the right wire format — it lives in
+  the tileset, so every client honours it — but it is a poor authoring experience for the actual task,
+  which is "nudge this scan until it sits on the building".
+
+  The missing half is a **free 6-DoF gizmo** (translate / rotate / scale) in the viewer that writes
+  back to those params, so an interactive session ends with a URL you can paste into Cesium for
+  Unreal rather than viewer-only state. Either `TransformControls` in the vanilla three.js path or
+  `@react-three/drei`'s `<PivotControls>` / `<TransformControls>` in the R3F path would do; both
+  already ship with this repo's dependencies.
+
+  **Prior art to copy from, not reinvent:** WilliamLiu-1997's
+  [3DTiles-Inspector](https://github.com/WilliamLiu-1997/3DTiles-Inspector) (pre-installed here under
+  `tools-inspector/` — see the [references index](/docs/references)) already does root-transform
+  editing plus geometric-error / layer-multiplier scaling on a loaded tileset, and is the closest
+  existing thing to this idea. The difference worth preserving is the **output**: the inspector edits
+  a tileset in place, whereas the point here is to end at a *stateless URL* against the middleware —
+  placement as a request parameter, not a saved file.
+
+  Two design notes for whenever this is picked up:
+  - The gizmo must compose **on top of** the adapter's own up-axis flip (SOG's RX(−90°), RAD's
+    RX(180°), LCC's `[East, −Up, North]`), not replace it, or every format regresses to Y-up/Z-up
+    guessing at the client.
+  - `&lon`/`&lat` place the dataset's **own local origin**. A dataset whose origin is not at its
+    bounding-box centre lands offset by exactly that amount, so a gizmo built on this will want the
+    as-yet-unbuilt `&anchor=center|origin` option to feel predictable.
+
 - [ ] **Feature request draft — expose SparkRenderer LoD options in `3d-tiles-rendererjs-3dgs-plugin`.**
   **Target repo:** https://github.com/WilliamLiu-1997/3D-Tiles-RendererJS-3DGS-Plugin
 

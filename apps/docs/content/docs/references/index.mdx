@@ -107,6 +107,13 @@ writeup (Spark 2.0 LoD system, PackedSplats/ExtSplats byte layouts, geometric er
   ```
   Each command starts a localhost HTTP server and opens the inspector in your default browser. Its `Geometric Error` / `Layer Multiplier` sliders are the runtime analogue of this converter's uniform-per-depth error model — handy for confirming LoD behaviour without re-tiling.
 
+  Its **root-transform editor** is also the closest prior art to a placement gizmo for this repo's
+  `&lon=&lat=&alt=&heading=&scale=` params: same interaction, different output — the inspector edits a
+  tileset in place, whereas the middleware wants the transform to end up as a *stateless URL* anyone
+  can paste into Cesium for Unreal. That is written up as a
+  [future-work item](/docs/guide/todo-future-work#rendering--viewer), including the two traps
+  (composing on top of each adapter's up-axis flip, and origin-vs-centre anchoring).
+
 **Splatter (splatter.app, Jakub Červený)** — a hosted Gaussian-splat viewer/host (tested against a
 103M-splat scene). Its `splatter-three` library's actual source lives in
 [`splatter-app/splatter-three`](https://github.com/splatter-app/splatter-three), a **private** repo —

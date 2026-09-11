@@ -48,7 +48,9 @@ Two Node children, both reusing scripts already in this repo:
 If a 3dtiled server is already listening on a candidate port (e.g. you have `pnpm dev` up), the app
 **adopts** it instead of starting a second copy, and leaves it running on quit.
 
-## What the launcher does
+## The three tabs
+
+### Build
 
 - Builds the URL against `/tiles/tileset.json`, the front door that dispatches to `/stream` for
   `cache=none|hierarchy` and `/convert` for `cache=full` — so the UI never re-encodes that routing rule.
@@ -60,17 +62,51 @@ If a 3dtiled server is already listening on a candidate port (e.g. you have `pnp
   the URL into a heavier client.
 - **Preview in Cesium** opens the stock-CesiumJS harness, which has zero viewer-side fix-ups: whatever
   it shows is what any 3D Tiles client gets from the tileset alone.
+- **Hierarchy graph** opens the [hierarchy explorer](/docs/guide/hierarchy-explorer) — the viewer
+  app's multi-tileset one when a viewer is reachable, otherwise the tile-server's own single-tileset
+  page.
 
-## Related endpoints worth knowing
+### Library
 
-- `/aggregate/tileset.json?url=…&url=…&nest=auto` — one endpoint over N datasets. With 8+ children it
-  builds a **web-mercator quadtree** from each child's root bounding sphere alone, so zooming
-  world → France → Paris → Sacré-Cœur only loads the tilesets in view.
-- `/stats/tileset.json?url=…&sample=12` — structural stats plus an optional **content sample**:
-  approximate triangle/point counts, glTF extensions, texture formats and compression.
+Datasets you want to keep: local paths and remote URLs, each stored as its **source plus options**
+rather than a built URL, so an entry can be re-opened into Build and edited (and so a future change
+to URL building doesn't strand the library).
+
+**Refresh stats** walks every saved entry through `/stats` and caches tiles / depth / leaves on the
+row. Entries that hit the node budget are shown with `≥` and *"node budget reached"* in amber — the
+numbers are lower bounds, and `2 000 tiles, depth 8` otherwise reads as a real shape when it is only
+where counting stopped. The walk is **sequential on purpose**: it fans out to arbitrary third-party
+hosts, and firing 30 at once is precisely the unbounded-concurrency pattern that
+[`/aggregate` had to fix](/docs/guide/meta-tilesets#does-it-hold-up-at-middleware-scale).
+
+<Callout type="warn">
+The library lives in the webview's `localStorage`. That makes it durable per install with no RPC, no
+file-permission prompt and no migration story — but it is **not shared** with the CLI or the web
+viewer, and clearing the app's webview data clears it. **Export** / **Import** round-trip it as JSON,
+which is also the seam along which it would move to a real file if it ever needs to be shared.
+</Callout>
+
+### Samples
+
+One or more real, publicly-hosted datasets per source format — COPC, Potree, streamed SOG, LCC, RAD,
+I3S — with the origin credited on each row. **Load** drops one into Build with the right format
+already selected; **Save** adds it to the library. The URLs are copied from the viewer app's own
+`FORMATS` preset table, so the desktop app demonstrates exactly the sources the rest of the project
+is tested against.
+
+The row icons are **generated format glyphs, not thumbnails**. A real preview would mean loading each
+tileset in a hidden Cesium view, which is far too expensive for a list; the glyph encodes the one
+thing knowable without fetching anything — whether it is a point cloud, splats or a mesh.
+
+## Where its links point
+
+`VIEWER_URL` / `DOCS_URL` win if set; otherwise the app probes for a locally-running viewer (`:3000`)
+and docs (`:3002/docs`) and falls back to the public deployment. A developer with `pnpm dev` up gets
+*their* build; someone who installed only this app still gets working links instead of a dead
+localhost URL.
 
 ## Not done yet
 
 Packaging, signing and auto-update; a native file picker (the dataset field is typed/pasted today);
 and bundling Node so the app runs without a repo checkout — it currently locates and runs the
-tile-server from the surrounding repo.
+tile-server from the surrounding repo. Library entries are per-install, as above.

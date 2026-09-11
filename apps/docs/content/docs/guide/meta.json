@@ -2,6 +2,8 @@
   "pages": [
     "supported-formats",
     "cli-usage",
+    "meta-tilesets",
+    "hierarchy-explorer",
     "desktop-app",
     "architecture-caching",
     "architecture-generic",
