@@ -12,13 +12,48 @@
  *
  *   GET /aggregate/tileset.json?urls=<u1>,<u2>,…     (each URL-encoded; commas separate)
  *   GET /aggregate/tileset.json?url=<u1>&url=<u2>…   (repeated form, equivalent)
+ *   …&nest=auto|mercator|geodetic|flat   &ttl=<seconds>
  *
  * Child fetch failures don't kill the aggregate: failed children are skipped and listed in
  * `asset.extras.failed` (with the error), so a mosaic of 40 datasets survives one dead host.
  */
-import { memoizeAsync, llhToEcef, ecefToLlh } from '../core/index.js';
+import { llhToEcef, ecefToLlh } from '../core/index.js';
 
 const CORS = { 'Access-Control-Allow-Origin': '*', 'Access-Control-Allow-Headers': '*' };
+
+/**
+ * Time-bounded memo. Deliberately NOT core's `memoizeAsync`, whose cache is permanent: that is right
+ * for an adapter's per-source ctx (the source file is immutable for the life of the process) and
+ * wrong here, because every child of an aggregate is a REMOTE tileset that can be re-tiled or
+ * re-published underneath us. A day-scale TTL is the useful middle: assembling 500 children costs 500
+ * round-trips, so it must not happen per request, but a mosaic that can never notice a child moved is
+ * a stale-data bug waiting to happen. Failures get a much shorter TTL so one dead host doesn't pin a
+ * degraded mosaic for a whole day.
+ */
+const DEFAULT_TTL_MS = 24 * 3600 * 1000;
+const FAILURE_TTL_MS = 60 * 1000;
+
+function ttlCache(builder) {
+  const cache = new Map();                       // key → { at, ttl, value | error }
+  return async (key, ttlMs = DEFAULT_TTL_MS) => {
+    // ttl=0 must bypass the cache in BOTH directions. Skipping only the write would still serve a
+    // previously-cached mosaic, which defeats the one thing `&ttl=0` exists for: forcing a re-read
+    // while a dataset is being re-tiled underneath you.
+    const hit = ttlMs > 0 ? cache.get(key) : undefined;
+    if (hit && Date.now() - hit.at < hit.ttl) {
+      if (hit.error) throw hit.error;
+      return hit.value;
+    }
+    try {
+      const value = await builder(key);
+      if (ttlMs > 0) cache.set(key, { at: Date.now(), ttl: ttlMs, value });
+      return value;
+    } catch (error) {
+      if (ttlMs > 0) cache.set(key, { at: Date.now(), ttl: Math.min(ttlMs, FAILURE_TTL_MS), error });
+      throw error;
+    }
+  };
+}
 
 // ── enclosing sphere [cx,cy,cz,r] of a child root boundingVolume, in the child tileset frame ──
 function sphereOfVolume(bv) {
@@ -56,7 +91,7 @@ function sphereToParent(sphere, transform, isRegion) {
 }
 
 // One child's meta entry: fetch its tileset.json (cached per URL), derive sphere + GE.
-const childInfo = memoizeAsync(async (url) => {
+const childInfo = ttlCache(async (url) => {
   const r = await fetch(url);
   if (!r.ok) throw new Error(`fetch ${url} → ${r.status}`);
   const ts = await r.json();
@@ -75,47 +110,110 @@ const childInfo = memoizeAsync(async (url) => {
 // the renderer something to cull. The tree is built from nothing but each child's root bounding
 // volume — centre and radius — which is all we can know without opening the datasets.
 //
-// This is deliberately the same idea as 3D Tiles implicit tiling / Bing's quadkeys: a web-mercator
-// quadtree, each node addressed by the base-4 digits of its x/y bits. Each dataset is placed at the
-// DEEPEST level whose cell still comfortably contains it, so a 200 m scan lands deep (its own city
-// cell) while a country-wide dataset stays shallow — a dataset is never forced into a cell smaller
-// than itself. The trie is then path-compressed, so you get continent → country → city only where
-// datasets actually diverge, not 20 levels of single-child nodes.
+// Each dataset is placed at the DEEPEST level whose cell still comfortably contains it, so a 200 m
+// scan lands deep (its own city cell) while a country-wide dataset stays shallow — a dataset is never
+// forced into a cell smaller than itself. The trie is then path-compressed, so you get continent →
+// country → city only where datasets actually diverge, not 20 levels of single-child nodes.
 //
 // Culling does the work at render time, but the GEOMETRIC ERROR is what stops the fetch: an internal
 // node's GE is 2× its children's, so from a world view the SSE of a site-sized node is a fraction of
 // a pixel and the renderer never traverses into it. Zoom to Paris and only the nodes whose bounding
 // spheres intersect the frustum refine — so only Paris's tilesets are fetched.
+//
+// ── TWO SCHEMES, because "Morton order" and "web-mercator quadtree" are NOT the same thing ────────
+//
+// Morton (Z-order) is an ADDRESSING scheme — interleave the bits of a cell's x/y — and it says
+// nothing about which projection those cells live in. Two different trees both use it:
+//
+//   mercator  Bing/OSM/slippy-map tiling. Level L is a 2^L × 2^L grid over the WEB-MERCATOR square,
+//             latitude clamped at ±85.05°. A Bing quadkey is exactly the base-4 Morton code of the
+//             cell. Cells are square on screen; their ground size shrinks with cos(lat).
+//
+//   geodetic  What 3D Tiles implicit tiling actually does, and therefore what Cesium walks. The
+//             spec subdivides the ROOT BOUNDING VOLUME in its own coordinate space — for a `region`,
+//             "`x`, `y`, `z` refer to `longitude`, `latitude`, `height`" and each child extent is a
+//             plain arithmetic bisection of that range. So it is a GEODETIC quadtree (Cesium's
+//             GeographicTilingScheme: 2×1 cells at level 0, lon/lat halved per level), with tiles
+//             *within a level* ordered along the Morton Z-curve. No mercator anywhere.
+//
+// Both are offered because they answer different questions: `mercator` lines a mosaic's grouping up
+// with the raster basemap and with /bing's own quadkeys, while `geodetic` lines it up with how a
+// 3D Tiles client subdivides a region — so a group's cell is the cell an implicit tileset would have
+// used. The grouping is a pure BVH either way, so neither is "wrong"; they just cut different seams.
 const EARTH_CIRCUMFERENCE = 40075017;
+const METERS_PER_DEG_LAT = 111320;
 const MAX_NEST_LEVEL = 16;          // ~600 m cells at the equator; deeper separates nothing useful
 const NEST_THRESHOLD = 8;           // below this, a flat root is simpler and just as cullable
+const CELL_SLACK = 4;               // a cell must be ≥4× the dataset radius before we descend into it
 
-/** Deepest mercator level whose cell still comfortably contains a sphere of this radius. */
-function levelForRadius(radiusM, latDeg) {
+/** Interleave x/y bits → Morton (Z-order) index, the ordering 3D Tiles uses within a level. */
+function mortonIndex(x, y, level) {
+  let m = 0;
+  for (let i = 0; i < level; i++) m |= ((x >> i) & 1) << (2 * i) | ((y >> i) & 1) << (2 * i + 1);
+  return m;
+}
+
+/** Path digits (base-4, coarsest first) from a level's x/y — identical maths to a Bing quadkey. */
+function digitsFromXY(x, y, level, rootDigits = '') {
+  let s = rootDigits;
+  for (let i = level; i > 0; i--) {
+    const mask = 1 << (i - 1);
+    s += ((x & mask) ? 1 : 0) + ((y & mask) ? 2 : 0);
+  }
+  return s;
+}
+
+const clamp = (v, lo, hi) => Math.min(hi, Math.max(lo, v));
+
+const SCHEMES = {
+  // Web-mercator / Bing-quadkey grid: 2^L × 2^L over the mercator square.
+  mercator: {
+    cellMeters: (level, latDeg) => (EARTH_CIRCUMFERENCE * Math.max(0.05, Math.cos(latDeg * Math.PI / 180))) / 2 ** level,
+    cellAt(lonDeg, latDeg, level) {
+      const n = 2 ** level;
+      const x = clamp(Math.floor(((lonDeg + 180) / 360) * n), 0, n - 1);
+      const latRad = clamp(latDeg * Math.PI / 180, -1.4844, 1.4844);   // ±85.05°, the mercator cutoff
+      const y = clamp(Math.floor(((1 - Math.asinh(Math.tan(latRad)) / Math.PI) / 2) * n), 0, n - 1);
+      return { x, y, key: digitsFromXY(x, y, level), morton: mortonIndex(x, y, level) };
+    },
+  },
+  // Geodetic quadtree: 2×1 root cells, lon/lat bisected per level — Cesium's GeographicTilingScheme
+  // and the subdivision a 3D Tiles implicit `region` tileset performs.
+  geodetic: {
+    // Cells are 360/2^(L+1)° wide and 180/2^L° tall; the binding constraint is whichever is smaller
+    // on the ground, which flips from lat-bound to lon-bound as you approach the poles.
+    cellMeters: (level, latDeg) => Math.min(
+      (360 / 2 ** (level + 1)) * METERS_PER_DEG_LAT * Math.max(0.05, Math.cos(latDeg * Math.PI / 180)),
+      (180 / 2 ** level) * METERS_PER_DEG_LAT,
+    ),
+    cellAt(lonDeg, latDeg, level) {
+      const nx = 2 ** (level + 1), ny = 2 ** level;                   // 2:1 at level 0
+      const x = clamp(Math.floor(((lonDeg + 180) / 360) * nx), 0, nx - 1);
+      const y = clamp(Math.floor(((latDeg + 90) / 180) * ny), 0, ny - 1);
+      // The extra lon bit selects the root cell (W/E hemisphere); the rest bisect in lockstep.
+      const key = digitsFromXY(x >> 1, y, level, String(x >> level));
+      return { x, y, key, morton: mortonIndex(x, y, level + 1) };
+    },
+  },
+};
+
+/** Deepest level whose cell still comfortably contains a sphere of this radius. */
+function levelForRadius(scheme, radiusM, latDeg) {
   if (!(radiusM > 0)) return MAX_NEST_LEVEL;
-  const cosLat = Math.max(0.05, Math.cos(latDeg * Math.PI / 180));
   for (let L = MAX_NEST_LEVEL; L >= 0; L--) {
-    const cell = (EARTH_CIRCUMFERENCE * cosLat) / 2 ** L;
-    if (cell >= radiusM * 4) return L;       // 4× slack so a dataset isn't split across cells
+    if (scheme.cellMeters(L, latDeg) >= radiusM * CELL_SLACK) return L;
   }
   return 0;
 }
 
-/** Quadkey digits for lon/lat at a given level (same addressing as Bing / implicit quadtree). */
-function quadKeyAt(lonDeg, latDeg, level) {
-  const n = 2 ** level;
-  const x = Math.min(n - 1, Math.max(0, Math.floor(((lonDeg + 180) / 360) * n)));
-  const latRad = Math.max(-1.4844, Math.min(1.4844, latDeg * Math.PI / 180));
-  const y = Math.min(n - 1, Math.max(0, Math.floor(((1 - Math.asinh(Math.tan(latRad)) / Math.PI) / 2) * n)));
-  let qk = '';
-  for (let i = level; i > 0; i--) {
-    const mask = 1 << (i - 1);
-    let d = 0;
-    if (x & mask) d += 1;
-    if (y & mask) d += 2;
-    qk += d;
-  }
-  return qk;
+/** Normalize the `nest` param into { enabled-decision, scheme name }. */
+function parseNest(nest) {
+  const v = String(nest ?? 'auto').toLowerCase();
+  if (v === '0' || v === 'false' || v === 'flat' || v === 'none') return { mode: 'off' };
+  if (v === 'auto' || v === '' ) return { mode: 'auto', scheme: 'mercator' };
+  if (v === '1' || v === 'true' || v === 'mercator' || v === 'webmerc' || v === 'quadtree') return { mode: 'on', scheme: 'mercator' };
+  if (v === 'geodetic' || v === 'morton' || v === 'implicit' || v === 'cesium') return { mode: 'on', scheme: 'geodetic' };
+  return { mode: 'auto', scheme: 'mercator' };                        // unknown value → the default
 }
 
 /** Minimal sphere enclosing two spheres (same maths the flat root already used). */
@@ -129,14 +227,21 @@ function unionSphere(a, b) {
   return [a[0] + (b[0] - a[0]) * k, a[1] + (b[1] - a[1]) * k, a[2] + (b[2] - a[2]) * k, R];
 }
 
-/** Build the nested tile tree from leaf entries [{ qk, tile }]. Returns a 3D Tiles tile. */
-function nestLeaves(leaves) {
-  // trie over quadkey digits; a node holds leaves that stop at its own level
-  const root = { kids: new Map(), here: [] };
+/**
+ * Build the nested tile tree from leaf entries [{ key, tile }]. Returns a 3D Tiles tile.
+ *
+ * Each emitted group carries `extras.cell` — its path digits, level and Morton index — so the
+ * grouping a mosaic chose is inspectable from the tileset alone (and by /stats, which walks it like
+ * any other tileset). Nothing renders off it; it is there so "why did this dataset end up here" has
+ * an answer that doesn't require re-running the server.
+ */
+function nestLeaves(leaves, schemeName) {
+  // trie over path digits; a node holds the datasets whose own cell stops at that node's level
+  const root = { kids: new Map(), here: [], path: '' };
   for (const lf of leaves) {
     let node = root;
-    for (const digit of lf.qk) {
-      if (!node.kids.has(digit)) node.kids.set(digit, { kids: new Map(), here: [] });
+    for (const digit of lf.key) {
+      if (!node.kids.has(digit)) node.kids.set(digit, { kids: new Map(), here: [], path: node.path + digit });
       node = node.kids.get(digit);
     }
     node.here.push(lf.tile);
@@ -158,13 +263,48 @@ function nestLeaves(leaves) {
     // Parent GE must exceed every child's (3D Tiles requires monotonic decrease on refine); 2× keeps
     // it monotonic while staying small enough that a distant group is never traversed.
     const geometricError = Math.max(...children.map(c => c.geometricError)) * 2;
-    return { boundingVolume: { sphere }, geometricError, refine: 'ADD', children };
+    // The geodetic path's first digit is the 2×1 root-cell selector, so its level is one shorter.
+    const level = schemeName === 'geodetic' ? Math.max(0, node.path.length - 1) : node.path.length;
+    return {
+      boundingVolume: { sphere },
+      geometricError,
+      refine: 'ADD',
+      extras: { cell: { scheme: schemeName, key: node.path || '(root)', level } },
+      children,
+    };
   };
   return build(root);
 }
 
-export async function buildAggregate(urls, { nest = 'auto' } = {}) {
-  const results = await Promise.allSettled(urls.map(childInfo));
+/**
+ * Bounded-concurrency `Promise.allSettled`.
+ *
+ * MEASURED, not defensive: firing all 500 children at once with a plain `Promise.allSettled` loses
+ * more than half of them — a 500-dataset mosaic came back with 232 datasets and 268 bare
+ * "fetch failed" entries, and still answered 200, because failed children degrade into
+ * `asset.extras.failed` by design. The mosaic looked fine and was missing half the world. Worse, the
+ * survivors varied run to run, so the tree shape was not reproducible.
+ *
+ * A small pool fixes it outright and costs nothing: the children are independent round-trips, so 16
+ * in flight already saturates the link, and going wider only buys socket exhaustion — against our own
+ * loopback here, and against whatever remote host is serving a real mosaic's children.
+ */
+const FETCH_CONCURRENCY = 16;
+
+async function pooledSettled(items, worker, limit = FETCH_CONCURRENCY) {
+  const out = new Array(items.length);
+  let next = 0;
+  await Promise.all(Array.from({ length: Math.min(limit, items.length) }, async () => {
+    for (let i = next++; i < items.length; i = next++) {
+      try { out[i] = { status: 'fulfilled', value: await worker(items[i]) }; }
+      catch (reason) { out[i] = { status: 'rejected', reason }; }
+    }
+  }));
+  return out;
+}
+
+export async function buildAggregate(urls, { nest = 'auto', ttlMs = DEFAULT_TTL_MS } = {}) {
+  const results = await pooledSettled(urls, (u) => childInfo(u, ttlMs));
   const children = [], failed = [];
   results.forEach((res, i) => {
     if (res.status === 'rejected') { failed.push({ url: urls[i], error: String(res.reason?.message || res.reason) }); return; }
@@ -178,24 +318,32 @@ export async function buildAggregate(urls, { nest = 'auto' } = {}) {
   });
   if (!children.length) throw new Error(`no reachable children (${failed.map(f => f.error).join('; ')})`);
 
-  const doNest = nest === '1' || nest === 'true' || nest === true
-    || (nest === 'auto' && children.length >= NEST_THRESHOLD);
+  const want = parseNest(nest);
+  const doNest = want.mode === 'on' || (want.mode === 'auto' && children.length >= NEST_THRESHOLD);
 
-  let root, nested = false;
+  let root, nesting = { mode: 'flat' };
   if (doNest) {
+    const schemeName = want.scheme;
+    const scheme = SCHEMES[schemeName];
     const leaves = children.map((tile) => {
       const [cx, cy, cz, r] = tile.boundingVolume.sphere;
       const [lon, lat] = ecefToLlh(cx, cy, cz);
-      return { qk: quadKeyAt(lon, lat, levelForRadius(r, lat)), tile };
+      const cell = scheme.cellAt(lon, lat, levelForRadius(scheme, r, lat));
+      // Stamp each dataset with the cell it landed in — the "why is this grouped here" breadcrumb.
+      tile.extras = { ...(tile.extras || {}), cell: { scheme: schemeName, key: cell.key, morton: cell.morton } };
+      return { key: cell.key, tile };
     });
-    root = nestLeaves(leaves);
-    nested = true;
+    root = nestLeaves(leaves, schemeName);
+    nesting = { mode: 'quadtree', scheme: schemeName };
   }
   if (!root) {                                   // flat: one root, every dataset a direct child
     const rootSphere = children.reduce((acc, ch) => unionSphere(acc, ch.boundingVolume.sphere), null);
     root = {
       boundingVolume: { sphere: rootSphere },
-      geometricError: Math.max(...children.map(c => c.geometricError)),
+      // ×2, not max(): 3D Tiles requires geometric error to DECREASE on refine, and plain max() ties
+      // the root to its largest child — so the root and that child become selectable at the same SSE.
+      // The nested path has always doubled; this keeps the flat path consistent with it.
+      geometricError: Math.max(...children.map(c => c.geometricError)) * 2,
       refine: 'ADD',
       children,
     };
@@ -213,7 +361,8 @@ export async function buildAggregate(urls, { nest = 'auto' } = {}) {
       version: '1.1',
       extras: {
         datasets: children.length,
-        nesting: nested ? { mode: 'quadtree', depth, groups, rootFanout: root.children?.length ?? 0 } : { mode: 'flat' },
+        nesting: nesting.mode === 'flat' ? nesting
+          : { ...nesting, depth, groups, rootFanout: root.children?.length ?? 0 },
         ...(failed.length ? { failed } : {}),
       },
     },
@@ -221,6 +370,16 @@ export async function buildAggregate(urls, { nest = 'auto' } = {}) {
     root,
   };
 }
+
+/**
+ * Assembled mosaics are cached whole, keyed by the exact child set + nesting scheme. Without this,
+ * every client that opens a 500-dataset mosaic pays 500 tileset.json round-trips before seeing a
+ * single tile — and a 3D Tiles client re-requests the root more than once per session.
+ */
+const aggregateCached = ttlCache(async (key) => {
+  const { urls, nest, ttlMs } = JSON.parse(key);
+  return buildAggregate(urls, { nest, ttlMs });
+});
 
 /** Try to handle an /aggregate/* request. Returns true iff it owned the response. */
 export async function handleAggregate(req, res, u) {
@@ -230,7 +389,13 @@ export async function handleAggregate(req, res, u) {
     ...(u.searchParams.get('urls') || '').split(',').map(s => s.trim()).filter(Boolean).map(decodeURIComponent),
   ];
   if (!urls.length) { res.writeHead(400, CORS); res.end('missing ?urls=<u1>,<u2>,… (each URL-encoded) or repeated ?url='); return true; }
-  const ts = await buildAggregate(urls, { nest: u.searchParams.get('nest') ?? 'auto' });
+  const nest = u.searchParams.get('nest') ?? 'auto';
+  // &ttl=<seconds>; ttl=0 bypasses the cache entirely (both the mosaic and its child roots), which is
+  // what you want while iterating on a dataset that is actively being re-tiled.
+  const ttlParam = u.searchParams.get('ttl');
+  const ttlMs = ttlParam == null ? DEFAULT_TTL_MS : Math.max(0, Number(ttlParam) || 0) * 1000;
+  const key = JSON.stringify({ urls, nest, ttlMs });
+  const ts = await aggregateCached(key, ttlMs);
   res.writeHead(200, { 'Content-Type': 'application/json', ...CORS });
   res.end(JSON.stringify(ts));
   return true;

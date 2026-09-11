@@ -844,9 +844,24 @@
             "in": "query",
             "schema": {
               "type": "string",
-              "default": "auto"
+              "default": "auto",
+              "enum": [
+                "auto",
+                "mercator",
+                "geodetic",
+                "flat"
+              ]
             },
-            "description": "Spatial auto-nesting: \"auto\" (default) builds a web-mercator quadtree over the children when there are 8 or more, so a renderer culls whole regions instead of considering every dataset; \"0\"/\"off\" forces a flat root. Each dataset is placed at the deepest quadtree level whose cell still comfortably contains it (from its root bounding sphere), the trie is path-compressed, and each group node gets 2x its children geometric error so distant groups are never traversed."
+            "description": "Spatial auto-nesting, so a renderer culls whole regions instead of considering every dataset. \"auto\" (default) builds a web-mercator quadtree once there are 8 or more children; \"mercator\" (aliases 1/true/webmerc/quadtree) forces it; \"geodetic\" (aliases morton/implicit/cesium) instead subdivides in longitude/latitude the way 3D Tiles implicit tiling does for a region bounding volume (Cesium's GeographicTilingScheme: 2x1 cells at level 0); \"flat\" (aliases 0/false/none) forces a flat root. Note Morton (Z-order) is an ADDRESSING scheme, not a projection - both trees use it, they differ in what space they subdivide. Each dataset is placed at the deepest level whose cell still comfortably contains it (from its root bounding sphere), the trie is path-compressed, and each group node gets 2x its children's geometric error so distant groups are never traversed. Groups and datasets carry extras.cell with the scheme, path key, level and Morton index."
+          },
+          {
+            "name": "ttl",
+            "in": "query",
+            "schema": {
+              "type": "integer",
+              "default": 86400
+            },
+            "description": "Cache lifetime in SECONDS for both the assembled mosaic and each child's fetched root. Defaults to 86400 (one day): assembling N children costs N round-trips, so it must not happen per request, but a mosaic that never re-reads its children cannot notice one moved. ttl=0 bypasses the cache in both directions - use it while a dataset is being re-tiled. Child fetches run through a 16-way pool; unbounded concurrency loses children at scale."
           }
         ],
         "responses": {
