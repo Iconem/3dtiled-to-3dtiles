@@ -186,8 +186,10 @@ export const FORMATS: FormatMeta[] = [
 export interface DirectAsset { id: string; icon: string; label: string; type: AssetType; url: string }
 
 export const DIRECT: DirectAsset[] = [
-  { id: 'wl-splat1', icon: '◈', label: '3DT · GSplat 1 (WL)', type: 'splat', url: 'https://raw.githubusercontent.com/WilliamLiu-1997/3DTilesRendererJS-3DGS-Plugin/main/data/gaussianSplat1/tileset.json' },
-  { id: 'wl-splat2', icon: '◈', label: '3DT · GSplat 2 (WL)', type: 'splat', url: 'https://raw.githubusercontent.com/WilliamLiu-1997/3DTilesRendererJS-3DGS-Plugin/main/data/gaussianSplat2/tileset.json' },
+  // The plugin repo's sample splats were renamed: data/gaussianSplat1|2 (404 since) → Elevator /
+  // SvirnasAlyt. Caught by /stats?sample= returning HTTP 404 for every sampled tile.
+  { id: 'wl-splat1', icon: '◈', label: '3DT · Elevator (WL)', type: 'splat', url: 'https://raw.githubusercontent.com/WilliamLiu-1997/3DTilesRendererJS-3DGS-Plugin/main/data/Elevator-3dtiles/tileset.json' },
+  { id: 'wl-splat2', icon: '◈', label: '3DT · Svirnas Alyt (WL)', type: 'splat', url: 'https://raw.githubusercontent.com/WilliamLiu-1997/3DTilesRendererJS-3DGS-Plugin/main/data/SvirnasAlyt-3dtiles/tileset.json' },
   { id: 'strasbourg', icon: '🏙', label: '3DT · Strasbourg', type: 'mesh', url: 'https://s3.eu-west-2.wasabisys.com/ems-sgct-photomaillage/ODACIT/EMS_PM2022/tileset.json' },
   { id: 'clermont', icon: '🏙', label: '3DT · Clermont', type: 'mesh', url: 'https://3d.craig.fr/datasets/Clermont/3dtiles/tileset.json' },
   { id: 'lille', icon: '🏙', label: '3DT · Lille', type: 'mesh', url: 'https://webimaging.lillemetropole.fr/externe/maillage/2016_mel_10cm/3dtiles/tileset.json' },

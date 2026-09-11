@@ -36,15 +36,123 @@ function radiusOfVolume(bv) {
 const resolveUri = (uri, base) => new URL(uri, base).href;
 const isTilesetUri = (uri) => /\.json(\?|$)/i.test(uri.split('#')[0]);
 
+/**
+ * Read a GLB's JSON chunk only — no BIN decode, no Draco/meshopt/SPZ decompression. Everything we
+ * want (primitive counts, extensions, texture MIME types, compression) is declared in the JSON, so
+ * this stays cheap enough to run against a live remote host.
+ */
+function inspectGlb(buf) {
+  if (buf.length < 20 || buf.toString('latin1', 0, 4) !== 'glTF') {
+    return { ok: false, reason: `not a GLB (magic "${buf.toString('latin1', 0, 4).replace(/[^\x20-\x7e]/g, '.')}")`, bytes: buf.length };
+  }
+  const jsonLen = buf.readUInt32LE(12);
+  let gltf;
+  try { gltf = JSON.parse(buf.toString('utf8', 20, 20 + jsonLen)); }
+  catch (e) { return { ok: false, reason: `bad JSON chunk: ${e.message}`, bytes: buf.length }; }
+
+  const acc = gltf.accessors || [];
+  const countOf = (i) => (i == null ? 0 : acc[i]?.count ?? 0);
+  let triangles = 0, points = 0, vertices = 0, primitives = 0;
+  for (const mesh of gltf.meshes || []) {
+    for (const p of mesh.primitives || []) {
+      primitives++;
+      const mode = p.mode ?? 4;                       // glTF default is TRIANGLES
+      const pos = countOf(p.attributes?.POSITION);
+      vertices += pos;
+      if (mode === 0) points += pos;
+      else if (mode === 4) triangles += p.indices != null ? Math.floor(countOf(p.indices) / 3) : Math.floor(pos / 3);
+      else if (mode === 5 || mode === 6) triangles += Math.max(0, (p.indices != null ? countOf(p.indices) : pos) - 2);
+    }
+  }
+  // Splats declare their count on the base extension's payload rather than as triangles.
+  const exts = gltf.extensionsUsed || [];
+  const images = (gltf.images || []).map((im) => im.mimeType || 'unknown');
+  const meshopt = (gltf.bufferViews || []).some((bv) => bv.extensions?.EXT_meshopt_compression);
+  const draco = (gltf.meshes || []).some((m) => (m.primitives || []).some((p) => p.extensions?.KHR_draco_mesh_compression));
+  return {
+    ok: true, bytes: buf.length, primitives, vertices, triangles, points,
+    extensions: exts, images,
+    compression: [
+      draco && 'draco',
+      meshopt && 'meshopt',
+      images.includes('image/ktx2') && 'ktx2',
+      exts.some((e) => e.includes('spz')) && 'spz',
+      exts.some((e) => e.includes('lgsc')) && 'lgsc',
+    ].filter(Boolean),
+  };
+}
+
+/**
+ * Sample a handful of content tiles, stratified across depth so both leaves and intermediate nodes
+ * are represented. This is the only part of /stats that downloads geometry, hence opt-in: the walk
+ * itself reads nothing but tileset JSON and subtree buffers.
+ */
+async function sampleContent(nodes, childCount, limit) {
+  const withUrl = nodes.filter((n) => n.c && n.u);
+  if (!withUrl.length || limit <= 0) return null;
+
+  // round-robin across levels so one dense level can't monopolise the sample
+  const byLevel = new Map();
+  for (const n of withUrl) {
+    if (!byLevel.has(n.l)) byLevel.set(n.l, []);
+    byLevel.get(n.l).push(n);
+  }
+  const levels = [...byLevel.keys()].sort((a, b) => a - b);
+  const picked = [];
+  for (let round = 0; picked.length < limit; round++) {
+    let added = false;
+    for (const L of levels) {
+      const bucket = byLevel.get(L);
+      if (round < bucket.length && picked.length < limit) {
+        picked.push(bucket[Math.floor((round * 7 + 3) % bucket.length)]);  // spread within the level
+        added = true;
+      }
+    }
+    if (!added) break;
+  }
+
+  const results = await Promise.all(picked.map(async (n) => {
+    try {
+      const r = await fetch(n.u);
+      if (!r.ok) return { level: n.l, leaf: !childCount[n.i], ok: false, reason: `HTTP ${r.status}` };
+      const info = inspectGlb(Buffer.from(await r.arrayBuffer()));
+      return { level: n.l, leaf: !childCount[n.i], ...info };
+    } catch (e) { return { level: n.l, leaf: !childCount[n.i], ok: false, reason: String(e.message || e) }; }
+  }));
+
+  const good = results.filter((r) => r.ok);
+  const tally = (key) => {
+    const m = {};
+    for (const r of good) for (const v of r[key] || []) m[v] = (m[v] || 0) + 1;
+    return m;
+  };
+  const sum = (k) => good.reduce((a, r) => a + (r[k] || 0), 0);
+  const n = good.length || 1;
+  return {
+    sampled: results.length, decoded: good.length,
+    leavesSampled: results.filter((r) => r.leaf).length,
+    avgBytes: Math.round(sum('bytes') / n),
+    avgTriangles: Math.round(sum('triangles') / n),
+    avgPoints: Math.round(sum('points') / n),
+    avgVertices: Math.round(sum('vertices') / n),
+    totalTriangles: sum('triangles'), totalPoints: sum('points'),
+    extensions: tally('extensions'), compression: tally('compression'), textures: tally('images'),
+    perTile: results.map((r) => ({ level: r.level, leaf: r.leaf, ok: r.ok, bytes: r.bytes,
+                                   triangles: r.triangles, points: r.points, reason: r.reason })),
+  };
+}
+
 /** Walk a tileset (explicit + implicit + external refs), collecting bounded node/level stats. */
-export async function collectStats(tsUrl, { maxNodes = 4000, maxDepth = 32, maxExternal = 64 } = {}) {
+export async function collectStats(tsUrl, { maxNodes = 4000, maxDepth = 32, maxExternal = 64, sample = 0 } = {}) {
   const nodes = [];                 // {i, p, l, ge, r, c}
   let truncated = false, externals = 0, subtreesFetched = 0;
   const full = () => nodes.length >= maxNodes;
 
-  const addNode = (parent, level, ge, r, hasContent) => {
+  // `u` is the resolved absolute content URL — kept only so the optional sampling pass has something
+  // to fetch. It is stripped before the response so the node array stays small for the graph UI.
+  const addNode = (parent, level, ge, r, hasContent, url = null) => {
     const i = nodes.length;
-    nodes.push({ i, p: parent, l: level, ge: +Number(ge ?? 0).toPrecision(4), r: +Number(r ?? 0).toPrecision(4), c: hasContent ? 1 : 0 });
+    nodes.push({ i, p: parent, l: level, ge: +Number(ge ?? 0).toPrecision(4), r: +Number(r ?? 0).toPrecision(4), c: hasContent ? 1 : 0, u: url });
     return i;
   };
 
@@ -85,7 +193,12 @@ export async function collectStats(tsUrl, { maxNodes = 4000, maxDepth = 32, maxE
             if (baseDepth + level > maxDepth) { truncated = true; continue; }
             const parent = d === 0 ? st.parentIdx : (idxByCell.get(`${d-1}-${dx>>1}-${dy>>1}-${dz>>1}`) ?? st.parentIdx);
             if (full()) { truncated = true; break; }
-            const i = addNode(parent, baseDepth + level, rootGE / 2 ** level, rootR / 2 ** level, sub.contentBit(bit));
+            // absolute cell coords, so the content template resolves to a real tile URL
+            const ax = st.x * 2 ** d + dx, ay = st.y * 2 ** d + dy, az = st.z * 2 ** d + dz;
+            const cUrl = (ctTemplate && sub.contentBit(bit))
+              ? resolveUri(ctTemplate.replace('{level}', level).replace('{x}', ax).replace('{y}', ay).replace('{z}', az), baseUrl)
+              : null;
+            const i = addNode(parent, baseDepth + level, rootGE / 2 ** level, rootR / 2 ** level, sub.contentBit(bit), cUrl);
             idxByCell.set(`${d}-${dx}-${dy}-${dz}`, i);
           }
           if (full()) break;
@@ -108,7 +221,8 @@ export async function collectStats(tsUrl, { maxNodes = 4000, maxDepth = 32, maxE
     if (tile.implicitTiling) { await walkImplicit(tile, baseUrl, parentIdx, depth); return; }
     const uri = tile.content?.uri ?? tile.content?.url;
     const isExternal = uri && isTilesetUri(uri);
-    const i = addNode(parentIdx, depth, tile.geometricError, radiusOfVolume(tile.boundingVolume), !!uri && !isExternal);
+    const i = addNode(parentIdx, depth, tile.geometricError, radiusOfVolume(tile.boundingVolume), !!uri && !isExternal,
+                      uri && !isExternal ? resolveUri(uri, baseUrl) : null);
     if (isExternal && externals < maxExternal) {
       externals++;
       try {
@@ -127,24 +241,38 @@ export async function collectStats(tsUrl, { maxNodes = 4000, maxDepth = 32, maxE
   if (!ts.root) throw new Error('no root tile in tileset');
   await walkTile(ts.root, tsUrl, -1, 0);
 
+  // fan-out per node → leaves are the nodes nothing points at as parent
+  const childCount = new Array(nodes.length).fill(0);
+  for (const n of nodes) if (n.p >= 0 && n.p < childCount.length) childCount[n.p]++;
+
   // per-level aggregates
   const byLevel = new Map();
   for (const n of nodes) {
     let L = byLevel.get(n.l);
-    if (!L) byLevel.set(n.l, L = { level: n.l, tiles: 0, content: 0, geMin: Infinity, geMax: -Infinity });
+    if (!L) byLevel.set(n.l, L = { level: n.l, tiles: 0, content: 0, leaves: 0, geMin: Infinity, geMax: -Infinity });
     L.tiles++; L.content += n.c;
+    if (!childCount[n.i]) L.leaves++;
     if (n.ge < L.geMin) L.geMin = n.ge;
     if (n.ge > L.geMax) L.geMax = n.ge;
   }
   const levels = [...byLevel.values()].sort((a, b) => a.level - b.level)
     .map(L => ({ ...L, geMin: L.geMin === Infinity ? 0 : L.geMin, geMax: L.geMax === -Infinity ? 0 : L.geMax }));
 
+  const leafNodes = childCount.reduce((a, c) => a + (c ? 0 : 1), 0);
+  const content = sample > 0 ? await sampleContent(nodes, childCount, sample) : null;
+
   return {
     url: tsUrl, tilesetGeometricError: ts.geometricError ?? null,
     totalNodes: nodes.length, contentNodes: nodes.reduce((a, n) => a + n.c, 0),
+    leafNodes,
+    maxFanout: childCount.reduce((a, c) => Math.max(a, c), 0),
     maxDepth: nodes.reduce((a, n) => Math.max(a, n.l), 0),
     truncated, subtreesFetched, externalTilesets: externals,
-    levels, nodes,
+    levels,
+    ...(content ? { content } : {}),
+    // drop the per-node content URL: it is only needed by the sampling pass above and would bloat
+    // the payload the hierarchy graph consumes.
+    nodes: nodes.map(({ u, ...rest }) => rest),
   };
 }
 
@@ -155,7 +283,10 @@ export async function handleStats(req, res, u) {
     if (!url) { res.writeHead(400, CORS); res.end('missing ?url=<tileset.json URL>'); return true; }
     const maxNodes = Math.min(20000, Number(u.searchParams.get('maxNodes')) || 4000);
     const maxDepth = Math.min(48, Number(u.searchParams.get('maxDepth')) || 32);
-    const stats = await collectStats(url, { maxNodes, maxDepth });
+    // &sample=N downloads N content tiles to report triangle/point counts, extensions and
+    // compression. Off by default — the rest of the walk never fetches geometry.
+    const sample = Math.min(64, Math.max(0, Number(u.searchParams.get('sample')) || 0));
+    const stats = await collectStats(url, { maxNodes, maxDepth, sample });
     res.writeHead(200, { 'Content-Type': 'application/json', ...CORS });
     res.end(JSON.stringify(stats));
     return true;

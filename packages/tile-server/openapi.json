@@ -838,6 +838,15 @@
               "type": "string"
             },
             "description": "Repeated form: one child tileset.json URL per url= param."
+          },
+          {
+            "name": "nest",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "default": "auto"
+            },
+            "description": "Spatial auto-nesting: \"auto\" (default) builds a web-mercator quadtree over the children when there are 8 or more, so a renderer culls whole regions instead of considering every dataset; \"0\"/\"off\" forces a flat root. Each dataset is placed at the deepest quadtree level whose cell still comfortably contains it (from its root bounding sphere), the trie is path-compressed, and each group node gets 2x its children geometric error so distant groups are never traversed."
           }
         ],
         "responses": {
@@ -888,6 +897,16 @@
               "maximum": 48
             },
             "description": "Depth cap."
+          },
+          {
+            "name": "sample",
+            "in": "query",
+            "schema": {
+              "type": "integer",
+              "default": 0,
+              "maximum": 64
+            },
+            "description": "Download N content tiles (stratified across depth, leaves and intermediate nodes) and report approximate triangle/point/vertex counts, glTF extensions used, texture MIME types and compression (draco/meshopt/ktx2/spz/lgsc). Only the GLB JSON chunk is parsed - no geometry decode. Off by default: the rest of the walk reads only tileset JSON and subtree buffers."
           }
         ],
         "responses": {
