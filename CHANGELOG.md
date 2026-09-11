@@ -5,6 +5,43 @@ Format loosely follows [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+### Added / Fixed — 2026-09-11 (Bing low-zoom globe · L-GSC docs · branch consolidation)
+- **Added: Bing Maps 3D low-zoom globe shell** (`bing-globe.js`). Bing's `tf=3dv4` mesh does not exist
+  above face-local **level 12** — measured, not assumed, with the new
+  `scripts/debug-bing-coverage.mjs` (levels 0–11 return 0-byte bodies; level 12 returns a 155 KB GLB
+  over London). Twelve empty levels means every zoomed-out view of `/bing/tileset.json` was blank.
+  Tiles with no Bing mesh at/above `&globe` (default 11) now carry a basemap-draped ellipsoid patch;
+  because a Bing face-local `(level,x,y)` **is** the global mercator tile at `(level+1)`, the raster
+  lookup is 1:1 — no resampling, no reprojection. `REPLACE` refinement hands over to real mesh where
+  it exists and keeps the shell where it never does (oceans), so there is no hole at the transition.
+  Deliberately **no tile `transform`** (a transform is inherited by the Bing subtree, whose GLBs bake
+  their own ECEF into the glTF node matrix) — absolute ECEF swizzled `(X, Z, −Y)` instead, so
+  Cesium's glTF→Z-up `RX(+90°)` restores it. Basemap is a URL template (`&basemap=`,
+  `BING_GLOBE_BASEMAP`, default OpenStreetMap, attribution emitted in `asset.copyright`);
+  `&globe=off` restores the previous behaviour. Verified in stock CesiumJS with Cesium's *own* globe
+  hidden, so all visible geometry came from the tileset.
+- **Fixed: `scripts/cesium-harness.html` readiness loop** — `Cartographic.fromCartesian` returns
+  `undefined` for a degenerate centre, which a whole-globe tileset genuinely has; the unhandled throw
+  killed the loop so `window.READY` never flipped and screenshots timed out despite rendering fine.
+- **Added: `KHR_gaussian_splatting_compression_lgsc`** (Qualcomm **L-GSC** v1.0) documented alongside
+  `_spz_2`. The rename during review (`..._lgsc` → `..._compression_lgsc`) confirms Khronos treats
+  splat compression as an open set of interchangeable children under one base, SPZ being first rather
+  than only. The PR is open and README-only, so the JSON nesting/`bufferView` are explicitly *not*
+  asserted here, and the codec publishes no benchmark numbers.
+- **Changed: WilliamLiu's `3DGS-PLY-3DTiles-Converter` went closed source** — the repo no longer
+  resolves; dead links unlinked and the geometric-error model it inspired is now written out in-page,
+  since the source is no longer citable.
+- **Fixed: README claimed no public deployment.** Docs/viewer/middleware are live via the GHCR images
+  behind Traefik. Domains appear only in the README — served artifacts still build every link from
+  `DOCS_URL`/`VIEWER_URL`/`REPO_URL`, so the no-committed-domains policy holds where it matters.
+  `docs-pages.yml` is now `workflow_dispatch`-only: Pages is not the canonical deployment and is not
+  enabled on the repo, so its push trigger failed every run.
+- **Repo hygiene:** `main` fast-forwarded to `origin/main`; `t3code/feature-roadmap-exploration`
+  merged with main (the `openapi.json` overlap auto-resolved — the roadmap branch expanded `paths`
+  while `809f5f4` touched only `info.description`) and pushed as a tracked remote branch. Five local
+  branches plus the remote `stream-cache` were deleted after verifying each held **zero** commits not
+  already reachable from `origin/main`.
+
 ### Added / Fixed — 2026-08-22 (roadmap batch: potree depth fix · globe placement · Pages docs · /aggregate · /stats+/hierarchy · bench · `serve` CLI)
 - **Fixed: Potree 1.x live streaming truncated at hierarchy-chunk depth** (`potree-live.js`). An
   already-loaded `.hrc` chunk returned empty boundaries from `loadOne`, so any subtree walk re-entering
