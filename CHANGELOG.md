@@ -5,7 +5,17 @@ Format loosely follows [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
-### Added / Fixed — 2026-09-11 (Bing low-zoom globe · L-GSC docs · branch consolidation)
+### Added / Fixed — 2026-09-11 (Bing low-zoom globe · desktop app · L-GSC docs · branch consolidation)
+- **Added: `apps/desktop`, an Electrobun companion app** that runs the tile-server **on-device** and
+  turns a dataset (local path or URL) into a paste-ready 3D Tiles endpoint — the "companion app"
+  roadmap item, previously reshaped into `3dtiled serve`. Framework choice was constrained: Tauri
+  needs a Rust + MSVC toolchain this machine lacks, Electron would add a ~200 MB dependency to a
+  monorepo whose CI runs `pnpm install` on every build, and Vercel's Native SDK compiles to Zig with
+  **no webview and no JS runtime**, so it cannot host the existing web UI at all. Electrobun is
+  webview-based with official Windows 11 / macOS 14 / Ubuntu 24.04 support. `apps/desktop` is
+  **excluded from the pnpm workspace** so `--frozen-lockfile` installs stay untouched. An
+  already-running 3dtiled server is *adopted* rather than duplicated; the Cesium preview is served by
+  the existing `scripts/static-server.mjs` so it is a plain `http://` page.
 - **Added: Bing Maps 3D low-zoom globe shell** (`bing-globe.js`). Bing's `tf=3dv4` mesh does not exist
   above face-local **level 12** — measured, not assumed, with the new
   `scripts/debug-bing-coverage.mjs` (levels 0–11 return 0-byte bodies; level 12 returns a 155 KB GLB
