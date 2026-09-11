@@ -48,8 +48,26 @@ found by walking up for `packages/tile-server/server.js`, because `electrobun de
 `apps/desktop` as cwd while the built app runs from `build/<target>/3DTiled-dev/bin` — a fixed depth
 would only ever be right for one of them.
 
-`src/mainview/` is the launcher UI. Ports travel to it in the `views://` query string, since the main
-process may adopt a server and the port is therefore not knowable at build time.
+`src/mainview/` is the launcher UI — three tabs:
+
+| tab | what it is |
+|---|---|
+| **Build** | dataset + format + materialization + optional globe placement → paste-ready URL |
+| **Library** | saved datasets (`library.ts`), with a cached `/stats` check per row |
+| **Samples** | `catalog.ts` — a real public dataset per source format, one click into Build |
+
+Ports **and** the resolved viewer/docs URLs travel to it in the `views://` query string, since the
+main process may adopt a server and probes for a local viewer/docs — none of which is knowable at
+build time. Link resolution is local-first: `VIEWER_URL`/`DOCS_URL` env → a reachable localhost
+instance → the public deployment.
+
+The library is `localStorage`-backed, so it is per-install and **not** shared with the CLI or the web
+viewer; Export/Import round-trip it as JSON, which is the seam to move it to a real file later.
+`/stats` refresh is sequential by design — it fans out to arbitrary third-party hosts, and the
+unbounded-concurrency version of that is what cost `/aggregate` half its children at scale.
+
+Row icons are generated **format glyphs, not thumbnails**: a real preview would require loading each
+tileset in a hidden Cesium view, which is far too expensive for a list.
 
 ## Two things that will bite you if you edit this
 

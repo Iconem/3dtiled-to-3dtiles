@@ -32,7 +32,7 @@ body {
 /* LEFT-aligned, not centred, and deliberately so. On a HiDPI Windows display the webview reports a
    CSS viewport wider than the native frame, so `margin: 0 auto` centres the content against a width
    the user cannot actually see and the right-hand side is clipped. */
-.container { max-width: 720px; margin: 0; padding: 24px 26px 32px; }
+.container { max-width: 1000px; margin: 0; padding: 24px 26px 32px; }
 
 header { display: flex; align-items: center; gap: 12px; margin-bottom: 8px; flex-wrap: wrap; }
 h1 { font-size: 18px; font-weight: 600; margin: 0; letter-spacing: -0.02em; }
@@ -147,7 +147,96 @@ select { appearance: none; background-image: none; cursor: pointer; }
 footer {
   display: flex; align-items: center; gap: 10px;
   color: hsl(var(--muted-foreground)); font-size: 12px; padding-top: 2px;
+  flex-wrap: wrap;
 }
 footer .spacer { flex: 1; }
 footer a { color: hsl(var(--muted-foreground)); text-decoration: none; }
 footer a:hover { color: hsl(var(--foreground)); text-decoration: underline; }
+
+/* ── tabs — shadcn TabsList/TabsTrigger proportions ──────────────────────────────────────────── */
+.tabs {
+  display: inline-flex; gap: 2px; padding: 3px; margin-bottom: 14px;
+  background: hsl(var(--muted) / 0.5);
+  border: 1px solid hsl(var(--border));
+  border-radius: calc(var(--radius) - 2px);
+}
+.tab {
+  display: inline-flex; align-items: center; gap: 7px;
+  height: 30px; padding: 0 14px;
+  border: 0; border-radius: calc(var(--radius) - 4px);
+  background: transparent; color: hsl(var(--muted-foreground));
+  font: inherit; font-size: 13px; font-weight: 500; cursor: pointer;
+  transition: background-color .15s, color .15s;
+}
+.tab:hover { color: hsl(var(--foreground)); }
+.tab-active { background: hsl(var(--card)); color: hsl(var(--foreground)); box-shadow: 0 1px 2px rgb(0 0 0 / .3); }
+.tab .count {
+  font-size: 11px; line-height: 1; padding: 3px 6px; border-radius: 999px;
+  background: hsl(var(--muted)); color: hsl(var(--muted-foreground));
+}
+.panel-hidden { display: none; }
+
+.card-head { display: flex; align-items: center; gap: 10px; margin-bottom: 8px; }
+.card-head-actions { margin-left: auto; display: flex; gap: 6px; }
+
+/* ── list rows (library + samples) ───────────────────────────────────────────────────────────── */
+.list, .groups { display: flex; flex-direction: column; gap: 8px; margin-top: 12px; }
+.group { display: flex; flex-direction: column; gap: 6px; }
+.group-head {
+  display: flex; align-items: center; gap: 8px;
+  font-size: 12.5px; font-weight: 600; color: hsl(var(--foreground));
+  margin-top: 10px; padding-bottom: 4px; border-bottom: 1px solid hsl(var(--border));
+}
+
+.item {
+  display: flex; align-items: center; gap: 12px;
+  padding: 10px 12px;
+  border: 1px solid hsl(var(--border));
+  border-radius: calc(var(--radius) - 2px);
+  background: hsl(var(--muted) / 0.25);
+  min-width: 0;
+}
+.item-compact { padding: 8px 12px; background: transparent; }
+.item:hover { background: hsl(var(--muted) / 0.5); }
+
+/* A generated format glyph, NOT a thumbnail. Rendering a real preview would mean loading each
+   tileset in a hidden Cesium view — far too expensive for a list — so this encodes the one thing
+   that is knowable without fetching: which family of data it is. */
+.glyph {
+  flex: none; width: 38px; height: 38px; border-radius: calc(var(--radius) - 3px);
+  display: grid; place-items: center; font-size: 17px;
+  border: 1px solid hsl(var(--border));
+}
+.glyph[data-kind="pointcloud"] { background: hsl(210 70% 55% / 0.14); }
+.glyph[data-kind="splat"]      { background: hsl(280 70% 60% / 0.14); }
+.glyph[data-kind="mesh"]       { background: hsl(150 60% 45% / 0.14); }
+
+.item-body { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+.item-title { display: flex; align-items: center; gap: 7px; font-size: 13.5px; font-weight: 500; }
+.item-sub {
+  font: 11.5px/1.4 ui-monospace, "Cascadia Code", Consolas, monospace;
+  color: hsl(var(--muted-foreground));
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.item-meta { font-size: 11.5px; color: hsl(var(--muted-foreground)); }
+.item-meta-partial { color: hsl(var(--warning)); }
+.item-actions { flex: none; display: flex; gap: 4px; }
+
+.chip {
+  font-size: 10.5px; font-weight: 500; line-height: 1;
+  padding: 3px 7px; border-radius: 999px;
+  background: hsl(var(--muted)); color: hsl(var(--muted-foreground));
+  border: 1px solid hsl(var(--border));
+  white-space: nowrap;
+}
+
+.btn-sm { height: 28px; padding: 0 10px; font-size: 12px; }
+
+.io {
+  display: none; width: 100%; margin-top: 10px; min-height: 120px; resize: vertical;
+  background: hsl(var(--muted) / 0.5); color: hsl(var(--foreground));
+  border: 1px solid hsl(var(--input)); border-radius: calc(var(--radius) - 2px);
+  padding: 9px 11px;
+  font: 11.5px/1.5 ui-monospace, "Cascadia Code", Consolas, monospace;
+}
+.io:focus { outline: none; border-color: hsl(var(--ring)); box-shadow: 0 0 0 2px hsl(var(--ring) / 0.25); }

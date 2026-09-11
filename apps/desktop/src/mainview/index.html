@@ -19,72 +19,119 @@
             on demand. Paste the resulting URL into Cesium&nbsp;for&nbsp;Unreal/Unity, QGIS, or CesiumJS.
         </p>
 
-        <section class="card">
-            <label class="field">
-                <span>Dataset — local path or URL</span>
-                <input id="src" type="text" spellcheck="false"
-                       placeholder="C:\data\scan.copc.laz   or   https://…/cloud.js">
-            </label>
+        <nav class="tabs" id="tabs">
+            <button class="tab tab-active" data-tab="build">Build</button>
+            <button class="tab" data-tab="library">Library <span class="count" id="lib-count">0</span></button>
+            <button class="tab" data-tab="samples">Samples</button>
+        </nav>
 
-            <div class="row">
+        <!-- ── Build ─────────────────────────────────────────────────────────────────────────── -->
+        <section class="panel" id="panel-build">
+            <div class="card">
                 <label class="field">
-                    <span>Format</span>
-                    <select id="format">
-                        <option value="">auto-detect</option>
-                        <option value="copc">COPC</option>
-                        <option value="potree">Potree</option>
-                        <option value="sog">SOG (streamed)</option>
-                        <option value="lcc">LCC</option>
-                        <option value="rad">RAD</option>
-                        <option value="i3s">I3S</option>
-                        <option value="threemx">3MX</option>
-                        <option value="geosplats">GeoSplats</option>
-                    </select>
+                    <span>Dataset — local path or URL</span>
+                    <input id="src" type="text" spellcheck="false"
+                           placeholder="C:\data\scan.copc.laz   or   https://…/cloud.js">
                 </label>
-                <label class="field">
-                    <span>Materialization</span>
-                    <select id="cache">
-                        <option value="none">cache=none — stream, nothing stored</option>
-                        <option value="hierarchy">cache=hierarchy — index in RAM</option>
-                        <option value="full">cache=full — convert once to disk</option>
-                    </select>
-                </label>
+
+                <div class="row">
+                    <label class="field">
+                        <span>Format</span>
+                        <select id="format">
+                            <option value="">auto-detect</option>
+                            <option value="copc">COPC</option>
+                            <option value="potree">Potree</option>
+                            <option value="sog">SOG (streamed)</option>
+                            <option value="lcc">LCC</option>
+                            <option value="rad">RAD</option>
+                            <option value="i3s">I3S</option>
+                            <option value="threemx">3MX</option>
+                            <option value="geosplats">GeoSplats</option>
+                        </select>
+                    </label>
+                    <label class="field">
+                        <span>Materialization</span>
+                        <select id="cache">
+                            <option value="none">cache=none — stream, nothing stored</option>
+                            <option value="hierarchy">cache=hierarchy — index in RAM</option>
+                            <option value="full">cache=full — convert once to disk</option>
+                        </select>
+                    </label>
+                </div>
+
+                <details class="placement">
+                    <summary>Place a local dataset on the globe <span class="hint">(for sources with no georeference)</span></summary>
+                    <div class="row">
+                        <label class="field"><span>Longitude</span><input id="lon" type="text" placeholder="2.2945"></label>
+                        <label class="field"><span>Latitude</span><input id="lat" type="text" placeholder="48.8584"></label>
+                        <label class="field"><span>Altitude&nbsp;m</span><input id="alt" type="text" placeholder="0"></label>
+                        <label class="field"><span>Heading°</span><input id="heading" type="text" placeholder="0"></label>
+                    </div>
+                    <p class="hint">
+                        Applied as a root ENU transform in the tileset itself, so every client gets it —
+                        not just this preview. Sources that carry their own georeference ignore these.
+                    </p>
+                </details>
             </div>
 
-            <details class="placement">
-                <summary>Place a local dataset on the globe <span class="hint">(for sources with no georeference)</span></summary>
-                <div class="row">
-                    <label class="field"><span>Longitude</span><input id="lon" type="text" placeholder="2.2945"></label>
-                    <label class="field"><span>Latitude</span><input id="lat" type="text" placeholder="48.8584"></label>
-                    <label class="field"><span>Altitude&nbsp;m</span><input id="alt" type="text" placeholder="0"></label>
-                    <label class="field"><span>Heading°</span><input id="heading" type="text" placeholder="0"></label>
+            <div class="card">
+                <span class="field-label">Tileset URL</span>
+                <div class="urlbar">
+                    <code id="url">—</code>
+                    <button id="copy" class="btn btn-primary">Copy</button>
                 </div>
-                <p class="hint">
-                    Applied as a root ENU transform in the tileset itself, so every client gets it —
-                    not just this preview. Sources that carry their own georeference ignore these.
-                </p>
-            </details>
+                <div class="actions">
+                    <button id="preview" class="btn">Preview in Cesium</button>
+                    <button id="check" class="btn">Test endpoint</button>
+                    <button id="save" class="btn">Save to library</button>
+                    <button id="playground" class="btn btn-ghost">API playground</button>
+                    <button id="hierarchy" class="btn btn-ghost">Hierarchy graph</button>
+                </div>
+                <div id="result" class="result"></div>
+            </div>
         </section>
 
-        <section class="card">
-            <span class="field-label">Tileset URL</span>
-            <div class="urlbar">
-                <code id="url">—</code>
-                <button id="copy" class="btn btn-primary">Copy</button>
+        <!-- ── Library ───────────────────────────────────────────────────────────────────────── -->
+        <section class="panel panel-hidden" id="panel-library">
+            <div class="card">
+                <div class="card-head">
+                    <span class="field-label" style="margin:0">Tracked tilesets</span>
+                    <div class="card-head-actions">
+                        <button id="lib-refresh" class="btn btn-ghost">Refresh stats</button>
+                        <button id="lib-export" class="btn btn-ghost">Export</button>
+                        <button id="lib-import" class="btn btn-ghost">Import</button>
+                    </div>
+                </div>
+                <p class="hint">
+                    Local paths and remote URLs you want to keep around. Stored in this app only —
+                    not shared with the CLI or the web viewer.
+                </p>
+                <div id="lib-list" class="list"></div>
+                <textarea id="lib-io" class="io" spellcheck="false" placeholder="Paste exported JSON here, then press Import again."></textarea>
             </div>
-            <div class="actions">
-                <button id="preview" class="btn">Preview in Cesium</button>
-                <button id="check" class="btn">Test endpoint</button>
-                <button id="playground" class="btn btn-ghost">API playground</button>
-                <button id="hierarchy" class="btn btn-ghost">Hierarchy graph</button>
+        </section>
+
+        <!-- ── Samples ───────────────────────────────────────────────────────────────────────── -->
+        <section class="panel panel-hidden" id="panel-samples">
+            <div class="card">
+                <span class="field-label">Every format this middleware reads</span>
+                <p class="hint">
+                    Real, publicly-hosted datasets — one click loads one into <em>Build</em> with the
+                    right format already selected. Third-party sources are credited; none of this data
+                    is ours unless it says Iconem.
+                </p>
+                <div id="sample-list" class="groups"></div>
             </div>
-            <div id="result" class="result"></div>
         </section>
 
         <footer>
             <span id="ports">—</span>
             <span class="spacer"></span>
-            <a href="https://docs.3dtiled.iconem.com" target="_blank" rel="noreferrer">Docs</a>
+            <a id="link-viewer" href="#" target="_blank" rel="noreferrer">Web viewer</a>
+            <a id="link-explorer" href="#" target="_blank" rel="noreferrer">Hierarchy explorer</a>
+            <a id="link-docs" href="#" target="_blank" rel="noreferrer">Docs</a>
+            <a id="link-plugins" href="#" target="_blank" rel="noreferrer">Cesium for Unreal</a>
+            <a id="link-repo" href="#" target="_blank" rel="noreferrer">Source</a>
         </footer>
     </div>
     <!-- Required: the Electrobun builder emits views/mainview/index.js from the configured view

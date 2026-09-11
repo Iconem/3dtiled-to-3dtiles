@@ -26,6 +26,23 @@ import { BrowserWindow } from "electrobun/main";
 const TILE_PORTS = [3001, 3031, 3032, 3033];
 const STATIC_PORTS = [3041, 3042, 3043];
 
+/**
+ * Where the companion app sends you for the web viewer and the docs.
+ *
+ * Resolution is local-first: an explicit env var wins, then a locally-running `pnpm dev` instance,
+ * then the public deployment. That ordering matters — a developer with the stack running should get
+ * THEIR build, not production, while a plain user who installed only this app still gets working
+ * links instead of a dead localhost URL.
+ *
+ * These are the project's own public deployments, and the only place in the desktop app where a
+ * domain is written down; everything a third party self-hosts (the server, viewer and docs images)
+ * builds its links from DOCS_URL/VIEWER_URL env vars instead. Override with the same env vars here.
+ */
+const LOCAL_VIEWER = 'http://127.0.0.1:3000';
+const LOCAL_DOCS = 'http://127.0.0.1:3002/docs';
+const PUBLIC_VIEWER = 'https://demo.3dtiled.iconem.com';
+const PUBLIC_DOCS = 'https://docs.3dtiled.iconem.com';
+
 // Cottontail exposes Bun-style spawn; node:child_process is the fallback so this keeps working if the
 // main process is switched to the Bun runtime (electrobun.config.ts `build.mainProcess`).
 async function spawnDetached(cmd: string[], cwd: string): Promise<{ kill: () => void }> {
@@ -126,16 +143,30 @@ const staticPort = await ensureServer({
 	timeoutMs: 15_000,
 });
 
-// The launcher is a bundled view; the ports travel in the query string so the UI needs no RPC round
-// trip just to learn where the servers ended up.
-const qs = `?tilePort=${tilePort ?? ""}&staticPort=${staticPort ?? ""}`;
+/** Is something answering here at all? Used to prefer a local viewer/docs over the public one. */
+async function reachable(url: string): Promise<boolean> {
+	try {
+		const r = await fetch(url, { signal: AbortSignal.timeout(1200) });
+		return r.ok;
+	} catch { return false; }
+}
+
+const env = (globalThis as any).process?.env ?? {};
+const viewerUrl = env.VIEWER_URL || (await reachable(LOCAL_VIEWER) ? LOCAL_VIEWER : PUBLIC_VIEWER);
+const docsUrl = env.DOCS_URL || (await reachable(LOCAL_DOCS) ? LOCAL_DOCS : PUBLIC_DOCS);
+
+// The launcher is a bundled view; the ports and resolved URLs travel in the query string so the UI
+// needs no RPC round trip just to learn where things ended up.
+const qs = `?tilePort=${tilePort ?? ""}&staticPort=${staticPort ?? ""}`
+	+ `&viewerUrl=${encodeURIComponent(viewerUrl)}&docsUrl=${encodeURIComponent(docsUrl)}`;
 const mainWindow = new BrowserWindow({
 	title: "3D Tiled — local middleware",
 	url: `views://mainview/index.html${qs}`,
-	frame: { width: 1040, height: 880, x: 120, y: 60 },
+	frame: { width: 1120, height: 940, x: 100, y: 40 },
 });
 
-console.log(`[3dtiled-desktop] tile-server=${tilePort ?? "FAILED"} static=${staticPort ?? "FAILED"} root=${root}`);
+console.log(`[3dtiled-desktop] tile-server=${tilePort ?? "FAILED"} static=${staticPort ?? "FAILED"} `
+	+ `viewer=${viewerUrl} docs=${docsUrl} root=${root}`);
 
 for (const sig of ["SIGINT", "SIGTERM", "exit"]) {
 	try { (globalThis as any).process?.on?.(sig, () => children.forEach((c) => c.kill())); } catch { /* no process object */ }
