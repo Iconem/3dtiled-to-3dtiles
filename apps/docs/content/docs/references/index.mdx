@@ -66,7 +66,27 @@ writeup (Spark 2.0 LoD system, PackedSplats/ExtSplats byte layouts, geometric er
 
 **3DTilesRendererJS Gaussian-splat ecosystem (WilliamLiu-1997)** — closest reference implementations to this repo's RAD path; studied to improve tiling:
 - [3DTilesRendererJS-3DGS-Plugin](https://github.com/WilliamLiu-1997/3DTilesRendererJS-3DGS-Plugin) — the `3d-tiles-rendererjs-3dgs-plugin` this viewer uses to render splats in 3DTRJS (parses `KHR_gaussian_splatting` + `_spz_2`, renders via SparkJS, one shared Spark renderer per scene/renderer, camera-relative rebasing, `sparkRendererOptions`, WebXR-aware). Its `data/gaussianSplat1` & `gaussianSplat2` are wired into this viewer's preset bar (**◈ GSplat 1/2**). Note its rendering tip: keep the globe in the **opaque** pass so it doesn't object-sort against transparent splats at the horizon.
-- [3DGS-PLY-3DTiles-Converter](https://github.com/WilliamLiu-1997/3DGS-PLY-3DTiles-Converter) — PLY→3D Tiles converter (kd-tree tiling, AABB bounds, SPZ v3 + quantized SH). Its [`src/tiling/geometric-error.js`](https://github.com/WilliamLiu-1997/3DGS-PLY-3DTiles-Converter/blob/main/src/tiling/geometric-error.js) is the model our **uniform-per-depth geometric error** mirrors: `GE(depth) = leafReference × (1/samplingRate)^(maxDepth−depth)`, anchored to a deepest-leaf "sparsity + extent" estimate, all siblings at a level sharing one error. Each tileset also emits a `build_summary.json` exposing the full GE-by-depth and sampling schedule — handy for cross-checking. ([Issue #24](https://github.com/WilliamLiu-1997/3DGS-PLY-3DTiles-Converter/issues/24): auto-depth can overload the root node on >8M-splat scenes — a tree-balancing concern worth noting for very large RAD inputs.)
+- **3DGS-PLY-3DTiles-Converter** — PLY→3D Tiles converter (kd-tree tiling, AABB bounds, SPZ v3 + quantized SH). Its `src/tiling/geometric-error.js` is the model our **uniform-per-depth geometric error** mirrors: `GE(depth) = leafReference × (1/samplingRate)^(maxDepth−depth)`, anchored to a deepest-leaf "sparsity + extent" estimate, all siblings at a level sharing one error. Each tileset also emits a `build_summary.json` exposing the full GE-by-depth and sampling schedule — handy for cross-checking. (Its issue #24 noted that auto-depth can overload the root node on >8M-splat scenes — a tree-balancing concern worth noting for very large RAD inputs.)
+
+  <Callout type="warn">
+  **Went closed source.** `github.com/WilliamLiu-1997/3DGS-PLY-3DTiles-Converter` was public earlier
+  in 2026 and no longer resolves — the converter has been taken closed source, so the references above
+  are left unlinked as dead links. Asked directly on the companion site's tracker
+  ([3DGS-PLY-3DTiles-Converter-Website#1](https://github.com/WilliamLiu-1997/3DGS-PLY-3DTiles-Converter-Website/issues/1#issuecomment-5621578818)):
+  *"The WilliamLiu-1997/3DGS-PLY-3DTiles-Converter link do not resolve, is it a private repo or do you
+  intend to make it open-source?"* — no response. The hosted converter *website* stays up as a service,
+  and the 3DGS plugin / 3DTiles-Inspector repos remain open.
+
+  This matters here because that converter is our **cross-validation reference** for the
+  geometric-error model described above — which is why the algorithm is now written out in this page
+  rather than linked: the source is no longer citable.
+
+  The last public release survives as a **private** reconstruction (assembled from published npm
+  tarballs, not a GitHub fork; upstream was Apache-2.0, which permits this) at
+  `github.com/jo-chemla/3DGS-PLY-3DTiles-Converter` — kept for **building tilesets directly** from
+  PLY and for cross-checking this repo's output against the original implementation. Access on
+  request; deliberately not hyperlinked, since the repo is private and the link would 404.
+  </Callout>
 - [3DTiles-Inspector](https://github.com/WilliamLiu-1997/3DTiles-Inspector) — standalone web inspector for 3D Tiles / Gaussian-splat tilesets (root-transform edit, geometric-error & layer-multiplier scaling `1/16x–16x`, splat crop regions, `build_summary.json` round-trip). A good complement to this repo's `viewer.html` 🪲 Debug-tiles overlay.
 
   **The inspector is pre-installed** in `tools-inspector/` — run via npm scripts (no global install needed):

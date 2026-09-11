@@ -23,6 +23,16 @@ in full.
 - **Nov 2025 (CesiumJS v1.135)** — the original extension was **removed**; only the base + `_spz_2`
   pair is supported. Existing tilesets must be re-tiled.
 - **Jan 2026** — `KHR_gaussian_splatting` (base) merged into the glTF repo as a release candidate.
+- **Jan 2026 (16th)** — a **second compression codec** is proposed:
+  [`KHR_gaussian_splatting_compression_lgsc`](https://github.com/KhronosGroup/glTF/pull/2551), wrapping
+  Qualcomm's **L-GSC** (*Lite 3D Gaussian Splat Codec*) v1.0. Opened as
+  `KHR_gaussian_splatting_lgsc` and renamed during review — *"The pattern we've been using for
+  compression extensions is `KHR_gaussian_splatting_compression_lgsc`"* — which confirms the shape the
+  split above was aiming at: **one base extension, an open set of interchangeable compression
+  children**, SPZ being the first rather than the only one. Still an **open PR** (unmerged, awaiting an
+  approving review) and carrying only a README, so the payload nesting isn't specified yet and nothing
+  in this repo's renderer stack decodes it. Details + codec characteristics:
+  [KHR_gaussian_splatting → L-GSC](/docs/references/3dtiles-gltf/KHR_gaussian_splatting).
 
 **Why the `_2` matters (the bug).** The `_2` in `KHR_gaussian_splatting_compression_spz_2` is the
 **SPZ format version (v2)**. As `lexaknyazev` notes in the PR, a KHR extension cannot float across
@@ -49,6 +59,8 @@ orientation (not scale) still looks off, that conversion is the next thing to ch
 
 - glTF base extension — [KhronosGroup/glTF#2490](https://github.com/KhronosGroup/glTF/pull/2490)
 - glTF SPZ compression child — [KhronosGroup/glTF#2531](https://github.com/KhronosGroup/glTF/pull/2531)
+- glTF L-GSC compression child — [KhronosGroup/glTF#2551](https://github.com/KhronosGroup/glTF/pull/2551) (open)
+- Qualcomm L-GSC reference codec — [qualcomm/lite-3Dgsplat-codec](https://github.com/qualcomm/lite-3Dgsplat-codec) (Apache-2.0, C++)
 - CesiumJS migration issue — [CesiumGS/cesium#12837](https://github.com/CesiumGS/cesium/issues/12837)
 - CesiumJS implementation PR — [CesiumGS/cesium#12843](https://github.com/CesiumGS/cesium/pull/12843)
 - "upside-down in Cesium" coordinate issue — [KhronosGroup/glTF#2509](https://github.com/KhronosGroup/glTF/issues/2509)
