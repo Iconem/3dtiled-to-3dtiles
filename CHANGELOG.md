@@ -5,6 +5,37 @@ Format loosely follows [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+### Added / Fixed — 2026-09-11b (aggregate spatial nesting · stats content sampling · Bing raster basemap)
+- **Added: `/aggregate` spatial auto-nesting** (`&nest=auto`, on from 8 children). A flat root is fine
+  for a dozen datasets and wrong for 500: every child sat directly under the root, so the moment the
+  root refined, all 500 child `tileset.json` were candidates. Nesting builds a **web-mercator
+  quadtree** from nothing but each child's root bounding sphere — the only thing knowable without
+  opening the datasets — the same idea as 3D Tiles implicit tiling and Bing's quadkeys. Each dataset
+  is placed at the **deepest level whose cell still comfortably contains it** (4× slack), so a 200 m
+  scan lands in its city cell while a country-wide dataset stays shallow and is never split; the trie
+  is then path-compressed, giving continent → country → city only where datasets actually diverge.
+  Culling does the work at render time, but the **geometric error is what stops the fetch**: a group's
+  GE is 2× its children's (also satisfying the spec's monotonic-decrease rule), so from a world view a
+  site-sized group subtends a fraction of a pixel and is never traversed. Verified with 28 datasets
+  worldwide — root fanout 28 → 4, depth 8, 20 groups, Paris nesting as Eiffel+Louvre (r≈2 km) →
+  Sacré-Cœur (3 km) → Versailles (10 km), GE strictly monotonic. `&nest=0` restores the flat root.
+- **Added: `/stats` content sampling** (`&sample=N`) plus `leafNodes`, per-level `leaves`, and
+  `maxFanout`. The sampler picks N content tiles **stratified across depth** (leaves *and* intermediate
+  nodes) and parses **only the GLB JSON chunk** — primitive counts, extensions, texture MIME types and
+  compression are all declared there, so no Draco/meshopt/SPZ decode is needed. Off by default; the
+  rest of the walk still reads nothing but tileset JSON and subtree buffers. Verified across content
+  types: Potree → points, no triangles; Bing → 512 triangles / 1536 vertices / JPEG, exactly the globe
+  shell's 16×16×2 grid; WL Elevator → ~24.7 k splats/tile with `KHR_gaussian_splatting` +
+  `_compression_spz_2` + `KHR_materials_unlit` + `EXT_splat_opacity`.
+- **Changed: the Bing globe shell now defaults to Bing's own raster tiles.** Low zoom was never a gap
+  in `tf=3dv4` — it is a different product: Bing Maps itself draws imagery-on-terrain there and only
+  switches to photogrammetry around z13. Those raster tiles are keyless, quadkey-addressed, and on the
+  **same host** as the mesh, so the shell now matches what it hands over to. `&basemap=osm` and any
+  `{z}/{x}/{y}` / `{q}` template remain available; attribution resolves from the *requested* basemap.
+- **Fixed: two dead viewer splat presets.** The 3DGS-plugin repo renamed its samples
+  (`data/gaussianSplat1|2` → `Elevator-3dtiles` / `SvirnasAlyt-3dtiles`); both preset URLs had been
+  404ing. Found by the new `/stats?sample=` reporting HTTP 404 for every sampled tile.
+
 ### Added / Fixed — 2026-09-11 (Bing low-zoom globe · desktop app · L-GSC docs · branch consolidation)
 - **Added: `apps/desktop`, an Electrobun companion app** that runs the tile-server **on-device** and
   turns a dataset (local path or URL) into a paste-ready 3D Tiles endpoint — the "companion app"
