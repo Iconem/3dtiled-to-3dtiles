@@ -1,3 +1,8 @@
 packages:
   - 'packages/*'
   - 'apps/*'
+  # apps/desktop is an Electrobun app: its toolchain and dependencies are managed by Hutch into
+  # apps/desktop/.hutch (gitignored), not by pnpm. Excluding it keeps `pnpm install
+  # --frozen-lockfile` — which the Dockerfile and every CI job run — completely unaffected by the
+  # desktop app, and keeps its Bun-flavoured devDependencies out of pnpm-lock.yaml.
+  - '!apps/desktop'

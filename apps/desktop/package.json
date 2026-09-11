@@ -1,0 +1,9 @@
+{
+	"name": "3dtiled-desktop",
+	"version": "0.1.0",
+	"private": true,
+	"description": "3D Tiled desktop companion — runs the tile-server middleware on-device and turns a local dataset into a paste-ready 3D Tiles URL",
+	"devDependencies": {
+		"@types/bun": "latest"
+	}
+}

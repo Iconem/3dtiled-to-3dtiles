@@ -1,0 +1,68 @@
+---
+title: "Desktop app"
+description: "3D Tiled desktop companion — runs the tile-server on-device and turns a local dataset into a paste-ready 3D Tiles URL."
+---
+
+The desktop companion (`apps/desktop`) is the **run-the-middleware-on-device** app: it starts
+`packages/tile-server` locally, then turns a dataset on your disk — or a public URL — into a live OGC
+3D Tiles endpoint you can paste into Cesium for Unreal/Unity, QGIS, or CesiumJS.
+
+Nothing is uploaded. The conversion happens on your machine, streamed on demand (`cache=none`) or
+cached to the local disk cache (`cache=full`). It is [`3dtiled serve`](/docs/guide/cli-usage) with a
+window, plus the globe-placement params and a stock-CesiumJS preview.
+
+## Running it
+
+```sh
+cd apps/desktop
+npx electrobun build     # writes build/<target>/
+npx electrobun dev       # build + run, with watch
+```
+
+On Windows, Hutch wants an explicit home if your user directory already contains unrelated files:
+
+```powershell
+$env:HUTCH_HOME = "$env:LOCALAPPDATA\hutch-home"
+```
+
+## Why Electrobun rather than Tauri or Electron
+
+| | |
+|---|---|
+| **Tauri** | needs a Rust + MSVC toolchain this repo has no other use for |
+| **Electron** | ~200 MB dependency in a monorepo whose CI runs `pnpm install` on every build |
+| **Electrobun** ✅ | small native host (Hutch + the Cottontail JSC runtime), official Windows 11 / macOS 14 / Ubuntu 24.04 support, toolchain lands in `.hutch/` (gitignored) |
+
+`apps/desktop` is deliberately **excluded from the pnpm workspace**, so
+`pnpm install --frozen-lockfile` — which the Dockerfile and every CI job run — is entirely unaffected
+by the desktop app.
+
+## Process model
+
+Two Node children, both reusing scripts already in this repo:
+
+- `packages/tile-server/server.js` — the middleware.
+- `scripts/static-server.mjs` over `scripts/` — serves `cesium-harness.html`, so **Preview in Cesium**
+  is a plain `http://` page rather than depending on `views://` query-string handling.
+
+If a 3dtiled server is already listening on a candidate port (e.g. you have `pnpm dev` up), the app
+**adopts** it instead of starting a second copy, and leaves it running on quit.
+
+## What the launcher does
+
+- Builds the URL against `/tiles/tileset.json`, the front door that dispatches to `/stream` for
+  `cache=none|hierarchy` and `/convert` for `cache=full` — so the UI never re-encodes that routing rule.
+- **Place a local dataset on the globe** applies `&lon/&lat/&alt/&heading` as a root ENU transform *in
+  the tileset*, so every client gets the placement — not just the preview. Sources carrying their own
+  georeference ignore them.
+- **Test endpoint** fetches the tileset and reports asset version, geometric error, bounding-volume
+  kind, root children, and whether a root transform was applied — a fast sanity check before you paste
+  the URL into a heavier client.
+- **Preview in Cesium** opens the stock-CesiumJS harness, which has zero viewer-side fix-ups: whatever
+  it shows is what any 3D Tiles client gets from the tileset alone.
+
+## Not done yet
+
+Packaging, signing and auto-update; a native file picker (the dataset field is typed/pasted today);
+and bundling Node so the app runs without a repo checkout — it currently locates and runs the
+tile-server from the surrounding repo.

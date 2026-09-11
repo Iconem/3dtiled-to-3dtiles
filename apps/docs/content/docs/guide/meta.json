@@ -2,6 +2,7 @@
   "pages": [
     "supported-formats",
     "cli-usage",
+    "desktop-app",
     "architecture-caching",
     "architecture-generic",
     "[API Playground (embedded)](/docs/api-reference)",
