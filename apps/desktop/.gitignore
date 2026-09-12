@@ -3,6 +3,8 @@ node_modules/
 build/
 dist/
 artifacts/
+# scratch dir the Cottontail runtime creates next to the project on dev/build
+.cottontail-tmp/
 *.tsbuildinfo
 
 # hutch drops an empty template-marker next to the project dir

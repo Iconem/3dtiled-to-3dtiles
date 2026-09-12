@@ -21,7 +21,8 @@
  * If a 3dtiled server is already listening on a candidate port (e.g. you have `pnpm dev` running),
  * we ADOPT it instead of starting a second copy, and leave it running on quit.
  */
-import { BrowserWindow } from "electrobun/main";
+import { BrowserWindow, Utils, defineElectrobunRPC } from "electrobun/main";
+import type { DesktopRPC } from "../shared/rpc-schema";
 
 const TILE_PORTS = [3001, 3031, 3032, 3033];
 const STATIC_PORTS = [3041, 3042, 3043];
@@ -159,10 +160,32 @@ const docsUrl = env.DOCS_URL || (await reachable(LOCAL_DOCS) ? LOCAL_DOCS : PUBL
 // needs no RPC round trip just to learn where things ended up.
 const qs = `?tilePort=${tilePort ?? ""}&staticPort=${staticPort ?? ""}`
 	+ `&viewerUrl=${encodeURIComponent(viewerUrl)}&docsUrl=${encodeURIComponent(docsUrl)}`;
+/**
+ * Native file/folder picker, exposed to the launcher view over RPC.
+ *
+ * It has to live in the main process: a webview `<input type=file>` yields a sandboxed File object
+ * with no real path, and the middleware needs an actual filesystem path to hand to an adapter. The
+ * OS dialog is the only way to get one.
+ */
+const rpc = defineElectrobunRPC<DesktopRPC, "bun">("bun", {
+	handlers: {
+		requests: {
+			pickDataset: ({ directory, allowedFileTypes }) =>
+				Utils.openFileDialog({
+					canChooseFiles: !directory,
+					canChooseDirectory: directory,
+					allowsMultipleSelection: false,
+					allowedFileTypes: allowedFileTypes || "*",
+				}),
+		},
+	},
+});
+
 const mainWindow = new BrowserWindow({
 	title: "3D Tiled — local middleware",
 	url: `views://mainview/index.html${qs}`,
 	frame: { width: 1120, height: 940, x: 100, y: 40 },
+	rpc,
 });
 
 console.log(`[3dtiled-desktop] tile-server=${tilePort ?? "FAILED"} static=${staticPort ?? "FAILED"} `

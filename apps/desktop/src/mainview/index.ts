@@ -11,8 +11,31 @@
  * process may adopt an already-running server rather than starting one, and it resolves whether a
  * local viewer/docs is up — neither is knowable at build time.
  */
+import { Electroview } from 'electrobun/view';
 import { CATALOG, LINKS, type Sample } from './catalog';
 import { loadLibrary, saveLibrary, newId, serialize, replaceAll, type LibraryEntry } from './library';
+import type { DesktopRPC } from '../shared/rpc-schema';
+
+/**
+ * RPC to the main process, for the one thing a webview genuinely cannot do: open a native file
+ * dialog and learn a real filesystem path.
+ *
+ * Construction is guarded because this same bundle is rendered in a plain browser during
+ * verification (esbuild + a static server), where there is no Electrobun host to talk to. In that
+ * case `picker` stays null and the Browse buttons hide themselves rather than throwing on click.
+ */
+type PickerRPC = ReturnType<typeof Electroview.defineRPC<DesktopRPC>>;
+
+let pickerRpc: PickerRPC | null = null;
+try {
+  const rpc = Electroview.defineRPC<DesktopRPC>({ handlers: { requests: {} } });
+  // Constructing the view is what wires the transport; we keep the rpc handle, not the view.
+  new Electroview({ rpc });
+  pickerRpc = rpc;
+} catch {
+  pickerRpc = null;
+}
+const pickerAvailable = () => Boolean(pickerRpc && (globalThis as { __electrobun?: unknown }).__electrobun);
 
 const params = new URLSearchParams(location.search);
 const tilePort = params.get('tilePort');
@@ -75,10 +98,37 @@ for (const el of [srcEl, formatEl, cacheEl, ...placement.map((k) => $<HTMLInputE
   el.addEventListener('change', refresh);
 }
 
+// ── native file picker ──────────────────────────────────────────────────────────────────────────
+//
+// Tree formats are a FOLDER (Potree's cloud.js directory, a streamed-SOG LOD folder, an unpacked
+// 3D Tiles tree); single-file formats are a FILE (.copc.laz, .rad, .lcc, .3tz). Hence two buttons
+// rather than one dialog that has to guess — on Windows a single dialog cannot offer both.
+const DATASET_FILE_TYPES = 'laz,las,copc,rad,lcc,json,js,zip,3tz,slpk,glb,b3dm';
+
+async function browse(directory: boolean) {
+  if (!pickerAvailable()) return say('The native picker needs the desktop app — paste a path instead.', 'err');
+  try {
+    const picked = await pickerRpc!.request.pickDataset({
+      directory,
+      allowedFileTypes: directory ? '*' : DATASET_FILE_TYPES,
+    });
+    const path = picked?.[0];
+    if (!path) return;                                   // user cancelled — not an error
+    srcEl.value = path;
+    refresh();
+    say(`Selected ${path}`, 'ok');
+  } catch (e) {
+    say(`File picker failed: ${e}`, 'err');
+  }
+}
+
+$('browse-file').addEventListener('click', () => browse(false));
+$('browse-dir').addEventListener('click', () => browse(true));
+
 // ── tabs ────────────────────────────────────────────────────────────────────────────────────────
 function showTab(name: string) {
   for (const b of document.querySelectorAll<HTMLButtonElement>('.tab')) {
-    b.classList.toggle('tab-active', b.dataset.tab === name);
+    b.classList.toggle('tab-active', b.dataset['tab'] === name);
   }
   for (const p of document.querySelectorAll<HTMLElement>('.panel')) {
     p.classList.toggle('panel-hidden', p.id !== `panel-${name}`);
@@ -86,7 +136,10 @@ function showTab(name: string) {
 }
 $('tabs').addEventListener('click', (e) => {
   const t = (e.target as HTMLElement).closest<HTMLButtonElement>('.tab');
-  if (t?.dataset.tab) showTab(t.dataset.tab);
+  // `dataset` is an index signature, so bracket access is required under
+  // noPropertyAccessFromIndexSignature (this tsconfig enables it).
+  const tab = t?.dataset['tab'];
+  if (tab) showTab(tab);
 });
 
 // ── build actions ───────────────────────────────────────────────────────────────────────────────
@@ -184,7 +237,7 @@ function renderLibrary() {
 
     const glyph = document.createElement('div');
     glyph.className = 'glyph';
-    glyph.dataset.kind = kindOf(e.format);
+    glyph.dataset['kind'] = kindOf(e.format);
     glyph.textContent = iconOf(e.format);
 
     const body = document.createElement('div');
@@ -374,6 +427,10 @@ function useSample(s: Sample) {
   setLink('link-docs', docsUrl);
   setLink('link-plugins', LINKS.cesiumUnreal);
   setLink('link-repo', LINKS.repo);
+
+  // Outside the Electrobun host (e.g. the bundle rendered in a plain browser for verification) the
+  // native dialog cannot exist — hide the buttons rather than offering an action that always fails.
+  if (!pickerAvailable()) for (const id of ['browse-file', 'browse-dir']) $(id).style.display = 'none';
 
   renderLibrary();
   renderSamples();

@@ -30,8 +30,12 @@
             <div class="card">
                 <label class="field">
                     <span>Dataset — local path or URL</span>
-                    <input id="src" type="text" spellcheck="false"
-                           placeholder="C:\data\scan.copc.laz   or   https://…/cloud.js">
+                    <div class="urlbar">
+                        <input id="src" type="text" spellcheck="false"
+                               placeholder="C:\data\scan.copc.laz   or   https://…/cloud.js">
+                        <button id="browse-file" class="btn" title="Pick a single-file dataset (.copc.laz, .rad, .lcc, .3tz…)">File…</button>
+                        <button id="browse-dir" class="btn" title="Pick a dataset folder (Potree cloud.js dir, streamed-SOG LOD dir, unpacked 3D Tiles)">Folder…</button>
+                    </div>
                 </label>
 
                 <div class="row">

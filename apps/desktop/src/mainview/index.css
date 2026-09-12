@@ -32,7 +32,13 @@ body {
 /* LEFT-aligned, not centred, and deliberately so. On a HiDPI Windows display the webview reports a
    CSS viewport wider than the native frame, so `margin: 0 auto` centres the content against a width
    the user cannot actually see and the right-hand side is clipped. */
-.container { max-width: 1000px; margin: 0; padding: 24px 26px 32px; }
+/* 720px is NOT a style preference — it is the measured safe width, and widening it regresses.
+   On a HiDPI Windows display this webview reports a CSS viewport WIDER than the native frame, so
+   content laid out past roughly (window width ÷ DPI scale) CSS px is simply never on screen. A
+   1000px container on a 1120px window at 150% scaling clipped the right-hand column clean off —
+   including the dataset row's Browse buttons — and nothing in a plain-browser preview reveals it,
+   because a normal browser has no such mismatch. Verify any change to this in the real app. */
+.container { max-width: 720px; margin: 0; padding: 24px 26px 32px; }
 
 header { display: flex; align-items: center; gap: 12px; margin-bottom: 8px; flex-wrap: wrap; }
 h1 { font-size: 18px; font-weight: 600; margin: 0; letter-spacing: -0.02em; }
@@ -114,6 +120,9 @@ select { appearance: none; background-image: none; cursor: pointer; }
   color: hsl(var(--foreground));
 }
 .urlbar code.empty { color: hsl(var(--muted-foreground)); }
+/* The dataset row reuses .urlbar for its input + Browse buttons, so the input has to take the slack
+   the same way the <code> does above. */
+.urlbar input[type=text] { flex: 1; min-width: 0; }
 
 .actions { display: flex; gap: 8px; margin-top: 12px; flex-wrap: wrap; }
 
