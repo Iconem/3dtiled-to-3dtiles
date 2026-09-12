@@ -875,6 +875,22 @@
               "default": 86400
             },
             "description": "Cache lifetime in SECONDS for both the assembled mosaic and each child's fetched root. Defaults to 86400 (one day): assembling N children costs N round-trips, so it must not happen per request, but a mosaic that never re-reads its children cannot notice one moved. ttl=0 bypasses the cache in both directions - use it while a dataset is being re-tiled. Child fetches run through a 16-way pool; unbounded concurrency loses children at scale."
+          },
+          {
+            "name": "only",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            },
+            "description": "Keep only children whose URL contains this case-insensitive substring. Repeatable. Applied BEFORE exclude. Motivating case: a site re-scanned yearly yields N tilesets over the same ground and you usually want one - e.g. only=_d2024. Filtering is server-side, so the result is still a plain 3D Tiles endpoint you can paste anywhere; the URL is the whole state. An empty result is a 400, not an empty tileset."
+          },
+          {
+            "name": "exclude",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            },
+            "description": "Drop children whose URL contains this case-insensitive substring. Repeatable. Applied after only."
           }
         ],
         "responses": {

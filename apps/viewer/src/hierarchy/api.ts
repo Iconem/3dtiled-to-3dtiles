@@ -103,7 +103,15 @@ export function labelForUrl(raw: string): string {
       const set = u.searchParams.get('set');
       const nest = u.searchParams.get('nest');
       const what = set ? `set=${set}` : `×${u.searchParams.getAll('url').length || '?'}`;
-      return `aggregate ${what}${nest ? ` (${nest})` : ''}`;
+      // Filters change which datasets are in the mosaic, so two otherwise-identical URLs are
+      // genuinely different tilesets — the label has to say so or a comparison is unreadable.
+      const only = u.searchParams.getAll('only');
+      const exclude = u.searchParams.getAll('exclude');
+      const filter = [
+        only.length ? `only ${only.join('+')}` : '',
+        exclude.length ? `−${exclude.join('−')}` : '',
+      ].filter(Boolean).join(' ');
+      return `aggregate ${what}${nest ? ` (${nest})` : ''}${filter ? ` [${filter}]` : ''}`;
     }
     const parts = u.pathname.split('/').filter(Boolean);
     const last = parts.pop() ?? u.hostname;

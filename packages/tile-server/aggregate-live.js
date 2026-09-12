@@ -473,12 +473,31 @@ export async function handleAggregate(req, res, u) {
     res.end(`unknown set "${setName}" — try one of: ${Object.keys(DEMO_SETS).join(', ')}`);
     return true;
   }
-  const urls = [
+  let urls = [
     ...(setName ? DEMO_SETS[setName].urls : []),
     ...u.searchParams.getAll('url'),
     ...(u.searchParams.get('urls') || '').split(',').map(s => s.trim()).filter(Boolean).map(decodeURIComponent),
   ];
   if (!urls.length) { res.writeHead(400, CORS); res.end(`missing ?urls=<u1>,<u2>,… (each URL-encoded), repeated ?url=, or ?set=<${Object.keys(DEMO_SETS).join('|')}>`); return true; }
+
+  // ── selection ──────────────────────────────────────────────────────────────────────────────────
+  //
+  // Overlapping captures are the motivating case: a site re-scanned yearly gives N tilesets covering
+  // the SAME ground, and you usually want one. Filtering happens here rather than client-side so the
+  // emitted tileset genuinely contains only the chosen datasets — the URL is the whole state, which
+  // means a filtered view is still a plain 3D Tiles endpoint you can paste into Unreal.
+  //
+  // Matching is a case-insensitive substring over the child URL, repeatable, `only` before `exclude`.
+  // Substring rather than regex on purpose: these go in query strings that people edit by hand.
+  const only = u.searchParams.getAll('only').filter(Boolean).map(s => s.toLowerCase());
+  const exclude = u.searchParams.getAll('exclude').filter(Boolean).map(s => s.toLowerCase());
+  if (only.length) urls = urls.filter(x => only.some(s => x.toLowerCase().includes(s)));
+  if (exclude.length) urls = urls.filter(x => !exclude.some(s => x.toLowerCase().includes(s)));
+  if (!urls.length) {
+    res.writeHead(400, CORS);
+    res.end(`no children left after only=[${only}] exclude=[${exclude}]`);
+    return true;
+  }
   const nest = u.searchParams.get('nest') ?? 'auto';
   // &ttl=<seconds>; ttl=0 bypasses the cache entirely (both the mosaic and its child roots), which is
   // what you want while iterating on a dataset that is actively being re-tiled.
