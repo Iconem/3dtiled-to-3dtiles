@@ -78,9 +78,16 @@ legible instead of burying it under 4 000 leaves.
 
 Before assuming a low tile count is a bug, check `truncatedBy` and `maxFanout`:
 
-- **LCC Big Mirror → 3 tiles, `truncatedBy: []`.** Real. LCC is not an octree; the adapter emits a
-  **REPLACE LoD chain**, one tile per level (`maxFanout: 1`, levels `1, 1, 1`). Three tiles means
-  three LoD levels.
+- **LCC Big Mirror → 3 tiles, `truncatedBy: []`.** Real — but *not* because LCC is flat.
+
+  LCC **is** hierarchical: `index.bin` packs each **Unit** as a grid cell (`x` low16 / `y` high16),
+  and each Unit carries its own per-LOD runs, so the emitted tree is *root → one child per Unit →
+  a REPLACE LoD chain within that Unit*. Root fan-out is therefore the **Unit count**.
+
+  Big Mirror is simply a **single-Unit** capture, so its fan-out is 1 and it looks like a bare chain.
+  The same adapter on XGRIDS' Guan Temple (11.4 M splats) gives **155 nodes, fan-out 41, depth 4**
+  (levels `1, 41, 40, 37, 36`) — 41 spatial cells, each up to four LOD levels deep. Judge from
+  `maxFanout`, not from one small dataset.
 - **RAD Tastier (500 k splats) → 11 tiles, depth 3.** Also real — a small scene.
 - **RAD Coit (40 M splats) → 2 296 nodes, `truncatedBy: ["external"]`.** *Not* real; that's the cap.
 

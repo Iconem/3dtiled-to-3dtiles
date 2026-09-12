@@ -175,6 +175,36 @@ which is why the TTL is a day rather than forever. Failures get a much shorter T
 host cannot pin a degraded mosaic for a day. `&ttl=0` bypasses the cache **in both directions** — use
 it while a dataset is actively being re-tiled.
 
+## Selecting a subset: `&only=` / `&exclude=`
+
+Overlapping captures are the motivating case. A site re-scanned yearly gives N tilesets covering the
+**same ground** — Mes Aynak has one scan per year — and you usually want to see one, not all of them
+stacked.
+
+```
+…/aggregate/tileset.json?set=angkor&only=PhnomKulen        → 4 of 23
+…/aggregate/tileset.json?set=angkor&exclude=PhnomKulen     → 19 of 23
+…/aggregate/tileset.json?set=angkor&only=Bayon&only=TaProhm → 2 of 23
+…/aggregate/tileset.json?set=mysite&only=_d2024            → just the 2024 scan
+```
+
+Both are repeatable, case-insensitive **substring** matches against the child URL (`only` is applied
+first, then `exclude`). Substring rather than regex on purpose: these live in query strings that
+people edit by hand. An empty result is a `400` rather than an empty tileset, so a typo'd filter
+fails loudly.
+
+Filtering happens **server-side**, which is the point: the emitted tileset genuinely contains only
+the chosen datasets, so a filtered view is still a plain 3D Tiles endpoint you can paste into Cesium
+for Unreal. The URL *is* the whole state.
+
+<Callout type="info">
+**Overlap is already handled.** Every tile `/aggregate` emits — root, groups and dataset entries —
+uses `refine: "ADD"`, so sibling datasets are drawn *together* rather than one replacing another.
+`REPLACE` still applies *inside* each child tileset, which is what you want: replace between LODs of
+one dataset, add between datasets. Nothing extra is needed for overlapping scans; filtering is about
+not *wanting* to see them at once, not about correctness.
+</Callout>
+
 ## Hand-built hierarchies still compose
 
 Auto-nesting derives grouping from geometry alone. If you want a *semantic* hierarchy — by campaign,
@@ -188,6 +218,33 @@ hand-authored "Cambodia" node can have an auto-nested mosaic of 40 Angkor scans 
 [`/stats` and the hierarchy explorer](/docs/guide/hierarchy-explorer) walk it directly — including
 following each child external reference — which is the quickest way to confirm a mosaic grouped the
 way you expected.
+
+## Sources that need care before you aggregate them
+
+Three real sources were evaluated for the demo sets and each failed a different check. They are
+documented rather than included, because each failure is a general lesson about aggregation.
+
+**Aerometrex** (e.g. `demo3d.aerometrex.com/USA/US0014_Brooklyn_50mm_Oct_2021/Scene/Cesium_Brooklyn.json`)
+— a valid tileset, fetches fine **server-side**, but sends **no `Access-Control-Allow-Origin`** even
+when asked with an `Origin` header. `/aggregate` can therefore derive its bounds, but the mosaic's
+child `content.uri` points back at that host, so a *browser* client fails on it. This server's
+[`/proxy`](/docs/api-reference) re-serves any URL with CORS — but proxying a **tileset root alone is
+not enough**: its children are relative (`Data/L13_0.b3dm`) and a client would resolve them against
+the proxy path rather than the origin host. A tileset-aware proxy that rewrites child URIs is the
+missing piece; until then, treat non-CORS hosts as server-side-only.
+
+<Callout type="warn">
+**Vexcel needs a secret.** `api.vexcelgroup.com/v2/3d/tileset` answers with a root listing ~10
+Australian collections, but its child URLs drop the `api_key`, and fetching one without the key
+returns **403**. The key is a **credential** — it must never be committed to a demo set in a public
+repo. Pass it per request with `?url=`, or wire it through an environment variable in your own
+deployment.
+</Callout>
+
+**The Iconem STAC catalogue** (`app.iconem.com/api/stac/collections/tiles`) is a valid STAC
+Collection whose `item_assets` declares a 3D Tiles entry point, and `…/api/stac/search?collections=tiles`
+returns items — but **unauthenticated it exposes only a handful**, not the full catalogue. Enumerating
+everything, and minting share links, needs credentials and is deliberately not automated here.
 
 ## Limits worth knowing
 

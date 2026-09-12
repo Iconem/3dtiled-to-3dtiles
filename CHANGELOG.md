@@ -25,9 +25,13 @@ Format loosely follows [Keep a Changelog](https://keepachangelog.com/).
   invisible — it had exhausted external-tileset refs at 64, not nodes. `/aggregate` mosaics hit the
   same cap, being made of external refs.
 - **Answered with data, not guesses: the small tile counts are mostly real.** LCC Big Mirror → 3
-  tiles, `truncatedBy: []`, `maxFanout: 1`, levels `1,1,1` — LCC is not an octree, so the adapter
-  emits a REPLACE **LoD chain**, one tile per level. RAD Tastier → 11 tiles is a genuinely small
-  500 k-splat scene. Only RAD Coit was misleading, per the item above.
+  tiles, `truncatedBy: []`, `maxFanout: 1`. RAD Tastier → 11 tiles is a genuinely small 500 k-splat
+  scene. Only RAD Coit was misleading, per the item above.
+  **Correction (same day):** an earlier version of this entry explained Big Mirror as *"LCC is not an
+  octree, so the adapter emits a LoD chain"*. That is wrong. LCC **is** hierarchical — `index.bin`
+  packs each **Unit** as a grid cell, and the adapter emits *root → one child per Unit → a REPLACE
+  LoD chain per Unit*, so root fan-out is the Unit count. Big Mirror is a **single-Unit** capture.
+  Guan Temple (11.4 M splats) through the same adapter: **155 nodes, fan-out 41, depth 4**.
 - **Added: explorer depth cap, external cap, Reload all, and demo presets.** The depth cap doubles as
   a display control — capping at level 8 keeps a deep tileset's top structure legible instead of
   burying it under 4 000 leaves. Options apply to newly added tilesets and **Reload all** re-walks

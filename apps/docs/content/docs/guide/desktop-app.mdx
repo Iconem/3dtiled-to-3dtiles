@@ -129,6 +129,36 @@ The row icons are **generated format glyphs, not thumbnails**. A real preview wo
 tileset in a hidden Cesium view, which is far too expensive for a list; the glyph encodes the one
 thing knowable without fetching anything — whether it is a point cloud, splats or a mesh.
 
+## Window sizing, and why the width is conservative
+
+The view measures its content and asks the host to resize (`fitWindow` over RPC) — only the view can
+measure, only the host can resize. Height auto-grows so a long tab needs less scrolling; it never
+shrinks below the default, so switching back to a short tab doesn't collapse a window you're using.
+
+**Width is deliberately left generous rather than fitted**, because the scale factor is not
+observable from inside the app. Measured on the same machine, same code, two runs:
+
+- one run laid out at **1:1** — `innerWidth: 1104`, `devicePixelRatio: 1`, content 744 px, text at
+  normal size, with empty space to the right;
+- another rendered the *same* layout ~1.5× larger and clipped at ~747 px.
+
+That second case is **Windows DPI virtualization**: the launcher is DPI-unaware, so the compositor
+scales its output and only `viewport ÷ scale` CSS px are ever on screen. Both the webview and the
+host report numbers that agree with each other and are wrong about what's visible —
+`devicePixelRatio` says `1`. So the app cannot compute the correction, and fitting the width to the
+content would silently clip it whenever virtualization is active. A little dead space on an unscaled
+display is the price of never losing the right-hand column.
+
+The same constraint is why the content column is a fixed 720 px. Widening it to 1000 px did clip the
+Browse buttons off-screen, and **no browser-based preview reveals this** — only running the real app.
+
+## Dark-theme native controls
+
+`:root { color-scheme: dark }` is load-bearing, not decoration. Without it WebView2 renders
+`<select>` drop-down popups, scrollbars and form controls with the **light** default — a white popup
+of pale options over a dark app, effectively unreadable. Styling `option` alone does not fix the
+popup on Windows, because the popup is an OS window rather than page content.
+
 ## Where its links point
 
 `VIEWER_URL` / `DOCS_URL` win if set; otherwise the app probes for a locally-running viewer (`:3000`)
