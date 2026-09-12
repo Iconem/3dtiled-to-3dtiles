@@ -145,7 +145,11 @@ async function sampleContent(nodes, childCount, limit) {
 /** Walk a tileset (explicit + implicit + external refs), collecting bounded node/level stats. */
 export async function collectStats(tsUrl, { maxNodes = 4000, maxDepth = 32, maxExternal = 64, sample = 0 } = {}) {
   const nodes = [];                 // {i, p, l, ge, r, c}
-  let truncated = false, externals = 0, subtreesFetched = 0;
+  // A bare `truncated: true` is not actionable: three different budgets can stop a walk, and the fix
+  // differs for each. Reporting WHICH one is why a walk that stopped at 2 296 nodes under a 20 000
+  // node budget is legible at all — that one had run out of external-tileset fetches, not nodes.
+  const stopped = new Set();
+  let externals = 0, subtreesFetched = 0;
   const full = () => nodes.length >= maxNodes;
 
   // `u` is the resolved absolute content URL — kept only so the optional sampling pass has something
@@ -174,7 +178,7 @@ export async function collectStats(tsUrl, { maxNodes = 4000, maxDepth = 32, maxE
     while (frontier.length && !full()) {
       const next = [];
       for (const st of frontier) {
-        if (full() || baseDepth + st.level > maxDepth) { truncated = true; continue; }
+        if (full() || baseDepth + st.level > maxDepth) { stopped.add(full() ? 'nodes' : 'depth'); continue; }
         let sub;
         try {
           const u = stTemplate.replace('{level}', st.level).replace('{x}', st.x).replace('{y}', st.y).replace('{z}', st.z);
@@ -190,9 +194,9 @@ export async function collectStats(tsUrl, { maxNodes = 4000, maxDepth = 32, maxE
             if (!sub.tileBit(bit)) continue;
             const { x: dx, y: dy, z: dz } = decode(m);
             const level = st.level + d;
-            if (baseDepth + level > maxDepth) { truncated = true; continue; }
+            if (baseDepth + level > maxDepth) { stopped.add('depth'); continue; }
             const parent = d === 0 ? st.parentIdx : (idxByCell.get(`${d-1}-${dx>>1}-${dy>>1}-${dz>>1}`) ?? st.parentIdx);
-            if (full()) { truncated = true; break; }
+            if (full()) { stopped.add('nodes'); break; }
             // absolute cell coords, so the content template resolves to a real tile URL
             const ax = st.x * 2 ** d + dx, ay = st.y * 2 ** d + dy, az = st.z * 2 ** d + dz;
             const cUrl = (ctTemplate && sub.contentBit(bit))
@@ -213,11 +217,11 @@ export async function collectStats(tsUrl, { maxNodes = 4000, maxDepth = 32, maxE
       }
       frontier = next;
     }
-    if (frontier.length) truncated = true;
+    if (frontier.length) stopped.add('nodes');
   }
 
   async function walkTile(tile, baseUrl, parentIdx, depth) {
-    if (full() || depth > maxDepth) { truncated = true; return; }
+    if (full() || depth > maxDepth) { stopped.add(full() ? 'nodes' : 'depth'); return; }
     if (tile.implicitTiling) { await walkImplicit(tile, baseUrl, parentIdx, depth); return; }
     const uri = tile.content?.uri ?? tile.content?.url;
     const isExternal = uri && isTilesetUri(uri);
@@ -230,9 +234,9 @@ export async function collectStats(tsUrl, { maxNodes = 4000, maxDepth = 32, maxE
         const ext = await fetchJson(extUrl);
         if (ext.root) await walkTile(ext.root, extUrl, i, depth + 1);
       } catch { /* unreachable external ref — keep going */ }
-    } else if (isExternal) truncated = true;
+    } else if (isExternal) stopped.add('external');
     for (const ch of tile.children || []) {
-      if (full()) { truncated = true; break; }
+      if (full()) { stopped.add('nodes'); break; }
       await walkTile(ch, baseUrl, i, depth + 1);
     }
   }
@@ -267,7 +271,12 @@ export async function collectStats(tsUrl, { maxNodes = 4000, maxDepth = 32, maxE
     leafNodes,
     maxFanout: childCount.reduce((a, c) => Math.max(a, c), 0),
     maxDepth: nodes.reduce((a, n) => Math.max(a, n.l), 0),
-    truncated, subtreesFetched, externalTilesets: externals,
+    truncated: stopped.size > 0,
+    // Which budget stopped the walk: 'nodes' (raise &maxNodes), 'depth' (raise &maxDepth), or
+    // 'external' (raise &maxExternal). Empty when the walk completed.
+    truncatedBy: [...stopped],
+    limits: { maxNodes, maxDepth, maxExternal },
+    subtreesFetched, externalTilesets: externals,
     levels,
     ...(content ? { content } : {}),
     // drop the per-node content URL: it is only needed by the sampling pass above and would bloat
@@ -283,10 +292,14 @@ export async function handleStats(req, res, u) {
     if (!url) { res.writeHead(400, CORS); res.end('missing ?url=<tileset.json URL>'); return true; }
     const maxNodes = Math.min(20000, Number(u.searchParams.get('maxNodes')) || 4000);
     const maxDepth = Math.min(48, Number(u.searchParams.get('maxDepth')) || 32);
+    // Formats that express LoD as chains of external tilesets (RAD is the extreme case) exhaust this
+    // long before the node budget, so it has to be tunable rather than a hidden constant — a walk
+    // that stopped at 2 296 of 20 000 nodes is otherwise inexplicable.
+    const maxExternal = Math.min(1024, Math.max(0, Number(u.searchParams.get('maxExternal')) || 64));
     // &sample=N downloads N content tiles to report triangle/point counts, extensions and
     // compression. Off by default — the rest of the walk never fetches geometry.
     const sample = Math.min(64, Math.max(0, Number(u.searchParams.get('sample')) || 0));
-    const stats = await collectStats(url, { maxNodes, maxDepth, sample });
+    const stats = await collectStats(url, { maxNodes, maxDepth, maxExternal, sample });
     res.writeHead(200, { 'Content-Type': 'application/json', ...CORS });
     res.end(JSON.stringify(stats));
     return true;
@@ -447,7 +460,10 @@ async function load(url) {
   $('status').style.display = 'none'; $('content').style.display = '';
   $('sub').textContent = STATS.url;
   $('k-total').textContent = fmt(STATS.totalNodes);
-  $('k-trunc').textContent = STATS.truncated ? 'truncated at budget — raise the node cap' : (STATS.subtreesFetched ? STATS.subtreesFetched + ' subtrees read' : 'full walk');
+  const REASON = { nodes: 'raise &maxNodes', depth: 'raise &maxDepth', external: 'raise &maxExternal' };
+  $('k-trunc').textContent = STATS.truncated
+    ? 'stopped at ' + (STATS.truncatedBy || []).join(' + ') + ' budget — ' + (STATS.truncatedBy || []).map(r => REASON[r] || r).join(', ')
+    : (STATS.subtreesFetched ? STATS.subtreesFetched + ' subtrees read' : 'full walk');
   $('k-content').textContent = fmt(STATS.contentNodes);
   $('k-depth').textContent = STATS.maxDepth;
   $('k-ge').textContent = STATS.tilesetGeometricError == null ? '—' : fmtGe(STATS.tilesetGeometricError);

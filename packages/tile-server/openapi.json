@@ -822,6 +822,19 @@
         "description": "Serves ONE 3D Tiles tileset whose children external-reference each given tileset URL, with per-child bounding spheres derived from each child root (fetched once, cached). Children can be any 3D-Tiles URL, including this server's own /stream, /convert, /bing or /3dtiles-self-contained endpoints - so one endpoint can mosaic COPC + Potree + LCC + RAD + remote 3D Tiles together. A local child can be globe-placed first via /stream's lon/lat placement params. Unreachable children are skipped and listed in asset.extras.failed.",
         "parameters": [
           {
+            "name": "set",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "enum": [
+                "opendata",
+                "angkor",
+                "world"
+              ]
+            },
+            "description": "Expand a curated demo set of real, public, key-less tilesets: \"opendata\" = the ten open datasets from 3D Tiles' own RESOURCES.md (four continents, all three boundingVolume kinds); \"angkor\" = Iconem's Angkor campaign as 23 individual site tilesets; \"world\" = both (33). Composes with ?url=. GET /aggregate/demo.json lists their contents."
+          },
+          {
             "name": "urls",
             "in": "query",
             "required": false,
@@ -922,11 +935,20 @@
               "maximum": 64
             },
             "description": "Download N content tiles (stratified across depth, leaves and intermediate nodes) and report approximate triangle/point/vertex counts, glTF extensions used, texture MIME types and compression (draco/meshopt/ktx2/spz/lgsc). Only the GLB JSON chunk is parsed - no geometry decode. Off by default: the rest of the walk reads only tileset JSON and subtree buffers."
+          },
+          {
+            "name": "maxExternal",
+            "in": "query",
+            "schema": {
+              "type": "integer",
+              "default": 64
+            },
+            "description": "Cap on external-tileset refs followed during the walk (max 1024). Formats that express LoD as chains of external tilesets - RAD is the extreme case - and /aggregate mosaics, which are made of them, exhaust this long before the node budget. When they do, the response reports truncatedBy: [\"external\"]."
           }
         ],
         "responses": {
           "200": {
-            "description": "Stats JSON: totals, per-level aggregates, node dump"
+            "description": "Per-level aggregates, totals (leafNodes, maxFanout, maxDepth), a bounded node dump, and truncatedBy[] naming which budget stopped the walk (\"nodes\" | \"depth\" | \"external\") alongside the limits actually applied."
           },
           "400": {
             "description": "Missing url"
@@ -1009,6 +1031,20 @@
         "responses": {
           "200": {
             "description": "A textured GLB ellipsoid patch"
+          }
+        }
+      }
+    },
+    "/aggregate/demo.json": {
+      "get": {
+        "tags": [
+          "aggregate"
+        ],
+        "summary": "List the curated demo sets available to /aggregate?set=",
+        "description": "Machine-readable index of the demo mosaics, so a UI can offer them without hardcoding 33 URLs. Each entry gives a label, a child count, and the child list.",
+        "responses": {
+          "200": {
+            "description": "Map of set name to { label, count, entries }"
           }
         }
       }

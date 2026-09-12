@@ -371,6 +371,78 @@ export async function buildAggregate(urls, { nest = 'auto', ttlMs = DEFAULT_TTL_
   };
 }
 
+// ── demo sets ────────────────────────────────────────────────────────────────────────────────────
+//
+// Curated, ready-to-open mosaics so `/aggregate` can be SEEN rather than described. Defined here, on
+// the server, rather than in the viewer: the desktop app, the docs and the hierarchy explorer all
+// want the same list, and three copies of 30 URLs would drift apart within a week.
+//
+// Every entry is a real, public, key-less tileset.json that was probed before being added.
+
+/** Open data from the 3D Tiles spec's own RESOURCES.md — nine cities on four continents. */
+const OPEN_DATA = [
+  { id: 'strasbourg', label: 'Strasbourg Od@CiT (FR)', url: 'https://s3.eu-west-2.wasabisys.com/ems-sgct-photomaillage/ODACIT/EMS_PM2022/tileset.json' },
+  { id: 'clermont', label: 'Clermont-Ferrand (FR)', url: 'https://3d.craig.fr/datasets/Clermont/3dtiles/tileset.json' },
+  { id: 'st-etienne', label: 'Saint-Étienne (FR)', url: 'https://3d.craig.fr/datasets/St-Etienne/3dtiles/tileset.json' },
+  { id: 'lille', label: 'Métropole de Lille (FR)', url: 'https://webimaging.lillemetropole.fr/externe/maillage/2016_mel_10cm/3dtiles/tileset.json' },
+  { id: 'angkor-planet', label: 'Angkor Wat — Planet SkySat (KH)', url: 'https://storage.googleapis.com/open-cogs/planet-stac/angkor-wat/3d-geofox.ai/3DTiles/tileset.json' },
+  { id: 'utrecht', label: 'Utrecht integrated mesh (NL)', url: 'https://tiles.arcgis.com/tiles/V6ZHFr6zdgNZuVG0/arcgis/rest/services/Utrecht_3D_Tiles_Integrated_Mesh/3DTilesServer/tileset.json' },
+  { id: 'soest', label: 'Soest 3D mesh (DE)', url: 'https://soest.virtualcitymap.de/datasource-data/HOSTING-Soest/3D-Mesh_2023/tileset.json' },
+  { id: 'aarhus', label: 'Aarhus mesh (DK)', url: 'https://sdfe-hosting.virtualcitymap.de/Aarhus/datasource-data/Aarhus_Mesh/tileset.json' },
+  { id: 'agi-hq', label: 'AGI Headquarters (US)', url: 'https://pelican-public.s3.amazonaws.com/3dtiles/agi-hq/tileset.json' },
+  { id: 'minato', label: 'Tokyo Minato-ku LOD4 — PLATEAU (JP)', url: 'https://assets.cms.plateau.reearth.io/assets/99/e2a800-7d75-4d11-94e1-bef604c39d01/13103_minato-ku_pref_2023_citygml_1_op_bldg_3dtiles_13103_minato-ku_lod4/tileset.json' },
+];
+
+/**
+ * Iconem's Angkor campaign as 23 INDIVIDUAL tilesets rather than its hand-authored merged root.
+ *
+ * This is the interesting case for nesting, because the sites are not uniformly spread: 19 of them
+ * sit inside the Angkor park (a few km apart) while the four PhnomKulen sites are ~30 km north-east.
+ * A grouping derived only from bounding spheres should discover that split on its own.
+ */
+const ANGKOR_BASE = 'https://api.iconem.com/s/is52XRiz30fn30HPjbgGe-KrydjSA3r0';
+const ANGKOR_SITES = [
+  'AkYum_231M_d202411_p202412_epsg32648',
+  'AngkorThom_SouthGate_817M_d202411_p202412_epsg32648',
+  'AngkorTom_Baphuon_SleepingBuddha_342M_d202408_p202410_epsg32648',
+  'Angkor_BakseiChamkrong', 'Angkor_BanteayThom', 'Angkor_PrasatKravan', 'Angkor_PrasatPrehko',
+  'Bayon_2400M_d202203_p202209_epsg32648',
+  'ElephantTerrace_1451M_d202411_p202412_epsg32648',
+  'Mebon2',
+  'NeakPean_168M_d202412_p202412_epsg32648',
+  'Phimeanakas_218M_d202408_p202410_epsg32648',
+  'PhnomBakeng_1726M_d202408_p202410_epsg32648',
+  'PhnomKulen_01-2_KrorBeiKrab_456M_d202411_p202412_epsg32648',
+  'PhnomKulen_02-1_OuThmorDab_280M_d202411_p202412_epsg32648',
+  'PhnomKulen_02-2_NaekTa_184M_d202411_p202412_epsg32648',
+  'PhnomKulen_02-3_OuPhaOng_213M_d202411_p202412_epsg32648',
+  'PrasatPreimonti_271M_202001',
+  'Prasat_Batchum_174M',
+  'PreahKhan_Master2_2018-05-28_21h17_31_798',
+  'ShausreBibol_complet_DronePercheSol_2018-05-29_23h37_49_523',
+  'TaProhm_4128M_d202408_p202410_epsg32648',
+  'TonleSnguot_221M_d202412_p202412_epsg32648',
+];
+
+export const DEMO_SETS = {
+  opendata: {
+    label: '3D Tiles RESOURCES.md open data — 10 datasets, 4 continents',
+    urls: OPEN_DATA.map((d) => d.url),
+    entries: OPEN_DATA,
+  },
+  angkor: {
+    label: 'Iconem Angkor — 23 individual site tilesets',
+    urls: ANGKOR_SITES.map((s) => `${ANGKOR_BASE}/${s}/tileset.json`),
+    entries: ANGKOR_SITES.map((s) => ({ id: s, label: s.split('_')[0], url: `${ANGKOR_BASE}/${s}/tileset.json` })),
+  },
+  /** Everything at once — the "one endpoint, heterogeneous sources, whole planet" pitch. */
+  world: {
+    label: 'Open data + Angkor — 33 tilesets across four continents',
+    urls: [...OPEN_DATA.map((d) => d.url), ...ANGKOR_SITES.map((s) => `${ANGKOR_BASE}/${s}/tileset.json`)],
+    entries: [...OPEN_DATA, ...ANGKOR_SITES.map((s) => ({ id: s, label: s.split('_')[0], url: `${ANGKOR_BASE}/${s}/tileset.json` }))],
+  },
+};
+
 /**
  * Assembled mosaics are cached whole, keyed by the exact child set + nesting scheme. Without this,
  * every client that opens a 500-dataset mosaic pays 500 tileset.json round-trips before seeing a
@@ -383,12 +455,30 @@ const aggregateCached = ttlCache(async (key) => {
 
 /** Try to handle an /aggregate/* request. Returns true iff it owned the response. */
 export async function handleAggregate(req, res, u) {
+  // Machine-readable index of the demo sets, so a UI can list them without hardcoding the contents.
+  if (u.pathname === '/aggregate/demo.json') {
+    res.writeHead(200, { 'Content-Type': 'application/json', ...CORS });
+    res.end(JSON.stringify(Object.fromEntries(
+      Object.entries(DEMO_SETS).map(([k, v]) => [k, { label: v.label, count: v.urls.length, entries: v.entries }]),
+    )));
+    return true;
+  }
   if (u.pathname !== '/aggregate/tileset.json') return false;
+
+  // ?set=<name> expands to a curated demo list; it composes with ?url= so you can add your own
+  // dataset to a demo mosaic without retyping the other 33.
+  const setName = u.searchParams.get('set');
+  if (setName && !DEMO_SETS[setName]) {
+    res.writeHead(400, CORS);
+    res.end(`unknown set "${setName}" — try one of: ${Object.keys(DEMO_SETS).join(', ')}`);
+    return true;
+  }
   const urls = [
+    ...(setName ? DEMO_SETS[setName].urls : []),
     ...u.searchParams.getAll('url'),
     ...(u.searchParams.get('urls') || '').split(',').map(s => s.trim()).filter(Boolean).map(decodeURIComponent),
   ];
-  if (!urls.length) { res.writeHead(400, CORS); res.end('missing ?urls=<u1>,<u2>,… (each URL-encoded) or repeated ?url='); return true; }
+  if (!urls.length) { res.writeHead(400, CORS); res.end(`missing ?urls=<u1>,<u2>,… (each URL-encoded), repeated ?url=, or ?set=<${Object.keys(DEMO_SETS).join('|')}>`); return true; }
   const nest = u.searchParams.get('nest') ?? 'auto';
   // &ttl=<seconds>; ttl=0 bypasses the cache entirely (both the mosaic and its child roots), which is
   // what you want while iterating on a dataset that is actively being re-tiled.
