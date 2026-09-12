@@ -51,6 +51,9 @@ export interface Stats {
   maxFanout: number;
   maxDepth: number;
   truncated: boolean;
+  /** Which budget stopped the walk: 'nodes' | 'depth' | 'external'. Empty when it completed. */
+  truncatedBy?: ('nodes' | 'depth' | 'external')[];
+  limits?: { maxNodes: number; maxDepth: number; maxExternal: number };
   subtreesFetched: number;
   externalTilesets: number;
   levels: StatsLevel[];
@@ -60,6 +63,10 @@ export interface Stats {
 
 export interface FetchStatsOptions {
   maxNodes?: number;
+  /** Hard cap on depth — the walk stops descending past this level. */
+  maxDepth?: number;
+  /** Cap on external-tileset refs followed. LoD-chain formats (RAD) exhaust this first. */
+  maxExternal?: number;
   /** Tiles to download and inspect (0 = none). Stratified across depth by the server. */
   sample?: number;
   signal?: AbortSignal;
@@ -68,6 +75,8 @@ export interface FetchStatsOptions {
 export async function fetchStats(url: string, opts: FetchStatsOptions = {}): Promise<Stats> {
   const q = new URLSearchParams({ url });
   if (opts.maxNodes) q.set('maxNodes', String(opts.maxNodes));
+  if (opts.maxDepth) q.set('maxDepth', String(opts.maxDepth));
+  if (opts.maxExternal) q.set('maxExternal', String(opts.maxExternal));
   if (opts.sample) q.set('sample', String(opts.sample));
   const r = await fetch(`${MW}/stats/tileset.json?${q}`, { signal: opts.signal });
   // The endpoint answers errors as plain text, so surface that rather than a JSON parse failure.
@@ -90,7 +99,11 @@ export function labelForUrl(raw: string): string {
       return fmt ? `${innerName} (${fmt})` : innerName;
     }
     if (u.pathname.endsWith('/aggregate/tileset.json')) {
-      return `aggregate ×${u.searchParams.getAll('url').length || '?'}`;
+      // ?set=<name> expands server-side, so there are no url= params to count — name the set instead.
+      const set = u.searchParams.get('set');
+      const nest = u.searchParams.get('nest');
+      const what = set ? `set=${set}` : `×${u.searchParams.getAll('url').length || '?'}`;
+      return `aggregate ${what}${nest ? ` (${nest})` : ''}`;
     }
     const parts = u.pathname.split('/').filter(Boolean);
     const last = parts.pop() ?? u.hostname;
@@ -98,10 +111,15 @@ export function labelForUrl(raw: string): string {
     // lod-meta.json — so the filename alone labels every Potree dataset identically. Prefer the
     // containing folder, unless that is an opaque storage token (api.iconem.com/s/<24-char id>/…),
     // in which case the host is the only thing that actually tells them apart.
-    if (/^(tileset\.json|cloud\.js|metadata\.json|lod-meta\.json|meta\.lcc)$/i.test(last)) {
+    // An opaque name — a UUID or a storage token — identifies nothing to a reader. Both the fixed
+    // entry filenames AND hash-like filenames fall back to the folder, then to the host.
+    const opaque = (s: string) =>
+      /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/i.test(s) || /^[A-Za-z0-9_-]{16,}$/.test(s);
+    const fixedEntry = /^(tileset\.json|cloud\.js|metadata\.json|lod-meta\.json|meta\.lcc)$/i.test(last);
+    if (fixedEntry || opaque(last.replace(/\.[a-z0-9]+$/i, ''))) {
       const folder = parts.pop();
-      if (folder && !/^[A-Za-z0-9_-]{16,}$/.test(folder)) return folder;
-      return folder ? `${u.hostname}/${folder.slice(0, 6)}…` : u.hostname;
+      if (folder && !opaque(folder)) return folder;
+      return `${u.hostname}${folder ? `/${folder.slice(0, 6)}…` : ''}`;
     }
     return last;
   } catch {

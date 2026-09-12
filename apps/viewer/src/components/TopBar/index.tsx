@@ -280,6 +280,22 @@ export default function TopBar({ activeHandleRef }: { activeHandleRef: React.Ref
           className="min-w-[240px] flex-1 font-mono text-xs"
         />
         <Button size="sm" onClick={handleLoadClick}>Load</Button>
+        <Button
+          size="sm"
+          variant="outline"
+          className="h-7 px-2 text-xs"
+          // The RESOLVED tileset URL, not the input field: in `raw url` mode the field holds the bare
+          // dataset (…/cloud.js), which /stats cannot walk — only the wrapped middleware URL can be.
+          // Falls back to the field so the button still works before anything has been loaded.
+          onClick={() => {
+            const target = useViewerStore.getState().lastLoadUrl || urlField.trim();
+            if (!target) return;
+            window.open(`/hierarchy?url=${encodeURIComponent(target)}`, '_blank', 'noopener');
+          }}
+          title="Open this tileset's depth/breadth hierarchy graph in a new tab"
+        >
+          ⌗ hierarchy
+        </Button>
       </div>
     </header>
   );
