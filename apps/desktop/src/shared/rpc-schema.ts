@@ -18,6 +18,25 @@ export interface DesktopRPC {
         params: { directory: boolean; allowedFileTypes?: string };
         response: string[];
       };
+      /**
+       * Ask the host to grow the window so the layout needs less scrolling.
+       *
+       * Only the view can measure content; only the host can resize. The view also reports its
+       * viewport, so the host can convert CSS px → frame px from the ratio it observes instead of
+       * trusting `devicePixelRatio`.
+       *
+       * MEASURED CAVEAT — on Windows this cannot fully solve the width problem. The launcher runs
+       * DPI-*unaware*, so Windows virtualizes it: the webview honestly reports `innerWidth: 1104,
+       * devicePixelRatio: 1` for a 1120-px frame, while the compositor scales the result up by the
+       * display factor and only ~1104/scale CSS px are ever on screen. Both sides' numbers agree
+       * and both are wrong about what is visible, so the scale is simply not observable from in
+       * here. That is why the layout stays inside a conservative fixed width and this call only
+       * ever GROWS the window — anything cleverer would be guessing.
+       */
+      fitWindow: {
+        params: { cssWidth: number; cssHeight: number; viewportWidth: number; viewportHeight: number };
+        response: { width: number; height: number };
+      };
     };
     messages: Record<string, never>;
   }>;

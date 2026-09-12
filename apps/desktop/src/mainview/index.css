@@ -1,6 +1,12 @@
 /* shadcn/ui "zinc dark" tokens — same HSL triples the shadcn theme ships, so this window reads as
    the same design language as the viewer and docs rather than a bespoke palette. */
 :root {
+  /* Tells the engine this document is dark, which is what makes NATIVE widgets follow suit. Without
+     it Chromium/WebView2 renders `<select>` drop-down popups, scrollbars and form controls with the
+     light default — a white popup listing white-on-light options, effectively unreadable, even
+     though the page around them is dark. Styling `option` alone does not fix the popup on Windows. */
+  color-scheme: dark;
+
   --background: 240 10% 3.9%;
   --foreground: 0 0% 98%;
   --card: 240 10% 5.5%;
@@ -96,6 +102,9 @@ input[type=text]:focus, select:focus {
 }
 input::placeholder { color: hsl(var(--muted-foreground) / 0.7); }
 select { appearance: none; background-image: none; cursor: pointer; }
+/* Belt-and-braces alongside `color-scheme: dark` above: the closed control paints from the page's
+   own tokens, and the popup rows get an explicit dark background on engines that honour it. */
+select option { background: hsl(var(--card)); color: hsl(var(--foreground)); }
 
 .placement { margin-top: 16px; border-top: 1px solid hsl(var(--border)); padding-top: 14px; }
 .placement summary {

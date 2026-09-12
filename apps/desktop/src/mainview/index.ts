@@ -125,6 +125,31 @@ async function browse(directory: boolean) {
 $('browse-file').addEventListener('click', () => browse(false));
 $('browse-dir').addEventListener('click', () => browse(true));
 
+// ── window sizing ───────────────────────────────────────────────────────────────────────────────
+//
+// Only the view can measure the content; only the host can resize the window. The conversion between
+// them is the subtle part on Windows, so the measurements are logged — `hutch electrobun dev` prints
+// them, which is how the CSS-px-vs-frame-px mismatch was pinned down in the first place.
+let lastFit = '';
+
+function fitWindowToContent() {
+  if (!pickerAvailable()) return;                 // no host to resize (plain-browser preview)
+  const el = document.querySelector<HTMLElement>('.container');
+  if (!el) return;
+  const rect = el.getBoundingClientRect();
+  const cssWidth = Math.ceil(rect.right + 24);    // content's right edge + breathing room
+  const cssHeight = Math.ceil(document.documentElement.scrollHeight + 8);
+  const key = `${cssWidth}x${cssHeight}`;
+  if (key === lastFit) return;                    // don't spam the host on every tab switch
+  lastFit = key;
+  console.log(`[fit] css=${cssWidth}x${cssHeight} innerWidth=${window.innerWidth} `
+    + `innerHeight=${window.innerHeight} dpr=${window.devicePixelRatio} scrollW=${document.documentElement.scrollWidth}`);
+  pickerRpc!.request.fitWindow({
+    cssWidth, cssHeight,
+    viewportWidth: window.innerWidth, viewportHeight: window.innerHeight,
+  }).catch(() => { /* host declined — the layout still works, it just may need scrolling */ });
+}
+
 // ── tabs ────────────────────────────────────────────────────────────────────────────────────────
 function showTab(name: string) {
   for (const b of document.querySelectorAll<HTMLButtonElement>('.tab')) {
@@ -133,6 +158,8 @@ function showTab(name: string) {
   for (const p of document.querySelectorAll<HTMLElement>('.panel')) {
     p.classList.toggle('panel-hidden', p.id !== `panel-${name}`);
   }
+  // Panels differ hugely in height (Build is short, Samples is a 20-row catalogue), so re-fit.
+  requestAnimationFrame(fitWindowToContent);
 }
 $('tabs').addEventListener('click', (e) => {
   const t = (e.target as HTMLElement).closest<HTMLButtonElement>('.tab');
@@ -443,4 +470,5 @@ function useSample(s: Sample) {
   statusEl.textContent = `tile-server ready on :${tilePort}`;
   statusEl.className = 'status status-ok';
   refresh();
+  requestAnimationFrame(fitWindowToContent);
 })();

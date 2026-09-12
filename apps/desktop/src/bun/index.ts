@@ -167,6 +167,9 @@ const qs = `?tilePort=${tilePort ?? ""}&staticPort=${staticPort ?? ""}`
  * with no real path, and the middleware needs an actual filesystem path to hand to an adapter. The
  * OS dialog is the only way to get one.
  */
+/** Window bounds, and the ceiling we will not grow past. */
+const WIN = { x: 100, y: 40, width: 1120, height: 940, maxWidth: 1600, maxHeight: 1200 };
+
 const rpc = defineElectrobunRPC<DesktopRPC, "bun">("bun", {
 	handlers: {
 		requests: {
@@ -177,6 +180,27 @@ const rpc = defineElectrobunRPC<DesktopRPC, "bun">("bun", {
 					allowsMultipleSelection: false,
 					allowedFileTypes: allowedFileTypes || "*",
 				}),
+
+			/**
+			 * Grow the window toward the content size.
+			 *
+			 * CSS px → frame px comes from the ratio the host can actually OBSERVE (the frame it asked
+			 * for vs the viewport the view reports), not from devicePixelRatio, which reports 1 under
+			 * Windows DPI virtualization — see the note on the RPC schema.
+			 *
+			 * One-directional on purpose: never shrink below the default, so switching from the long
+			 * Samples tab back to the short Build tab does not collapse a window the user is using,
+			 * and an under-estimate can never clip content. Capped so a 30-row catalogue cannot open a
+			 * window taller than the screen.
+			 */
+			fitWindow: ({ cssWidth, cssHeight, viewportWidth, viewportHeight }) => {
+				const sx = viewportWidth > 0 ? WIN.width / viewportWidth : 1;
+				const sy = viewportHeight > 0 ? WIN.height / viewportHeight : 1;
+				const width = Math.min(WIN.maxWidth, Math.max(WIN.width, Math.ceil(cssWidth * sx)));
+				const height = Math.min(WIN.maxHeight, Math.max(WIN.height, Math.ceil(cssHeight * sy)));
+				mainWindow.setSize(width, height);
+				return { width, height };
+			},
 		},
 	},
 });
@@ -184,7 +208,7 @@ const rpc = defineElectrobunRPC<DesktopRPC, "bun">("bun", {
 const mainWindow = new BrowserWindow({
 	title: "3D Tiled — local middleware",
 	url: `views://mainview/index.html${qs}`,
-	frame: { width: 1120, height: 940, x: 100, y: 40 },
+	frame: { width: WIN.width, height: WIN.height, x: WIN.x, y: WIN.y },
 	rpc,
 });
 
