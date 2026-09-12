@@ -12,13 +12,28 @@ There are two front ends over the same endpoint:
 
 | | Where | Good for |
 |---|---|---|
-| `/hierarchy` | the tile-server itself, dependency-free single page | one tileset, works with nothing but the server running |
-| Hierarchy explorer | the viewer app, `/hierarchy` (React + shadcn + `d3-hierarchy`) | **several tilesets at once**, content sampling, shareable comparison URLs |
+| `/hierarchy` | the **tile-server**, e.g. `localhost:3001/hierarchy` — dependency-free single page | one tileset, works with nothing but the server running |
+| Hierarchy explorer | the **viewer app**, e.g. `localhost:3000/hierarchy` (React + shadcn + `d3-hierarchy`) | **several tilesets at once**, content sampling, shareable comparison URLs |
+
+Three ways in:
+
+- Straight to the URL, optionally pre-loaded: `/hierarchy?url=<encoded tileset.json>`. Repeat `url=`
+  to open a comparison; the address bar keeps itself in sync, so any comparison is a shareable link.
+- The **⌗ hierarchy** button in the viewer's top bar, which forwards whatever is currently loaded.
+  It sends the *resolved* tileset URL, not the raw input field — in `raw url` mode the field holds a
+  bare dataset (`…/cloud.js`), which `/stats` cannot walk; only the wrapped middleware URL can be.
+- The desktop app's **Hierarchy graph** button, which prefers this explorer when a viewer is
+  reachable and falls back to the server's own page otherwise.
+
+The preset list starts with ready-made `/aggregate` demo mosaics (see
+[Meta-tilesets](/docs/guide/meta-tilesets)), then one entry per source format drawn from the viewer's
+own preset table.
 
 ## The endpoint
 
 ```
-GET /stats/tileset.json?url=<any tileset.json>[&maxNodes=4000][&maxDepth=32][&sample=N]
+GET /stats/tileset.json?url=<any tileset.json>
+    [&maxNodes=4000] [&maxDepth=32] [&maxExternal=64] [&sample=N]
 ```
 
 It walks **explicit** children, **3D Tiles 1.1 implicit tiling** (fetching and decoding `.subtree`
@@ -36,11 +51,38 @@ downloads geometry, which is what makes it fast enough to point at a live remote
 - `nodes[]` — a bounded `{i, p, l, ge, r, c}` dump (index, parent, level, geometric error, radius,
   has-content) for the graph views.
 
+### Three budgets, and knowing which one stopped you
+
+`truncated: true` means every count is a **lower bound**. But three different budgets can stop a
+walk, and the fix differs for each — so `truncatedBy[]` names the one that did:
+
+| `truncatedBy` | Meaning | Fix |
+|---|---|---|
+| `nodes` | hit `maxNodes` (default 4 000, max 20 000) | raise `&maxNodes` |
+| `depth` | hit `maxDepth` (default 32) | raise `&maxDepth` |
+| `external` | followed `maxExternal` external tileset refs (default 64) | raise `&maxExternal` |
+
 <Callout type="warn">
-`truncated: true` means the walk hit `maxNodes` and stopped. Depth and every count are then **lower
-bounds** — raise the budget before concluding anything about shape. The explorer surfaces this as a
-red *"hit node budget"* badge rather than letting a truncated walk read as a shallow tileset.
+`external` is the one that surprises people. Formats that express LoD as **chains of external
+tilesets** — RAD is the extreme case — and `/aggregate` mosaics, which are *made* of external refs,
+exhaust it long before the node budget. A RAD scene reporting 2 296 nodes under a **20 000** node
+budget is not a small tileset; it ran out of external-ref fetches at 64. Before this was reported,
+that walk was simply inexplicable.
 </Callout>
+
+The explorer shows this as a red **“stopped: external”** badge, and exposes all three as dropdowns.
+The depth cap doubles as a display control: capping at level 8 keeps a deep tileset's top structure
+legible instead of burying it under 4 000 leaves.
+
+### Small numbers are often real
+
+Before assuming a low tile count is a bug, check `truncatedBy` and `maxFanout`:
+
+- **LCC Big Mirror → 3 tiles, `truncatedBy: []`.** Real. LCC is not an octree; the adapter emits a
+  **REPLACE LoD chain**, one tile per level (`maxFanout: 1`, levels `1, 1, 1`). Three tiles means
+  three LoD levels.
+- **RAD Tastier (500 k splats) → 11 tiles, depth 3.** Also real — a small scene.
+- **RAD Coit (40 M splats) → 2 296 nodes, `truncatedBy: ["external"]`.** *Not* real; that's the cap.
 
 ### Content sampling (`&sample=N`, opt-in)
 

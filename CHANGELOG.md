@@ -5,6 +5,56 @@ Format loosely follows [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+### Added / Fixed — 2026-09-12 (aggregate demo sets · truncation reasons · native file picker · packaging)
+- **Added: `/aggregate?set=opendata|angkor|world`** — curated demo mosaics of real, public, key-less
+  tilesets, defined server-side so the viewer, docs and desktop app share one list instead of three
+  copies drifting apart. `GET /aggregate/demo.json` indexes them; `?set=` composes with `?url=`.
+  `opendata` is the ten datasets from 3D Tiles' own `RESOURCES.md` (four continents, and all three
+  `boundingVolume` kinds — `region`, `box`, `sphere`); `angkor` is Iconem's campaign as **23
+  individual site tilesets**; `world` is both. All 33 probed before being added; 33/33 reachable.
+- **The Angkor set is the partitioning proof.** The sites are not uniformly spread — 19 inside the
+  Angkor park, four at PhnomKulen ~30 km north-east — and nothing tells the aggregator that; it sees
+  23 bounding spheres. It splits them at the root anyway, and the innermost Angkor group it forms is
+  Bayon + Baphuon + Phimeanakas, i.e. exactly the monuments **inside Angkor Thom's walls**. Root
+  fanout 23 → 2, depth 8 geodetic / 7 mercator. Against the hand-authored merged root in the
+  explorer: same 23 datasets, **max fanout 23 → 8**, costing 3 levels of depth.
+- **Fixed: `/stats` said “truncated” without saying why.** Three budgets can stop a walk and the fix
+  differs for each, so the response now carries `truncatedBy: ["nodes"|"depth"|"external"]` plus the
+  `limits` actually applied, and `&maxExternal=` is tunable (was a hidden constant of 64). This was
+  not cosmetic: **RAD Coit reported 2 296 nodes under a 20 000-node budget** and the reason was
+  invisible — it had exhausted external-tileset refs at 64, not nodes. `/aggregate` mosaics hit the
+  same cap, being made of external refs.
+- **Answered with data, not guesses: the small tile counts are mostly real.** LCC Big Mirror → 3
+  tiles, `truncatedBy: []`, `maxFanout: 1`, levels `1,1,1` — LCC is not an octree, so the adapter
+  emits a REPLACE **LoD chain**, one tile per level. RAD Tastier → 11 tiles is a genuinely small
+  500 k-splat scene. Only RAD Coit was misleading, per the item above.
+- **Added: explorer depth cap, external cap, Reload all, and demo presets.** The depth cap doubles as
+  a display control — capping at level 8 keeps a deep tileset's top structure legible instead of
+  burying it under 4 000 leaves. Options apply to newly added tilesets and **Reload all** re-walks
+  the rest, rather than auto-refiring N remote walks on every dropdown change.
+- **Added: a `⌗ hierarchy` button in the viewer top bar** that forwards the currently-loaded tileset.
+  It sends the *resolved* URL, not the input field: in `raw url` mode the field holds a bare dataset
+  (`…/cloud.js`), which `/stats` cannot walk — only the wrapped middleware URL can be.
+- **Fixed: two explorer labels.** `?set=` mosaics showed `aggregate ×?` (nothing to count, since the
+  set expands server-side) and a UUID filename showed raw; both now resolve to something readable.
+- **Added: a native file picker in the desktop app** — File… / Folder… over RPC to the main process.
+  It must be the main process: a webview `<input type=file>` yields a sandboxed `File` with no real
+  path, and the middleware needs a filesystem path. Two buttons because tree formats are a folder and
+  single-file formats are a file, and one Windows dialog cannot offer both. Construction is guarded
+  so the same bundle still renders outside an Electrobun host (the buttons hide).
+- **Packaging now works, and the blocker was upstream.** Electrobun **2.0.1 (current stable) cannot
+  package on Windows**: it pins cottontail 0.5.0, whose windows-x64 release ships `cottontail.exe`
+  but not the `cottontail-core` its own build step copies → `CopySourceMissing`. Pinned
+  `2.0.2-beta.20` (cottontail 0.7.0-canary.2), and verified **both `dev` and `build`** on it —
+  producing `3D Tiled-Setup.exe`, a 20 MB installer zip and an update bundle. Also: the build must
+  run from **PowerShell, not MSYS**, where `tar` reads `C:\…` as a remote host.
+  Signing is configured but **off by default and unverified** — no certificate in this repo.
+- **Fixed: a HiDPI regression I had introduced.** Widening the desktop container from 720 px to
+  1000 px re-broke the documented Windows clipping — on a 1120 px window at 150 % scaling the right
+  column, including the new Browse buttons, was simply never on screen. A plain-browser preview
+  cannot reveal this (no DPI mismatch); only running the real app did. Reverted, with the constraint
+  written into the CSS so it does not get "improved" again.
+
 ### Added / Fixed — 2026-09-11c (geodetic nesting · hierarchy explorer · desktop library · Potree write-up)
 - **Added: `/aggregate&nest=geodetic`, and the distinction it exists to make.** "Morton order" and
   "web-mercator quadtree" are not the same thing: Morton (Z-order) is an *addressing* scheme —

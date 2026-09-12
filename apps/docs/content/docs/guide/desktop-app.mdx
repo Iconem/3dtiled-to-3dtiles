@@ -13,17 +13,43 @@ window, plus the globe-placement params and a stock-CesiumJS preview.
 
 ## Running it
 
-```sh
-cd apps/desktop
-npx electrobun build     # writes build/<target>/
-npx electrobun dev       # build + run, with watch
-```
-
-On Windows, Hutch wants an explicit home if your user directory already contains unrelated files:
-
 ```powershell
-$env:HUTCH_HOME = "$env:LOCALAPPDATA\hutch-home"
+cd apps/desktop
+$env:HUTCH_HOME = "$env:LOCALAPPDATA\hutch-home"   # Windows: give Hutch an explicit home
+hutch electrobun dev                               # build + run
+hutch electrobun build --env=stable                # distributable → build/stable-<target>/ + artifacts/
 ```
+
+<Callout type="warn">
+**Run the build from PowerShell, not Git Bash/MSYS.** Hutch shells out to `tar`, and MSYS `tar`
+reads a `C:\…` path as a *remote host* spec — the build fails with
+`tar: Cannot connect to C: resolve failed`. Windows' own `tar.exe` handles it fine.
+</Callout>
+
+A Windows `build --env=stable` produces `3D Tiled-Setup.exe` (a ~1.3 MB installer stub), the app
+tree under `3DTiled/`, and in `artifacts/`: `win-x64-3DTiled-Setup.zip` (~20 MB), the update bundle
+`stable-win-x64-3DTiled.tar.zst`, and `stable-win-x64-update.json`.
+
+### Why the Electrobun version is pinned to a beta
+
+`2.0.1` — the current stable — **cannot package on Windows**. It pins cottontail `0.5.0`, whose
+windows-x64 release ships only `cottontail.exe` and not the `cottontail-core` binary that its own
+build step then copies, so `electrobun build` dies with `CopySourceMissing`. `2.0.2-beta.20` resolves
+cottontail `0.7.0-canary.2`, which does ship it. Both `dev` and `build` were verified on that pin;
+revisit when 2.0.2 ships stable.
+
+### Signing — configured, not done
+
+Signing is **opt-in and off by default**, because turning it on without credentials makes the build
+fail, which is better than silently shipping an unsigned app:
+
+- **macOS** — set `ELECTROBUN_CODESIGN=1` (and `ELECTROBUN_NOTARIZE=1`) on a machine with a Developer
+  ID in its keychain plus notarization credentials in the environment. That also switches the DMG on.
+- **Windows** — Electrobun exposes no signing option. Authenticode is a post-build step against the
+  produced `.exe` (`signtool sign /fd sha256 /tr <timestamp-url> …`).
+
+This repo holds no code-signing certificate, so **no signed artifact has been produced or tested** —
+only the configuration and the unsigned installer above.
 
 ## Why Electrobun rather than Tauri or Electron
 
@@ -52,6 +78,11 @@ If a 3dtiled server is already listening on a candidate port (e.g. you have `pnp
 
 ### Build
 
+- **File… / Folder…** open the **native OS picker** over RPC to the main process. It has to be the
+  main process: a webview `<input type=file>` yields a sandboxed `File` with no real path, and the
+  middleware needs an actual filesystem path. Two buttons rather than one because tree formats are a
+  *folder* (Potree's `cloud.js` directory, a streamed-SOG LOD folder) and single-file formats are a
+  *file* (`.copc.laz`, `.rad`, `.lcc`) — a single Windows dialog cannot offer both.
 - Builds the URL against `/tiles/tileset.json`, the front door that dispatches to `/stream` for
   `cache=none|hierarchy` and `/convert` for `cache=full` — so the UI never re-encodes that routing rule.
 - **Place a local dataset on the globe** applies `&lon/&lat/&alt/&heading` as a root ENU transform *in

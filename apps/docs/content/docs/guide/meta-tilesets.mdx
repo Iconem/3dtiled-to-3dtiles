@@ -13,8 +13,66 @@ error from it, and emits a parent whose children external-reference the child UR
 ```
 GET /aggregate/tileset.json?url=<u1>&url=<u2>&…        # repeated form
 GET /aggregate/tileset.json?urls=<u1>,<u2>,…           # comma form (each URL-encoded)
+GET /aggregate/tileset.json?set=opendata|angkor|world  # a curated demo set (below)
     [&nest=auto|mercator|geodetic|flat]  [&ttl=<seconds>]
 ```
+
+## Try it — the demo sets
+
+`?set=` expands server-side to a curated list of real, public, key-less tilesets, so the endpoint can
+be *seen* rather than described. `GET /aggregate/demo.json` lists what each set contains.
+
+| `set=` | What |
+|---|---|
+| `opendata` | The ten open datasets from 3D Tiles' own [RESOURCES.md](https://github.com/CesiumGS/3d-tiles/blob/main/RESOURCES.md#open-data) — Strasbourg, Clermont-Ferrand, Saint-Étienne, Lille, Planet's Angkor Wat SkySat, Utrecht, Soest, Aarhus, AGI HQ, Tokyo Minato-ku. Four continents, and all three bounding-volume kinds (`region`, `box`, `sphere`). |
+| `angkor` | Iconem's Angkor campaign as **23 individual site tilesets** rather than its hand-authored merged root. |
+| `world` | Both at once — 33 tilesets. |
+
+```
+http://localhost:3001/aggregate/tileset.json?set=world&nest=geodetic
+```
+
+`?set=` composes with `?url=`, so you can drop your own dataset into a demo mosaic without retyping
+the other 33.
+
+### What the Angkor set demonstrates
+
+This is the interesting one, because the sites are **not** uniformly spread: 19 sit inside the Angkor
+park a few km apart, while four PhnomKulen sites are ~30 km north-east. Nothing tells the aggregator
+that — it sees 23 bounding spheres. It finds the split anyway:
+
+```
+[group r=23km]
+  [group r=14km]                 ← the Angkor park, 19 sites
+    …
+    [group r=1km]
+      • ElephantTerrace
+      • AngkorThom_SouthGate
+      [group r<1km]
+        • Bayon
+        [group r<1km]
+          • Baphuon_SleepingBuddha
+          • Phimeanakas
+  [group r=3km]                  ← PhnomKulen, 4 sites, ~30 km away
+    • PhnomKulen_01-2_KrorBeiKrab
+    …
+```
+
+The innermost Angkor group — Bayon, Baphuon, Phimeanakas — is archaeologically correct: those three
+are the monuments *inside Angkor Thom's walls*. That grouping came from bounding spheres alone.
+
+Measured on the real endpoints: 23/23 children, **root fanout 23 → 2**, depth 8 (geodetic) or 7
+(mercator). The `world` set: 33/33, fanout 2, depth 12.
+
+Comparing `set=angkor` against the hand-authored merged root in the
+[hierarchy explorer](/docs/guide/hierarchy-explorer) shows the point directly — same 23 datasets,
+**root fanout 23 → 8**, at the cost of a few levels of depth.
+
+<Callout type="warn">
+`/stats` follows external tileset refs, and an aggregate is *made* of them — so walking one of these
+demo mosaics hits the default 64-external-ref cap almost immediately and reports
+`truncatedBy: ["external"]`. Pass `&maxExternal=256` to see more of it.
+</Callout>
 
 Children can be **any** 3D-Tiles-serving URL — including this server's own `/stream`, `/convert`,
 `/bing` or `/3dtiles-self-contained`. That is the point: one mosaic can mix COPC + Potree + LCC + RAD
