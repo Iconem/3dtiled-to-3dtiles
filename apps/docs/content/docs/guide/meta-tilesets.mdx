@@ -175,6 +175,55 @@ which is why the TTL is a day rather than forever. Failures get a much shorter T
 host cannot pin a degraded mosaic for a day. `&ttl=0` bypasses the cache **in both directions** — use
 it while a dataset is actively being re-tiled.
 
+## Local sets: mosaicking every Iconem dataset
+
+Demo sets are committed; **local sets** are not. Any `.local/aggregate-sets/<name>.json` (gitignored;
+override with `AGGREGATE_SETS_DIR`) becomes `?set=<name>`, re-read on every request so a regenerated
+manifest needs no restart:
+
+```json
+{ "label": "…", "entries": [
+  { "url": "https://api.iconem.com/s/<token>/cloud.js", "format": "potree",  "name": "Geghard" },
+  { "url": "https://api.iconem.com/s/<token>/<id>.json", "format": "3dtiles", "name": "Bayon_d2022" },
+  { "url": "https://api.iconem.com/s/<token>/<id>.copc.laz", "format": "copc", "name": "…" } ] }
+```
+
+`potree` and `copc` entries are wrapped through this server's `/stream` automatically. `only=` /
+`exclude=` match the entry's **name, project and scene** as well as its URL — necessary because a
+share URL is an opaque token, so `only=_d2024` could never match `/s/<token>/cloud.js` alone.
+`/aggregate/demo.json` lists local sets by name and count only, never their URLs.
+
+### Generating the manifest: `scripts/iconem-share-links.mjs`
+
+Enumerates every project → scene → Potree / 3D Tiles (and optionally COPC) asset on the Iconem
+platform, ensures each has **one** live share link named `single-meta-tileset`, and writes the
+manifest above.
+
+```powershell
+$env:ICONEM_EMAIL = "…"; $env:ICONEM_PASSWORD = "…"          # env only — never arguments
+node scripts/iconem-share-links.mjs                            # dry run: lists what it would create
+node scripts/iconem-share-links.mjs --apply                    # create missing links, write manifest
+# → http://localhost:3001/aggregate/tileset.json?set=iconem&nest=geodetic
+```
+
+It was built from the platform's own source (`iconem/Backend`, `iconem/Frontend`) and tested against
+`scripts/mock-iconem-api.mjs`, a mock that enforces the same contract — cookie `jwt`, `X-XSRF-TOKEN`
+on writes, 100-row pages, non-unique share names — so the flow is proven without minting a real link.
+
+- **Dry run by default.** Every share is public to whoever holds the URL.
+- **Idempotent.** The platform does not enforce unique share names and every POST mints a new token,
+  so the script reuses an existing live (non-revoked, unexpired) link of the same name. Running it
+  twice creates nothing the second time.
+- **No API keys exist on this platform** — it authenticates with an account email + password.
+
+<Callout type="warn">
+**COPC is opt-in (`--include-copc`), and for a real reason.** A share on a `las`/COPC asset is scoped
+to the **whole project blob container**, not the one file: the link for a single `.copc.laz` grants
+read + list on *every* blob in that project. Potree and 3D Tiles shares are scoped to their own asset
+container. COPC shares also require an `admin` account — the `las` share routes are absent from the
+expert permission list, so an expert gets `403`.
+</Callout>
+
 ## Selecting a subset: `&only=` / `&exclude=`
 
 Overlapping captures are the motivating case. A site re-scanned yearly gives N tilesets covering the
