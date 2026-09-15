@@ -7,3 +7,5 @@ sample-data
 # stderr redirect files from locally-spawned dev servers — same category as *.log above
 *.err
 screens/
+# machine-local state: generated aggregate manifests hold share-link URLs, which are bearer credentials
+.local/
