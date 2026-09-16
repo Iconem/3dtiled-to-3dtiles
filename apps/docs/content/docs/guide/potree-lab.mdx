@@ -9,12 +9,25 @@ time with the point-rendering controls 3DTilesRendererJS added in
 example has no URL parameter — its datasets are hard-coded — so this page exists to point the same
 renderer at *our* datasets.
 
-## The two load modes
+Open it from the demo app with **✺ potree lab** in the top bar. A raw `cloud.js` / `.copc.laz` in the
+URL field opens as itself; a loaded point-cloud tileset (a `/stream` or `/aggregate` URL) opens in
+`tileset` mode.
+
+## The load modes
 
 | `mode=` | How the dataset is read | Point sizing |
 |---|---|---|
 | `potree` | `PotreePlugin` reads `cloud.js` directly in the browser | **Adaptive, per point**: each point is sized by the deepest *active* octree node containing it, resolved in the vertex shader from a texture of the active node hierarchy |
-| `stream` | This repo's `/stream` turns the same `cloud.js` into 3D Tiles (POINTS GLB), rendered through `PointCloudEffectsPlugin` | Per **tile**: fixed, or derived from the tile's geometric error (toggle) |
+| `stream` | This repo's `/stream` turns the same `cloud.js`, or a `.copc.laz`, into 3D Tiles (POINTS GLB), rendered through `PointCloudEffectsPlugin` | Per **tile**: fixed, or derived from the tile's geometric error (toggle) |
+| `tileset` | **Any** 3D Tiles URL as is: typically an `/aggregate` mosaic of point clouds, kept regional with `&only=` | same as `stream` |
+
+A COPC that declares no CRS takes one in the URL fragment: `…/overview.copc.laz#crs=EPSG:3812`, which
+becomes `/stream`'s `&crs=`. The dataset list includes a flai COPC (Namur) and an aggregate, and for
+example this shows Mes Aynak's newest capture with eye-dome lighting:
+
+```
+/potree-lab?mode=tileset&edl=0.6&url=http://localhost:3001/aggregate/tileset.json?set=iconem%26only=MesAynak_20%26latest=1
+```
 
 Both modes share the effects: point shape (`square`/`round`/`sphere`), minimum pixel size, eye-dome
 lighting (strength, radius) and debug colouring by node / depth / tile.
@@ -29,6 +42,24 @@ The dataset picker lists public samples plus — **dev server only** — every P
 share-link manifest (`.local/aggregate-sets/iconem.json`). Vite serves that file to **loopback clients
 only** and returns `403` to anyone else, because it is a list of bearer-credential URLs and the dev
 server binds every network interface.
+
+## Running the viewer on 3DTilesRendererJS master
+
+To try unreleased renderer work in the **whole** viewer, not just this page, build the renderer from
+source. The lockfile stays on 0.5.2:
+
+```sh
+node scripts/build-3dtr-master.mjs            # clone/update .local/3DTilesRendererJS, npm ci, build
+cd apps/viewer && npm run dev:3dtr-master      # the viewer, aliased onto that build
+```
+
+`vite.3dtr-master.config.mts` aliases every `3d-tiles-renderer` entry point to the build and dedupes
+`three` / `react` / `@react-three/fiber`, because the clone has its own copies and two `three`
+instances break everything. On Windows, upstream's library build externalises its own `C:\…`
+aliases and emits a 253-byte `index.js`; the script builds through a wrapper config that fixes the
+`external` test without touching upstream files. Verified at `70847eb`: implicit `/stream` Potree
+loads in the main viewer, and this lab renders a 149,695-point Mes Aynak aggregate with EDL. Once a
+release ships the work, bump the dependency and delete `.local/3DTilesRendererJS`.
 
 ## Why the plugins are vendored
 

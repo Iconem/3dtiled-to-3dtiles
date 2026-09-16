@@ -276,7 +276,53 @@ verified rendering; splats behave identically on both versions under headless so
 blob), so check splats on a real GPU.
 
 The new Potree point-rendering plugins are not in 0.5.2 yet; they live on a separate page,
-[Potree lab](/docs/guide/potree-lab) (`/potree-lab`), rather than in this app.
+[Potree lab](/docs/guide/potree-lab) (`/potree-lab`, **✺ potree lab** in the top bar), rather than in
+this app. `npm run dev:3dtr-master` runs the whole viewer on a from-source renderer build (see that
+page).
+
+<Callout type="warn">
+**Fixed: implicit point clouds disappeared in 3DTRjs at normal viewing distances.** 3d-tiles-renderer
+0.5.2 and current master skip a child of an `ADD` tile when "the parent already meets the error
+target", without checking that the parent has anything to draw. An implicit subtree root has only its
+`.subtree`; its points live in a content child with the same geometric error. So once that child was
+"good enough", the whole subtree was skipped, and every `/stream` COPC/Potree cloud vanished until
+the camera was close (Geghard from 1.2 km: 2.3 px < target 4). `ImplicitAddRefineFixPlugin`
+(`src/lib/implicitAddFix.ts`, registered in the viewer and the lab) raises that child's view error
+just above the target, so it is never skipped. The renderer is also now held until its implicit and
+glTF plugins are registered, so a root is never preprocessed without them. Worth reporting upstream.
+</Callout>
+
+### Terrain and snap to ground
+
+**Terrain** offers four modes:
+- **WGS84**: the plain ellipsoid.
+- **Cesium World Terrain**: quantized mesh through ion.
+- **Terrarium (AWS, open)**: the keyless AWS Terrain Tiles.
+  - 3DTRjs renders it with its `TerrariumMeshPlugin` and drapes the basemap on it.
+  - Cesium has no Terrarium support, so `src/lib/terrarium.ts` adapts the same tiles as a
+    `CustomHeightmapTerrainProvider` on a web-mercator scheme; below zoom 15 it cuts tiles out of
+    their zoom-15 ancestor.
+- **Google 3D**: Google's photorealistic 3D tiles.
+
+Terrarium heights are above mean sea level, not the ellipsoid.
+
+**⤓ Snap to ground** (Local Frame section, both renderers) moves the loaded tileset vertically onto
+the active terrain. It samples a 9 × 9 grid over the central half of the dataset:
+1. At each node it reads the dataset's **top surface**, using a narrow vertical pick with the globe
+   hidden.
+2. It reads the **terrain height** at the same node:
+   - Cesium: `sampleTerrain` / `sampleTerrainMostDetailed`;
+   - 3DTRjs: `sampleCartographicElevation` for Terrarium, a raycast for real meshes;
+   - Google 3D: a pick on that tileset.
+3. It applies the **80th percentile** of *terrain − dataset* as the Z offset. Roofs, canopy and
+   monuments give the most negative differences, and bare ground the largest.
+4. It runs a second pass once the moved tileset has refined.
+
+Tested on Iconem's Geghard with Terrarium: Cesium −68.9 m (35 of 81 samples), 3DTRjs −74.3 m (27 of
+81). The two agree because both pick the top surface narrowly. A wide point-pick cylinder, or letting
+the pick fall through to the globe, gave contradictory answers, and the implementation notes in
+`src/lib/snapToGround.ts` explain why. A dataset in a narrow gorge is only as well matched as the
+~30 m terrain allows.
 
 ### Tools mode datasets (implicit-to-explicit / upgrade)
 

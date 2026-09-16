@@ -5,6 +5,40 @@ Format loosely follows [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+### Added / Fixed — 2026-09-16d (open sets · proxy · terrain · snap · 3DTRjs implicit fix)
+- **Added: `set=flai`**: 113 national open-LiDAR campaigns from flai-ai/open-lidar-data as COPC
+  overviews; all place and none fail. They are generated from the flai README by
+  `scripts/flai-open-lidar-set.mjs`.
+- **Added: `set=aerometrex`**: 12 US city meshes through `/proxy`. Committed public manifests now
+  live in `packages/tile-server/aggregate-sets/`; entries may carry `proxy`, `crs`, `licence` and ISO
+  date intervals.
+- **Corrected: the "missing tileset-aware proxy" was never missing.** `/proxy` already rewrites child
+  URIs; Brooklyn's 1,003 tiles stream through it. The docs said otherwise and are fixed.
+- **Added: `/stream …&crs=EPSG:<n>`** for COPC/Potree files that declare no CRS. `core/geo.js` gains
+  definitions for 15 national grids plus UTM rules (`crsDefinition`).
+- **Added: dataset names in the 3D Tiles output.** Aggregate leaves carry 3D Tiles 1.1 tile
+  metadata (class `dataset`).
+- **Added: build timings in `asset.extras.build`** (`childRootsFetched`, `fetchMs`, `treeMs`).
+  Iconem: a cold build fetches 692 roots in 10.8 s and builds the tree in 16 ms; a warm rebuild in
+  another scheme takes 257 ms end to end.
+- **Docs:** a step-by-step account of how a mosaic is built, and why the output is an explicit
+  quadtree with no height split.
+- **Fixed: 3DTRjs showed nothing for implicit point clouds at normal distances.** This is an upstream
+  traversal bug (the ADD-parent skip ignores unrenderable parents); `ImplicitAddRefineFixPlugin` works
+  around it. The renderer is also now held until its implicit and glTF plugins are registered.
+- **Added: Terrarium terrain** (open AWS tiles) in both renderers. Cesium gets it through a custom
+  heightmap provider.
+- **Added: ⤓ Snap to ground** in both renderers: 9 × 9 top-surface vs terrain samples, 80th
+  percentile, two passes. On Geghard the renderers agree within 5 m.
+- **Added: ✺ potree lab button** in the top bar. The lab gains a `tileset` mode (any URL, e.g. an
+  aggregate), COPC input and `#crs=`.
+- **Added: `scripts/build-3dtr-master.mjs` + `npm run dev:3dtr-master`**: the whole viewer on a
+  from-source 3DTilesRendererJS build, with a Windows fix for upstream's library build. Verified at
+  `70847eb`.
+- `window.tiles3dtr` exposes the 3DTRjs renderer for inspection, like Cesium's `window.viewer`.
+- The repo now pushes to both `jo-chemla/3dtiled-to-3dtiles` and `iconem/3dtiled-to-3dtiles`
+  (`origin` has two push URLs).
+
 ### Added / Fixed — 2026-09-16c (aggregate picker · dates · regions · 3DTRjs markers)
 - **Added: a dataset picker** for loaded mosaics. It lists what is on screen, grouped by platform
   scene, with per-dataset checkboxes and capture dates. Per-site **latest** and **all** buttons cover
