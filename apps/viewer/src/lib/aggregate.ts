@@ -14,7 +14,7 @@ export interface DatasetMarker {
   scene?: string;
   /** Platform scene when known (`scene:<uuid>`): datasets sharing one belong to the same site. */
   group?: string | null;
-  /** Capture date, "YYYY", "YYYY-MM" or "YYYY-MM-DD"; null when neither the platform nor the name says. */
+  /** Capture date, "YYYY", "YYYY-MM", "YYYY-MM-DD" or an ISO interval "start/end"; null when unknown. */
   date?: string | null;
   format: string;
   url: string;
@@ -22,6 +22,7 @@ export interface DatasetMarker {
   lat: number;
   height: number;
   radius: number;
+  licence?: string;
   /** Set by the client: listed in the full index but excluded from the loaded mosaic. */
   inactive?: boolean;
 }
@@ -184,6 +185,9 @@ export function searchDatasets(datasets: DatasetMarker[], query: string, limit =
 
 /** A capture date as a [first, last] span in fractional years: "2012" → [2012, 2013). */
 export function dateSpan(d: string): [number, number] {
+  // an ISO 8601 interval ("2021-01-01/2025-01-01": a multi-year national campaign)
+  const slash = d.indexOf('/');
+  if (slash > 0) return [dateSpan(d.slice(0, slash))[0], dateSpan(d.slice(slash + 1))[1]];
   const [y, m, day] = d.split('-').map(Number);
   if (day) { const t = y + (m - 1) / 12 + (day - 1) / 365; return [t, t]; }
   if (m) return [y + (m - 1) / 12, y + m / 12 - 1e-6];
@@ -192,7 +196,7 @@ export function dateSpan(d: string): [number, number] {
 
 /** "2015-11-08" → 2015.85 — for the timeline slider. */
 export function dateToYear(d: string): number {
-  const [y, m = '6', day = '15'] = d.split('-');
+  const [y, m = '6', day = '15'] = d.split('/')[0].split('-');
   return +y + (+m - 1) / 12 + (+day - 1) / 365;
 }
 

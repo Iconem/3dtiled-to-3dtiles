@@ -136,7 +136,7 @@ export default function AggregateSearch({ activeHandleRef, renderer }: {
 
   // Year span of the dated datasets, for the timeline.
   const yearSpan = useMemo(() => {
-    const ys = (full?.datasets ?? []).filter((d) => d.date).map((d) => Math.floor(dateToYear(d.date!)));
+    const ys = (full?.datasets ?? []).filter((d) => d.date).flatMap((d) => dateSpan(d.date!)).map(Math.floor);
     if (!ys.length) return null;
     return { min: Math.min(...ys), max: Math.max(...ys), dated: ys.length };
   }, [full]);
@@ -370,7 +370,7 @@ export default function AggregateSearch({ activeHandleRef, renderer }: {
                       <Checkbox checked={on} disabled={lockedOff} onCheckedChange={(v) => toggleDataset(d, v === true)} />
                       <Dot format={d.format} dim={!on} />
                       <span className="min-w-0 flex-1 truncate">{d.name}</span>
-                      <span className="shrink-0 text-muted-foreground">{d.date ?? '—'}</span>
+                      <span className="shrink-0 text-muted-foreground">{d.date ? d.date.replace(/-\d\d(?=\/|$)/g, '').replace('/', '→') : '—'}</span>
                       <button type="button" className="shrink-0 text-muted-foreground hover:text-foreground" title="fly to"
                         onClick={(e) => { e.preventDefault(); pick({ kind: 'dataset', d }); }}>↗</button>
                     </label>

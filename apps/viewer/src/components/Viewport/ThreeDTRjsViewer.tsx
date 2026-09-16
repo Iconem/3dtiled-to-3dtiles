@@ -15,6 +15,7 @@ import { KTX2Loader } from 'three/addons/loaders/KTX2Loader.js';
 // missing from this package's .d.ts — imported via the namespace + cast to dodge the stale types.
 import * as ThreeTilesPlugins from '3d-tiles-renderer/plugins';
 const GeneratedSurfacePlugin = (ThreeTilesPlugins as any).GeneratedSurfacePlugin;
+const TerrariumMeshPlugin = (ThreeTilesPlugins as any).TerrariumMeshPlugin;
 import { WGS84_ELLIPSOID, type TilesRenderer as TilesRendererImpl } from '3d-tiles-renderer';
 import { PivotPointMesh } from '3d-tiles-renderer/src/three/renderer/controls/PivotPointMesh.js';
 import { GaussianSplatPlugin } from '3d-tiles-rendererjs-3dgs-plugin';
@@ -26,6 +27,9 @@ import { CESIUM_ION_TOKEN } from '@/lib/ion';
 import { GOOGLE_MAPS_API_KEY } from '@/lib/google';
 import { installB3dmClientFixes } from '@/lib/b3dmClientFix';
 import { useViewerStore } from '@/state/store';
+import { TERRARIUM_URL, TERRARIUM_MAX_ZOOM } from '@/lib/terrarium';
+import { ImplicitAddRefineFixPlugin } from '@/lib/implicitAddFix';
+import { SNAP_HALF, SNAP_SAMPLES, SNAP_MIN_HITS } from '@/lib/snapToGround';
 import type { DatasetMarker } from '@/lib/aggregate';
 import DatasetTooltip, { type TooltipChannel } from './DatasetTooltip';
 import ThreeDatasetMarkers, { datasetsInView3d } from './ThreeDatasetMarkers';
@@ -204,6 +208,23 @@ function TerrainGlobe({ basemap, gl }: { basemap: 'google' | 'osm' | 'none'; gl:
   );
 }
 
+// Open Terrarium elevation (AWS Terrain Tiles, no key) via 3DTRjs's own TerrariumMeshPlugin, which
+// displaces a shared surface mesh on the GPU and drapes the basemap on it. The live renderer is kept in
+// a module variable so "snap to ground" can ask the plugin for heights (sampleCartographicElevation) —
+// GPU-displaced geometry is invisible to a plain raycast.
+let terrariumTiles: TilesRendererImpl | null = null;
+function TerrariumGlobe({ basemap }: { basemap: 'google' | 'osm' | 'none' }) {
+  const args = useMemo(() => {
+    const overlay = basemap === 'none' ? null : makeBasemapOverlay(basemap);
+    return { url: TERRARIUM_URL, maxZoom: TERRARIUM_MAX_ZOOM, overlay, applyOverlayTexture: !!overlay };
+  }, [basemap]);
+  return (
+    <TilesRendererR3F key={basemap} ref={(t: any) => { terrariumTiles = t ?? null; }}>
+      <TilesPlugin plugin={TerrariumMeshPlugin as any} args={args as any} />
+    </TilesRendererR3F>
+  );
+}
+
 // Google Photorealistic 3D Tiles — 3d-tiles-renderer's own first-party GoogleCloudAuthPlugin, using a
 // real Google Maps Platform key (lib/google.ts) rather than brokering through Cesium ion. The plugin
 // sets tiles.rootURL itself (https://tile.googleapis.com/v1/3dtiles/root.json) when unset, same
@@ -365,6 +386,26 @@ const Scene = forwardRef<ViewerHandle, { loadArgs: LoadArgs; tooltip: TooltipCha
   const store = useViewerStore;
   const [pendingFlyTo, setPendingFlyTo] = useState<{ lon: number; lat: number; height: number } | null>(null);
   const [markers, setMarkers] = useState<DatasetMarker[] | null>(null);
+  // <TilesPlugin> registers one render AFTER <TilesRenderer> creates the renderer, and the renderer's
+  // useFrame may already have run update() in between — fetching and preprocessing the root without
+  // ImplicitTilingPlugin. The root then never expands (an implicit root tries to load its content
+  // TEMPLATE as a file: "tile/{level}-{x}-{y}-{z}.glb" 404), so every implicit /stream point cloud
+  // rendered nothing. Keep the renderer disabled until its essential plugins are in.
+  const [pluginsReadyFor, setPluginsReadyFor] = useState<TilesRendererImpl | null>(null);
+  useEffect(() => {
+    let raf = 0;
+    const tick = () => {
+      const t = tilesRef.current as any;
+      if (t && t !== pluginsReadyFor && t.getPluginByName('IMPLICIT_TILING_PLUGIN') && t.getPluginByName('IMPLICIT_ADD_REFINE_FIX_PLUGIN') && t.plugins.some((p: any) => p instanceof (GLTFExtensionsPlugin as any))) {
+        setPluginsReadyFor(t);
+        invalidate();
+        return;
+      }
+      raf = requestAnimationFrame(tick);
+    };
+    raf = requestAnimationFrame(tick);
+    return () => cancelAnimationFrame(raf);
+  }, [loadArgs, pluginsReadyFor, invalidate]);
   const controlsRef = useRef<any>(null);
   // Cached local "up" (ellipsoid surface normal) at the loaded tileset's own location — set once in
   // frameToTileset, read by applyZOffsetInternal. null for non-georeferenced content (flat world-Y is
@@ -947,6 +988,62 @@ const Scene = forwardRef<ViewerHandle, { loadArgs: LoadArgs; tooltip: TooltipCha
     },
     flyToCity(lon, lat, height) { setPendingFlyTo({ lon, lat, height }); },
     setDatasetMarkers(list) { setMarkers(list); },
+    async snapToGround() {
+      const tiles = tilesRef.current;
+      if (!tiles) return 'Load a tileset first.';
+      const E = WGS84_ELLIPSOID;
+      const mode = store.getState().terrainMode;
+      const terrarium = mode === 'terrarium' ? (terrariumTiles as any)?.getPluginByName?.('TERRARIUM_MESH_PLUGIN') : null;
+      const raycaster = new THREE.Raycaster();
+      let total = 0, last = '';
+      for (let pass = 0; pass < 2; pass++) {
+        const sphere = new THREE.Sphere();
+        if (!(tiles as any).getBoundingSphere(sphere)) return 'The tileset has no bounds yet.';
+        tiles.group.updateMatrixWorld(true);
+        sphere.applyMatrix4(tiles.group.matrixWorld);
+        const up = E.getPositionToNormal(sphere.center, new THREE.Vector3());
+        const east = new THREE.Vector3().crossVectors(Math.abs(up.y) < 0.99 ? new THREE.Vector3(0, 1, 0) : new THREE.Vector3(1, 0, 0), up).normalize();
+        const north = up.clone().cross(east).normalize();
+        const reach = Math.min(sphere.radius * 0.5, 5000);
+        const above = sphere.radius * 2 + 1000;
+        const diffs: number[] = [];
+        const carto: any = {};
+        for (let i = -SNAP_HALF; i <= SNAP_HALF; i++) {
+          for (let j = -SNAP_HALF; j <= SNAP_HALF; j++) {
+            const p = sphere.center.clone().addScaledVector(east, (i / SNAP_HALF) * reach).addScaledVector(north, (j / SNAP_HALF) * reach);
+            const n = E.getPositionToNormal(p, new THREE.Vector3());
+            raycaster.set(p.clone().addScaledVector(n, above), n.clone().negate());
+            // a NARROW column, like Cesium's pick volume: a wide one returns the highest point around
+            raycaster.params.Points.threshold = Math.max(0.5, reach / 100);
+            const hits = raycaster.intersectObject(tiles.group, true);
+            if (!hits.length) continue;
+            const dataH = E.getPositionToCartographic(hits[0].point, carto).height;
+            let groundH: number | null = null;
+            if (mode === 'wgs84') groundH = 0;
+            else if (terrarium) groundH = terrarium.sampleCartographicElevation(carto.lat, carto.lon);
+            else {
+              // World Terrain / Google 3D: real geometry, so raycast everything that is NOT the dataset
+              const ground = raycaster.intersectObjects(scene.children, true)
+                .find((h) => { let o: THREE.Object3D | null = h.object; while (o) { if (o === tiles.group) return false; o = o.parent; } return true; });
+              if (ground) { E.getPositionToCartographic(ground.point, carto); groundH = carto.height; }
+            }
+            if (groundH != null && Number.isFinite(groundH)) diffs.push(groundH - dataH);
+          }
+        }
+        diffs.sort((a, b) => a - b);
+        if (diffs.length < SNAP_MIN_HITS) return `Snap to ground: only ${diffs.length} of ${SNAP_SAMPLES} samples hit both the dataset and the terrain — zoom in so more of both is loaded, then retry.`;
+        const dz = diffs[Math.floor(0.8 * (diffs.length - 1))];
+        total += dz;
+        const next = +(store.getState().localFrame.zOffset + dz).toFixed(2);
+        store.getState().setLocalFrame({ zOffset: next });
+        applyZOffsetInternal(tiles, next);
+        invalidate();
+        last = `${diffs.length}/${SNAP_SAMPLES} samples, spread ${(diffs[diffs.length - 1] - diffs[0]).toFixed(1)} m`;
+        if (Math.abs(dz) < 0.25) break;
+        await new Promise((r) => setTimeout(r, 1500));
+      }
+      return `Snapped to ground: moved ${total.toFixed(2)} m (Z offset now ${store.getState().localFrame.zOffset} m; ${last}).`;
+    },
     flyToSphere(lon, lat, height, radius) { flyToSphereInternal(lon, lat, height, radius); },
     datasetsInView(list, minFraction) {
       const g = tilesRef.current?.group;
@@ -1017,6 +1114,8 @@ const Scene = forwardRef<ViewerHandle, { loadArgs: LoadArgs; tooltip: TooltipCha
           reference when imagery is off. */}
       {showGlobe && (terrainMode === 'cesium' ? (
         <TerrainGlobe basemap={basemap} gl={gl} />
+      ) : terrainMode === 'terrarium' ? (
+        <TerrariumGlobe basemap={basemap} />
       ) : terrainMode === 'google' ? (
         <GoogleGlobe ktxLoader={ktxLoader} />
       ) : basemap === 'none' ? (
@@ -1031,12 +1130,18 @@ const Scene = forwardRef<ViewerHandle, { loadArgs: LoadArgs; tooltip: TooltipCha
         <TilesRendererR3F
           ref={tilesRef as any}
           url={loadArgs.url}
+          // Held until the plugins below are registered — see pluginsReadyFor.
+          enabled={tilesRef.current != null && pluginsReadyFor === tilesRef.current}
           errorTarget={errorTarget}
           // Skipped when the caller (a flyTo-tagged preset — e.g. Bing's per-city pills, which all
           // load the SAME global tileset URL) is about to issue its OWN flyToCity right after load()
           // — this async auto-frame (fires once the tileset.json fetch resolves) would otherwise land
           // AFTER and override that flyTo with the tileset's own (possibly world-sized) bounding sphere.
-          onLoadRootTileset={() => { if (!loadArgs?.skipAutoFrame) frameToTileset(tilesRef.current, true); }}
+          onLoadRootTileset={() => {
+            // devtools / headless inspection — the counterpart of CesiumViewer's window.viewer
+            (window as any).tiles3dtr = { tiles: tilesRef.current, scene, camera };
+            if (!loadArgs?.skipAutoFrame) frameToTileset(tilesRef.current, true);
+          }}
           onLoadModel={onLoadContentModel}
           onLoadError={(e: any) => {
             // `tile === null` means the ROOT tileset.json itself failed (nothing will ever show) —
@@ -1056,6 +1161,7 @@ const Scene = forwardRef<ViewerHandle, { loadArgs: LoadArgs; tooltip: TooltipCha
               implicit roots) never expands past the root tile. Plug-and-play, no options, and a no-op on
               explicit tilesets (only triggers on nodes that actually carry `implicitTiling`). */}
           <TilesPlugin plugin={ImplicitTilingPlugin as any} />
+          <TilesPlugin plugin={ImplicitAddRefineFixPlugin as any} />
           <TilesPlugin plugin={GLTFExtensionsPlugin as any} args={{ dracoLoader, ktxLoader } as any} />
           {isSplat && <TilesPlugin plugin={GaussianSplatPlugin as any} args={{ renderer: gl, scene } as any} />}
           {debugTiles && <TilesPlugin plugin={DebugTilesPlugin as any} displayBoxBounds colorMode={7} />}
@@ -1137,6 +1243,7 @@ const ThreeDTRjsViewer = forwardRef<ViewerHandle, Props>(function ThreeDTRjsView
     flyToCity: (...a) => sceneRef.current?.flyToCity(...a),
     autoZoomToTileset: () => sceneRef.current?.autoZoomToTileset(),
     setDatasetMarkers: (list) => sceneRef.current?.setDatasetMarkers?.(list),
+    snapToGround: () => sceneRef.current?.snapToGround?.() ?? Promise.resolve('3DTRjs scene not ready.'),
     flyToSphere: (...a) => sceneRef.current?.flyToSphere?.(...a),
     datasetsInView: (list, f) => sceneRef.current?.datasetsInView?.(list, f) ?? [],
     setControlMode: (...a) => sceneRef.current?.setControlMode?.(...a),

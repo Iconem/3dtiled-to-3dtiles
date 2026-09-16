@@ -38,6 +38,7 @@ export default function BasemapSection({ activeHandleRef }: { activeHandleRef: R
           <SelectContent>
             <SelectItem value="wgs84">WGS84 (none)</SelectItem>
             <SelectItem value="cesium">Cesium World Terrain</SelectItem>
+            <SelectItem value="terrarium">Terrarium (AWS, open)</SelectItem>
             <SelectItem value="google">Google 3D</SelectItem>
           </SelectContent>
         </Select>

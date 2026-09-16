@@ -42,7 +42,7 @@ interface ViewerStore {
   basemap: 'google' | 'osm' | 'none';
   // 'wgs84' = flat ellipsoid (no elevation), 'cesium' = Cesium World Terrain (Ion), 'google' = Google
   // Photorealistic 3D Tiles (a textured mesh that embeds its own terrain — Cesium-only, no-op on 3DTRJS).
-  terrainMode: 'wgs84' | 'cesium' | 'google';
+  terrainMode: 'wgs84' | 'cesium' | 'terrarium' | 'google';
   setBasemap: (v: ViewerStore['basemap']) => void;
   setTerrainMode: (v: ViewerStore['terrainMode']) => void;
 

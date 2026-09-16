@@ -15,6 +15,8 @@ export default function LocalFrameSection({ activeHandleRef }: { activeHandleRef
   const gizmoOn = useViewerStore((s) => s.tilesetGizmoOn);
   const setGizmoOn = useViewerStore((s) => s.setTilesetGizmoOn);
   const h = () => activeHandleRef.current;
+  const terrainMode = useViewerStore((s) => s.terrainMode);
+  const terrainLabel = { wgs84: 'ellipsoid', cesium: 'World Terrain', terrarium: 'Terrarium', google: 'Google 3D' }[terrainMode];
 
   function useCurrentView() {
     const v = h()?.useCurrentView();
@@ -27,6 +29,11 @@ export default function LocalFrameSection({ activeHandleRef }: { activeHandleRef
         <Label className="text-xs">Z offset (m)</Label>
         <Input type="number" className="h-7 w-28" value={lf.zOffset} onChange={(e) => { const v = Number(e.target.value); setLocalFrame({ zOffset: v }); h()?.applyZOffset(v); }} />
       </div>
+      <Button size="sm" variant="outline"
+        title="Sample the dataset's surface and the active terrain on a 9×9 grid around its centre, and set the Z offset to their difference (80th percentile, so roofs and trees don't pull it down). Pick a real terrain first."
+        onClick={async () => { const st = useViewerStore.getState(); st.setStatus('Snapping to ground…'); st.setStatus((await h()?.snapToGround?.()) ?? 'Not supported by this renderer.'); }}>
+        ⤓ Snap to ground ({terrainLabel})
+      </Button>
       <Label className="text-xs" title="Drag (or press W/E/R to switch translate/rotate/scale) a gizmo on the loaded tileset itself">
         <Checkbox checked={gizmoOn} onCheckedChange={(v) => { const on = !!v; setGizmoOn(on); if (on) h()?.showTilesetGizmo?.(); else h()?.hideTilesetGizmo?.(); }} />
         Transform gizmo (3DTRJS)

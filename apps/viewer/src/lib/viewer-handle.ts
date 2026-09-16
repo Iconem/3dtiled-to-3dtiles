@@ -15,7 +15,7 @@ export interface ViewerHandle {
   // SAME global tileset URL, so the auto-frame target is the whole-world bounding sphere, not the city).
   load(url: string, type: AssetType, opts?: { sseOverride?: number | null; skipAutoFrame?: boolean }): void;
   setBasemap(id: string): void;
-  setTerrainMode(mode: 'wgs84' | 'cesium' | 'google'): void;
+  setTerrainMode(mode: 'wgs84' | 'cesium' | 'terrarium' | 'google'): void;
   setMaxSSE(v: number | null): void;
   toggleAssetVisible(show: boolean): void;
   setOrtho(on: boolean): void;
@@ -42,6 +42,12 @@ export interface ViewerHandle {
    * the viewport height — i.e. the ones that are, or are about to be, actually rendering.
    */
   datasetsInView?(list: DatasetMarker[], minFraction: number): string[];
+  /**
+   * Move the loaded tileset vertically onto the active terrain: sample the dataset's own surface and
+   * the terrain on a grid around its centre and apply the difference as the Z offset. Resolves to a
+   * status line.
+   */
+  snapToGround?(): Promise<string>;
   // 3DTRJS-only — no-ops on CesiumViewer.
   setControlMode?(mode: 'globe' | 'orbit' | 'env'): void;
   setPointSize?(px: number): void;

@@ -300,6 +300,25 @@ export default function TopBar({ activeHandleRef }: { activeHandleRef: React.Ref
         >
           ⌗ hierarchy
         </Button>
+        <Button
+          size="sm"
+          variant="outline"
+          className="h-7 px-2 text-xs"
+          // Point clouds open in the lab with 3DTRjs master's point effects (shape, EDL, adaptive size):
+          // a raw cloud.js / .copc.laz as itself, anything already 3D Tiles (a /stream or /aggregate URL)
+          // in "any 3D Tiles url" mode. Other assets open the lab on its default sample.
+          onClick={() => {
+            const st = useViewerStore.getState();
+            const field = urlField.trim();
+            const raw = /(cloud\.js|metadata\.json|\.copc\.laz)(\?|#|$)/i.test(field) ? field : '';
+            const q = raw ? `?url=${encodeURIComponent(raw)}`
+              : st.currentType === 'pointcloud' && st.lastLoadUrl ? `?mode=tileset&url=${encodeURIComponent(st.lastLoadUrl)}` : '';
+            window.open(`/potree-lab${q}`, '_blank', 'noopener');
+          }}
+          title="Open the Potree lab (3DTRjs master point-cloud effects: shape, eye-dome lighting, adaptive size) in a new tab"
+        >
+          ✺ potree lab
+        </Button>
       </div>
     </header>
   );

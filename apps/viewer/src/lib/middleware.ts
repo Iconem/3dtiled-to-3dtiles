@@ -108,6 +108,10 @@ export function currentPresets(p: MiddlewareParams & { toolName: ToolName; tiles
       { id: 'agg-angkor', label: '🧩 Angkor — 23 sites (geodetic)', type: 'mesh', url: agg('set=angkor&nest=geodetic'), flyTo: ANGKOR_THOM },
       { id: 'agg-angkor-merc', label: '🧩 Angkor — 23 sites (mercator)', type: 'mesh', url: agg('set=angkor&nest=mercator'), flyTo: ANGKOR_THOM },
       { id: 'agg-phnomkulen', label: '🧩 Angkor — only PhnomKulen', type: 'mesh', url: agg('set=angkor&only=PhnomKulen'), flyTo: { lon: 104.0, lat: 13.55, height: 12_000 } },
+      // Committed public sets (packages/tile-server/aggregate-sets/): flai's national open LiDAR as COPC
+      // overviews (CRS passed per entry), and Aerometrex's US city previews through the tileset-aware /proxy.
+      { id: 'agg-flai', label: '🧩 flai open LiDAR — 113 national COPC', type: 'pointcloud', url: agg('set=flai&nest=geodetic'), flyTo: { lon: 10, lat: 54, height: 3_500_000 } },
+      { id: 'agg-aerometrex', label: '🧩 Aerometrex — 12 US cities (proxied)', type: 'mesh', url: agg('set=aerometrex&nest=geodetic'), flyTo: { lon: -73.982, lat: 40.685, height: 7_000 } },
       // `iconem` is a machine-local set (a gitignored manifest of share links), so these four only
       // appear where the server actually has it — see TopBar's requiresSet filter.
       { id: 'agg-iconem-all', label: '🧩 Iconem — all formats', type: 'pointcloud', url: agg('set=iconem&nest=geodetic'), requiresSet: 'iconem' },

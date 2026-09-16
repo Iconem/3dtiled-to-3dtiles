@@ -6,6 +6,8 @@ import type { AssetType } from '@/lib/formats';
 import { CESIUM_ION_TOKEN } from '@/lib/ion';
 import { useViewerStore } from '@/state/store';
 import DatasetTooltip, { MARKER_COLORS, type TooltipChannel } from './DatasetTooltip';
+import { createTerrariumTerrainProvider } from '@/lib/terrarium';
+import { SNAP_HALF, SNAP_SAMPLES, SNAP_MIN_HITS } from '@/lib/snapToGround';
 
 // Ported from viewer.html's Cesium section (lines ~855-1675), near-verbatim: a plain `Cesium.Viewer`
 // constructed imperatively in a mount effect against a bare container div, exactly like viewer.html's
@@ -515,6 +517,11 @@ const CesiumViewer = forwardRef<ViewerHandle, Props>(function CesiumViewer({ vis
         v.terrainProvider = new Cesium.EllipsoidTerrainProvider();
         return;
       }
+      if (mode === 'terrarium') {
+        v.terrainProvider = createTerrariumTerrainProvider();
+        store.getState().setStatus('Terrarium terrain (AWS open elevation tiles, heights above mean sea level).');
+        return;
+      }
       if (mode === 'cesium') {
         try {
           v.terrainProvider = await Cesium.createWorldTerrainAsync();
@@ -574,6 +581,58 @@ const CesiumViewer = forwardRef<ViewerHandle, Props>(function CesiumViewer({ vis
       applyDatasetMarkers();
     },
     flyToSphere(lon, lat, height, radius) { flyToSphereInternal(lon, lat, height, radius); },
+    async snapToGround() {
+      const v = getViewer();
+      const ts = currentTilesetRef.current;
+      if (!v || !ts) return 'Load a tileset first.';
+      const exclude = [googleTilesetRef.current, markersRef.current].filter(Boolean) as object[];
+      let total = 0, last = '';
+      // Two passes: the first move changes what LOD is on screen, the second settles on it.
+      for (let pass = 0; pass < 2; pass++) {
+        const bs = ts.boundingSphere;
+        const enu = Cesium.Transforms.eastNorthUpToFixedFrame(bs.center);
+        const reach = Math.min(bs.radius * 0.5, 5000);
+        const grid: Cesium.Cartographic[] = [];
+        for (let i = -SNAP_HALF; i <= SNAP_HALF; i++) {
+          for (let j = -SNAP_HALF; j <= SNAP_HALF; j++) {
+            const p = Cesium.Matrix4.multiplyByPoint(enu, new Cesium.Cartesian3((i / SNAP_HALF) * reach, (j / SNAP_HALF) * reach, 0), new Cesium.Cartesian3());
+            const c = Cesium.Cartographic.fromCartesian(p);
+            c.height = 0;
+            grid.push(c);
+          }
+        }
+        const clone = () => grid.map((c) => Cesium.Cartographic.clone(c));
+        // The dataset's own surface. sampleHeight ALSO hits the globe, and a sparse point cloud leaves
+        // gaps where the ray reaches it — which silently returned terrain heights ("already on the
+        // ground"). Hide the globe while sampling; a pick volume ~1% of the sampled area catches points.
+        const globeShown = v.scene.globe.show;
+        v.scene.globe.show = false;
+        let data: (Cesium.Cartographic | undefined)[];
+        try { data = await v.scene.sampleHeightMostDetailed(clone(), exclude, Math.max(0.5, reach / 100)); }
+        finally { v.scene.globe.show = globeShown; }
+        let ground: (Cesium.Cartographic | undefined)[];
+        if (googleTilesetRef.current) ground = await v.scene.sampleHeightMostDetailed(clone(), [ts, markersRef.current].filter(Boolean) as object[]);
+        else if (v.terrainProvider instanceof Cesium.EllipsoidTerrainProvider) ground = clone();
+        else if ((v.terrainProvider as any).availability) ground = await Cesium.sampleTerrainMostDetailed(v.terrainProvider, clone());
+        else ground = await Cesium.sampleTerrain(v.terrainProvider, 14, clone());   // custom providers publish no availability
+        const diffs = data
+          .map((d, i) => (d && ground[i] && Number.isFinite(d.height) && Number.isFinite(ground[i]!.height) ? ground[i]!.height - d.height : NaN))
+          .filter(Number.isFinite)
+          .sort((a, b) => a - b);
+        if (diffs.length < SNAP_MIN_HITS) return `Snap to ground: only ${diffs.length} of ${SNAP_SAMPLES} samples hit the dataset — zoom in so more of it is loaded, then retry.`;
+        // 80th percentile: points on roofs / canopy sit ABOVE the ground and give smaller differences;
+        // the ground-level ones are the largest, minus a margin for noise.
+        const dz = diffs[Math.floor(0.8 * (diffs.length - 1))];
+        total += dz;
+        const next = +(store.getState().localFrame.zOffset + dz).toFixed(2);
+        store.getState().setLocalFrame({ zOffset: next });
+        applyZOffsetInternal(next);
+        last = `${diffs.length}/${SNAP_SAMPLES} samples, spread ${(diffs[diffs.length - 1] - diffs[0]).toFixed(1)} m`;
+        if (Math.abs(dz) < 0.25) break;
+        await new Promise((r) => setTimeout(r, 1500));      // let the moved tileset refine before re-sampling
+      }
+      return `Snapped to ground: moved ${total.toFixed(2)} m (Z offset now ${store.getState().localFrame.zOffset} m; ${last}).`;
+    },
     datasetsInView(list, minFraction) {
       const v = getViewer();
       if (!v) return [];

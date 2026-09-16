@@ -38,9 +38,10 @@ export default function DatasetTooltip({ channel, visible }: { channel: TooltipC
       </div>
       {place.map((p) => <div key={p} className="text-muted-foreground break-words">{p}</div>)}
       <div className="mt-0.5 text-muted-foreground">
-        {d.format}{d.date ? ` · ${d.date}` : ''} · {d.radius >= 1000 ? `${(d.radius / 1000).toFixed(1)} km` : `${Math.round(d.radius)} m`}
+        {d.format}{d.date ? ` · ${d.date.replace('/', ' → ')}` : ''} · {d.radius >= 1000 ? `${(d.radius / 1000).toFixed(1)} km` : `${Math.round(d.radius)} m`}
         {d.inactive ? ' · hidden' : ''}
       </div>
+      {d.licence && <div className="text-[10px] text-muted-foreground break-words">{d.licence.replace(/\[License\]\((.*?)\)/, '$1')}</div>}
       <div className="text-[10px] text-muted-foreground/70">click to fly there</div>
     </div>
   );

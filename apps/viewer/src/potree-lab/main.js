@@ -14,8 +14,14 @@
  *            from the octree into a plain 3D Tiles endpoint; per-POINT adaptive sizing would also
  *            need the active-node texture, keyed from each tile's implicit (level, x, y, z).
  *
+ *   tileset  Any 3D Tiles URL as is — typically an /aggregate mosaic of point clouds (filter it with
+ *            &only= so it stays regional) — with the same effects and sizing as `stream`.
+ *
+ * `stream` also takes a COPC (.copc.laz) url; `&crs=EPSG:<n>` is passed through for files that
+ * declare no CRS (flai's open LiDAR).
+ *
  * State lives in the query string so any view is shareable:
- *   /potree-lab?url=<cloud.js>&mode=potree|stream&shape=round&edl=0.4&scale=1&geSize=1
+ *   /potree-lab?url=<cloud.js|.copc.laz|tileset.json>&mode=potree|stream|tileset&shape=round&edl=0.4&scale=1&geSize=1
  *
  * Dataset list = built-in public samples + (dev server only) the Iconem share-link manifest at
  * .local/aggregate-sets/iconem.json, served loopback-only by vite.config.ts.
@@ -27,6 +33,7 @@ import { GUI } from 'three/addons/libs/lil-gui.module.min.js';
 import { PotreePlugin } from './vendor/potree/PotreePlugin.js';
 import { PointCloudEffectsPlugin } from './vendor/pointcloud/PointCloudEffectsPlugin.js';
 import { MW } from '@/lib/formats';
+import { ImplicitAddRefineFixPlugin } from '@/lib/implicitAddFix';
 
 const POTREE_REPO = 'https://raw.githubusercontent.com/potree/potree/refs/heads/develop/pointclouds/';
 const BUILTIN = {
@@ -34,13 +41,17 @@ const BUILTIN = {
   'sample · Lion (normals)': `${POTREE_REPO}lion_takanawa_normals/cloud.js`,
   'sample · Vol Total': `${POTREE_REPO}vol_total/cloud.js`,
   'Iconem · Geghard monastery': 'https://api.iconem.com/s/rIdPkRfOmEdRtgsoO08TgNt9MSxh-woC/cloud.js',
+  'flai COPC · Belgium Namur (EPSG:3812)': 'https://open-lidar-data.s3.eu-central-1.amazonaws.com/data/BE/SPW/NAMUR_2021-2022/overview/overview.copc.laz#crs=EPSG:3812',
+  'aggregate · Angkor PhnomKulen (3D Tiles)': `${MW}/aggregate/tileset.json?set=angkor&only=PhnomKulen`,
 };
+// Presets that only make sense in one mode switch to it when picked.
+const MODE_OF = (u) => (/\/aggregate\/|tileset\.json/.test(u) ? 'tileset' : null);
 
 const q = new URLSearchParams(location.search);
 const params = {
   dataset: '',
   url: q.get('url') || BUILTIN['sample · Lion Takanawa'],
-  mode: q.get('mode') === 'stream' ? 'stream' : 'potree',
+  mode: ['stream', 'tileset'].includes(q.get('mode')) ? q.get('mode') : 'potree',
   enable: true,
   errorTarget: Number(q.get('error') ?? 1),
   pointScale: Number(q.get('scale') ?? 1),
@@ -78,7 +89,12 @@ controls.useFallbackPlane = true;
 let tiles = null, effects = null;
 
 function streamUrl(src) {
-  return `${MW}/stream/tileset.json?format=potree&url=${encodeURIComponent(src)}&cache=none`;
+  if (params.mode === 'tileset') return src;
+  // "<url>#crs=EPSG:n" carries a CRS for sources that declare none
+  const [bare, frag = ''] = src.split('#');
+  const crs = new URLSearchParams(frag).get('crs');
+  const format = /\.copc\.laz$/i.test(bare) ? 'copc' : 'potree';
+  return `${MW}/stream/tileset.json?format=${format}&url=${encodeURIComponent(bare)}&cache=none${crs ? `&crs=${encodeURIComponent(crs)}` : ''}`;
 }
 
 /** Point size for a /stream tile. GE of a Potree-derived tile is its point spacing, so reuse it. */
@@ -87,7 +103,7 @@ function sizeFor(tile) {
 }
 
 function applyStreamSizes() {
-  if (!tiles || params.mode !== 'stream') return;
+  if (!tiles || params.mode === 'potree') return;
   tiles.forEachLoadedModel((model, tile) => {
     model.traverse((o) => { if (o.isPoints && o.material?.isPointCloudMaterial) o.material.size = sizeFor(tile); });
   });
@@ -104,6 +120,7 @@ function initTiles() {
     edlRadius: params.edlRadius,
   };
 
+  if (params.mode === 'potree' && /\.copc\.laz|tileset\.json|\/aggregate\//i.test(params.url)) params.mode = 'stream';
   if (params.mode === 'potree') {
     tiles = new TilesRenderer();
     effects = new PotreePlugin({ url: params.url, pointScale: params.pointScale, ...effectOpts });
@@ -112,6 +129,7 @@ function initTiles() {
   } else {
     tiles = new TilesRenderer(streamUrl(params.url));
     tiles.registerPlugin(new ImplicitTilingPlugin());
+    tiles.registerPlugin(new ImplicitAddRefineFixPlugin());   // see lib/implicitAddFix.ts
     // /stream may emit a georeferenced (ECEF) root; recentre + orient so both modes frame the same way.
     tiles.registerPlugin(new ReorientationPlugin({ recenter: true }));
     effects = new PointCloudEffectsPlugin(effectOpts);
@@ -159,7 +177,7 @@ function initTiles() {
 function syncUrl() {
   const s = new URLSearchParams({ url: params.url, mode: params.mode, shape: params.pointShape,
     edl: params.edl ? String(params.edlStrength) : '0', scale: String(params.pointScale) });
-  if (params.mode === 'stream') { s.set('geSize', params.geSize ? '1' : '0'); if (!params.geSize) s.set('fixed', String(params.fixedSize)); }
+  if (params.mode !== 'potree') { s.set('geSize', params.geSize ? '1' : '0'); if (!params.geSize) s.set('fixed', String(params.fixedSize)); }
   if (params.debugColorMode !== 'none') s.set('debug', params.debugColorMode);
   if (params.displayBoxBounds) s.set('boxes', '1');
   history.replaceState(null, '', `?${s}`);
@@ -170,12 +188,15 @@ const gui = new GUI({ title: 'Potree lab' });
 const datasets = { ...BUILTIN };
 const datasetCtl = gui.add(params, 'dataset', Object.keys(datasets)).name('dataset').onChange((name) => {
   params.url = datasets[name];
+  const mode = MODE_OF(params.url);
+  if (mode) { params.mode = mode; modeCtl.updateDisplay(); streamFolder.show(true); }
+  else if (params.mode === 'tileset') { params.mode = 'stream'; modeCtl.updateDisplay(); }
   urlCtl.updateDisplay();
   initTiles();
 });
-const urlCtl = gui.add(params, 'url').name('cloud.js url').onFinishChange(initTiles);
-gui.add(params, 'mode', { 'PotreePlugin (adaptive size)': 'potree', '/stream 3D Tiles + effects': 'stream' })
-  .name('load as').onChange(() => { streamFolder.show(params.mode === 'stream'); scaleCtl.name(params.mode === 'potree' ? 'point scale' : 'size multiplier'); initTiles(); });
+const urlCtl = gui.add(params, 'url').name('source url').onFinishChange(initTiles);
+const modeCtl = gui.add(params, 'mode', { 'PotreePlugin (adaptive size)': 'potree', '/stream 3D Tiles + effects': 'stream', 'any 3D Tiles url + effects': 'tileset' })
+  .name('load as').onChange(() => { streamFolder.show(params.mode !== 'potree'); scaleCtl.name(params.mode === 'potree' ? 'point scale' : 'size multiplier'); initTiles(); });
 
 const tilesFolder = gui.addFolder('tiles');
 tilesFolder.add(params, 'enable').name('update tiles');
@@ -196,7 +217,7 @@ const streamFolder = gui.addFolder('stream mode sizing');
 streamFolder.add(params, 'geSize').name('size from tile GE').onChange(() => { applyStreamSizes(); syncUrl(); });
 streamFolder.add(params, 'geFactor', 0.25, 4, 0.05).name('GE → size factor').onChange(applyStreamSizes);
 streamFolder.add(params, 'fixedSize', 0.001, 1, 0.001).name('fixed size (m)').onChange(applyStreamSizes);
-streamFolder.show(params.mode === 'stream');
+streamFolder.show(params.mode !== 'potree');
 
 const debug = gui.addFolder('debug');
 debug.add(params, 'debugColorMode', ['none', 'node', 'depth', 'tile']).name('color by').onChange((v) => { effects.debugColorMode = v; syncUrl(); });
@@ -229,7 +250,7 @@ function updateHud() {
   });
   LAB.visibleTiles = vis;
   LAB.visiblePoints = pts;
-  hud.textContent = `${params.mode === 'potree' ? 'PotreePlugin · adaptive size' : `/stream 3D Tiles · ${params.geSize ? 'size from tile GE' : 'fixed size'}`}`
+  hud.textContent = `${params.mode === 'potree' ? 'PotreePlugin · adaptive size' : `${params.mode === 'tileset' ? '3D Tiles url' : '/stream 3D Tiles'} · ${params.geSize ? 'size from tile GE' : 'fixed size'}`}`
     + ` · ${vis} tiles · ${pts.toLocaleString('en-US')} points`
     + (hud.dataset.iconem ? ` · ${hud.dataset.iconem} Iconem datasets listed` : '')
     + (LAB.errors.length ? ` · ${LAB.errors.length} error(s)` : '');
