@@ -4,7 +4,7 @@
  * See ARCHITECTURE.md.
  */
 export { buildSpzBuffer, buildSpzGlb, buildSplatTileGlb, computeBounds } from './spz-glb.js';
-export { buildPointsGlb } from './points-glb.js';
+export { buildPointsGlb, srgbToLinear } from './points-glb.js';
 export { parallelMap, WorkerPool, defaultConcurrency } from './parallel.js';
 export { detectFormat, detectFormatByName } from './detect.js';
 export { keyToCoords, coordsToKey, octreeChildKeys, octreeSubCube, cubeToBox,
