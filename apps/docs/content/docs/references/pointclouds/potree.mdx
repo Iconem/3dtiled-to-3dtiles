@@ -33,6 +33,13 @@ numPoints` (BFS within a chunk of `hierarchyStepSize` levels; the deepest level 
 childMask bit `c` set ⇒ child `c` exists. File path: `octreeDir/r/<name[1..] chunked by stepSize>/<name>.<bin|laz>`.
 Node files are `.bin` (raw), `.las`, or `.laz` (`pointAttributes:"LAZ"`).
 
+**1.8 variant**: same layout as 1.7, but `pointAttributes` is an array of **objects**
+(`{ name, size, elements, elementSize, type, description }`) instead of names. Read the byte size
+from the object's `size`. This repo's decoder once read `byteSize` — a field 1.8 does not have — so
+every attribute size was `undefined`, the point stride `NaN`, and every 1.8 node decoded to zero
+points: the root tile answered 404 and roughly half of Iconem's Potree datasets streamed as an empty
+bounding volume. A 60-dataset sweep went from 27/60 to 60/60 with the fix.
+
 **1.4 variant**: inline `hierarchy:[[name,numPoints],…]` in cloud.js (no `.hrc`, no `hierarchyStepSize`),
 flat `data/<name>.<bin|laz>`.
 

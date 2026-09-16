@@ -5,6 +5,25 @@ Format loosely follows [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+### Added / Fixed — 2026-09-16b (Potree 1.8 · aggregate search + markers)
+- **Fixed: every Potree 1.8 dataset rendered nothing.** 1.8's `pointAttributes` are objects with a
+  `size` field; the decoder read `byteSize`, so the point stride was `NaN` and every node decoded to
+  zero points — the root tile 404'd ("no such node") and only the bounding sphere showed (e.g.
+  Quéribus). Sweep of 60 Iconem Potree datasets: 27/60 → **60/60** (all 33 1.8 ones fixed). Affects
+  both `/stream` and the offline converter. Unknown attribute sizes now throw instead of silently
+  producing empty tiles.
+- **Added: `/aggregate/index.json`** — one row per placed dataset (name, project, scene, format,
+  lon/lat/height, radius) plus unplaced/failed, sharing the tileset's selection and cached mosaic.
+- **Added: search box + dataset markers in the demo app** for any loaded mosaic: accent-insensitive
+  dataset search plus OSM place search (Photon), and fixed-size format-coloured markers on the
+  ellipsoid that hide once a dataset spans >10% of the viewport (per-point
+  `DistanceDisplayCondition`); hover names, click flies. Cesium only for markers.
+- **Changed: worldwide mosaics get an Earth-centred root sphere** when it is tighter than the greedy
+  union (Iconem: 9 526 → 6 401 km).
+- **Changed: Iconem pills only appear when the server has the set**, replacing the "(local)" suffix;
+  Angkor demo entries carry distinct names ("PhnomKulen 02-1 OuThmorDab" instead of four
+  "PhnomKulen").
+
 ### Added / Fixed — 2026-09-16 (Iconem share links · point colours · Potree lab · 0.5.2 · aggregate pill)
 - **Ran the share-link script against production:** 692 `single-meta-tileset` links created (658
   Potree, 17 3D Tiles, 17 COPC) across 139 projects, 0 failures; a second run reused all 692 and

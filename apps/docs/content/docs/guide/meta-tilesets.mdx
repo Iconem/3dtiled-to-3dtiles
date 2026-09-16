@@ -62,6 +62,27 @@ Three ways to look at them:
   **Load**; **⌗ hierarchy** then opens it in the explorer.
 - **`/hierarchy`** on the viewer: its preset list starts with these mosaics.
 
+### Search and markers in the demo app
+
+Whenever an `/aggregate` tileset is loaded, the demo app shows a search box over the globe, fed by
+`/aggregate/index.json` — the same query as the tileset, flattened to one row per placed dataset
+(`name`, `project`, `scene`, `format`, `lon`, `lat`, `height`, `radius`), plus the `unplaced` and
+`failed` lists. The two can never disagree about which datasets a URL means: they share one selection
+function and one cached mosaic.
+
+- **Search** matches dataset name, project, scene and format as you type (accent-insensitive, every
+  word must match), and queries the world through [Photon](https://photon.komoot.io) — OpenStreetMap,
+  no key — from three characters. Arrow keys and Enter work; picking a dataset frames its bounding
+  sphere, picking a place frames its extent.
+- **Markers** (Cesium): one fixed-size dot per dataset on the ellipsoid, coloured by format (amber
+  Potree, blue COPC, violet 3D Tiles). Hover names it, click flies to it. A marker disappears once its
+  dataset's bounds would span **more than 10% of the viewport height** — a per-point
+  `DistanceDisplayCondition` at `radius / (0.1 · tan(fovy/2))`, so the hand-off from dot to data costs
+  no per-frame JavaScript. The 3DTRjs renderer has search but not markers yet.
+
+Presets backed by a machine-local set (the Iconem manifest) are only offered when the server reports
+that set in `/aggregate/demo.json`, instead of being shown everywhere and failing with `unknown set`.
+
 ### What the Angkor set demonstrates
 
 This is the interesting one, because the sites are **not** uniformly spread: 19 sit inside the Angkor
@@ -337,6 +358,14 @@ lon/lat and its sphere inflates the root past the planet's own radius. Such chil
 and listed in `asset.extras.unplaced` (on the Iconem set: 32 of 692). If *every* child is unplaceable
 or unreachable, the endpoint answers **`422`** with both lists and a hint rather than a `500`: place
 them first with `/stream/tileset.json?...&lon=<deg>&lat=<deg>` and they become ordinary children.
+
+## The root bounding sphere
+
+Worldwide mosaics are bounded by an **Earth-centred** sphere whenever that is tighter than the
+greedy pairwise union of the children (whose radius overshot to 9 526 km for the Iconem set — larger
+than the planet). Regional mosaics keep the tight union (Angkor: 23 km). The centre of a sphere that
+encloses sites on several continents therefore sits inside the Earth — like the midpoint of a chord —
+which is expected, not a placement bug.
 
 ## How a child's geometric error is chosen
 
