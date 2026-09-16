@@ -375,6 +375,15 @@ export async function buildAggregate(urls, { nest = 'auto', ttlMs = DEFAULT_TTL_
     };
   }
 
+  // A mosaic spread across continents is better bounded by an EARTH-CENTRED sphere than by the greedy
+  // pairwise union (whose centre drifts and whose radius overshoots: 9 526 km for the Iconem set,
+  // larger than the planet). Both enclose every child; keep whichever is smaller.
+  {
+    const s = root.boundingVolume.sphere;
+    const earthR = Math.max(...children.map((c) => { const [x, y, z, r] = c.boundingVolume.sphere; return Math.hypot(x, y, z) + r; }));
+    if (earthR < s[3]) root.boundingVolume.sphere = [0, 0, 0, earthR];
+  }
+
   // depth/fanout of what we produced — cheap to compute, and the only way to see the nesting worked
   const shape = (t, d = 0) => t.children
     ? t.children.reduce((a, c) => { const s = shape(c, d + 1); return { depth: Math.max(a.depth, s.depth), groups: a.groups + s.groups }; },
@@ -451,6 +460,14 @@ const ANGKOR_SITES = [
   'TonleSnguot_221M_d202412_p202412_epsg32648',
 ];
 
+/**
+ * "PhnomKulen_02-1_OuThmorDab_280M_d202411_p202412_epsg32648" → "PhnomKulen 02-1 OuThmorDab".
+ * Search needs the distinguishing part: the first token alone named four different sites "PhnomKulen".
+ */
+function angkorLabel(s) {
+  return s.replace(/_\d+M(_.*)?$/, '').replace(/_(complet|Master\d*).*$/, '').replace(/^Angkor_/, '').replace(/_/g, ' ');
+}
+
 export const DEMO_SETS = {
   opendata: {
     label: '3D Tiles RESOURCES.md open data — 10 datasets, 4 continents',
@@ -460,13 +477,13 @@ export const DEMO_SETS = {
   angkor: {
     label: 'Iconem Angkor — 23 individual site tilesets',
     urls: ANGKOR_SITES.map((s) => `${ANGKOR_BASE}/${s}/tileset.json`),
-    entries: ANGKOR_SITES.map((s) => ({ id: s, label: s.split('_')[0], url: `${ANGKOR_BASE}/${s}/tileset.json` })),
+    entries: ANGKOR_SITES.map((s) => ({ id: s, label: angkorLabel(s), url: `${ANGKOR_BASE}/${s}/tileset.json` })),
   },
   /** Everything at once — the "one endpoint, heterogeneous sources, whole planet" pitch. */
   world: {
     label: 'Open data + Angkor — 33 tilesets across four continents',
     urls: [...OPEN_DATA.map((d) => d.url), ...ANGKOR_SITES.map((s) => `${ANGKOR_BASE}/${s}/tileset.json`)],
-    entries: [...OPEN_DATA, ...ANGKOR_SITES.map((s) => ({ id: s, label: s.split('_')[0], url: `${ANGKOR_BASE}/${s}/tileset.json` }))],
+    entries: [...OPEN_DATA, ...ANGKOR_SITES.map((s) => ({ id: s, label: angkorLabel(s), url: `${ANGKOR_BASE}/${s}/tileset.json` }))],
   },
 };
 
@@ -544,32 +561,99 @@ export async function handleAggregate(req, res, u) {
       : { label: v.label, count: v.urls.length, entries: v.entries }]))));
     return true;
   }
-  if (u.pathname !== '/aggregate/tileset.json') return false;
+  const isTileset = u.pathname === '/aggregate/tileset.json';
+  const isIndex = u.pathname === '/aggregate/index.json';
+  if (!isTileset && !isIndex) return false;
 
+  const sel = selectChildren(req, u, sets);
+  if (sel.error) { res.writeHead(400, CORS); res.end(sel.error); return true; }
+  const { items, urls, nest, ttlMs } = sel;
+
+  const key = JSON.stringify({ urls, nest, ttlMs });
+  let ts;
+  try {
+    ts = await aggregateCached(key, ttlMs);
+  } catch (e) {
+    if (e.status !== 422) throw e;
+    res.writeHead(422, { 'Content-Type': 'application/json', ...CORS });
+    res.end(JSON.stringify({ error: e.message, ...e.detail,
+      hint: 'datasets without a georeference can be placed first: /stream/tileset.json?…&lon=<deg>&lat=<deg>' }));
+    return true;
+  }
+
+  if (isIndex) {
+    // Same selection and the same cached mosaic as tileset.json, flattened into one row per PLACED
+    // dataset: what a client needs for a search box and for "there is data here" markers, without
+    // walking the tree or opening a single child. Built from the mosaic's own leaves so positions are
+    // exactly what the renderer sees.
+    const byUrl = new Map(items.map((it) => [it.url, it]));
+    const datasets = [];
+    (function walk(t) {
+      if (t.content?.uri) {
+        const [x, y, z, r] = t.boundingVolume.sphere;
+        const [lon, lat, height] = ecefToLlh(x, y, z);
+        const it = byUrl.get(t.content.uri) || {};
+        datasets.push({
+          name: it.name || nameFromUrl(t.content.uri), project: it.project, scene: it.scene,
+          format: it.fmt || '3dtiles', url: t.content.uri,
+          lon: +lon.toFixed(6), lat: +lat.toFixed(6), height: +height.toFixed(1), radius: +r.toFixed(1),
+        });
+      }
+      for (const c of t.children || []) walk(c);
+    })(ts.root);
+    res.writeHead(200, { 'Content-Type': 'application/json', ...CORS });
+    res.end(JSON.stringify({
+      count: datasets.length, datasets,
+      unplaced: ts.asset.extras.unplaced ?? [], failed: ts.asset.extras.failed ?? [],
+    }));
+    return true;
+  }
+
+  res.writeHead(200, { 'Content-Type': 'application/json', ...CORS });
+  res.end(JSON.stringify(ts));
+  return true;
+}
+
+/** A readable name for an ad-hoc child: the inner source file of a /stream URL, else the URL's tail. */
+function nameFromUrl(x) {
+  try {
+    const u = new URL(x);
+    const inner = u.searchParams.get('url');
+    const p = (inner ? new URL(inner) : u).pathname.split('/').filter(Boolean);
+    const last = p.pop() || u.hostname;
+    return /^(tileset\.json|cloud\.js|metadata\.json|lod-meta\.json)$/i.test(last) ? (p.pop() || last) : last;
+  } catch { return x.slice(-40); }
+}
+
+/**
+ * Resolve ?set= / ?url= / ?urls= plus &format= / &only= / &exclude= into the child list. Shared by
+ * tileset.json and index.json so the two can never disagree about which datasets a URL means.
+ */
+function selectChildren(req, u, sets) {
   // ?set=<name> expands to a curated or local list; it composes with ?url= so you can add your own
   // dataset to a demo mosaic without retyping the other 33.
   const setName = u.searchParams.get('set');
-  if (setName && !sets[setName]) {
-    res.writeHead(400, CORS);
-    res.end(`unknown set "${setName}" — try one of: ${Object.keys(sets).join(', ')}`);
-    return true;
-  }
+  if (setName && !sets[setName]) return { error: `unknown set "${setName}" — try one of: ${Object.keys(sets).join(', ')}` };
   const proto = (req.headers['x-forwarded-proto'] || 'http').split(',')[0].trim();
   const origin = `${proto}://${req.headers['x-forwarded-host'] || req.headers.host}`;
 
   // Each child carries the text filters match against. For share links that must include the dataset
   // NAME: a share URL is an opaque token (/s/<token>/cloud.js), so `only=_d2024` could never match it.
-  // Each also knows its source FORMAT, so `&format=` can split one mosaic into per-format variants.
-  const fromSet = !setName ? [] : sets[setName].local
-    ? sets[setName].entries.map((e) => ({ url: childUrlFor(e, origin), fmt: e.format || '3dtiles', text: [e.url, e.name, e.project, e.scene].filter(Boolean).join(' ') }))
-    : sets[setName].urls.map((x) => ({ url: x, fmt: '3dtiles', text: x }));
-  const adhoc = (x) => ({ url: x, fmt: formatOfUrl(x), text: x });
+  // Each also knows its source FORMAT, so `&format=` can split one mosaic into per-format variants,
+  // and a display NAME for the index.
+  const set = setName ? sets[setName] : null;
+  const labelByUrl = new Map((set && !set.local ? set.entries : []).map((e) => [e.url, e.label || e.id]));
+  const fromSet = !set ? [] : set.local
+    ? set.entries.map((e) => ({ url: childUrlFor(e, origin), fmt: e.format || '3dtiles', name: e.name, project: e.project, scene: e.scene,
+        text: [e.url, e.name, e.project, e.scene].filter(Boolean).join(' ') }))
+    : set.urls.map((x) => ({ url: x, fmt: '3dtiles', name: labelByUrl.get(x), text: `${x} ${labelByUrl.get(x) ?? ''}` }));
+  const adhoc = (x) => ({ url: x, fmt: formatOfUrl(x), name: nameFromUrl(x), text: x });
   let items = [
     ...fromSet,
     ...u.searchParams.getAll('url').map(adhoc),
     ...(u.searchParams.get('urls') || '').split(',').map(s => s.trim()).filter(Boolean).map(decodeURIComponent).map(adhoc),
   ];
-  if (!items.length) { res.writeHead(400, CORS); res.end(`missing ?urls=<u1>,<u2>,… (each URL-encoded), repeated ?url=, or ?set=<${Object.keys(sets).join('|')}>`); return true; }
+  if (!items.length) return { error: `missing ?urls=<u1>,<u2>,… (each URL-encoded), repeated ?url=, or ?set=<${Object.keys(sets).join('|')}>` };
 
   // ── selection ──────────────────────────────────────────────────────────────────────────────────
   //
@@ -589,28 +673,11 @@ export async function handleAggregate(req, res, u) {
   if (only.length) items = items.filter(it => only.some(s => it.text.toLowerCase().includes(s)));
   if (exclude.length) items = items.filter(it => !exclude.some(s => it.text.toLowerCase().includes(s)));
   const urls = items.map((it) => it.url);
-  if (!urls.length) {
-    res.writeHead(400, CORS);
-    res.end(`no children left after format=[${formats}] only=[${only}] exclude=[${exclude}]`);
-    return true;
-  }
+  if (!urls.length) return { error: `no children left after format=[${formats}] only=[${only}] exclude=[${exclude}]` };
   const nest = u.searchParams.get('nest') ?? 'auto';
   // &ttl=<seconds>; ttl=0 bypasses the cache entirely (both the mosaic and its child roots), which is
   // what you want while iterating on a dataset that is actively being re-tiled.
   const ttlParam = u.searchParams.get('ttl');
   const ttlMs = ttlParam == null ? DEFAULT_TTL_MS : Math.max(0, Number(ttlParam) || 0) * 1000;
-  const key = JSON.stringify({ urls, nest, ttlMs });
-  let ts;
-  try {
-    ts = await aggregateCached(key, ttlMs);
-  } catch (e) {
-    if (e.status !== 422) throw e;
-    res.writeHead(422, { 'Content-Type': 'application/json', ...CORS });
-    res.end(JSON.stringify({ error: e.message, ...e.detail,
-      hint: 'datasets without a georeference can be placed first: /stream/tileset.json?…&lon=<deg>&lat=<deg>' }));
-    return true;
-  }
-  res.writeHead(200, { 'Content-Type': 'application/json', ...CORS });
-  res.end(JSON.stringify(ts));
-  return true;
+  return { items, urls, nest, ttlMs };
 }
