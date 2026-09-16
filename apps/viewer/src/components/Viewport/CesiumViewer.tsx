@@ -5,6 +5,7 @@ import type { DatasetMarker } from '@/lib/aggregate';
 import type { AssetType } from '@/lib/formats';
 import { CESIUM_ION_TOKEN } from '@/lib/ion';
 import { useViewerStore } from '@/state/store';
+import DatasetTooltip, { MARKER_COLORS, type TooltipChannel } from './DatasetTooltip';
 
 // Ported from viewer.html's Cesium section (lines ~855-1675), near-verbatim: a plain `Cesium.Viewer`
 // constructed imperatively in a mount effect against a bare container div, exactly like viewer.html's
@@ -30,7 +31,6 @@ interface Props {
 // Extract whatever's actually there, falling back to an actionable hint instead of "undefined".
 // Aggregate markers: hide once a dataset's bounds span more than this fraction of the viewport height.
 const MARKER_HIDE_FRACTION = 0.1;
-const MARKER_COLORS: Record<string, string> = { potree: '#f59e0b', copc: '#38bdf8', '3dtiles': '#a78bfa' };
 
 function describeLoadError(e: any): string {
   if (typeof e === 'string' && e) return e;
@@ -61,6 +61,7 @@ const CesiumViewer = forwardRef<ViewerHandle, Props>(function CesiumViewer({ vis
   // Aggregate dataset markers: one PointPrimitive per placed dataset (see setDatasetMarkers below).
   const markersRef = useRef<Cesium.PointPrimitiveCollection | null>(null);
   const markerDataRef = useRef<DatasetMarker[] | null>(null);
+  const tooltipRef: TooltipChannel = useRef(null);
   const pendingLoadRef = useRef<{ url: string; type: AssetType; opts?: { sseOverride?: number | null; skipAutoFrame?: boolean } } | null>(null);
 
   const getViewer = () => viewerRef.current;
@@ -203,6 +204,7 @@ const CesiumViewer = forwardRef<ViewerHandle, Props>(function CesiumViewer({ vis
     const v = getViewer();
     if (!v) return;
     if (markersRef.current) { v.scene.primitives.remove(markersRef.current); markersRef.current = null; }
+    tooltipRef.current?.(null);
     const list = markerDataRef.current;
     if (!list?.length) return;
     const fr: any = v.camera.frustum;
@@ -214,8 +216,11 @@ const CesiumViewer = forwardRef<ViewerHandle, Props>(function CesiumViewer({ vis
       pts.add({
         // A few metres above the ellipsoid so the sprite doesn't z-fight with the globe surface.
         position: Cesium.Cartesian3.fromDegrees(d.lon, d.lat, 30),
-        pixelSize: 9,
-        color: Cesium.Color.fromCssColorString(MARKER_COLORS[d.format] ?? '#94a3b8'),
+        // Hidden-by-the-picker datasets stay as small grey dots, so they can still be found and re-shown.
+        pixelSize: d.inactive ? 6 : 9,
+        color: d.inactive
+          ? Cesium.Color.fromCssColorString('#9ca3af').withAlpha(0.55)
+          : Cesium.Color.fromCssColorString(MARKER_COLORS[d.format] ?? '#94a3b8'),
         outlineColor: outline,
         outlineWidth: 1.5,
         distanceDisplayCondition: new Cesium.DistanceDisplayCondition(d.radius * hideBelow, Number.MAX_VALUE),
@@ -302,11 +307,13 @@ const CesiumViewer = forwardRef<ViewerHandle, Props>(function CesiumViewer({ vis
         easingFunction: Cesium.EasingFunction.QUADRATIC_OUT,
       });
     }, Cesium.ScreenSpaceEventType.LEFT_DOUBLE_CLICK);
-    // Dataset markers: click flies to the dataset, hover names it (native tooltip on the canvas).
+    // Dataset markers: click flies to the dataset, hover shows its card (DatasetTooltip).
     const markerOf = (pos: Cesium.Cartesian2): DatasetMarker | null => {
       if (!markersRef.current) return null;
-      const picked: any = v.scene.pick(pos);
-      return picked?.collection === markersRef.current ? picked.id?.dataset ?? null : null;
+      // drillPick, not pick: the marker of a small dataset often sits under a larger one that has
+      // already loaded (Canal Grande under the Venice airborne cloud) and must still answer.
+      const hit: any = v.scene.drillPick(pos, 6).find((p: any) => p?.collection === markersRef.current);
+      return hit?.id?.dataset ?? null;
     };
     handler.setInputAction((e: any) => {
       const d = markerOf(e.position);
@@ -314,13 +321,22 @@ const CesiumViewer = forwardRef<ViewerHandle, Props>(function CesiumViewer({ vis
       flyToSphereInternal(d.lon, d.lat, d.height, d.radius);
       store.getState().setStatus(`${d.name}${d.project ? ` — ${d.project}` : ''} [${d.format}]`);
     }, Cesium.ScreenSpaceEventType.LEFT_CLICK);
+    // scene.pick renders a pick pass, so skip it entirely while no markers are shown.
+    // At most one pick per frame, however fast the mouse moves.
+    let hoverRaf = 0;
     handler.setInputAction((e: any) => {
-      const d = markerOf(e.endPosition);
-      const title = d ? `${d.name}${d.project ? ` — ${d.project}` : ''} (${d.format})` : '';
-      if (v.scene.canvas.title !== title) v.scene.canvas.title = title;
+      const at = Cesium.Cartesian2.clone(e.endPosition);
+      cancelAnimationFrame(hoverRaf);
+      hoverRaf = requestAnimationFrame(() => {
+        if (v.isDestroyed()) return;
+        const d = markersRef.current ? markerOf(at) : null;
+        const canvas = v.scene.canvas;
+        canvas.style.cursor = d ? 'pointer' : '';
+        tooltipRef.current?.(d ? { d, x: at.x, y: at.y, w: canvas.clientWidth, h: canvas.clientHeight } : null);
+      });
     }, Cesium.ScreenSpaceEventType.MOUSE_MOVE);
     store.getState().setStatus('Cesium ready. Select a preset or enter a tileset.json URL.');
-    cleanupRef.current = () => { handler.destroy(); v.destroy(); viewerRef.current = null; };
+    cleanupRef.current = () => { cancelAnimationFrame(hoverRaf); handler.destroy(); v.destroy(); viewerRef.current = null; };
     if (pendingLoadRef.current) {
       const { url, type, opts } = pendingLoadRef.current;
       pendingLoadRef.current = null;
@@ -558,6 +574,23 @@ const CesiumViewer = forwardRef<ViewerHandle, Props>(function CesiumViewer({ vis
       applyDatasetMarkers();
     },
     flyToSphere(lon, lat, height, radius) { flyToSphereInternal(lon, lat, height, radius); },
+    datasetsInView(list, minFraction) {
+      const v = getViewer();
+      if (!v) return [];
+      const cam = v.camera, fr: any = cam.frustum;
+      const culling = fr.computeCullingVolume(cam.positionWC, cam.directionWC, cam.upWC);
+      const tanHalf = Math.tan((fr.fovy ?? 1.047) / 2);
+      const bs = new Cesium.BoundingSphere();
+      const ids: string[] = [];
+      for (const d of list) {
+        Cesium.Cartesian3.fromDegrees(d.lon, d.lat, d.height, undefined, bs.center);
+        bs.radius = d.radius;
+        if (culling.computeVisibility(bs) === Cesium.Intersect.OUTSIDE) continue;
+        const dist = Cesium.Cartesian3.distance(bs.center, cam.positionWC);
+        if (dist <= d.radius || d.radius / (dist * tanHalf) >= minFraction) ids.push(d.id);
+      }
+      return ids;
+    },
     flyToLocalFrame(lon, lat, alt, range) {
       const v = getViewer();
       if (!v) return;
@@ -719,6 +752,7 @@ const CesiumViewer = forwardRef<ViewerHandle, Props>(function CesiumViewer({ vis
   return (
     <div style={{ position: 'absolute', inset: 0, visibility: visible ? 'visible' : 'hidden' }}>
       <div ref={containerRef} style={{ position: 'absolute', inset: 0 }} />
+      <DatasetTooltip channel={tooltipRef} visible={visible} />
     </div>
   );
 });

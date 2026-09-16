@@ -32,11 +32,16 @@ export interface ViewerHandle {
   getExtractMatrix(): number[] | null;
   flyToCity(lon: number, lat: number, height: number): void;
   autoZoomToTileset(): void;
-  // Aggregate mosaics (optional — CesiumViewer implements both; callers fall back when absent).
+  // Aggregate mosaics (optional — both renderers implement them; callers fall back when absent).
   /** Show one "there is data here" marker per dataset, or clear them with null. */
   setDatasetMarkers?(list: DatasetMarker[] | null): void;
   /** Frame a dataset from its bounding sphere (degrees, metres). */
   flyToSphere?(lon: number, lat: number, height: number, radius: number): void;
+  /**
+   * Ids of the datasets whose bounds are inside the view frustum AND span at least `minFraction` of
+   * the viewport height — i.e. the ones that are, or are about to be, actually rendering.
+   */
+  datasetsInView?(list: DatasetMarker[], minFraction: number): string[];
   // 3DTRJS-only — no-ops on CesiumViewer.
   setControlMode?(mode: 'globe' | 'orbit' | 'env'): void;
   setPointSize?(px: number): void;

@@ -113,6 +113,8 @@ export function currentPresets(p: MiddlewareParams & { toolName: ToolName; tiles
       { id: 'agg-iconem-all', label: '🧩 Iconem — all formats', type: 'pointcloud', url: agg('set=iconem&nest=geodetic'), requiresSet: 'iconem' },
       { id: 'agg-iconem-3dtiles', label: '🧩 Iconem — 3D Tiles only', type: 'mesh', url: agg('set=iconem&format=3dtiles&nest=geodetic'), requiresSet: 'iconem' },
       { id: 'agg-iconem-potree', label: '🧩 Iconem — Potree only', type: 'pointcloud', url: agg('set=iconem&format=potree&nest=geodetic'), requiresSet: 'iconem' },
+      // Diachronic sites (Mes Aynak 2010→2022, Mosul 2018→2020…) show their newest capture only.
+      { id: 'agg-iconem-latest', label: '🧩 Iconem — latest captures (Mes Aynak)', type: 'pointcloud', url: agg('set=iconem&nest=geodetic&latest=1'), flyTo: { lon: 69.3080, lat: 34.2698, height: 9_000 }, requiresSet: 'iconem' },
       { id: 'agg-iconem-copc', label: '🧩 Iconem — COPC only', type: 'pointcloud', url: agg('set=iconem&format=copc&nest=geodetic'), requiresSet: 'iconem' },
     ];
   }

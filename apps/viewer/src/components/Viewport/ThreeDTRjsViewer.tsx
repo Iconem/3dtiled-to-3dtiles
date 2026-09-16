@@ -15,7 +15,7 @@ import { KTX2Loader } from 'three/addons/loaders/KTX2Loader.js';
 // missing from this package's .d.ts — imported via the namespace + cast to dodge the stale types.
 import * as ThreeTilesPlugins from '3d-tiles-renderer/plugins';
 const GeneratedSurfacePlugin = (ThreeTilesPlugins as any).GeneratedSurfacePlugin;
-import type { TilesRenderer as TilesRendererImpl } from '3d-tiles-renderer';
+import { WGS84_ELLIPSOID, type TilesRenderer as TilesRendererImpl } from '3d-tiles-renderer';
 import { PivotPointMesh } from '3d-tiles-renderer/src/three/renderer/controls/PivotPointMesh.js';
 import { GaussianSplatPlugin } from '3d-tiles-rendererjs-3dgs-plugin';
 import * as THREE from 'three';
@@ -26,6 +26,9 @@ import { CESIUM_ION_TOKEN } from '@/lib/ion';
 import { GOOGLE_MAPS_API_KEY } from '@/lib/google';
 import { installB3dmClientFixes } from '@/lib/b3dmClientFix';
 import { useViewerStore } from '@/state/store';
+import type { DatasetMarker } from '@/lib/aggregate';
+import DatasetTooltip, { type TooltipChannel } from './DatasetTooltip';
+import ThreeDatasetMarkers, { datasetsInView3d } from './ThreeDatasetMarkers';
 
 // Fixes Clermont/Marseille-style crashes (see b3dmClientFix.ts) for tilesets loaded directly, with
 // no ?tool=upgrade transform selected — those never touch packages/3dtiles-tools/upgrade.js's
@@ -342,7 +345,7 @@ function CropGizmo({ tilesRef, pickScene }: { tilesRef: React.MutableRefObject<T
   );
 }
 
-const Scene = forwardRef<ViewerHandle, { loadArgs: LoadArgs }>(function Scene({ loadArgs }, ref) {
+const Scene = forwardRef<ViewerHandle, { loadArgs: LoadArgs; tooltip: TooltipChannel }>(function Scene({ loadArgs, tooltip }, ref) {
   const tilesRef = useRef<TilesRendererImpl | null>(null);
   // Individually-selected (not `const {...} = useThree()`, which subscribes to the ENTIRE R3F root
   // state — including `pointer`/`viewport`, which update on every mouse move) — that pattern was
@@ -361,6 +364,7 @@ const Scene = forwardRef<ViewerHandle, { loadArgs: LoadArgs }>(function Scene({ 
   const invalidate = useThree((s) => s.invalidate);
   const store = useViewerStore;
   const [pendingFlyTo, setPendingFlyTo] = useState<{ lon: number; lat: number; height: number } | null>(null);
+  const [markers, setMarkers] = useState<DatasetMarker[] | null>(null);
   const controlsRef = useRef<any>(null);
   // Cached local "up" (ellipsoid surface normal) at the loaded tileset's own location — set once in
   // frameToTileset, read by applyZOffsetInternal. null for non-georeferenced content (flat world-Y is
@@ -492,9 +496,13 @@ const Scene = forwardRef<ViewerHandle, { loadArgs: LoadArgs }>(function Scene({ 
     // georeferenced (its own tileset.json root transform already placed it on the real ellipsoid) —
     // re-anchoring that would visibly relocate already-correct content.
     const ellipsoidForAnchor = (tiles as any).ellipsoid;
+    // "Centre near the origin" alone does not mean local content: a worldwide /aggregate mosaic is
+    // bounded by an Earth-centred sphere (centre 0,0,0, radius ~6 400 km). A planet-sized sphere is
+    // global data, and anchoring it to the local frame would fling every dataset off the globe.
+    const planetScale = (sp: THREE.Sphere) => sp.center.length() <= 6378137 * 0.5 && sp.radius > 6378137 * 0.5;
     // Decide (and cache) this ONLY on the fresh-load call — see needsEnuAnchorRef's own comment for why
     // re-deriving it from `sphere.center.length()` on a later re-frame call is unsound.
-    if (isFreshLoad) needsEnuAnchorRef.current = sphere.center.length() <= 6378137 * 0.5 && !!ellipsoidForAnchor;
+    if (isFreshLoad) needsEnuAnchorRef.current = sphere.center.length() <= 6378137 * 0.5 && !planetScale(sphere) && !!ellipsoidForAnchor;
     if (needsEnuAnchorRef.current && ellipsoidForAnchor) {
       const { lon, lat, alt } = store.getState().localFrame;
       const anchor = new THREE.Vector3();
@@ -549,7 +557,8 @@ const Scene = forwardRef<ViewerHandle, { loadArgs: LoadArgs }>(function Scene({ 
     // relationship to, invisible once the camera below auto-frames tightly on the small local content.
     // Only draw the globe when the bounding sphere is actually far enough from the origin to plausibly
     // BE a point on Earth's surface — the same heuristic ReorientationPlugin itself uses internally.
-    const geoReferenced = sphere.center.length() > 6378137 * 0.5;
+    const global = planetScale(sphere);
+    const geoReferenced = sphere.center.length() > 6378137 * 0.5 || global;
     setShowGlobe(geoReferenced);
     const fovRad = THREE.MathUtils.degToRad((camera as THREE.PerspectiveCamera).fov ?? fov);
     const dist = (sphere.radius / Math.sin(fovRad / 2)) * 1.5;
@@ -557,7 +566,8 @@ const Scene = forwardRef<ViewerHandle, { loadArgs: LoadArgs }>(function Scene({ 
     // content — real Earth-surface content needs the actual ellipsoid normal at that point instead, or
     // orbiting tilts the camera against the true horizon ("env mode has the wrong up" without this).
     // GlobeControls already derives this itself; setting it here too is harmless (same value either way).
-    const ellipsoid = geoReferenced ? (tiles as any).ellipsoid : null;
+    // (no single surface normal for a whole-planet sphere — it is framed from wherever the camera is)
+    const ellipsoid = geoReferenced && !global ? (tiles as any).ellipsoid : null;
     const surfaceUp = ellipsoid ? ellipsoid.getPositionToNormal(sphere.center, new THREE.Vector3()) : null;
     let dir: THREE.Vector3;
     if (surfaceUp) {
@@ -936,6 +946,13 @@ const Scene = forwardRef<ViewerHandle, { loadArgs: LoadArgs }>(function Scene({ 
       return Array.from(g.matrix.elements);
     },
     flyToCity(lon, lat, height) { setPendingFlyTo({ lon, lat, height }); },
+    setDatasetMarkers(list) { setMarkers(list); },
+    flyToSphere(lon, lat, height, radius) { flyToSphereInternal(lon, lat, height, radius); },
+    datasetsInView(list, minFraction) {
+      const g = tilesRef.current?.group;
+      g?.updateMatrixWorld(true);
+      return datasetsInView3d(list, camera, g ? g.matrixWorld : null, minFraction);
+    },
     autoZoomToTileset() { frameToTileset(tilesRef.current); },
     setControlMode(mode) { store.getState().setControlMode(mode); },
     setPointSize(px) { store.getState().setPointSize(px); },
@@ -943,7 +960,30 @@ const Scene = forwardRef<ViewerHandle, { loadArgs: LoadArgs }>(function Scene({ 
     hideCropGizmo() { store.getState().setCropGizmoOn(false); },
     showTilesetGizmo() { store.getState().setTilesetGizmoOn(true); },
     hideTilesetGizmo() { store.getState().setTilesetGizmoOn(false); },
-  }), [camera, invalidate, frameToTileset, applyZOffsetInternal]);
+  }), [camera, invalidate, frameToTileset, applyZOffsetInternal, animateCameraTo]);
+
+  /**
+   * Frame a dataset from its bounding sphere: 3 radii out, pitched ~35° down, approaching from the
+   * side the camera is already on (so a click never swings the view around the globe).
+   */
+  function flyToSphereInternal(lon: number, lat: number, height: number, radius: number) {
+    const g = tilesRef.current?.group;
+    g?.updateMatrixWorld(true);
+    const lat_ = THREE.MathUtils.degToRad(lat), lon_ = THREE.MathUtils.degToRad(lon);
+    const E = WGS84_ELLIPSOID;
+    const center = E.getCartographicToPosition(lat_, lon_, height, new THREE.Vector3());
+    const up = E.getCartographicToNormal(lat_, lon_, new THREE.Vector3());
+    if (g) { center.applyMatrix4(g.matrixWorld); up.transformDirection(g.matrixWorld); }
+    const side = camera.position.clone().sub(center);
+    side.addScaledVector(up, -side.dot(up));
+    if (side.lengthSq() < 1e-6) side.set(1, 0, 0).addScaledVector(up, -up.x);
+    side.normalize();
+    const range = Math.max(150, radius * 3);
+    const pos = center.clone()
+      .addScaledVector(up, range * Math.sin(THREE.MathUtils.degToRad(35)))
+      .addScaledVector(side, range * Math.cos(THREE.MathUtils.degToRad(35)));
+    animateCameraTo(pos, center, 1200);
+  }
 
   function flyToLocalFrameInternal(lon: number, lat: number, alt: number, range: number) {
     const tiles = tilesRef.current;
@@ -1056,6 +1096,12 @@ const Scene = forwardRef<ViewerHandle, { loadArgs: LoadArgs }>(function Scene({ 
           manager.syncCameras();
         }}
       />
+      {markers && markers.length > 0 && (
+        <ThreeDatasetMarkers list={markers} tilesRef={tilesRef} tooltip={tooltip} onPick={(d) => {
+          flyToSphereInternal(d.lon, d.lat, d.height, d.radius);
+          store.getState().setStatus(`${d.name}${d.project ? ` — ${d.project}` : ''} [${d.format}]`);
+        }} />
+      )}
       <CropGizmo tilesRef={tilesRef} pickScene={pickScene} />
       <TilesetGizmo tilesRef={tilesRef} pickScene={pickScene} />
       <GizmoHelper alignment="bottom-right" margin={[60, 60]}>
@@ -1068,6 +1114,7 @@ const Scene = forwardRef<ViewerHandle, { loadArgs: LoadArgs }>(function Scene({ 
 const ThreeDTRjsViewer = forwardRef<ViewerHandle, Props>(function ThreeDTRjsViewer({ visible }, ref) {
   const [loadArgs, setLoadArgs] = useState<LoadArgs>(null);
   const sceneRef = useRef<ViewerHandle>(null);
+  const tooltipRef: TooltipChannel = useRef(null);
 
   useImperativeHandle(ref, (): ViewerHandle => ({
     load(url, type, opts) { setLoadArgs({ url, type, sseOverride: opts?.sseOverride, skipAutoFrame: opts?.skipAutoFrame }); },
@@ -1089,6 +1136,9 @@ const ThreeDTRjsViewer = forwardRef<ViewerHandle, Props>(function ThreeDTRjsView
     getExtractMatrix: () => sceneRef.current?.getExtractMatrix() ?? null,
     flyToCity: (...a) => sceneRef.current?.flyToCity(...a),
     autoZoomToTileset: () => sceneRef.current?.autoZoomToTileset(),
+    setDatasetMarkers: (list) => sceneRef.current?.setDatasetMarkers?.(list),
+    flyToSphere: (...a) => sceneRef.current?.flyToSphere?.(...a),
+    datasetsInView: (list, f) => sceneRef.current?.datasetsInView?.(list, f) ?? [],
     setControlMode: (...a) => sceneRef.current?.setControlMode?.(...a),
     setPointSize: (...a) => sceneRef.current?.setPointSize?.(...a),
     showCropGizmo: () => sceneRef.current?.showCropGizmo?.() ?? false,
@@ -1113,8 +1163,9 @@ const ThreeDTRjsViewer = forwardRef<ViewerHandle, Props>(function ThreeDTRjsView
           compared to the identical data in Cesium (which does no such tone mapping) — this is the
           "hidden brightness multiplier" affecting potree/COPC/mesh content alike. */}
       <Canvas frameloop="demand" flat camera={{ fov: 60, near: 0.1, far: 1e8, position: [0, 0, 1e7] }} gl={{ logarithmicDepthBuffer: true }}>
-        <Scene ref={sceneRef} loadArgs={loadArgs} />
+        <Scene ref={sceneRef} loadArgs={loadArgs} tooltip={tooltipRef} />
       </Canvas>
+      <DatasetTooltip channel={tooltipRef} visible={visible} />
     </div>
   );
 });
