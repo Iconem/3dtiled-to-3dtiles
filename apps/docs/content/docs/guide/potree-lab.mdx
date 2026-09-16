@@ -1,0 +1,77 @@
+---
+title: "Potree lab: point-cloud rendering test bench"
+description: "Test point-cloud datasets one at a time with 3DTilesRendererJS's new PotreePlugin (adaptive point size, eye-dome lighting) and compare against this repo's /stream 3D Tiles output."
+---
+
+`/potree-lab` on the viewer app (`http://localhost:3000/potree-lab`) loads **one** Potree dataset at a
+time with the point-rendering controls 3DTilesRendererJS added in
+[#1742](https://github.com/NASA-AMMOS/3DTilesRendererJS/pull/1742) (merged 2026-09-10). The upstream
+example has no URL parameter — its datasets are hard-coded — so this page exists to point the same
+renderer at *our* datasets.
+
+## The two load modes
+
+| `mode=` | How the dataset is read | Point sizing |
+|---|---|---|
+| `potree` | `PotreePlugin` reads `cloud.js` directly in the browser | **Adaptive, per point**: each point is sized by the deepest *active* octree node containing it, resolved in the vertex shader from a texture of the active node hierarchy |
+| `stream` | This repo's `/stream` turns the same `cloud.js` into 3D Tiles (POINTS GLB), rendered through `PointCloudEffectsPlugin` | Per **tile**: fixed, or derived from the tile's geometric error (toggle) |
+
+Both modes share the effects: point shape (`square`/`round`/`sphere`), minimum pixel size, eye-dome
+lighting (strength, radius) and debug colouring by node / depth / tile.
+
+Everything is in the query string, so any view is a shareable link:
+
+```
+/potree-lab?url=<cloud.js>&mode=potree|stream&shape=round&edl=0.4&scale=1&geSize=1
+```
+
+The dataset picker lists public samples plus — **dev server only** — every Potree entry of the Iconem
+share-link manifest (`.local/aggregate-sets/iconem.json`). Vite serves that file to **loopback clients
+only** and returns `403` to anyone else, because it is a list of bearer-credential URLs and the dev
+server binds every network interface.
+
+## Why the plugins are vendored
+
+`PotreePlugin` and `PointCloudEffectsPlugin` are on 3DTilesRendererJS `master` only — `0.5.2`, the
+latest npm release, predates them. They are copied verbatim, pinned to the upstream commit, under
+`apps/viewer/src/potree-lab/vendor/` (Apache-2.0, license included). Everything they need from the
+renderer (`loadRootTileset`, `setTileActive`, `invokeOnePlugin`, `processNodeQueue`, …) already exists
+in `0.5.2`, which the viewer now uses. Delete the copy once a release ships them.
+
+## What comparing the two modes showed
+
+<Callout type="warn">
+**Our point clouds were rendering washed out everywhere — fixed.** glTF defines `COLOR_0` as
+**linear**, but every point writer here (live COPC/Potree, offline COPC/Potree/LAS, `.pnts` upgrade)
+copied display-encoded sRGB straight in. Side by side on Geghard, `potree` mode showed the site's
+greens and browns while `stream` mode showed the same points pale and whitish. Colours are now
+linearised on write (a 16-bit lookup table, so no `pow()` in the tile hot path); splat centroids,
+which are already linear, opt out. Conversions cached to disk before the fix are ignored — the
+`/convert` cache key now carries an output version.
+</Callout>
+
+**Per-tile sizing is not enough — per-point sizing is what makes Potree look right.** `/stream` point
+tilesets refine **additively**, so every ancestor tile stays on screen with its coarser, sparser
+points. Sizing points from their *own* tile's geometric error makes those ancestors draw large blobs
+under the fine detail. Potree avoids exactly this by sizing each point from the *deepest active node
+covering its position*.
+
+That is also the answer to "can the density be passed down to plain 3D Tiles endpoints?": **yes, but
+it has to be the per-point scheme**, not a per-tile size:
+
+- For implicit-octree tilesets (our `/stream` COPC and Potree), a tile's `(level, x, y, z)` is exactly
+  a Potree octree key, and its geometric error is the point spacing — so the same active-node texture
+  can be built without any Potree metadata.
+- That needs a small plugin of our own (active tiles → node texture → `PointCloudMaterial`'s
+  `uActiveNodes` / `uNodeSize` / `uNodeMinOffset`); `PointCloudMaterial` already supports it, it just
+  has no generic driver yet. Not built.
+
+## Limits
+
+- **Potree 1.x (`cloud.js`) is the tested path.** The plugin also reads 2.0 (`metadata.json`); the
+  Iconem platform only produces 1.x today.
+- Splat rendering cannot be judged in headless verification: Spark splats render as a dark blob under
+  software GL on **both** `0.4.28` and `0.5.2`, so the renderer upgrade is neutral there but splat
+  quality is unverified until checked on a real GPU.
+- `stream` mode recentres georeferenced tilesets with `ReorientationPlugin`, and frames on a bounding
+  **sphere** — a box around a rotated ECEF box is inflated and framed sites several times too far away.

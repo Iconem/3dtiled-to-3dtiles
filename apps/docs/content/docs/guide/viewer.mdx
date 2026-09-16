@@ -253,6 +253,26 @@ manual URL entry in the viewer instead. See [`maptiler-geosplats.md`](/docs/refe
 and the [Bentley 3MX and Bing Maps 3D](/docs/guide/planning/streaming-architecture-design-log) section of the
 design log for what each adapter does.
 
+### Aggregate 🧩
+
+`/aggregate` mosaics: one 3D Tiles endpoint over many datasets (see
+[Meta-tilesets](/docs/guide/meta-tilesets)). Presets: the committed `world` / `opendata` / `angkor`
+sets (Angkor in both nestings, plus a PhnomKulen-only filter), and the machine-local Iconem set in four
+variants: all formats, 3D Tiles only, Potree only, COPC only. The Iconem pills only work where
+`.local/aggregate-sets/iconem.json` exists; elsewhere the server answers `400 unknown set`. Mixed and
+point-cloud variants are typed `pointcloud` so the point-size slider reaches their points.
+
+### Renderer version and the Potree lab
+
+The 3DTRjs side runs **`3d-tiles-renderer` 0.5.2** (was 0.4.28). The Gaussian-splat plugin still
+declares `^0.4.25` as its peer range, but it only uses `TilesRenderer`, `invokeOnePlugin`,
+`invokeAllPlugins` and `forEachLoadedModel`, all present in 0.5.2. Point clouds and meshes were
+verified rendering; splats behave identically on both versions under headless software GL (a dark
+blob), so check splats on a real GPU.
+
+The new Potree point-rendering plugins are not in 0.5.2 yet; they live on a separate page,
+[Potree lab](/docs/guide/potree-lab) (`/potree-lab`), rather than in this app.
+
 ### Tools mode datasets (implicit-to-explicit / upgrade)
 
 The **⚙ Tools** mode's demo datasets (`TOOLS_DATASETS` in `formats.ts`), used to exercise the

@@ -5,6 +5,45 @@ Format loosely follows [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+### Added / Fixed — 2026-09-16 (Iconem share links · point colours · Potree lab · 0.5.2 · aggregate pill)
+- **Ran the share-link script against production:** 692 `single-meta-tileset` links created (658
+  Potree, 17 3D Tiles, 17 COPC) across 139 projects, 0 failures; a second run reused all 692 and
+  created none. Every sampled link is public with CORS; COPC links answer range requests (`206 LASF`).
+  `?set=iconem` mosaics them: 692 children, 0 failed.
+- **Confirmed the COPC container finding empirically, not just from source.** In one project, COPC
+  share A's token reads COPC file B (`206 LASF`), because a `las` share's container is the project.
+  Blob names are UUIDs and nginx drops client query strings (no listing), which limits practical
+  exposure, but a COPC link is still not scoped to its own file.
+- **Fixed: every point cloud rendered washed out.** glTF `COLOR_0` is linear; all point writers wrote
+  raw sRGB. Found by rendering Geghard through 3DTRjs's `PotreePlugin` (correct colours) and through
+  `/stream` (pale) side by side. Colours are now linearised on write via a 16-bit table in the core
+  writer, the offline COPC writer, and the `.pnts` upgrader (which also moves to normalized uint16 so
+  linear shadows don't band). Splat centroids, already linear, opt out. 11 unit checks. `/convert`
+  cache keys gain an output version so pre-fix conversions are rebuilt instead of served forever.
+- **Fixed: the Angkor mosaic loaded nothing.** Iconem's site tilesets declare geometric error √3 for
+  ~240 m sites; the reference tile copied it and every group doubled from there, so nothing refined
+  beyond ~100 m. The reference tile's error is now `max(tileset GE, root GE, bounding radius)`.
+  Verified in the demo app: sites load at Angkor Thom from 1.8 km.
+- **Fixed: datasets without a georeference polluted mosaics.** Their centre is the Earth's core, so
+  they landed in arbitrary cells and inflated the root past the planet's radius. Now excluded and
+  listed in `asset.extras.unplaced` (32 of 692 on the Iconem set). An aggregate with nothing placeable
+  answers `422` with the lists and a placement hint instead of `500`.
+- **Added: `/aggregate&format=potree|copc|3dtiles`**: per-format variants of one mosaic (Iconem: 660
+  all, 17 3D Tiles, 628 Potree, 15 COPC).
+- **Added: 🧩 Aggregate pill in the demo app**: world / open data / Angkor (both nestings, PhnomKulen
+  filter) and the four Iconem variants; Angkor presets fly close enough for sites to load.
+- **Changed: viewer on `3d-tiles-renderer` 0.5.2** (was 0.4.28). Typecheck, build and point-cloud
+  rendering verified. Splat rendering is identical on both versions under headless GL (A/B tested by
+  reverting to 0.4.28), so the upgrade is neutral there, but splats remain unverified on a real GPU.
+- **Added: `/potree-lab`**: one dataset at a time with 3DTRjs's unreleased `PotreePlugin` and
+  `PointCloudEffectsPlugin` (vendored at a pinned commit, Apache-2.0): adaptive point size, shapes,
+  eye-dome lighting, debug colours, plus a `stream` mode rendering our `/stream` output through the
+  same effects for comparison. Iconem datasets are listed from the local manifest, served to loopback
+  clients only. Finding: per-tile point sizing from geometric error is not enough for additive
+  tilesets (ancestors draw blobs), so passing density down to plain 3D Tiles needs Potree's per-point
+  active-node scheme, which our implicit `(level,x,y,z)` keys could drive (not built).
+- **Added: `cdp-screenshot.mjs --print-eval`**, used for every headless check above.
+
 ### Added / Fixed — 2026-09-12 (aggregate demo sets · truncation reasons · native file picker · packaging)
 - **Added: `/aggregate?set=opendata|angkor|world`** — curated demo mosaics of real, public, key-less
   tilesets, defined server-side so the viewer, docs and desktop app share one list instead of three
