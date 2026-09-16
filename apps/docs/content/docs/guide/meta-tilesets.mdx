@@ -495,6 +495,10 @@ ancestor regions, under both schemes.
 …/aggregate/tileset.json?set=iconem&nest=geodetic&bv=region
 ```
 
+`region` is a core 3D Tiles 1.0 bounding volume, not something tied to implicit tiling. Cesium and
+3DTRjs both cull and refine on it; the demo app's **Angkor — 23 sites (regions)** pill is the same
+tree as the geodetic pill, so the two can be compared directly.
+
 ## Hand-built hierarchies still compose
 
 Auto-nesting derives grouping from geometry alone. If you want a *semantic* hierarchy — by campaign,

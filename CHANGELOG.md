@@ -21,11 +21,15 @@ Format loosely follows [Keep a Changelog](https://keepachangelog.com/).
 - **Added: build timings in `asset.extras.build`** (`childRootsFetched`, `fetchMs`, `treeMs`).
   Iconem: a cold build fetches 692 roots in 10.8 s and builds the tree in 16 ms; a warm rebuild in
   another scheme takes 257 ms end to end.
+- **Added: an *Angkor — 23 sites (regions)* preset** (`bv=region`); it renders in both Cesium and
+  3DTRjs.
 - **Docs:** a step-by-step account of how a mosaic is built, and why the output is an explicit
   quadtree with no height split.
 - **Fixed: 3DTRjs showed nothing for implicit point clouds at normal distances.** This is an upstream
   traversal bug (the ADD-parent skip ignores unrenderable parents); `ImplicitAddRefineFixPlugin` works
-  around it. The renderer is also now held until its implicit and glTF plugins are registered.
+  around it.
+- **Fixed: 3DTRjs preset fly-tos were lost about half the time**: `flyToCity` reached the in-Canvas
+  scene before it mounted. Such calls are now queued until the scene exists.
 - **Added: Terrarium terrain** (open AWS tiles) in both renderers. Cesium gets it through a custom
   heightmap provider.
 - **Added: ⤓ Snap to ground** in both renderers: 9 × 9 top-surface vs terrain samples, 80th

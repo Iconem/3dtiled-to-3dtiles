@@ -288,8 +288,15 @@ target", without checking that the parent has anything to draw. An implicit subt
 "good enough", the whole subtree was skipped, and every `/stream` COPC/Potree cloud vanished until
 the camera was close (Geghard from 1.2 km: 2.3 px < target 4). `ImplicitAddRefineFixPlugin`
 (`src/lib/implicitAddFix.ts`, registered in the viewer and the lab) raises that child's view error
-just above the target, so it is never skipped. The renderer is also now held until its implicit and
-glTF plugins are registered, so a root is never preprocessed without them. Worth reporting upstream.
+just above the target, so it is never skipped. Worth reporting upstream.
+</Callout>
+
+<Callout type="warn">
+**Fixed: 3DTRjs preset fly-tos were lost about half the time.** The 3DTRjs scene lives inside
+`<Canvas>`, which mounts its children a few frames after the viewer. A preset pill calls `load()` and
+then `flyToCity()` immediately. `load()` is React state and survived, but `flyToCity()` hit a null
+ref and vanished, so the Angkor pills stayed on the whole globe and loaded nothing. Calls made before
+the scene exists (fly-to, markers) are now queued until it mounts; 4 of 4 runs fly correctly.
 </Callout>
 
 ### Terrain and snap to ground
