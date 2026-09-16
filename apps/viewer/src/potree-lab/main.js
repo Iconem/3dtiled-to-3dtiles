@@ -1,0 +1,258 @@
+/**
+ * Potree lab — test point-cloud datasets one at a time, with the point-rendering controls that
+ * 3DTilesRendererJS added in #1742 (merged 2026-09-10, not in any npm release yet; see ./vendor).
+ *
+ * Two ways to load the same Potree dataset, switchable, so they can be compared directly:
+ *
+ *   potree   PotreePlugin reads cloud.js in the browser. Points get ADAPTIVE size: each point is sized
+ *            by the deepest active octree node containing it, resolved in the vertex shader from a
+ *            texture of the active node hierarchy.
+ *   stream   This repo's /stream middleware turns the same cloud.js into 3D Tiles (POINTS GLB).
+ *            PointCloudEffectsPlugin still converts the material, so shape + EDL apply — but a GLB
+ *            carries no point spacing, so sizing is either fixed, or (toggle) derived per TILE from
+ *            its geometric error. That toggle is the cheap approximation of "passing density down"
+ *            from the octree into a plain 3D Tiles endpoint; per-POINT adaptive sizing would also
+ *            need the active-node texture, keyed from each tile's implicit (level, x, y, z).
+ *
+ * State lives in the query string so any view is shareable:
+ *   /potree-lab?url=<cloud.js>&mode=potree|stream&shape=round&edl=0.4&scale=1&geSize=1
+ *
+ * Dataset list = built-in public samples + (dev server only) the Iconem share-link manifest at
+ * .local/aggregate-sets/iconem.json, served loopback-only by vite.config.ts.
+ */
+import { Scene, WebGLRenderer, PerspectiveCamera, Box3, Sphere } from 'three';
+import { TilesRenderer, EnvironmentControls } from '3d-tiles-renderer';
+import { DebugTilesPlugin, ImplicitTilingPlugin, ReorientationPlugin } from '3d-tiles-renderer/plugins';
+import { GUI } from 'three/addons/libs/lil-gui.module.min.js';
+import { PotreePlugin } from './vendor/potree/PotreePlugin.js';
+import { PointCloudEffectsPlugin } from './vendor/pointcloud/PointCloudEffectsPlugin.js';
+import { MW } from '@/lib/formats';
+
+const POTREE_REPO = 'https://raw.githubusercontent.com/potree/potree/refs/heads/develop/pointclouds/';
+const BUILTIN = {
+  'sample · Lion Takanawa': `${POTREE_REPO}lion_takanawa/cloud.js`,
+  'sample · Lion (normals)': `${POTREE_REPO}lion_takanawa_normals/cloud.js`,
+  'sample · Vol Total': `${POTREE_REPO}vol_total/cloud.js`,
+  'Iconem · Geghard monastery': 'https://api.iconem.com/s/rIdPkRfOmEdRtgsoO08TgNt9MSxh-woC/cloud.js',
+};
+
+const q = new URLSearchParams(location.search);
+const params = {
+  dataset: '',
+  url: q.get('url') || BUILTIN['sample · Lion Takanawa'],
+  mode: q.get('mode') === 'stream' ? 'stream' : 'potree',
+  enable: true,
+  errorTarget: Number(q.get('error') ?? 1),
+  pointScale: Number(q.get('scale') ?? 1),
+  pointShape: q.get('shape') || 'round',
+  minPointSize: Number(q.get('min') ?? 2),
+  edl: (q.get('edl') ?? '0.4') !== '0',
+  edlStrength: Number(q.get('edl') ?? 0.4) || 0.4,
+  edlRadius: 1.4,
+  debugColorMode: q.get('debug') || 'none',
+  displayBoxBounds: q.get('boxes') === '1',
+  geSize: q.get('geSize') !== '0',        // stream mode: size points from each tile's geometric error
+  geFactor: Number(q.get('geFactor') ?? 1.7),
+  fixedSize: Number(q.get('fixed') ?? 0.05),
+};
+
+// Surfaced for headless verification (scripts/cdp-screenshot.mjs --print-eval) and for poking at in devtools.
+const LAB = (window.LAB = { errors: [], visibleTiles: 0, visiblePoints: 0, rootLoaded: false });
+addEventListener('error', (e) => LAB.errors.push(String(e.message)));
+addEventListener('unhandledrejection', (e) => LAB.errors.push(String(e.reason?.message ?? e.reason)));
+
+const renderer = new WebGLRenderer({ antialias: true });
+renderer.setPixelRatio(devicePixelRatio);
+renderer.setClearColor(0x111111);
+document.body.appendChild(renderer.domElement);
+
+const scene = new Scene();
+const camera = new PerspectiveCamera(60, 1, 0.1, 1000);
+camera.position.set(4, 2, 8);
+
+const controls = new EnvironmentControls(scene, camera, renderer.domElement);
+controls.enableDamping = true;
+controls.cameraRadius = 0;
+controls.useFallbackPlane = true;
+
+let tiles = null, effects = null;
+
+function streamUrl(src) {
+  return `${MW}/stream/tileset.json?format=potree&url=${encodeURIComponent(src)}&cache=none`;
+}
+
+/** Point size for a /stream tile. GE of a Potree-derived tile is its point spacing, so reuse it. */
+function sizeFor(tile) {
+  return params.geSize ? tile.geometricError * params.geFactor * params.pointScale : params.fixedSize * params.pointScale;
+}
+
+function applyStreamSizes() {
+  if (!tiles || params.mode !== 'stream') return;
+  tiles.forEachLoadedModel((model, tile) => {
+    model.traverse((o) => { if (o.isPoints && o.material?.isPointCloudMaterial) o.material.size = sizeFor(tile); });
+  });
+}
+
+function initTiles() {
+  if (tiles) { scene.remove(tiles.group); tiles.dispose(); }
+  LAB.rootLoaded = false;
+  const effectOpts = {
+    pointShape: params.pointShape,
+    minPointSize: params.minPointSize,
+    debugColorMode: params.debugColorMode,
+    edlStrength: params.edl ? params.edlStrength : 0,
+    edlRadius: params.edlRadius,
+  };
+
+  if (params.mode === 'potree') {
+    tiles = new TilesRenderer();
+    effects = new PotreePlugin({ url: params.url, pointScale: params.pointScale, ...effectOpts });
+    tiles.registerPlugin(effects);
+    tiles.group.rotation.x = -Math.PI / 2;           // Potree is Z-up
+  } else {
+    tiles = new TilesRenderer(streamUrl(params.url));
+    tiles.registerPlugin(new ImplicitTilingPlugin());
+    // /stream may emit a georeferenced (ECEF) root; recentre + orient so both modes frame the same way.
+    tiles.registerPlugin(new ReorientationPlugin({ recenter: true }));
+    effects = new PointCloudEffectsPlugin(effectOpts);
+    tiles.registerPlugin(effects);
+    tiles.addEventListener('load-model', ({ scene: model, tile }) => {
+      model.traverse((o) => { if (o.isPoints && o.material?.isPointCloudMaterial) o.material.size = sizeFor(tile); });
+    });
+  }
+  tiles.registerPlugin(new DebugTilesPlugin({ displayBoxBounds: params.displayBoxBounds }));
+  tiles.errorTarget = params.errorTarget;
+  tiles.setCamera(camera);
+  scene.add(tiles.group);
+  LAB.tiles = tiles;                               // devtools / headless inspection
+
+  // Frame whatever loaded: datasets range from metres to kilometres, so everything scales off the bounds.
+  // A bounding SPHERE, not a box: in stream mode ReorientationPlugin rotates the group, and the
+  // world-axis box around a rotated box is inflated (up to √3×), which framed georeferenced sites
+  // several times too far away. A sphere is rotation-invariant, so both modes frame identically.
+  tiles.addEventListener('load-root-tileset', () => {
+    const sphere = new Sphere();
+    tiles.group.updateMatrixWorld();
+    tiles.getBoundingSphere(sphere);
+    sphere.applyMatrix4(tiles.group.matrixWorld);
+    tiles.group.position.sub(sphere.center);
+    const radius = sphere.radius || 10;
+    tiles.group.updateMatrixWorld();                 // pick up the recentring before measuring again
+    const box = new Box3();                          // only for the fallback plane height below
+    tiles.getBoundingBox(box);
+    box.applyMatrix4(tiles.group.matrixWorld);
+    camera.position.set(0.6, 0.4, 1).normalize().multiplyScalar(radius * 2.5);
+    camera.lookAt(0, 0, 0);
+    camera.near = radius / 1000;
+    camera.far = radius * 100;
+    camera.updateProjectionMatrix();
+    controls.minDistance = radius / 50;
+    controls.maxDistance = radius * 20;
+    controls.raycaster.params.Points.threshold = radius / 200;
+    controls.fallbackPlane.constant = -box.min.y;
+    LAB.rootLoaded = true;
+  });
+  tiles.addEventListener('load-error', (e) => LAB.errors.push(`load-error: ${e.error?.message ?? e.error} (${e.url ?? ''})`));
+  syncUrl();
+}
+
+function syncUrl() {
+  const s = new URLSearchParams({ url: params.url, mode: params.mode, shape: params.pointShape,
+    edl: params.edl ? String(params.edlStrength) : '0', scale: String(params.pointScale) });
+  if (params.mode === 'stream') { s.set('geSize', params.geSize ? '1' : '0'); if (!params.geSize) s.set('fixed', String(params.fixedSize)); }
+  if (params.debugColorMode !== 'none') s.set('debug', params.debugColorMode);
+  if (params.displayBoxBounds) s.set('boxes', '1');
+  history.replaceState(null, '', `?${s}`);
+}
+
+// ── GUI ─────────────────────────────────────────────────────────────────────────────────────────
+const gui = new GUI({ title: 'Potree lab' });
+const datasets = { ...BUILTIN };
+const datasetCtl = gui.add(params, 'dataset', Object.keys(datasets)).name('dataset').onChange((name) => {
+  params.url = datasets[name];
+  urlCtl.updateDisplay();
+  initTiles();
+});
+const urlCtl = gui.add(params, 'url').name('cloud.js url').onFinishChange(initTiles);
+gui.add(params, 'mode', { 'PotreePlugin (adaptive size)': 'potree', '/stream 3D Tiles + effects': 'stream' })
+  .name('load as').onChange(() => { streamFolder.show(params.mode === 'stream'); scaleCtl.name(params.mode === 'potree' ? 'point scale' : 'size multiplier'); initTiles(); });
+
+const tilesFolder = gui.addFolder('tiles');
+tilesFolder.add(params, 'enable').name('update tiles');
+tilesFolder.add(params, 'errorTarget', 0.5, 16, 0.1).name('error target').onChange((v) => { tiles.errorTarget = v; });
+
+const points = gui.addFolder('points');
+const scaleCtl = points.add(params, 'pointScale', 0.1, 4, 0.05).name(params.mode === 'potree' ? 'point scale' : 'size multiplier').onChange((v) => {
+  if (params.mode === 'potree') effects.pointScale = v; else applyStreamSizes();
+  syncUrl();
+});
+points.add(params, 'pointShape', ['square', 'round', 'sphere']).name('shape').onChange((v) => { effects.pointShape = v; syncUrl(); });
+points.add(params, 'minPointSize', 0, 8, 0.5).name('min size (px)').onChange((v) => { effects.minPointSize = v; });
+points.add(params, 'edl').name('eye-dome lighting').onChange((v) => { effects.edlStrength = v ? params.edlStrength : 0; syncUrl(); });
+points.add(params, 'edlStrength', 0.05, 2, 0.01).name('edl strength').onChange((v) => { if (params.edl) effects.edlStrength = v; syncUrl(); });
+points.add(params, 'edlRadius', 1, 4, 0.01).name('edl radius').onChange((v) => { effects.edlRadius = v; });
+
+const streamFolder = gui.addFolder('stream mode sizing');
+streamFolder.add(params, 'geSize').name('size from tile GE').onChange(() => { applyStreamSizes(); syncUrl(); });
+streamFolder.add(params, 'geFactor', 0.25, 4, 0.05).name('GE → size factor').onChange(applyStreamSizes);
+streamFolder.add(params, 'fixedSize', 0.001, 1, 0.001).name('fixed size (m)').onChange(applyStreamSizes);
+streamFolder.show(params.mode === 'stream');
+
+const debug = gui.addFolder('debug');
+debug.add(params, 'debugColorMode', ['none', 'node', 'depth', 'tile']).name('color by').onChange((v) => { effects.debugColorMode = v; syncUrl(); });
+debug.add(params, 'displayBoxBounds').name('bounding boxes').onChange((v) => {
+  tiles.getPluginByName('DEBUG_TILES_PLUGIN').displayBoxBounds = v; syncUrl();
+});
+
+// Iconem datasets: dev-only manifest of share links (see file header). Absent in production builds.
+fetch('/local-sets/iconem.json')
+  .then((r) => (r.ok ? r.json() : null))
+  .then((m) => {
+    if (!m?.entries) return;
+    for (const e of m.entries.filter((x) => x.format === 'potree')) datasets[`Iconem · ${e.project} / ${e.name}`] = e.url;
+    datasetCtl.options(Object.keys(datasets));
+    const match = Object.entries(datasets).find(([, u]) => u === params.url);
+    params.dataset = match ? match[0] : '';
+    datasetCtl.updateDisplay();
+    hud.dataset.iconem = String(Object.keys(datasets).length - Object.keys(BUILTIN).length);
+  })
+  .catch(() => {});
+
+// ── HUD + loop ──────────────────────────────────────────────────────────────────────────────────
+const hud = document.getElementById('hud');
+function updateHud() {
+  let pts = 0, vis = 0;
+  tiles.forEachLoadedModel((model, tile) => {
+    if (!tiles.visibleTiles.has(tile)) return;
+    vis++;
+    model.traverse((o) => { if (o.isPoints) pts += o.geometry.attributes.position.count; });
+  });
+  LAB.visibleTiles = vis;
+  LAB.visiblePoints = pts;
+  hud.textContent = `${params.mode === 'potree' ? 'PotreePlugin · adaptive size' : `/stream 3D Tiles · ${params.geSize ? 'size from tile GE' : 'fixed size'}`}`
+    + ` · ${vis} tiles · ${pts.toLocaleString('en-US')} points`
+    + (hud.dataset.iconem ? ` · ${hud.dataset.iconem} Iconem datasets listed` : '')
+    + (LAB.errors.length ? ` · ${LAB.errors.length} error(s)` : '');
+}
+
+function resize() {
+  camera.aspect = innerWidth / innerHeight;
+  camera.updateProjectionMatrix();
+  renderer.setSize(innerWidth, innerHeight);
+}
+addEventListener('resize', resize);
+resize();
+
+let frame = 0;
+renderer.setAnimationLoop(() => {
+  controls.update();
+  if (params.enable) {
+    tiles.setCamera(camera);
+    tiles.setResolutionFromRenderer(camera, renderer);
+    tiles.update();
+  }
+  renderer.render(scene, camera);
+  if (++frame % 15 === 0) updateHud();
+});
+
+initTiles();

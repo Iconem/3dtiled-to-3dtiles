@@ -1,6 +1,6 @@
 // cdp-screenshot.mjs — headless-Chrome screenshot with a REAL readiness wait (no virtual time):
 //   node scripts/cdp-screenshot.mjs <url> <out.png> [--wait-expr '<js expr, truthy when ready>']
-//        [--width 1440] [--height 900] [--settle 1500] [--timeout 120000] [--eval '<js run after load>']
+//        [--width 1440] [--height 900] [--settle 1500] [--timeout 120000] [--eval '<js run after load>'] [--print-eval]
 // Drives Chrome over the DevTools Protocol using Node's native WebSocket — no puppeteer dependency.
 import { spawn } from 'node:child_process';
 import fs from 'node:fs/promises';
@@ -57,7 +57,12 @@ for (;;) {
   if (v) break;
   await new Promise(r => setTimeout(r, 700));
 }
-if (evalAfter) await evalJs(evalAfter);
+if (evalAfter) {
+  const v = await evalJs(evalAfter);
+  // --print-eval: surface what the page reported (e.g. collected console errors) — a screenshot alone
+  // cannot show a runtime exception that left the view blank.
+  if (args.includes('--print-eval')) console.log(`eval → ${typeof v === 'string' ? v : JSON.stringify(v)}`);
+}
 await new Promise(r => setTimeout(r, settle));
 const shot = await send('Page.captureScreenshot', { format: 'png' });
 await fs.writeFile(out, Buffer.from(shot.result.data, 'base64'));

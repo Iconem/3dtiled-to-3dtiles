@@ -69,6 +69,31 @@ export default defineConfig({
       },
     },
     {
+      // DEV ONLY: serve machine-local aggregate manifests (.local/aggregate-sets/*.json) to the Potree
+      // lab's dataset picker. Those manifests hold Iconem share links, which are bearer credentials —
+      // and this dev server binds every interface (`host: true`) — so only loopback clients get them,
+      // and `configureServer` means none of this exists in a production build.
+      name: 'local-sets-loopback-only',
+      configureServer(server) {
+        server.middlewares.use(async (req, res, next) => {
+          const url = req.url || '';
+          if (!url.startsWith('/local-sets/')) return next();
+          const addr = req.socket.remoteAddress || '';
+          if (!['127.0.0.1', '::1', '::ffff:127.0.0.1'].includes(addr)) {
+            res.statusCode = 403;
+            return res.end('local sets are only served to loopback clients');
+          }
+          const name = path.basename(decodeURIComponent(url.split('?')[0]));
+          if (!/^[\w.-]+\.json$/.test(name)) return next();
+          const filePath = path.join(repoRoot, '.local', 'aggregate-sets', name);
+          try { await stat(filePath); } catch { res.statusCode = 404; return res.end('no such local set'); }
+          res.setHeader('Content-Type', 'application/json');
+          res.setHeader('Cache-Control', 'no-store');
+          createReadStream(filePath).pipe(res);
+        });
+      },
+    },
+    {
       // Extension-less `/vanilla-viewer` (matching the plain `/docs` link's style) instead of forcing
       // `/vanilla-viewer.html` — `serve.json`'s `rewrites` covers the same alias for the production build.
       name: 'vanilla-viewer-alias',
@@ -78,6 +103,9 @@ export default defineConfig({
           // Same extension-less alias for the hierarchy explorer (public/serve.json mirrors both
           // rewrites for the production static server).
           if (req.url === '/hierarchy') req.url = '/hierarchy.html';
+          if (req.url?.startsWith('/potree-lab') && !req.url.startsWith('/potree-lab.html')) {
+            req.url = '/potree-lab.html' + req.url.slice('/potree-lab'.length);
+          }
           next();
         });
       },
@@ -127,6 +155,9 @@ export default defineConfig({
         // /stats + d3-hierarchy, and folding it into index.html would make every visit download
         // Cesium, three and SparkJS to draw a graph.
         hierarchy: fileURLToPath(new URL('./hierarchy.html', import.meta.url)),
+        // Point-cloud rendering test bench (PotreePlugin + PointCloudEffectsPlugin); own entry so the
+        // main app doesn't carry the vendored, not-yet-released 3DTRjs plugins.
+        'potree-lab': fileURLToPath(new URL('./potree-lab.html', import.meta.url)),
       },
     },
   },

@@ -207,6 +207,7 @@ export const PSEUDO_FORMATS: [string, string][] = [
   ['bing', '🗺 Bing 3D'],
   ['threemx', '🏛 3MX'],
   ['geosplats', '✨ GeoSplats'],
+  ['aggregate', '🧩 Aggregate'],
 ];
 
 // The single, deliberately-grouped render order for the format pill row — cuts across the FORMATS
@@ -216,6 +217,7 @@ export const PSEUDO_FORMATS: [string, string][] = [
 //   0: point-cloud octrees (COPC, Potree)
 //   1: splat formats (SOG, LCC, GeoSplats, RAD)
 //   2: tileset-native / mesh formats (3D Tiles, Packages, I3S, 3MX, Bing)
+//   3: meta-tilesets — /aggregate mosaics that mix all of the above
 export const FORMAT_PILL_ORDER: { id: string; group: number }[] = [
   { id: 'copc', group: 0 },
   { id: 'potree', group: 0 },
@@ -228,6 +230,7 @@ export const FORMAT_PILL_ORDER: { id: string; group: number }[] = [
   { id: 'i3s', group: 2 },
   { id: 'threemx', group: 2 },
   { id: 'bing', group: 2 },
+  { id: 'aggregate', group: 3 },
 ];
 
 /** Look up a pill's icon+label whether it's a real FORMATS entry or a PSEUDO_FORMATS one. */

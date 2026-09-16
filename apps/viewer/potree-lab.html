@@ -1,0 +1,26 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <link rel="icon" type="image/svg+xml" href="/logo.svg" />
+    <title>Potree lab — 3D Tiled</title>
+    <style>
+      html, body { margin: 0; height: 100%; overflow: hidden; background: #111; }
+      canvas { display: block; }
+      #hud {
+        position: fixed; left: 10px; bottom: 10px; max-width: 70vw;
+        font: 12px/1.4 ui-sans-serif, system-ui, sans-serif; color: #ddd;
+        background: rgb(0 0 0 / 0.55); padding: 6px 9px; border-radius: 6px; pointer-events: none;
+      }
+      #back { position: fixed; left: 10px; top: 10px; font: 12px ui-sans-serif, system-ui, sans-serif; color: #aaa; }
+    </style>
+  </head>
+  <body>
+    <a id="back" href="/">← Viewer</a>
+    <div id="hud">loading…</div>
+    <!-- Runtime-overridable tile-server URL — must run before the module below reads formats.ts's MW. -->
+    <script src="/env-config.js"></script>
+    <script type="module" src="/src/potree-lab/main.js"></script>
+  </body>
+</html>

@@ -79,11 +79,11 @@ importers:
   apps/viewer:
     dependencies:
       3d-tiles-renderer:
-        specifier: 0.4.28
-        version: 0.4.28(@react-three/fiber@9.6.1(@types/react@19.2.17)(react-dom@19.2.7(react@19.2.7))(react@19.2.7)(three@0.180.0))(react-dom@19.2.7(react@19.2.7))(react@19.2.7)(three@0.180.0)
+        specifier: 0.5.2
+        version: 0.5.2(@react-three/fiber@9.6.1(@types/react@19.2.17)(react-dom@19.2.7(react@19.2.7))(react@19.2.7)(three@0.180.0))(react-dom@19.2.7(react@19.2.7))(react@19.2.7)(three@0.180.0)
       3d-tiles-rendererjs-3dgs-plugin:
         specifier: 0.1.13
-        version: 0.1.13(3d-tiles-renderer@0.4.28(@react-three/fiber@9.6.1(@types/react@19.2.17)(react-dom@19.2.7(react@19.2.7))(react@19.2.7)(three@0.180.0))(react-dom@19.2.7(react@19.2.7))(react@19.2.7)(three@0.180.0))(@sparkjsdev/spark@2.1.0(three@0.180.0))(three@0.180.0)
+        version: 0.1.13(3d-tiles-renderer@0.5.2(@react-three/fiber@9.6.1(@types/react@19.2.17)(react-dom@19.2.7(react@19.2.7))(react@19.2.7)(three@0.180.0))(react-dom@19.2.7(react@19.2.7))(react@19.2.7)(three@0.180.0))(@sparkjsdev/spark@2.1.0(three@0.180.0))(three@0.180.0)
       '@radix-ui/react-checkbox':
         specifier: 1.3.6
         version: 1.3.6(@types/react-dom@19.2.3(@types/react@19.2.17))(@types/react@19.2.17)(react-dom@19.2.7(react@19.2.7))(react@19.2.7)
@@ -365,8 +365,8 @@ importers:
 
 packages:
 
-  3d-tiles-renderer@0.4.28:
-    resolution: {integrity: sha512-eDFg3fTgnFeoa6kU9oyAQIci/N/CJq6JUi/ZUrmDyqLzEDH9mWd9FBs+NqS+0eO8b7y4HjIWfUVnf8o03AFtSA==}
+  3d-tiles-renderer@0.5.2:
+    resolution: {integrity: sha512-mpl6Gqvg6ZjkxZW/TQZ9SW91gjWRRDuscuU3D2WWzw1ETFct8ijVdnXJs400sDkkIXpcmrEoHlpN+r9NdROd+w==}
     peerDependencies:
       '@babylonjs/core': '>=8.0.0'
       '@babylonjs/loaders': '>=8.0.0'
@@ -6878,7 +6878,7 @@ packages:
 
 snapshots:
 
-  3d-tiles-renderer@0.4.28(@react-three/fiber@9.6.1(@types/react@19.2.17)(react-dom@19.2.7(react@19.2.7))(react@19.2.7)(three@0.180.0))(react-dom@19.2.7(react@19.2.7))(react@19.2.7)(three@0.180.0):
+  3d-tiles-renderer@0.5.2(@react-three/fiber@9.6.1(@types/react@19.2.17)(react-dom@19.2.7(react@19.2.7))(react@19.2.7)(three@0.180.0))(react-dom@19.2.7(react@19.2.7))(react@19.2.7)(three@0.180.0):
     dependencies:
       '@mapbox/vector-tile': 2.0.5
       pbf: 4.0.2
@@ -6889,9 +6889,9 @@ snapshots:
       react-dom: 19.2.7(react@19.2.7)
       three: 0.180.0
 
-  3d-tiles-rendererjs-3dgs-plugin@0.1.13(3d-tiles-renderer@0.4.28(@react-three/fiber@9.6.1(@types/react@19.2.17)(react-dom@19.2.7(react@19.2.7))(react@19.2.7)(three@0.180.0))(react-dom@19.2.7(react@19.2.7))(react@19.2.7)(three@0.180.0))(@sparkjsdev/spark@2.1.0(three@0.180.0))(three@0.180.0):
+  3d-tiles-rendererjs-3dgs-plugin@0.1.13(3d-tiles-renderer@0.5.2(@react-three/fiber@9.6.1(@types/react@19.2.17)(react-dom@19.2.7(react@19.2.7))(react@19.2.7)(three@0.180.0))(react-dom@19.2.7(react@19.2.7))(react@19.2.7)(three@0.180.0))(@sparkjsdev/spark@2.1.0(three@0.180.0))(three@0.180.0):
     dependencies:
-      3d-tiles-renderer: 0.4.28(@react-three/fiber@9.6.1(@types/react@19.2.17)(react-dom@19.2.7(react@19.2.7))(react@19.2.7)(three@0.180.0))(react-dom@19.2.7(react@19.2.7))(react@19.2.7)(three@0.180.0)
+      3d-tiles-renderer: 0.5.2(@react-three/fiber@9.6.1(@types/react@19.2.17)(react-dom@19.2.7(react@19.2.7))(react@19.2.7)(three@0.180.0))(react-dom@19.2.7(react@19.2.7))(react@19.2.7)(three@0.180.0)
       '@sparkjsdev/spark': 2.1.0(three@0.180.0)
       three: 0.180.0
 
