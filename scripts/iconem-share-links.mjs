@@ -91,6 +91,32 @@ async function all(route, key) {
   }
 }
 
+/**
+ * Capture date of a dataset, as "YYYY" or "YYYY-MM". The platform's own `date` field is authoritative
+ * but mostly null in practice (all five Mes Aynak diachronic scans have date: null), so fall back to
+ * Iconem's naming conventions, most specific first, looking at the asset name, then scene, then
+ * project:
+ *   `_d202411_`   capture date (`_d2011_` = year only) (the `_p……` next to it is the PROCESSING date — deliberately ignored)
+ *   `(2021-07)`   / `2015-10`
+ *   `_2012`       a bare year
+ * Years outside 1990–2035 are rejected: "Church of the Assumption, 1783" names a building, not a scan.
+ */
+function captureDate(apiDate, ...texts) {
+  if (apiDate) return { date: String(apiDate).slice(0, 10), dateSource: 'api' };
+  const ok = (y) => +y >= 1990 && +y <= 2035;
+  for (const t of texts) {
+    if (!t) continue;
+    let m = t.match(/_d((?:19|20)\d{2})(\d{2})?(?:\d{2})?(?=_|$)/);
+    if (m && ok(m[1]) && !m[2]) return { date: m[1], dateSource: 'name' };
+    if (m && ok(m[1]) && +m[2] >= 1 && +m[2] <= 12) return { date: `${m[1]}-${m[2]}`, dateSource: 'name' };
+    m = t.match(/(?:^|[^\d])((?:19|20)\d{2})-(0[1-9]|1[0-2])(?!\d)/);
+    if (m && ok(m[1])) return { date: `${m[1]}-${m[2]}`, dateSource: 'name' };
+    m = t.match(/(?:^|[_\s(-])((?:19|20)\d{2})(?![\d-])/);
+    if (m && ok(m[1])) return { date: m[1], dateSource: 'name' };
+  }
+  return { date: null, dateSource: null };
+}
+
 const liveShare = (s) => s.name === NAME && !s.is_revoked && (!s.expires_at || new Date(s.expires_at) > new Date());
 
 const ASSETS = {
@@ -151,6 +177,9 @@ for (const p of projects) {
           entries.push({
             type, format: type === 'pointcloud' ? 'potree' : type === 'las' ? 'copc' : '3dtiles',
             url: share.url, name: a.name, project: p.name, scene: s.name,
+            // ids let a client group datasets by scene without trusting names to be unique
+            projectId: p.id, sceneId: s.id, assetId: a.id,
+            ...captureDate(a.date, a.name, s.name, p.name),
           });
           console.log(`  ${wasCreated ? 'created' : 'reused '}       [${type}] ${label}`);
         } catch (e) {

@@ -13,12 +13,13 @@
  *   3. geodetic  — same, under 3D Tiles implicit tiling's own lon/lat subdivision.
  *   4. Scale-awareness: a country-sized dataset must NOT be buried inside a city-sized cell.
  *   5. Monotonic geometric error — a parent's GE must exceed every child's, or clients mis-refine.
+ *   6. bv=region — groups become lon/lat/height regions that still enclose every dataset below them.
  *
  * Run: node scripts/debug-aggregate-nesting.mjs
  */
 import http from 'node:http';
 import { buildAggregate } from '../packages/tile-server/aggregate-live.js';
-import { llhToEcef } from '../packages/core/index.js';
+import { llhToEcef, ecefToLlh } from '../packages/core/index.js';
 
 // name, lon, lat, radius(m) — radius is what decides how deep a dataset is allowed to nest
 const DATASETS = [
@@ -127,6 +128,42 @@ for (const nest of ['flat', 'mercator', 'geodetic']) {
     check('country-scale dataset stays shallow', france.length < eiffel.length,
           `france depth ${france.length} < eiffel depth ${eiffel.length}`);
   }
+}
+
+// ── bv=region: the same quadtree, with groups bounded by lon/lat/height regions ──────────────────
+//
+// A region is only valid if it encloses every dataset below it. Sample each leaf sphere's surface
+// (poles, equator and diagonals of the ball) and check every sample lies inside every ancestor region.
+function regionMisses(tile, ancestors = []) {
+  const here = tile.boundingVolume.region ? [...ancestors, tile.boundingVolume.region] : ancestors;
+  if (tile.content) {
+    const [x, y, z, r] = tile.boundingVolume.sphere;
+    const dirs = [];
+    for (const a of [-1, 0, 1]) for (const b of [-1, 0, 1]) for (const c of [-1, 0, 1]) if (a || b || c) dirs.push([a, b, c]);
+    for (const [a, b, c] of dirs) {
+      const n = Math.hypot(a, b, c);
+      const [lon, lat, h] = ecefToLlh(x + r * a / n, y + r * b / n, z + r * c / n);
+      const lo = lon * Math.PI / 180, la = lat * Math.PI / 180;
+      for (const [w, s, e, nn, h0, h1] of here) {
+        if (lo < w || lo > e || la < s || la > nn || h < h0 - 1e-3 || h > h1 + 1e-3) return 1;
+      }
+    }
+    return 0;
+  }
+  return (tile.children || []).reduce((acc, c) => acc + regionMisses(c, here), 0);
+}
+const countGroups = (t, pred) => (t.children ? (pred(t) ? 1 : 0) + t.children.reduce((a, c) => a + countGroups(c, pred), 0) : 0);
+
+for (const nest of ['mercator', 'geodetic']) {
+  const ts = await buildAggregate(urls, { nest, ttlMs: 0, bv: 'region' });
+  console.log(`\n=== nest=${nest} bv=region → ${JSON.stringify(ts.asset.extras.nesting)}`);
+  check(`${nest}/region: every group is a region`, countGroups(ts.root, (t) => !t.boundingVolume.region) === 0);
+  const misses = regionMisses(ts.root);
+  check(`${nest}/region: every dataset lies inside all its ancestor regions`, misses === 0, `${misses} datasets poke out`);
+  const sphereTree = await buildAggregate(urls, { nest, ttlMs: 0 });
+  check(`${nest}/region: same grouping as the sphere tree`,
+        JSON.stringify(ts.root, (k, v) => (k === 'boundingVolume' ? undefined : v))
+          === JSON.stringify(sphereTree.root, (k, v) => (k === 'boundingVolume' ? undefined : v)));
 }
 
 // ── scale: does this hold up at "every Iconem dataset in one endpoint" size? ──────────────────────

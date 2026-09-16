@@ -12,7 +12,8 @@
  *
  *   GET /aggregate/tileset.json?urls=<u1>,<u2>,…     (each URL-encoded; commas separate)
  *   GET /aggregate/tileset.json?url=<u1>&url=<u2>…   (repeated form, equivalent)
- *   …&nest=auto|mercator|geodetic|flat   &ttl=<seconds>
+ *   …&nest=auto|mercator|geodetic|flat   &bv=sphere|region   &ttl=<seconds>
+ *   …&format=  &only=  &exclude=  &hide=<id>  &latest=1  &from=YYYY[-MM]  &to=YYYY[-MM]
  *
  * Child fetch failures don't kill the aggregate: failed children are skipped and listed in
  * `asset.extras.failed` (with the error), so a mosaic of 40 datasets survives one dead host.
@@ -20,6 +21,7 @@
 import { readdir, readFile } from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { createHash } from 'node:crypto';
 import { llhToEcef, ecefToLlh } from '../core/index.js';
 
 const CORS = { 'Access-Control-Allow-Origin': '*', 'Access-Control-Allow-Headers': '*' };
@@ -237,6 +239,33 @@ function unionSphere(a, b) {
 }
 
 /**
+ * A `region` [west, south, east, north, minH, maxH] (radians, metres) enclosing an ECEF sphere.
+ *
+ * The angular half-extent is asin(r/|c|) — the cone a ball subtends from the Earth's centre — plus 1%
+ * for the gap between geocentric and geodetic latitude (≤0.19°, at most a ~1% change of scale).
+ * Longitude widens by 1/cos of the most poleward latitude the ball reaches; a ball that reaches a pole
+ * or crosses the antimeridian gets the full longitude range, which is loose but never wrong.
+ */
+function sphereToRegion([x, y, z, r]) {
+  const d = Math.hypot(x, y, z);
+  const [lonDeg, latDeg, h] = ecefToLlh(x, y, z);
+  const lon = lonDeg * Math.PI / 180, lat = latDeg * Math.PI / 180;
+  const a = r >= d ? Math.PI : Math.asin(r / d) * 1.01;
+  const south = Math.max(-Math.PI / 2, lat - a), north = Math.min(Math.PI / 2, lat + a);
+  const polar = Math.max(Math.abs(south), Math.abs(north));
+  const dLon = polar >= Math.PI / 2 - 1e-6 ? Math.PI * 2 : a / Math.cos(polar);
+  let west = lon - dLon, east = lon + dLon;
+  if (west < -Math.PI || east > Math.PI) { west = -Math.PI; east = Math.PI; }
+  return [west, south, east, north, h - r, h + r];
+}
+
+function unionRegion(a, b) {
+  if (!a) return b;
+  return [Math.min(a[0], b[0]), Math.min(a[1], b[1]), Math.max(a[2], b[2]), Math.max(a[3], b[3]),
+    Math.min(a[4], b[4]), Math.max(a[5], b[5])];
+}
+
+/**
  * Build the nested tile tree from leaf entries [{ key, tile }]. Returns a 3D Tiles tile.
  *
  * Each emitted group carries `extras.cell` — its path digits, level and Morton index — so the
@@ -244,7 +273,12 @@ function unionSphere(a, b) {
  * any other tileset). Nothing renders off it; it is there so "why did this dataset end up here" has
  * an answer that doesn't require re-running the server.
  */
-function nestLeaves(leaves, schemeName) {
+function nestLeaves(leaves, schemeName, bv = 'sphere') {
+  // Groups may be emitted as regions, but unions are always computed from the children's spheres:
+  // a sphere enclosing a region's corners would be far looser than the union of the original balls.
+  const sphereOf = new Map();
+  const sph = (t) => sphereOf.get(t) ?? t.boundingVolume.sphere;
+  const reg = (t) => t.boundingVolume.region ?? sphereToRegion(t.boundingVolume.sphere);
   // trie over path digits; a node holds the datasets whose own cell stops at that node's level
   const root = { kids: new Map(), here: [], path: '' };
   for (const lf of leaves) {
@@ -268,21 +302,24 @@ function nestLeaves(leaves, schemeName) {
     if (!children.length) return null;
     if (children.length === 1) return children[0];        // don't wrap a lone child in a group
 
-    const sphere = children.reduce((acc, c) => unionSphere(acc, c.boundingVolume.sphere), null);
+    const sphere = children.reduce((acc, c) => unionSphere(acc, sph(c)), null);
     // Parent GE must exceed every child's (3D Tiles requires monotonic decrease on refine); 2× keeps
     // it monotonic while staying small enough that a distant group is never traversed.
     const geometricError = Math.max(...children.map(c => c.geometricError)) * 2;
     // The geodetic path's first digit is the 2×1 root-cell selector, so its level is one shorter.
     const level = schemeName === 'geodetic' ? Math.max(0, node.path.length - 1) : node.path.length;
-    return {
-      boundingVolume: { sphere },
+    const group = {
+      boundingVolume: bv === 'region' ? { region: children.reduce((acc, c) => unionRegion(acc, reg(c)), null) } : { sphere },
       geometricError,
       refine: 'ADD',
       extras: { cell: { scheme: schemeName, key: node.path || '(root)', level } },
       children,
     };
+    sphereOf.set(group, sphere);
+    return group;
   };
-  return build(root);
+  const tree = build(root);
+  return tree && { tree, sphere: sph(tree) };
 }
 
 /**
@@ -312,7 +349,7 @@ async function pooledSettled(items, worker, limit = FETCH_CONCURRENCY) {
   return out;
 }
 
-export async function buildAggregate(urls, { nest = 'auto', ttlMs = DEFAULT_TTL_MS } = {}) {
+export async function buildAggregate(urls, { nest = 'auto', ttlMs = DEFAULT_TTL_MS, bv = 'sphere' } = {}) {
   const results = await pooledSettled(urls, (u) => childInfo(u, ttlMs));
   const children = [], failed = [], unplaced = [];
   results.forEach((res, i) => {
@@ -347,7 +384,7 @@ export async function buildAggregate(urls, { nest = 'auto', ttlMs = DEFAULT_TTL_
   const want = parseNest(nest);
   const doNest = want.mode === 'on' || (want.mode === 'auto' && children.length >= NEST_THRESHOLD);
 
-  let root, nesting = { mode: 'flat' };
+  let root, rootSphere, nesting = { mode: 'flat' };
   if (doNest) {
     const schemeName = want.scheme;
     const scheme = SCHEMES[schemeName];
@@ -359,11 +396,13 @@ export async function buildAggregate(urls, { nest = 'auto', ttlMs = DEFAULT_TTL_
       tile.extras = { ...(tile.extras || {}), cell: { scheme: schemeName, key: cell.key, morton: cell.morton } };
       return { key: cell.key, tile };
     });
-    root = nestLeaves(leaves, schemeName);
-    nesting = { mode: 'quadtree', scheme: schemeName };
+    const nested = nestLeaves(leaves, schemeName, bv);
+    root = nested?.tree;
+    rootSphere = nested?.sphere;
+    nesting = { mode: 'quadtree', scheme: schemeName, bv };
   }
   if (!root) {                                   // flat: one root, every dataset a direct child
-    const rootSphere = children.reduce((acc, ch) => unionSphere(acc, ch.boundingVolume.sphere), null);
+    rootSphere = children.reduce((acc, ch) => unionSphere(acc, ch.boundingVolume.sphere), null);
     root = {
       boundingVolume: { sphere: rootSphere },
       // ×2, not max(): 3D Tiles requires geometric error to DECREASE on refine, and plain max() ties
@@ -378,10 +417,14 @@ export async function buildAggregate(urls, { nest = 'auto', ttlMs = DEFAULT_TTL_
   // A mosaic spread across continents is better bounded by an EARTH-CENTRED sphere than by the greedy
   // pairwise union (whose centre drifts and whose radius overshoots: 9 526 km for the Iconem set,
   // larger than the planet). Both enclose every child; keep whichever is smaller.
-  {
-    const s = root.boundingVolume.sphere;
+  // A lone child is its own root and keeps its own volume. With bv=region the root is a region too.
+  if (root.children) {
     const earthR = Math.max(...children.map((c) => { const [x, y, z, r] = c.boundingVolume.sphere; return Math.hypot(x, y, z) + r; }));
-    if (earthR < s[3]) root.boundingVolume.sphere = [0, 0, 0, earthR];
+    // union of the children's regions — the nested root already is one; a region around the union
+    // SPHERE would be useless (that sphere can be larger than the planet)
+    if (bv === 'region') root.boundingVolume.region ??= root.children.reduce((acc, c) => unionRegion(acc, c.boundingVolume.region ?? sphereToRegion(c.boundingVolume.sphere)), null);
+    if (bv === 'region') delete root.boundingVolume.sphere;
+    else if (earthR < rootSphere[3]) root.boundingVolume = { sphere: [0, 0, 0, earthR] };
   }
 
   // depth/fanout of what we produced — cheap to compute, and the only way to see the nesting worked
@@ -493,8 +536,8 @@ export const DEMO_SETS = {
  * single tile — and a 3D Tiles client re-requests the root more than once per session.
  */
 const aggregateCached = ttlCache(async (key) => {
-  const { urls, nest, ttlMs } = JSON.parse(key);
-  return buildAggregate(urls, { nest, ttlMs });
+  const { urls, nest, ttlMs, bv } = JSON.parse(key);
+  return buildAggregate(urls, { nest, ttlMs, bv });
 });
 
 // ── local sets ───────────────────────────────────────────────────────────────────────────────────
@@ -567,9 +610,13 @@ export async function handleAggregate(req, res, u) {
 
   const sel = selectChildren(req, u, sets);
   if (sel.error) { res.writeHead(400, CORS); res.end(sel.error); return true; }
-  const { items, urls, nest, ttlMs } = sel;
+  const { nest, ttlMs, bv } = sel;
+  let { items } = sel;
+  // &latest=1 needs every dataset's footprint, so it runs after selection, on the cached child roots.
+  if (sel.latest) items = await keepLatest(items, ttlMs);
+  const urls = items.map((it) => it.url);
 
-  const key = JSON.stringify({ urls, nest, ttlMs });
+  const key = JSON.stringify({ urls, nest, ttlMs, bv });
   let ts;
   try {
     ts = await aggregateCached(key, ttlMs);
@@ -594,7 +641,11 @@ export async function handleAggregate(req, res, u) {
         const [lon, lat, height] = ecefToLlh(x, y, z);
         const it = byUrl.get(t.content.uri) || {};
         datasets.push({
+          id: it.id ?? idOf(t.content.uri),
           name: it.name || nameFromUrl(t.content.uri), project: it.project, scene: it.scene,
+          // `group` is the platform scene when known: datasets sharing one are either a diachronic
+          // series (show the latest) or pieces of one site (show them all) — a UI decides which.
+          group: it.group ?? null, date: it.date ?? null,
           format: it.fmt || '3dtiles', url: t.content.uri,
           lon: +lon.toFixed(6), lat: +lat.toFixed(6), height: +height.toFixed(1), radius: +r.toFixed(1),
         });
@@ -612,6 +663,50 @@ export async function handleAggregate(req, res, u) {
   res.writeHead(200, { 'Content-Type': 'application/json', ...CORS });
   res.end(JSON.stringify(ts));
   return true;
+}
+
+/** Stable short id of a child — hashed from its SOURCE url, so it survives a change of server origin. */
+const idOf = (x) => createHash('sha1').update(x).digest('hex').slice(0, 10);
+
+/** "2012" → ["2012-01-01", "2012-12-31"]; "2015-10" → ["2015-10-01", "2015-10-31"]. */
+function dateSpan(d) {
+  const [y, m, day] = String(d).split('-');
+  if (day) return [d, d];
+  if (m) return [`${y}-${m}-01`, `${y}-${m}-31`];
+  return [`${y}-01-01`, `${y}-12-31`];
+}
+
+/**
+ * &latest=1 — among datasets covering the SAME ground at different dates, keep only the newest.
+ *
+ * "Same ground" is geometric, not a naming rule: centres closer than 0.3× the larger radius and radii
+ * within a factor of two. That separates a yearly re-scan of one site (Mes Aynak 2010…2022) from a
+ * detail capture nested in a wider one (Piazza San Marco inside the Venice airborne scan, which has
+ * a hole cut for it and must stay). Undated datasets are never superseded: there is nothing to compare.
+ */
+async function keepLatest(items, ttlMs) {
+  const dated = items.filter((it) => it.date);
+  const infos = await pooledSettled(dated, (it) => childInfo(it.url, ttlMs));
+  const pts = dated.map((it, i) => ({ it, s: infos[i].status === 'fulfilled' ? infos[i].value.sphere : null })).filter((p) => p.s);
+  const parent = pts.map((_, i) => i);
+  const find = (i) => (parent[i] === i ? i : (parent[i] = find(parent[i])));
+  for (let i = 0; i < pts.length; i++) {
+    for (let j = i + 1; j < pts.length; j++) {
+      const a = pts[i].s, b = pts[j].s;
+      const rMax = Math.max(a[3], b[3]), rMin = Math.min(a[3], b[3]);
+      if (rMin < rMax / 2) continue;
+      if (Math.hypot(a[0] - b[0], a[1] - b[1], a[2] - b[2]) < 0.3 * rMax) parent[find(i)] = find(j);
+    }
+  }
+  // Superseded = ended before the newest capture STARTED. Comparing start to end keeps mixed precision
+  // honest: "2022-05" and "2022-05-19" overlap, so neither replaces the other.
+  const newest = new Map();
+  pts.forEach((p, i) => {
+    const r = find(i), start = dateSpan(p.it.date)[0];
+    if (!newest.has(r) || start > newest.get(r)) newest.set(r, start);
+  });
+  const dropped = new Set(pts.filter((p, i) => dateSpan(p.it.date)[1] < newest.get(find(i))).map((p) => p.it));
+  return items.filter((it) => !dropped.has(it));
 }
 
 /** A readable name for an ad-hoc child: the inner source file of a /stream URL, else the URL's tail. */
@@ -644,10 +739,12 @@ function selectChildren(req, u, sets) {
   const set = setName ? sets[setName] : null;
   const labelByUrl = new Map((set && !set.local ? set.entries : []).map((e) => [e.url, e.label || e.id]));
   const fromSet = !set ? [] : set.local
-    ? set.entries.map((e) => ({ url: childUrlFor(e, origin), fmt: e.format || '3dtiles', name: e.name, project: e.project, scene: e.scene,
-        text: [e.url, e.name, e.project, e.scene].filter(Boolean).join(' ') }))
-    : set.urls.map((x) => ({ url: x, fmt: '3dtiles', name: labelByUrl.get(x), text: `${x} ${labelByUrl.get(x) ?? ''}` }));
-  const adhoc = (x) => ({ url: x, fmt: formatOfUrl(x), name: nameFromUrl(x), text: x });
+    ? set.entries.map((e) => ({ id: idOf(e.url), url: childUrlFor(e, origin), fmt: e.format || '3dtiles',
+        name: e.name, project: e.project, scene: e.scene, date: e.date ?? null,
+        group: e.sceneId != null ? `scene:${e.sceneId}` : e.scene ? `scene:${e.project ?? ''}/${e.scene}` : null,
+        text: [e.url, e.name, e.project, e.scene, e.date].filter(Boolean).join(' ') }))
+    : set.urls.map((x) => ({ id: idOf(x), url: x, fmt: '3dtiles', name: labelByUrl.get(x), text: `${x} ${labelByUrl.get(x) ?? ''}` }));
+  const adhoc = (x) => ({ id: idOf(x), url: x, fmt: formatOfUrl(x), name: nameFromUrl(x), text: x });
   let items = [
     ...fromSet,
     ...u.searchParams.getAll('url').map(adhoc),
@@ -672,12 +769,21 @@ function selectChildren(req, u, sets) {
   const exclude = u.searchParams.getAll('exclude').filter(Boolean).map(s => s.toLowerCase());
   if (only.length) items = items.filter(it => only.some(s => it.text.toLowerCase().includes(s)));
   if (exclude.length) items = items.filter(it => !exclude.some(s => it.text.toLowerCase().includes(s)));
-  const urls = items.map((it) => it.url);
-  if (!urls.length) return { error: `no children left after format=[${formats}] only=[${only}] exclude=[${exclude}]` };
+  // &hide=<id> (repeatable / comma-separated) — the ids index.json reports; what a show/hide picker sets.
+  const hide = new Set(u.searchParams.getAll('hide').flatMap(s => s.split(',')).map(s => s.trim()).filter(Boolean));
+  if (hide.size) items = items.filter(it => !hide.has(it.id));
+  // &from= / &to= (YYYY, YYYY-MM or YYYY-MM-DD) keep datasets whose capture date overlaps the range.
+  // Undated datasets are kept — a timeline must not silently empty a mosaic that is half undated.
+  const from = u.searchParams.get('from'), to = u.searchParams.get('to');
+  if (from) items = items.filter(it => !it.date || dateSpan(it.date)[1] >= dateSpan(from)[0]);
+  if (to) items = items.filter(it => !it.date || dateSpan(it.date)[0] <= dateSpan(to)[1]);
+  if (!items.length) return { error: `no children left after format=[${formats}] only=[${only}] exclude=[${exclude}] hide=${hide.size} from=${from ?? ''} to=${to ?? ''}` };
   const nest = u.searchParams.get('nest') ?? 'auto';
   // &ttl=<seconds>; ttl=0 bypasses the cache entirely (both the mosaic and its child roots), which is
   // what you want while iterating on a dataset that is actively being re-tiled.
   const ttlParam = u.searchParams.get('ttl');
   const ttlMs = ttlParam == null ? DEFAULT_TTL_MS : Math.max(0, Number(ttlParam) || 0) * 1000;
-  return { items, urls, nest, ttlMs };
+  const bv = u.searchParams.get('bv') === 'region' ? 'region' : 'sphere';
+  const latest = ['1', 'true'].includes(u.searchParams.get('latest') ?? '');
+  return { items, nest, ttlMs, bv, latest };
 }
