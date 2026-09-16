@@ -77,9 +77,20 @@ export async function loadPotree1(dir, opts = {}) {
   // .bin attribute layout (not used for LAZ nodes, which carry their own LAS header).
   let pointSize = 0; const attrs = [];
   if (!isLaz && Array.isArray(cloud.pointAttributes)) {
-    for (const name of cloud.pointAttributes) {
-      const sz = ATTR_SIZE[name] ?? (typeof name === 'object' ? name.byteSize : 0);
-      attrs.push({ name: (name.name || name), offset: pointSize, size: sz });
+    // 1.7 lists attribute NAMES ("POSITION_CARTESIAN"); 1.8 lists OBJECTS
+    // ({ name, size, elements, elementSize, type }). The object's own byte size is authoritative when
+    // present. An earlier version read `name.byteSize` — a field 1.8 does not have — so every
+    // attribute size was undefined, pointSize became NaN, every node decoded to zero points, and the
+    // server answered "no such node" for the ROOT tile: roughly half of Iconem's Potree datasets
+    // (every 1.8 one) streamed as an empty bounding volume.
+    for (const a of cloud.pointAttributes) {
+      const attrName = typeof a === 'string' ? a : a.name;
+      const declared = typeof a === 'object'
+        ? (a.size ?? a.byteSize ?? (a.elements && a.elementSize ? a.elements * a.elementSize : undefined))
+        : undefined;
+      const sz = declared ?? ATTR_SIZE[attrName];
+      if (!Number.isFinite(sz) || sz <= 0) throw new Error(`potree 1.x: unknown size for point attribute ${JSON.stringify(attrName)}`);
+      attrs.push({ name: attrName, offset: pointSize, size: sz });
       pointSize += sz;
     }
   }

@@ -32,7 +32,8 @@ const exists = async p => !!(await fs.stat(p).catch(() => null));
 // Bump when the GLB bytes a converter writes change meaning, so a cached conversion is rebuilt
 // instead of silently served forever. v2: point COLOR_0 is now linear (it used to be raw sRGB, which
 // rendered washed out in every spec-following client) — caches from before that must not be reused.
-const OUTPUT_VERSION = 'v2';
+// v3: Potree 1.8 nodes decode again - v2-era caches of 1.8 datasets hold empty tiles.
+const OUTPUT_VERSION = 'v3';
 const keyFor = (src, fmt, centroids, tiling) => crypto.createHash('sha1').update(`${OUTPUT_VERSION}|${fmt || ''}|${centroids ? 'c|' : ''}${tiling || ''}|${src}`).digest('hex').slice(0, 16);
 
 const MIME = {
