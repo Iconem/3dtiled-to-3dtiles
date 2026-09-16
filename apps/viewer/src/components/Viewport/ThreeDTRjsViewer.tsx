@@ -386,26 +386,6 @@ const Scene = forwardRef<ViewerHandle, { loadArgs: LoadArgs; tooltip: TooltipCha
   const store = useViewerStore;
   const [pendingFlyTo, setPendingFlyTo] = useState<{ lon: number; lat: number; height: number } | null>(null);
   const [markers, setMarkers] = useState<DatasetMarker[] | null>(null);
-  // <TilesPlugin> registers one render AFTER <TilesRenderer> creates the renderer, and the renderer's
-  // useFrame may already have run update() in between — fetching and preprocessing the root without
-  // ImplicitTilingPlugin. The root then never expands (an implicit root tries to load its content
-  // TEMPLATE as a file: "tile/{level}-{x}-{y}-{z}.glb" 404), so every implicit /stream point cloud
-  // rendered nothing. Keep the renderer disabled until its essential plugins are in.
-  const [pluginsReadyFor, setPluginsReadyFor] = useState<TilesRendererImpl | null>(null);
-  useEffect(() => {
-    let raf = 0;
-    const tick = () => {
-      const t = tilesRef.current as any;
-      if (t && t !== pluginsReadyFor && t.getPluginByName('IMPLICIT_TILING_PLUGIN') && t.getPluginByName('IMPLICIT_ADD_REFINE_FIX_PLUGIN') && t.plugins.some((p: any) => p instanceof (GLTFExtensionsPlugin as any))) {
-        setPluginsReadyFor(t);
-        invalidate();
-        return;
-      }
-      raf = requestAnimationFrame(tick);
-    };
-    raf = requestAnimationFrame(tick);
-    return () => cancelAnimationFrame(raf);
-  }, [loadArgs, pluginsReadyFor, invalidate]);
   const controlsRef = useRef<any>(null);
   // Cached local "up" (ellipsoid surface normal) at the loaded tileset's own location — set once in
   // frameToTileset, read by applyZOffsetInternal. null for non-georeferenced content (flat world-Y is
@@ -1083,9 +1063,9 @@ const Scene = forwardRef<ViewerHandle, { loadArgs: LoadArgs; tooltip: TooltipCha
   }
 
   function flyToLocalFrameInternal(lon: number, lat: number, alt: number, range: number) {
-    const tiles = tilesRef.current;
-    const ellipsoid = (tiles as any)?.ellipsoid;
-    if (!ellipsoid) return;
+    // WGS84 when no tileset has loaded yet: a preset's fly-to is issued right after load() and must
+    // not depend on the tileset having arrived.
+    const ellipsoid = (tilesRef.current as any)?.ellipsoid ?? WGS84_ELLIPSOID;
     const pos = new THREE.Vector3();
     ellipsoid.getCartographicToPosition(THREE.MathUtils.degToRad(lat), THREE.MathUtils.degToRad(lon), alt, pos);
     const dir = pos.clone().normalize();
@@ -1094,8 +1074,12 @@ const Scene = forwardRef<ViewerHandle, { loadArgs: LoadArgs; tooltip: TooltipCha
     invalidate();
   }
 
+  // Fly at once, and again when the root tileset arrives (onLoadRootTileset below), so the controls
+  // pick up the new pivot rather than the one from before the tileset existed.
+  const pendingFlyToRef = useRef<typeof pendingFlyTo>(null);
   useEffect(() => {
-    if (!pendingFlyTo || !tilesRef.current) return;
+    if (!pendingFlyTo) return;
+    pendingFlyToRef.current = pendingFlyTo;
     flyToLocalFrameInternal(pendingFlyTo.lon, pendingFlyTo.lat, pendingFlyTo.height, 800);
     setPendingFlyTo(null);
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -1130,8 +1114,6 @@ const Scene = forwardRef<ViewerHandle, { loadArgs: LoadArgs; tooltip: TooltipCha
         <TilesRendererR3F
           ref={tilesRef as any}
           url={loadArgs.url}
-          // Held until the plugins below are registered — see pluginsReadyFor.
-          enabled={tilesRef.current != null && pluginsReadyFor === tilesRef.current}
           errorTarget={errorTarget}
           // Skipped when the caller (a flyTo-tagged preset — e.g. Bing's per-city pills, which all
           // load the SAME global tileset URL) is about to issue its OWN flyToCity right after load()
@@ -1141,6 +1123,12 @@ const Scene = forwardRef<ViewerHandle, { loadArgs: LoadArgs; tooltip: TooltipCha
             // devtools / headless inspection — the counterpart of CesiumViewer's window.viewer
             (window as any).tiles3dtr = { tiles: tilesRef.current, scene, camera };
             if (!loadArgs?.skipAutoFrame) frameToTileset(tilesRef.current, true);
+            const fly = pendingFlyToRef.current;
+            pendingFlyToRef.current = null;
+            if (fly && loadArgs?.skipAutoFrame) {
+              flyToLocalFrameInternal(fly.lon, fly.lat, fly.height, 800);
+              setControlsPivot(camera.position.clone().setLength(6378137), true);
+            }
           }}
           onLoadModel={onLoadContentModel}
           onLoadError={(e: any) => {
@@ -1219,7 +1207,23 @@ const Scene = forwardRef<ViewerHandle, { loadArgs: LoadArgs; tooltip: TooltipCha
 
 const ThreeDTRjsViewer = forwardRef<ViewerHandle, Props>(function ThreeDTRjsViewer({ visible }, ref) {
   const [loadArgs, setLoadArgs] = useState<LoadArgs>(null);
-  const sceneRef = useRef<ViewerHandle>(null);
+  const sceneRef = useRef<ViewerHandle | null>(null);
+  // The Scene lives inside <Canvas>, which mounts its children a few frames AFTER this component.
+  // A call made in between — a preset pill's flyToCity right after load(), markers pushed on the first
+  // render — used to hit a null ref and vanish (the Angkor pills then stayed on the whole globe). Calls
+  // that must not be lost wait here until the Scene's handle arrives.
+  const sceneQueue = useRef<((h: ViewerHandle) => void)[]>([]);
+  const whenScene = useCallback((f: (h: ViewerHandle) => void) => {
+    if (sceneRef.current) f(sceneRef.current);
+    else sceneQueue.current.push(f);
+  }, []);
+  const setSceneRef = useCallback((h: ViewerHandle | null) => {
+    sceneRef.current = h;
+    if (!h) return;
+    const q = sceneQueue.current;
+    sceneQueue.current = [];
+    for (const f of q) f(h);
+  }, []);
   const tooltipRef: TooltipChannel = useRef(null);
 
   useImperativeHandle(ref, (): ViewerHandle => ({
@@ -1240,11 +1244,11 @@ const ThreeDTRjsViewer = forwardRef<ViewerHandle, Props>(function ThreeDTRjsView
     useCurrentView: () => sceneRef.current?.useCurrentView() ?? null,
     setCropToView: () => sceneRef.current?.setCropToView() ?? null,
     getExtractMatrix: () => sceneRef.current?.getExtractMatrix() ?? null,
-    flyToCity: (...a) => sceneRef.current?.flyToCity(...a),
+    flyToCity: (...a) => whenScene((h) => h.flyToCity(...a)),
     autoZoomToTileset: () => sceneRef.current?.autoZoomToTileset(),
-    setDatasetMarkers: (list) => sceneRef.current?.setDatasetMarkers?.(list),
+    setDatasetMarkers: (list) => whenScene((h) => h.setDatasetMarkers?.(list)),
     snapToGround: () => sceneRef.current?.snapToGround?.() ?? Promise.resolve('3DTRjs scene not ready.'),
-    flyToSphere: (...a) => sceneRef.current?.flyToSphere?.(...a),
+    flyToSphere: (...a) => whenScene((h) => h.flyToSphere?.(...a)),
     datasetsInView: (list, f) => sceneRef.current?.datasetsInView?.(list, f) ?? [],
     setControlMode: (...a) => sceneRef.current?.setControlMode?.(...a),
     setPointSize: (...a) => sceneRef.current?.setPointSize?.(...a),
@@ -1252,7 +1256,7 @@ const ThreeDTRjsViewer = forwardRef<ViewerHandle, Props>(function ThreeDTRjsView
     hideCropGizmo: () => sceneRef.current?.hideCropGizmo?.(),
     showTilesetGizmo: () => sceneRef.current?.showTilesetGizmo?.(),
     hideTilesetGizmo: () => sceneRef.current?.hideTilesetGizmo?.(),
-  }), []);
+  }), [whenScene]);
 
   return (
     <div style={{ position: 'absolute', inset: 0, visibility: visible ? 'visible' : 'hidden' }}>
@@ -1270,7 +1274,7 @@ const ThreeDTRjsViewer = forwardRef<ViewerHandle, Props>(function ThreeDTRjsView
           compared to the identical data in Cesium (which does no such tone mapping) — this is the
           "hidden brightness multiplier" affecting potree/COPC/mesh content alike. */}
       <Canvas frameloop="demand" flat camera={{ fov: 60, near: 0.1, far: 1e8, position: [0, 0, 1e7] }} gl={{ logarithmicDepthBuffer: true }}>
-        <Scene ref={sceneRef} loadArgs={loadArgs} tooltip={tooltipRef} />
+        <Scene ref={setSceneRef} loadArgs={loadArgs} tooltip={tooltipRef} />
       </Canvas>
       <DatasetTooltip channel={tooltipRef} visible={visible} />
     </div>
