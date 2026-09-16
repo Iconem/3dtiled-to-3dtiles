@@ -100,9 +100,15 @@ const childInfo = ttlCache(async (url) => {
   const ts = await r.json();
   const root = ts.root || {};
   const sphere = sphereToParent(sphereOfVolume(root.boundingVolume || {}), root.transform, !!root.boundingVolume?.region);
-  // The child tile's GE gates when the renderer LOADS the child tileset; use the child's own tileset
-  // GE so it appears exactly when the child's own root would have.
-  const geometricError = Number.isFinite(ts.geometricError) ? ts.geometricError : (root.geometricError ?? 1e6);
+  // The reference tile's GE gates when the renderer LOADS the child tileset, so it has to mean "the
+  // error of not showing this dataset at all" — which is its SIZE. Trusting the child's own tileset GE
+  // alone breaks on real data: Iconem's Angkor site tilesets declare GE √3 ≈ 1.73 at both tileset and
+  // root level for ~240 m sites, so the reference tile (and every group above it, which doubles from
+  // there) only refined within ~100 m of the camera — the Angkor mosaic loaded nothing from any
+  // sensible viewpoint. max() keeps well-formed tilesets as they were (GE ≥ radius already) and lifts
+  // degenerate ones to their bounding radius; ≥ the child root's GE keeps refinement monotonic.
+  const declared = [ts.geometricError, root.geometricError].filter(Number.isFinite);
+  const geometricError = Math.max(sphere[3] || 0, ...declared, declared.length ? 0 : 1e6);
   return { sphere, geometricError };
 });
 
@@ -308,10 +314,20 @@ async function pooledSettled(items, worker, limit = FETCH_CONCURRENCY) {
 
 export async function buildAggregate(urls, { nest = 'auto', ttlMs = DEFAULT_TTL_MS } = {}) {
   const results = await pooledSettled(urls, (u) => childInfo(u, ttlMs));
-  const children = [], failed = [];
+  const children = [], failed = [], unplaced = [];
   results.forEach((res, i) => {
     if (res.status === 'rejected') { failed.push({ url: urls[i], error: String(res.reason?.message || res.reason) }); return; }
     const { sphere, geometricError } = res.value;
+    // A dataset in its own local frame (no georeference, no root transform) has its centre near the
+    // ECEF origin — i.e. inside the Earth. Mosaicking it is worse than useless: ecefToLlh of a point
+    // at the core yields an arbitrary lon/lat, so it lands in a random quadtree cell, and its sphere
+    // drags the root bound past the planet's own radius (observed: 32 of 692 Iconem datasets, root
+    // radius 9 235 km). Same 1 000 km rule as isEcefPlaced. Reported, not silently dropped — place
+    // them with /stream's &lon=&lat= and they become regular children.
+    if (Math.hypot(sphere[0], sphere[1], sphere[2]) < 1e6) {
+      unplaced.push({ url: urls[i], reason: 'no georeference — centre is at the ECEF origin' });
+      return;
+    }
     children.push({
       boundingVolume: { sphere },
       geometricError,
@@ -319,7 +335,14 @@ export async function buildAggregate(urls, { nest = 'auto', ttlMs = DEFAULT_TTL_
       content: { uri: urls[i] },
     });
   });
-  if (!children.length) throw new Error(`no reachable children (${failed.map(f => f.error).join('; ')})`);
+  if (!children.length) {
+    const err = new Error(`no placeable children (${failed.length} failed, ${unplaced.length} without georeference${failed.length ? ': ' + failed.map(f => f.error).join('; ') : ''})`);
+    // A client-side problem (bad URLs, or datasets that need &lon=&lat= placement first), not a
+    // server fault — the handler maps this to 422 with the lists attached.
+    err.status = 422;
+    err.detail = { failed, unplaced };
+    throw err;
+  }
 
   const want = parseNest(nest);
   const doNest = want.mode === 'on' || (want.mode === 'auto' && children.length >= NEST_THRESHOLD);
@@ -367,6 +390,7 @@ export async function buildAggregate(urls, { nest = 'auto', ttlMs = DEFAULT_TTL_
         nesting: nesting.mode === 'flat' ? nesting
           : { ...nesting, depth, groups, rootFanout: root.children?.length ?? 0 },
         ...(failed.length ? { failed } : {}),
+        ...(unplaced.length ? { unplaced } : {}),
       },
     },
     geometricError: root.geometricError * 2,
@@ -496,6 +520,15 @@ function childUrlFor(entry, origin) {
   return `${origin}/stream/tileset.json?format=${encodeURIComponent(fmt)}&url=${encodeURIComponent(entry.url)}&cache=none`;
 }
 
+/** Source format of an ad-hoc ?url= child: this server's /stream URLs say so; anything else is 3D Tiles. */
+function formatOfUrl(x) {
+  try {
+    const u = new URL(x);
+    if (/\/(stream|tiles|convert)\/tileset\.json$/.test(u.pathname)) return (u.searchParams.get('format') || '3dtiles').toLowerCase();
+  } catch { /* not absolute — treat as a tileset */ }
+  return '3dtiles';
+}
+
 /** Try to handle an /aggregate/* request. Returns true iff it owned the response. */
 export async function handleAggregate(req, res, u) {
   const localSets = await loadLocalSets();
@@ -526,13 +559,15 @@ export async function handleAggregate(req, res, u) {
 
   // Each child carries the text filters match against. For share links that must include the dataset
   // NAME: a share URL is an opaque token (/s/<token>/cloud.js), so `only=_d2024` could never match it.
+  // Each also knows its source FORMAT, so `&format=` can split one mosaic into per-format variants.
   const fromSet = !setName ? [] : sets[setName].local
-    ? sets[setName].entries.map((e) => ({ url: childUrlFor(e, origin), text: [e.url, e.name, e.project, e.scene].filter(Boolean).join(' ') }))
-    : sets[setName].urls.map((x) => ({ url: x, text: x }));
+    ? sets[setName].entries.map((e) => ({ url: childUrlFor(e, origin), fmt: e.format || '3dtiles', text: [e.url, e.name, e.project, e.scene].filter(Boolean).join(' ') }))
+    : sets[setName].urls.map((x) => ({ url: x, fmt: '3dtiles', text: x }));
+  const adhoc = (x) => ({ url: x, fmt: formatOfUrl(x), text: x });
   let items = [
     ...fromSet,
-    ...u.searchParams.getAll('url').map((x) => ({ url: x, text: x })),
-    ...(u.searchParams.get('urls') || '').split(',').map(s => s.trim()).filter(Boolean).map(decodeURIComponent).map((x) => ({ url: x, text: x })),
+    ...u.searchParams.getAll('url').map(adhoc),
+    ...(u.searchParams.get('urls') || '').split(',').map(s => s.trim()).filter(Boolean).map(decodeURIComponent).map(adhoc),
   ];
   if (!items.length) { res.writeHead(400, CORS); res.end(`missing ?urls=<u1>,<u2>,… (each URL-encoded), repeated ?url=, or ?set=<${Object.keys(sets).join('|')}>`); return true; }
 
@@ -545,6 +580,10 @@ export async function handleAggregate(req, res, u) {
   //
   // Matching is a case-insensitive substring over the child URL, repeatable, `only` before `exclude`.
   // Substring rather than regex on purpose: these go in query strings that people edit by hand.
+  // &format=potree|copc|3dtiles (repeatable) — "only the 3D Tiles", "only the point clouds", … without
+  // maintaining a manifest per variant.
+  const formats = u.searchParams.getAll('format').flatMap(s => s.split(',')).map(s => s.trim().toLowerCase()).filter(Boolean);
+  if (formats.length) items = items.filter(it => formats.includes(it.fmt));
   const only = u.searchParams.getAll('only').filter(Boolean).map(s => s.toLowerCase());
   const exclude = u.searchParams.getAll('exclude').filter(Boolean).map(s => s.toLowerCase());
   if (only.length) items = items.filter(it => only.some(s => it.text.toLowerCase().includes(s)));
@@ -552,7 +591,7 @@ export async function handleAggregate(req, res, u) {
   const urls = items.map((it) => it.url);
   if (!urls.length) {
     res.writeHead(400, CORS);
-    res.end(`no children left after only=[${only}] exclude=[${exclude}]`);
+    res.end(`no children left after format=[${formats}] only=[${only}] exclude=[${exclude}]`);
     return true;
   }
   const nest = u.searchParams.get('nest') ?? 'auto';
@@ -561,7 +600,16 @@ export async function handleAggregate(req, res, u) {
   const ttlParam = u.searchParams.get('ttl');
   const ttlMs = ttlParam == null ? DEFAULT_TTL_MS : Math.max(0, Number(ttlParam) || 0) * 1000;
   const key = JSON.stringify({ urls, nest, ttlMs });
-  const ts = await aggregateCached(key, ttlMs);
+  let ts;
+  try {
+    ts = await aggregateCached(key, ttlMs);
+  } catch (e) {
+    if (e.status !== 422) throw e;
+    res.writeHead(422, { 'Content-Type': 'application/json', ...CORS });
+    res.end(JSON.stringify({ error: e.message, ...e.detail,
+      hint: 'datasets without a georeference can be placed first: /stream/tileset.json?…&lon=<deg>&lat=<deg>' }));
+    return true;
+  }
   res.writeHead(200, { 'Content-Type': 'application/json', ...CORS });
   res.end(JSON.stringify(ts));
   return true;
