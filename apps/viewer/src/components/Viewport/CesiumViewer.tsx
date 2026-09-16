@@ -1,6 +1,7 @@
 import { forwardRef, useEffect, useImperativeHandle, useRef } from 'react';
 import * as Cesium from 'cesium';
 import type { ViewerHandle } from '@/lib/viewer-handle';
+import type { DatasetMarker } from '@/lib/aggregate';
 import type { AssetType } from '@/lib/formats';
 import { CESIUM_ION_TOKEN } from '@/lib/ion';
 import { useViewerStore } from '@/state/store';
@@ -27,6 +28,10 @@ interface Props {
 // `` `Failed to load tileset:\n${e.message}` `` rendered literally as "...\nundefined" with zero
 // actionable information (the actual bug behind a mis-issued cert on a Traefik-routed subdomain).
 // Extract whatever's actually there, falling back to an actionable hint instead of "undefined".
+// Aggregate markers: hide once a dataset's bounds span more than this fraction of the viewport height.
+const MARKER_HIDE_FRACTION = 0.1;
+const MARKER_COLORS: Record<string, string> = { potree: '#f59e0b', copc: '#38bdf8', '3dtiles': '#a78bfa' };
+
 function describeLoadError(e: any): string {
   if (typeof e === 'string' && e) return e;
   if (e?.message) return String(e.message);
@@ -53,6 +58,9 @@ const CesiumViewer = forwardRef<ViewerHandle, Props>(function CesiumViewer({ vis
 
   const store = useViewerStore;
   const cleanupRef = useRef<(() => void) | null>(null);
+  // Aggregate dataset markers: one PointPrimitive per placed dataset (see setDatasetMarkers below).
+  const markersRef = useRef<Cesium.PointPrimitiveCollection | null>(null);
+  const markerDataRef = useRef<DatasetMarker[] | null>(null);
   const pendingLoadRef = useRef<{ url: string; type: AssetType; opts?: { sseOverride?: number | null; skipAutoFrame?: boolean } } | null>(null);
 
   const getViewer = () => viewerRef.current;
@@ -181,6 +189,56 @@ const CesiumViewer = forwardRef<ViewerHandle, Props>(function CesiumViewer({ vis
     if (v && !v.isDestroyed()) v.useDefaultRenderLoop = visible;
   }, [visible]);
 
+  /**
+   * "There is data here" markers for an /aggregate mosaic: a fixed-pixel point on the ellipsoid per
+   * dataset, which disappears once the dataset itself is big enough on screen to speak for itself.
+   *
+   * That hand-off is a per-point DistanceDisplayCondition rather than per-frame JS: a sphere of radius
+   * r seen from distance d spans r / (d·tan(fovy/2)) of the viewport height, so it exceeds
+   * MARKER_HIDE_FRACTION once d < r / (MARKER_HIDE_FRACTION·tan(fovy/2)). Cesium then evaluates the
+   * cut-off on the GPU side for all ~700 points at once. The distance is measured to the marker on the
+   * ellipsoid rather than to the sphere centre — close enough for a visibility hint.
+   */
+  function applyDatasetMarkers() {
+    const v = getViewer();
+    if (!v) return;
+    if (markersRef.current) { v.scene.primitives.remove(markersRef.current); markersRef.current = null; }
+    const list = markerDataRef.current;
+    if (!list?.length) return;
+    const fr: any = v.camera.frustum;
+    const fovy: number = fr?.fovy ?? 1.047;
+    const hideBelow = 1 / (MARKER_HIDE_FRACTION * Math.tan(fovy / 2));
+    const pts = new Cesium.PointPrimitiveCollection();
+    const outline = Cesium.Color.fromCssColorString('#0b0b0f');
+    for (const d of list) {
+      pts.add({
+        // A few metres above the ellipsoid so the sprite doesn't z-fight with the globe surface.
+        position: Cesium.Cartesian3.fromDegrees(d.lon, d.lat, 30),
+        pixelSize: 9,
+        color: Cesium.Color.fromCssColorString(MARKER_COLORS[d.format] ?? '#94a3b8'),
+        outlineColor: outline,
+        outlineWidth: 1.5,
+        distanceDisplayCondition: new Cesium.DistanceDisplayCondition(d.radius * hideBelow, Number.MAX_VALUE),
+        // Depth-tested from far away (so the far side of the globe hides its markers), but never hidden
+        // by terrain once the camera is within 50 km.
+        disableDepthTestDistance: 50_000,
+        id: { dataset: d },
+      });
+    }
+    v.scene.primitives.add(pts);
+    markersRef.current = pts;
+  }
+
+  function flyToSphereInternal(lon: number, lat: number, height: number, radius: number) {
+    const v = getViewer();
+    if (!v) return;
+    const center = Cesium.Cartesian3.fromDegrees(lon, lat, height);
+    v.camera.flyToBoundingSphere(new Cesium.BoundingSphere(center, Math.max(radius, 20)), {
+      offset: new Cesium.HeadingPitchRange(0, Cesium.Math.toRadians(-35), Math.max(150, radius * 3)),
+      duration: 1.5,
+    });
+  }
+
   function initViewer(container: HTMLDivElement) {
     // A personal Cesium Ion token — required for Cesium World Terrain and Google Photorealistic 3D
     // Tiles (see setTerrainMode below). Ships client-side like any Ion demo token; rotate it in the
@@ -244,6 +302,23 @@ const CesiumViewer = forwardRef<ViewerHandle, Props>(function CesiumViewer({ vis
         easingFunction: Cesium.EasingFunction.QUADRATIC_OUT,
       });
     }, Cesium.ScreenSpaceEventType.LEFT_DOUBLE_CLICK);
+    // Dataset markers: click flies to the dataset, hover names it (native tooltip on the canvas).
+    const markerOf = (pos: Cesium.Cartesian2): DatasetMarker | null => {
+      if (!markersRef.current) return null;
+      const picked: any = v.scene.pick(pos);
+      return picked?.collection === markersRef.current ? picked.id?.dataset ?? null : null;
+    };
+    handler.setInputAction((e: any) => {
+      const d = markerOf(e.position);
+      if (!d) return;
+      flyToSphereInternal(d.lon, d.lat, d.height, d.radius);
+      store.getState().setStatus(`${d.name}${d.project ? ` — ${d.project}` : ''} [${d.format}]`);
+    }, Cesium.ScreenSpaceEventType.LEFT_CLICK);
+    handler.setInputAction((e: any) => {
+      const d = markerOf(e.endPosition);
+      const title = d ? `${d.name}${d.project ? ` — ${d.project}` : ''} (${d.format})` : '';
+      if (v.scene.canvas.title !== title) v.scene.canvas.title = title;
+    }, Cesium.ScreenSpaceEventType.MOUSE_MOVE);
     store.getState().setStatus('Cesium ready. Select a preset or enter a tileset.json URL.');
     cleanupRef.current = () => { handler.destroy(); v.destroy(); viewerRef.current = null; };
     if (pendingLoadRef.current) {
@@ -475,7 +550,14 @@ const CesiumViewer = forwardRef<ViewerHandle, Props>(function CesiumViewer({ vis
         const aspect = v.scene.canvas.clientWidth / v.scene.canvas.clientHeight;
         fr.fov = aspect > 1 ? 2 * Math.atan(Math.tan(vrad / 2) * aspect) : vrad;
       }
+      // Marker hide distances are derived from the vertical field of view.
+      if (markerDataRef.current) applyDatasetMarkers();
     },
+    setDatasetMarkers(list) {
+      markerDataRef.current = list;
+      applyDatasetMarkers();
+    },
+    flyToSphere(lon, lat, height, radius) { flyToSphereInternal(lon, lat, height, radius); },
     flyToLocalFrame(lon, lat, alt, range) {
       const v = getViewer();
       if (!v) return;

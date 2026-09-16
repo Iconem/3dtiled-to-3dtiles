@@ -3,6 +3,7 @@ import TopBar from '@/components/TopBar';
 import Sidebar from '@/components/Sidebar';
 import StatusPanel from '@/components/StatusPanel';
 import ErrorModal from '@/components/ErrorModal';
+import AggregateSearch from '@/components/AggregateSearch';
 import CesiumViewer from '@/components/Viewport/CesiumViewer';
 import ThreeDTRjsViewer from '@/components/Viewport/ThreeDTRjsViewer';
 import { useUrlState } from '@/state/urlState';
@@ -45,6 +46,7 @@ export default function App() {
           <CesiumViewer ref={cesiumRef} visible={url.renderer === 'cesium'} />
           <ThreeDTRjsViewer ref={threeRef} visible={url.renderer === '3dtrjs'} />
           <StatusPanel />
+          <AggregateSearch activeHandleRef={activeHandleRef} renderer={url.renderer} />
         </div>
         <Sidebar activeHandleRef={activeHandleRef} />
       </div>
