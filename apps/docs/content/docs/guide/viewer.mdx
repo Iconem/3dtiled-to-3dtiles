@@ -257,10 +257,15 @@ design log for what each adapter does.
 
 `/aggregate` mosaics: one 3D Tiles endpoint over many datasets (see
 [Meta-tilesets](/docs/guide/meta-tilesets)). Presets: the committed `world` / `opendata` / `angkor`
-sets (Angkor in both nestings, plus a PhnomKulen-only filter), and the machine-local Iconem set in four
-variants: all formats, 3D Tiles only, Potree only, COPC only. The Iconem pills only work where
-`.local/aggregate-sets/iconem.json` exists; elsewhere the server answers `400 unknown set`. Mixed and
-point-cloud variants are typed `pointcloud` so the point-size slider reaches their points.
+sets (Angkor in both nestings, plus a PhnomKulen-only filter), and the machine-local Iconem set in five
+variants: all formats, 3D Tiles only, Potree only, COPC only, and latest captures (flies to Mes Aynak).
+The Iconem pills only appear where the server reports that set, i.e. where
+`.local/aggregate-sets/iconem.json` exists. Mixed and point-cloud variants are typed `pointcloud` so
+the point-size slider reaches their points.
+
+A loaded mosaic gets a search box, hover cards on its markers and a dataset picker (show/hide, latest
+only, dates, formats) in both renderers; see
+[Search, markers and the dataset picker](/docs/guide/meta-tilesets#search-markers-and-the-dataset-picker-in-the-demo-app).
 
 ### Renderer version and the Potree lab
 

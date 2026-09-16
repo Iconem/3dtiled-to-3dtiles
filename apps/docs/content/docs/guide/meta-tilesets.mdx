@@ -62,23 +62,56 @@ Three ways to look at them:
   **Load**; **⌗ hierarchy** then opens it in the explorer.
 - **`/hierarchy`** on the viewer: its preset list starts with these mosaics.
 
-### Search and markers in the demo app
+### Search, markers and the dataset picker in the demo app
 
 Whenever an `/aggregate` tileset is loaded, the demo app shows a search box over the globe, fed by
 `/aggregate/index.json` — the same query as the tileset, flattened to one row per placed dataset
-(`name`, `project`, `scene`, `format`, `lon`, `lat`, `height`, `radius`), plus the `unplaced` and
-`failed` lists. The two can never disagree about which datasets a URL means: they share one selection
-function and one cached mosaic.
+(`id`, `name`, `project`, `scene`, `group`, `date`, `format`, `lon`, `lat`, `height`, `radius`), plus
+the `unplaced` and `failed` lists. The two can never disagree about which datasets a URL means: they
+share one selection function and one cached mosaic.
 
-- **Search** matches dataset name, project, scene and format as you type (accent-insensitive, every
-  word must match), and queries the world through [Photon](https://photon.komoot.io) — OpenStreetMap,
-  no key — from three characters. Arrow keys and Enter work; picking a dataset frames its bounding
-  sphere, picking a place frames its extent.
-- **Markers** (Cesium): one fixed-size dot per dataset on the ellipsoid, coloured by format (amber
-  Potree, blue COPC, violet 3D Tiles). Hover names it, click flies to it. A marker disappears once its
-  dataset's bounds would span **more than 10% of the viewport height** — a per-point
-  `DistanceDisplayCondition` at `radius / (0.1 · tan(fovy/2))`, so the hand-off from dot to data costs
-  no per-frame JavaScript. The 3DTRjs renderer has search but not markers yet.
+- **Search** matches dataset name, project, scene, format and date as you type — accent-insensitive,
+  every word must match, and **typo-tolerant**: one edit for words of 4–6 letters, two from 7
+  ("mes aynek 2011" → MesAynak_2011, "venezzia"), also inside glued names like `MesAynak`. Exact
+  matches rank first. It also queries the world through [Photon](https://photon.komoot.io) —
+  OpenStreetMap, no key — from three characters. Arrow keys and Enter work; picking a dataset frames
+  its bounding sphere, picking a place frames its extent.
+- **Markers** (both renderers): one fixed-size dot per dataset on the ellipsoid, coloured by format
+  (amber Potree, blue COPC, violet 3D Tiles). **Hovering shows a card** with the dataset, scene,
+  project, format, capture date and size; clicking flies to it. A marker disappears once its dataset
+  spans **more than 10% of the viewport height**, i.e. once the data speaks for itself. Cesium encodes
+  that as a per-point `DistanceDisplayCondition` at `radius / (0.1 · tan(fovy/2))`; 3DTRjs evaluates
+  the same formula in the vertex shader of one `THREE.Points` layer. Neither costs per-frame
+  JavaScript. Hover uses `drillPick`, so a small dataset's marker still answers when a larger,
+  already-loaded dataset covers it (Canal Grande under the Venice airborne scan).
+- **The picker** (`in view N ▾`) lists the datasets that are in the frustum and at least 3% of the
+  viewport tall — the ones rendering or about to — **grouped by platform scene**, each with a
+  checkbox and its capture date. A group's **latest** button hides that site's older dated captures
+  (a diachronic series such as Mes Aynak 2010 → 2022); **all** shows every piece (Venice: the airborne
+  scan plus San Marco, Rialto and the palazzi, all 2021-06, meant to be seen together). Above the
+  list: **format chips** derived from the index with their counts, a global **latest only** switch
+  and a **capture-date range**. Hidden datasets keep a small grey marker so they can be found and
+  brought back.
+
+Every picker action rewrites the mosaic URL — `&hide=`, `&latest=1`, `&from=`/`&to=`, `&format=` (see
+[below](#showhide-latest-only-and-dates)) — and reloads it without moving the camera. The picker has
+no state of its own: a filtered view is still one shareable 3D Tiles URL.
+
+<Callout type="info">
+**"Why is a Bing dataset visible over Rome?"** It is not the `/bing` endpoint leaking into the mosaic:
+the Iconem platform itself hosts a 3D Tiles asset named *Bing-Vatican - Cesium-it-62-rome-2020-subarea-vatican-1-48734*
+in its *San Pietro Basilica* scene, so it is one of the 17 Iconem 3D Tiles children. Hide it with the
+picker, or add `&exclude=Bing-Vatican`.
+</Callout>
+
+### Why not a 3DTRjs plugin for the markers
+
+3d-tiles-renderer 0.5 has `MVTAnnotationsPlugin`, `GeoJSONOverlay` / `MVTOverlay` and the
+`ImageOverlayPlugin`. All of them **drape** features onto loaded tile surfaces: they need geometry
+under the feature and they scale with the ground. A "there is data here" marker has to be visible
+precisely where nothing has loaded yet, at a constant pixel size, and MVT would mean serving vector
+tiles for ~700 points. A plain `THREE.Points` layer that follows the tileset group's transform is
+both simpler and correct; GeoJSON overlays would be the right tool for dataset *footprints*, later.
 
 Presets backed by a machine-local set (the Iconem manifest) are only offered when the server reports
 that set in `/aggregate/demo.json`, instead of being shown everywhere and failing with `unknown set`.
@@ -309,6 +342,65 @@ one dataset, add between datasets. Nothing extra is needed for overlapping scans
 not *wanting* to see them at once, not about correctness.
 </Callout>
 
+## Show/hide, latest only and dates
+
+These params compose with the ones above and are what the demo app's picker writes.
+
+| Param | Keeps |
+|---|---|
+| `&hide=<id>[,<id>…]` | everything except these datasets. `id` is the 10-hex-digit hash `index.json` reports, taken from the dataset's **source** URL, so it does not change with the server's origin. |
+| `&latest=1` | among datasets covering the **same ground** at different dates, only the newest. |
+| `&from=YYYY[-MM[-DD]]` `&to=…` | datasets whose capture date overlaps the range. **Undated datasets are kept**, so a timeline never silently empties a half-undated mosaic. |
+
+```
+…/aggregate/tileset.json?set=iconem&latest=1               → 625 of 660 placed
+…/aggregate/tileset.json?set=iconem&from=2020&to=2021      → 356 (dated in range + undated)
+…/aggregate/tileset.json?set=iconem&hide=266212bc81        → without Venice "General Airborne"
+```
+
+**What "same ground" means for `latest=1`.** Names are no guide, so the rule is geometric: centres
+closer than 0.3× the larger radius, and radii within a factor of two. That groups a yearly re-scan
+(Mes Aynak 2010, 2011, 2012, 2015 → 2022; Mosul al-Nuri 2018 → 2020; the INRAP excavation phases),
+while leaving a **detail capture nested inside a wider one** alone. Piazza San Marco inside the Venice
+airborne scan is much smaller, so both stay, and the airborne scan has a hole cut for it anyway.
+A capture is superseded only if it **ended before** the newest one **started**. Mixed precision is
+therefore handled honestly: `2022-05` and `2022-05-19` overlap, so neither replaces the other. It is
+a heuristic: different sensors of one site (a 2022 LiDAR and a 2025 photogrammetry) count as the same
+ground too. Use `&hide=` or the picker's per-site buttons when that is wrong.
+
+**Where dates come from.** The platform's `date` field on each asset when set (128 of 692), otherwise
+Iconem's naming conventions, most specific first, looking at the asset name, then the scene, then the
+project (271 more):
+
+| Pattern | Example | Date |
+|---|---|---|
+| `_dYYYYMM` / `_dYYYY` | `Vatican_…_d202412_p202501_epsg32633` | `2024-12` (`_p…` is the processing date, ignored) |
+| `YYYY-MM` | `Palazzo Ducale - Venezia (2020-06)` | `2020-06` |
+| bare year | `MesAynak_2012` | `2012` |
+
+Years outside 1990–2035 are rejected ("Church of the Assumption, 1783" names a building, not a scan).
+The share-link script writes `date`, `dateSource`, `projectId`, `sceneId` and `assetId` into the
+manifest; re-running it in dry-run mode refreshes them without creating any link.
+
+## Region bounding volumes: `&bv=region`
+
+The nesting is already a quadtree: each group is a cell (`extras.cell` records its key, level and
+Morton index). By default groups are bounded by **spheres**, the union of the children's balls.
+`&bv=region` emits the same tree with group and root volumes as 3D Tiles `region`s
+(`[west, south, east, north, minH, maxH]`), the union of each child ball's lon/lat/height box. That is
+the volume an implicit quadtree would use, and it is much tighter for long thin groups.
+
+A ball of radius `r` whose centre is `d` from the Earth's centre spans `asin(r/d)` of arc, plus 1%
+for the gap between geocentric and geodetic latitude. Longitude widens by `1/cos` of the most poleward
+latitude reached. A ball that touches a pole or crosses the antimeridian gets the full longitude
+range, which is loose but never wrong. Dataset entries keep their own sphere, derived from their own
+root. `scripts/debug-aggregate-nesting.mjs` checks that every dataset lies inside all of its
+ancestor regions, under both schemes.
+
+```
+…/aggregate/tileset.json?set=iconem&nest=geodetic&bv=region
+```
+
 ## Hand-built hierarchies still compose
 
 Auto-nesting derives grouping from geometry alone. If you want a *semantic* hierarchy — by campaign,
@@ -365,7 +457,9 @@ Worldwide mosaics are bounded by an **Earth-centred** sphere whenever that is ti
 greedy pairwise union of the children (whose radius overshot to 9 526 km for the Iconem set — larger
 than the planet). Regional mosaics keep the tight union (Angkor: 23 km). The centre of a sphere that
 encloses sites on several continents therefore sits inside the Earth — like the midpoint of a chord —
-which is expected, not a placement bug.
+which is expected, not a placement bug. Viewers that decide "centre near the origin = local, unplaced
+content" must also look at the radius: the demo app's 3DTRjs renderer treats a planet-sized sphere
+as global data rather than re-anchoring it to the local frame.
 
 ## How a child's geometric error is chosen
 

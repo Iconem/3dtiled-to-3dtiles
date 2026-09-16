@@ -5,6 +5,32 @@ Format loosely follows [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+### Added / Fixed — 2026-09-16c (aggregate picker · dates · regions · 3DTRjs markers)
+- **Added: a dataset picker** for loaded mosaics. It lists what is on screen, grouped by platform
+  scene, with per-dataset checkboxes and capture dates. Per-site **latest** and **all** buttons cover
+  diachronic series (Mes Aynak) and multi-part sites (Venice). It also has format chips derived from
+  the index, a global *latest only* switch and a capture-date range. Every action is a URL param, so
+  the view stays one shareable tileset.
+- **Added: `/aggregate` params `&hide=<id>`, `&latest=1`, `&from=` / `&to=`, `&bv=region`.** Each
+  dataset has a stable `id`. `latest` keeps the newest capture among datasets on the same ground
+  (geometric test, mixed date precision handled); on the Iconem set it keeps 625 of 660. `bv=region`
+  bounds quadtree groups with lon/lat/height regions, verified to enclose every descendant.
+- **Added: capture dates.** The share-link script records the platform `date`, or parses Iconem names
+  (`_dYYYYMM`, `YYYY-MM`, bare years within 1990–2035; the `_p` processing date is ignored), along
+  with project, scene and asset ids: 399 of 692 datasets are dated. `index.json` returns `id`, `group`
+  and `date`.
+- **Added: hover cards on markers** (name, scene, project, format, date, size) instead of the native
+  canvas tooltip. Cesium hover now uses `drillPick`, so markers under already-loaded data still
+  respond.
+- **Added: markers in 3DTRjs**: one `THREE.Points` layer with the 10%-of-viewport hand-off in the
+  vertex shader, screen-space hover/click and a fly-to. The 3DTRjs overlay plugins drape onto
+  surfaces, so they don't fit this.
+- **Added: typo-tolerant dataset search** ("mes aynek 2011", "venezzia"), and an *Iconem — latest
+  captures* preset that flies to Mes Aynak.
+- **Fixed: 3DTRjs flung worldwide mosaics off the globe.** Their Earth-centred root sphere looked like
+  local, unplaced content, so the viewer re-anchored it to the local frame. Planet-sized spheres are
+  now treated as global.
+
 ### Added / Fixed — 2026-09-16b (Potree 1.8 · aggregate search + markers)
 - **Fixed: every Potree 1.8 dataset rendered nothing.** 1.8's `pointAttributes` are objects with a
   `size` field; the decoder read `byteSize`, so the point stride was `NaN` and every node decoded to
