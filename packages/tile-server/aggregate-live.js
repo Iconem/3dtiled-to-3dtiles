@@ -40,7 +40,7 @@ const FAILURE_TTL_MS = 60 * 1000;
 
 function ttlCache(builder) {
   const cache = new Map();                       // key → { at, ttl, value | error }
-  return async (key, ttlMs = DEFAULT_TTL_MS) => {
+  const get = async (key, ttlMs = DEFAULT_TTL_MS) => {
     // ttl=0 must bypass the cache in BOTH directions. Skipping only the write would still serve a
     // previously-cached mosaic, which defeats the one thing `&ttl=0` exists for: forcing a re-read
     // while a dataset is being re-tiled underneath you.
@@ -58,6 +58,11 @@ function ttlCache(builder) {
       throw error;
     }
   };
+  get.isWarm = (key, ttlMs = DEFAULT_TTL_MS) => {
+    const hit = ttlMs > 0 ? cache.get(key) : undefined;
+    return !!hit && Date.now() - hit.at < hit.ttl;
+  };
+  return get;
 }
 
 // ── enclosing sphere [cx,cy,cz,r] of a child root boundingVolume, in the child tileset frame ──
@@ -349,8 +354,29 @@ async function pooledSettled(items, worker, limit = FETCH_CONCURRENCY) {
   return out;
 }
 
-export async function buildAggregate(urls, { nest = 'auto', ttlMs = DEFAULT_TTL_MS, bv = 'sphere' } = {}) {
+/**
+ * 3D Tiles 1.1 tile metadata for the dataset entries, so a mosaic is self-describing: any 1.1 client
+ * can read which dataset a tile is (Cesium: `tile.metadata.getProperty('name')`) without the
+ * side-channel index.json. Every property is optional; entries carry only the ones they know.
+ */
+const DATASET_SCHEMA = {
+  id: 'aggregate',
+  classes: {
+    dataset: {
+      description: 'One source dataset referenced by an /aggregate mosaic',
+      properties: Object.fromEntries(['id', 'name', 'project', 'scene', 'date', 'format', 'licence']
+        .map((k) => [k, { type: 'STRING' }])),
+    },
+  },
+};
+
+export async function buildAggregate(urls, { nest = 'auto', ttlMs = DEFAULT_TTL_MS, bv = 'sphere', labels = {} } = {}) {
+  // Timings are part of the output because they are the whole cost story of a mosaic: fetching every
+  // child root dominates a cold build by orders of magnitude, while the tree itself takes milliseconds.
+  const t0 = performance.now();
+  const cold = urls.filter((u) => !childInfo.isWarm(u, ttlMs)).length;
   const results = await pooledSettled(urls, (u) => childInfo(u, ttlMs));
+  const t1 = performance.now();
   const children = [], failed = [], unplaced = [];
   results.forEach((res, i) => {
     if (res.status === 'rejected') { failed.push({ url: urls[i], error: String(res.reason?.message || res.reason) }); return; }
@@ -365,11 +391,13 @@ export async function buildAggregate(urls, { nest = 'auto', ttlMs = DEFAULT_TTL_
       unplaced.push({ url: urls[i], reason: 'no georeference — centre is at the ECEF origin' });
       return;
     }
+    const props = Object.fromEntries(Object.entries(labels[urls[i]] || {}).filter(([, v]) => v != null && v !== '').map(([k, v]) => [k, String(v)]));
     children.push({
       boundingVolume: { sphere },
       geometricError,
       refine: 'ADD',
       content: { uri: urls[i] },
+      ...(Object.keys(props).length ? { metadata: { class: 'dataset', properties: props } } : {}),
     });
   });
   if (!children.length) {
@@ -433,18 +461,28 @@ export async function buildAggregate(urls, { nest = 'auto', ttlMs = DEFAULT_TTL_
                         { depth: d, groups: 1 })
     : { depth: d, groups: 0 };
   const { depth, groups } = shape(root);
+  const t2 = performance.now();
 
   return {
     asset: {
       version: '1.1',
       extras: {
         datasets: children.length,
+        build: {
+          builtAt: new Date().toISOString(),
+          childRoots: urls.length,
+          childRootsFetched: cold,          // the rest came from the child-root cache
+          fetchConcurrency: FETCH_CONCURRENCY,
+          fetchMs: Math.round(t1 - t0),
+          treeMs: +(t2 - t1).toFixed(2),
+        },
         nesting: nesting.mode === 'flat' ? nesting
           : { ...nesting, depth, groups, rootFanout: root.children?.length ?? 0 },
         ...(failed.length ? { failed } : {}),
         ...(unplaced.length ? { unplaced } : {}),
       },
     },
+    schema: DATASET_SCHEMA,
     geometricError: root.geometricError * 2,
     root,
   };
@@ -536,8 +574,8 @@ export const DEMO_SETS = {
  * single tile — and a 3D Tiles client re-requests the root more than once per session.
  */
 const aggregateCached = ttlCache(async (key) => {
-  const { urls, nest, ttlMs, bv } = JSON.parse(key);
-  return buildAggregate(urls, { nest, ttlMs, bv });
+  const { urls, nest, ttlMs, bv, labels } = JSON.parse(key);
+  return buildAggregate(urls, { nest, ttlMs, bv, labels });
 });
 
 // ── local sets ───────────────────────────────────────────────────────────────────────────────────
@@ -553,20 +591,27 @@ const aggregateCached = ttlCache(async (key) => {
 // Manifest shape: { label, entries: [{ url, format: 'potree'|'copc'|'3dtiles', name?, project?, scene? }] }
 const LOCAL_SETS_DIR = process.env.AGGREGATE_SETS_DIR
   || fileURLToPath(new URL('../../.local/aggregate-sets/', import.meta.url));
+// Committed manifests of PUBLIC data, same shape (flai open LiDAR, Aerometrex previews): no secrets,
+// so their URLs may be listed, and they exist on every deployment.
+const PUBLIC_SETS_DIR = fileURLToPath(new URL('./aggregate-sets/', import.meta.url));
 
-/** Read on every request: a manifest regenerated by the share-link script is picked up without a restart. */
-async function loadLocalSets() {
+async function readSetsDir(dir, local) {
   let files = [];
-  try { files = (await readdir(LOCAL_SETS_DIR)).filter((f) => f.endsWith('.json')); }
-  catch { return {}; }                             // no directory = no local sets, not an error
+  try { files = (await readdir(dir)).filter((f) => f.endsWith('.json')); }
+  catch { return {}; }                             // no directory = no sets, not an error
   const sets = {};
   for (const f of files) {
     try {
-      const m = JSON.parse(await readFile(path.join(LOCAL_SETS_DIR, f), 'utf8'));
-      if (Array.isArray(m.entries)) sets[f.replace(/\.json$/, '')] = { label: m.label ?? f, entries: m.entries, local: true };
+      const m = JSON.parse(await readFile(path.join(dir, f), 'utf8'));
+      if (Array.isArray(m.entries)) sets[f.replace(/\.json$/, '')] = { label: m.label ?? f, entries: m.entries, manifest: true, local };
     } catch (e) { console.warn(`[aggregate] ignoring unreadable set ${f}: ${e.message}`); }
   }
   return sets;
+}
+
+/** Read on every request: a regenerated manifest is picked up without a restart. Local names win. */
+async function loadLocalSets() {
+  return { ...(await readSetsDir(PUBLIC_SETS_DIR, false)), ...(await readSetsDir(LOCAL_SETS_DIR, true)) };
 }
 
 /**
@@ -576,8 +621,12 @@ async function loadLocalSets() {
  */
 function childUrlFor(entry, origin) {
   const fmt = entry.format || '3dtiles';
-  if (fmt === '3dtiles') return entry.url;
-  return `${origin}/stream/tileset.json?format=${encodeURIComponent(fmt)}&url=${encodeURIComponent(entry.url)}&cache=none`;
+  // `proxy`: a host that sends no CORS (Aerometrex). /proxy is tileset-aware — it rewrites every child
+  // content.uri to come back through itself — so the whole tree, not just the root, becomes readable.
+  if (fmt === '3dtiles') return entry.proxy ? `${origin}/proxy?url=${encodeURIComponent(entry.url)}` : entry.url;
+  // `crs`: for point clouds whose file declares none (flai's COPC overviews).
+  return `${origin}/stream/tileset.json?format=${encodeURIComponent(fmt)}&url=${encodeURIComponent(entry.url)}&cache=none`
+    + (entry.crs ? `&crs=${encodeURIComponent(entry.crs)}` : '');
 }
 
 /** Source format of an ad-hoc ?url= child: this server's /stream URLs say so; anything else is 3D Tiles. */
@@ -601,7 +650,7 @@ export async function handleAggregate(req, res, u) {
     res.writeHead(200, { 'Content-Type': 'application/json', ...CORS });
     res.end(JSON.stringify(Object.fromEntries(Object.entries(sets).map(([k, v]) => [k, v.local
       ? { label: v.label, count: v.entries.length, local: true, names: v.entries.map((e) => e.name ?? null) }
-      : { label: v.label, count: v.urls.length, entries: v.entries }]))));
+      : { label: v.label, count: v.entries.length, entries: v.entries }]))));
     return true;
   }
   const isTileset = u.pathname === '/aggregate/tileset.json';
@@ -615,8 +664,11 @@ export async function handleAggregate(req, res, u) {
   // &latest=1 needs every dataset's footprint, so it runs after selection, on the cached child roots.
   if (sel.latest) items = await keepLatest(items, ttlMs);
   const urls = items.map((it) => it.url);
+  const labels = Object.fromEntries(items.map((it) => [it.url, {
+    id: it.id, name: it.name, project: it.project, scene: it.scene, date: it.date, format: it.fmt, licence: it.licence,
+  }]));
 
-  const key = JSON.stringify({ urls, nest, ttlMs, bv });
+  const key = JSON.stringify({ urls, nest, ttlMs, bv, labels });
   let ts;
   try {
     ts = await aggregateCached(key, ttlMs);
@@ -645,7 +697,7 @@ export async function handleAggregate(req, res, u) {
           name: it.name || nameFromUrl(t.content.uri), project: it.project, scene: it.scene,
           // `group` is the platform scene when known: datasets sharing one are either a diachronic
           // series (show the latest) or pieces of one site (show them all) — a UI decides which.
-          group: it.group ?? null, date: it.date ?? null,
+          group: it.group ?? null, date: it.date ?? null, ...(it.licence ? { licence: it.licence } : {}),
           format: it.fmt || '3dtiles', url: t.content.uri,
           lon: +lon.toFixed(6), lat: +lat.toFixed(6), height: +height.toFixed(1), radius: +r.toFixed(1),
         });
@@ -654,7 +706,7 @@ export async function handleAggregate(req, res, u) {
     })(ts.root);
     res.writeHead(200, { 'Content-Type': 'application/json', ...CORS });
     res.end(JSON.stringify({
-      count: datasets.length, datasets,
+      count: datasets.length, build: ts.asset.extras.build, datasets,
       unplaced: ts.asset.extras.unplaced ?? [], failed: ts.asset.extras.failed ?? [],
     }));
     return true;
@@ -668,8 +720,13 @@ export async function handleAggregate(req, res, u) {
 /** Stable short id of a child — hashed from its SOURCE url, so it survives a change of server origin. */
 const idOf = (x) => createHash('sha1').update(x).digest('hex').slice(0, 10);
 
-/** "2012" → ["2012-01-01", "2012-12-31"]; "2015-10" → ["2015-10-01", "2015-10-31"]. */
+/**
+ * "2012" → ["2012-01-01", "2012-12-31"]; "2015-10" → ["2015-10-01", "2015-10-31"]; an ISO 8601
+ * interval "2021-01-01/2025-01-01" (a multi-year national campaign) → its two ends.
+ */
 function dateSpan(d) {
+  const slash = String(d).indexOf('/');
+  if (slash > 0) return [dateSpan(d.slice(0, slash))[0], dateSpan(d.slice(slash + 1))[1]];
   const [y, m, day] = String(d).split('-');
   if (day) return [d, d];
   if (m) return [`${y}-${m}-01`, `${y}-${m}-31`];
@@ -737,10 +794,10 @@ function selectChildren(req, u, sets) {
   // Each also knows its source FORMAT, so `&format=` can split one mosaic into per-format variants,
   // and a display NAME for the index.
   const set = setName ? sets[setName] : null;
-  const labelByUrl = new Map((set && !set.local ? set.entries : []).map((e) => [e.url, e.label || e.id]));
-  const fromSet = !set ? [] : set.local
+  const labelByUrl = new Map((set && !set.manifest ? set.entries : []).map((e) => [e.url, e.label || e.id]));
+  const fromSet = !set ? [] : set.manifest
     ? set.entries.map((e) => ({ id: idOf(e.url), url: childUrlFor(e, origin), fmt: e.format || '3dtiles',
-        name: e.name, project: e.project, scene: e.scene, date: e.date ?? null,
+        name: e.name, project: e.project, scene: e.scene, date: e.date ?? null, licence: e.licence,
         group: e.sceneId != null ? `scene:${e.sceneId}` : e.scene ? `scene:${e.project ?? ''}/${e.scene}` : null,
         text: [e.url, e.name, e.project, e.scene, e.date].filter(Boolean).join(' ') }))
     : set.urls.map((x) => ({ id: idOf(x), url: x, fmt: '3dtiles', name: labelByUrl.get(x), text: `${x} ${labelByUrl.get(x) ?? ''}` }));

@@ -191,7 +191,9 @@ export async function handleStream(req, res, u) {
       yaw: u.searchParams.has('yaw') ? Number(u.searchParams.get('yaw')) : undefined,
       alt: u.searchParams.has('alt') ? Number(u.searchParams.get('alt')) : undefined,
     } : null;
-    const ts = await adapter.tileset(url, { tiling: u.searchParams.get('tiling'), lazy, hierarchy, prefetch, centroids, ...geosplatsOpts });
+    // crs: EPSG:<n> for point clouds whose file declares no CRS (copc/potree; ignored elsewhere).
+    const crs = u.searchParams.get('crs') || undefined;
+    const ts = await adapter.tileset(url, { tiling: u.searchParams.get('tiling'), lazy, hierarchy, prefetch, centroids, crs, ...geosplatsOpts });
     // User-directed globe placement (&lon=&lat=[&alt=][&heading=][&scale=]): attach a LOCAL dataset to
     // a real location so ANY 3D Tiles client (Cesium for Unreal/Unity, QGIS, native CesiumJS) streams
     // it in place — no viewer-side reorientation needed. Composes ON TOP of the adapter's own

@@ -15,6 +15,7 @@
 import { buildPointsGlb, coordsToKey, keyToCoords, buildSubtreeBuffer, georefFromCrs, buildImplicitTileset, parallelMap, defaultConcurrency, progressStart, progressTick, progressDone, memoizeAsync } from '../core/index.js';
 import { preparePotree2Schema, parsePotree2Hierarchy, parsePotree2Chunk, decodePotree2Node } from '../potree-to-3dtiles/src/potree2.js';
 import { loadPotree1 } from '../potree-to-3dtiles/src/potree1.js';
+import { withCrsOverride } from './copc-live.js';
 
 const SUBTREE_LEVELS = 3;
 // Spatial octree (level,x,y,z) of a node from its box vs root box (exact ints — robust to Potree's
@@ -357,8 +358,8 @@ export async function potreeTileset(url, opts = {}) {
     }
   }
   if (ctx.lazy)   // 1.x .hrc: implicit by default (lazy subtrees); explicit = full materialization (drains every chunk)
-    return opts.tiling === 'explicit' ? buildTilesetExplicit1x(ctx, url) : buildTilesetImplicit(ctx, url);
-  return opts.tiling === 'explicit' ? buildTilesetExplicit(ctx, url) : buildTilesetImplicit(ctx, url);
+    return withCrsOverride(opts.tiling === 'explicit' ? buildTilesetExplicit1x(ctx, url) : buildTilesetImplicit(ctx, url), ctx, opts.crs, 'potree-live');
+  return withCrsOverride(opts.tiling === 'explicit' ? buildTilesetExplicit(ctx, url) : buildTilesetImplicit(ctx, url), ctx, opts.crs, 'potree-live');
 }
 export async function potreeTile(url, token) {
   const ctx = await getCtx(url);
