@@ -5,6 +5,32 @@ Format loosely follows [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+### Added — 2026-09-17 (export to folder · aggregate builder)
+- **Added: export any tileset to a local folder.** `POST /export` on the tile-server, `3dtiled export`
+  on the CLI, and an *Export to a folder* card in the desktop app. It crawls the URL, so `/stream`,
+  `/convert`, `/tiles`, `/aggregate`, `/proxy` and remote 3D Tiles all work.
+  - The output is a static, self-contained tree: relative uris, implicit tilings expanded (depth-capped
+    via the new `implicit-to-explicit` `maxLevels`), sharded tile folders, and failures listed in
+    `export-report.json` after retries.
+  - `GET /export/{id}/files/…` previews the copy.
+  - Writing to disk needs `TILED_ALLOW_EXPORT=1`, which the desktop app sets, and answers loopback
+    clients only.
+  - Verified: Geghard via the desktop UI (48 files in 5.3 s), Geghard and Brooklyn via the CLI (both
+    copies render from a static server), and a proxied Aerometrex mosaic over HTTP. The Electrobun
+    build succeeds.
+- **Added: Aggregate Builder (`/builder`, 🧱 in the viewer's top bar)**, pure React + shadcn with no new
+  dependencies.
+  - Layout: a library of datasets (server sets, or any URL; fuzzy search), a drag-and-drop tree with
+    groups, and an inspector for name, date, notes, custom metadata, refine, and display mode
+    (`all` / `latest` / `first`).
+  - Undo/redo, autosave, and project import/export.
+  - Exports a 3D Tiles 1.1 `tileset.json` (sphere unions, GE doubling, tile metadata) or an aggregate set
+    manifest.
+  - **Preview in viewer** posts an in-memory draft (`POST /aggregate/draft`, 50 drafts, 24 h) and opens
+    it through the viewer's new `?load=<url>&fly=<lon,lat,height>` start parameters.
+  - Drafts also get `index.json` and the picker's filters. 62 self-checks cover the tree operations and
+    export.
+
 ### Added / Fixed — 2026-09-16d (open sets · proxy · terrain · snap · 3DTRjs implicit fix)
 - **Added: `set=flai`**: 113 national open-LiDAR campaigns from flai-ai/open-lidar-data as COPC
   overviews; all place and none fail. They are generated from the flai README by
