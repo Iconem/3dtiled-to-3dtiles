@@ -144,6 +144,7 @@ are relative to it (the demo app's URL field needs the absolute form).
 | `/aggregate/tileset.json?set=flai&nest=geodetic` | 113 national LiDAR campaigns |
 | `/aggregate/tileset.json?set=aerometrex` | 12 US cities through `/proxy` |
 | `/stats/tileset.json?url=<encoded aggregate URL>&maxExternal=256` | hierarchy statistics of any of them |
+| `POST /aggregate/draft` → `/aggregate/draft/<id>/tileset.json` (and `index.json`) | a hand-built mosaic from the [Aggregate Builder](/docs/guide/aggregate-builder), kept in memory for 24 h |
 
 Three ways to look at them:
 

@@ -3,6 +3,7 @@
     "supported-formats",
     "cli-usage",
     "meta-tilesets",
+    "aggregate-builder",
     "hierarchy-explorer",
     "potree-lab",
     "desktop-app",

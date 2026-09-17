@@ -34,7 +34,13 @@ export interface AggregateIndex {
   failed: { url: string; error: string }[];
 }
 
-export const isAggregateUrl = (u: string) => /\/aggregate\/tileset\.json(\?|$)/.test(u);
+// Server-built mosaics and the Aggregate Builder's drafts (/aggregate/draft/<id>/tileset.json) — both
+// have an index.json next to them and honour the picker params.
+export const isAggregateUrl = (u: string) => /\/aggregate\/(draft\/[0-9a-f-]{36}\/)?tileset\.json(\?|$)/.test(u);
+
+/** The index.json describing an aggregate tileset URL (same query, so the same selection). */
+export const aggregateIndexUrl = (tilesetUrl: string) =>
+  tilesetUrl.replace(/\/aggregate\/(draft\/[^/?]+\/)?tileset\.json/, '/aggregate/$1index.json');
 
 // ── the picker's state lives in the mosaic URL ─────────────────────────────────────────────────
 //
@@ -80,7 +86,7 @@ export function withPicker(url: string, st: PickerState): string {
 
 /** The index shares the mosaic's exact query, so both describe the same selection. */
 export async function fetchAggregateIndex(tilesetUrl: string, signal?: AbortSignal): Promise<AggregateIndex> {
-  const r = await fetch(tilesetUrl.replace('/aggregate/tileset.json', '/aggregate/index.json'), { signal });
+  const r = await fetch(aggregateIndexUrl(tilesetUrl), { signal });
   if (!r.ok) throw new Error((await r.text()).slice(0, 200) || `HTTP ${r.status}`);
   return r.json();
 }

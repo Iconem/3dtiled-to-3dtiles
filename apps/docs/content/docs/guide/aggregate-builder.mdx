@@ -1,0 +1,172 @@
+---
+title: "Aggregate Builder: hand-made mosaics (/builder)"
+description: "Assemble your own mosaic of 3D Tiles, Potree and COPC datasets as a tree of groups, with per-node metadata and display modes, then export a 3D Tiles 1.1 tileset.json or a set manifest, or preview it through a server-side draft."
+---
+
+[`/aggregate`](/docs/guide/meta-tilesets) builds a mosaic **automatically**: it groups datasets by a
+quadtree cell, which is right for 700 datasets and says nothing about what they *are*. The Aggregate
+Builder is the manual counterpart. You choose the grouping (a site, a campaign, a year), name and date
+every node, attach your own metadata, and decide what a group shows. The result is still one plain
+3D Tiles URL.
+
+Open it at `localhost:3000/builder`, or with the **🧱 builder** button in the viewer's top bar. When
+an `/aggregate` mosaic (or a builder draft) is loaded, the button passes its selection along, and the
+library opens on exactly those datasets.
+
+| Query param | Effect |
+|---|---|
+| `?import=<index.json URL>` | preloads the library with that selection (an `/aggregate/…/tileset.json` URL works too) |
+| `?tileset=<tileset.json URL>` | imports an existing aggregate or builder tileset as the tree |
+
+## The three panes
+
+**Library** (left). Pick a source: any set from `/aggregate/demo.json` (rows come from
+`/aggregate/index.json?set=<name>`), the imported selection, or **Added by URL**. Search is the
+viewer's typo-tolerant dataset search. Format chips filter the list, and the list can be grouped by
+project or scene. Only the rows in view are mounted, so the 692-row Iconem set scrolls smoothly.
+Rows can be dragged, multi-selected with Shift/Ctrl, added with **Add to "…"** (the non-drag path,
+which targets the focused group), or added with a double-click. A group header drags all of its
+rows, and its **+ group** button adds them as a new group.
+
+**Add URL** accepts a `tileset.json`, a Potree `cloud.js` / `metadata.json`, or a `.copc.laz`.
+Point clouds are wrapped through `/stream` exactly as the server wraps manifest entries (with
+`cache=none`). **via /proxy** routes a 3D Tiles host that sends no CORS headers through the
+tileset-aware `/proxy`. The row's position comes from a **single-URL**
+`/aggregate/index.json?url=<wrapped>`, which does exactly the needed work: it fetches the child root,
+derives its sphere and reports `lon`/`lat`/`height`/`radius`. A dataset in its own local frame comes
+back `422` and is shown as an **unplaced** error row. An unreachable one is shown as **failed**.
+
+**Tree** (centre). The root is the tileset. Below it are groups and dataset leaves. Drag from the
+library into any group. Within the tree, drag to reorder or re-parent: the top quarter of a row drops
+*before* it, the bottom quarter *after* it, and the middle drops *inside* (datasets split in halves).
+An invalid drop, such as a group into its own descendant, shows no indicator and does nothing.
+Each row shows its format dot, date, child count (`shown/total` when a display mode drops children)
+and its mode or refine when not the default. Its **⋯** menu offers rename, new group,
+**group children by scene / project / year**, sort by name / date, duplicate and delete.
+
+| Key | Action |
+|---|---|
+| ↑ ↓ Home End, Shift to extend | move / extend the selection |
+| ← → | collapse / expand, or go to the parent |
+| F2 or double-click | rename inline |
+| Del | delete the selection |
+| Ctrl+G · Ctrl+D · Ctrl+A | group selection · duplicate · select all |
+| Ctrl+Z · Ctrl+Shift+Z (or Ctrl+Y) | undo · redo (outside text fields) |
+| Ctrl+S | save the project JSON |
+
+"Group by year" gives each new group that year as its date, so a parent in `latest` mode can choose
+between them. Running a helper again reuses the groups it made earlier.
+
+**Inspector** (right). Every node has a name, a date (`YYYY`, `YYYY-MM`, `YYYY-MM-DD` or an ISO
+interval `start/end`, committed only when valid), notes and free key/value metadata. A dataset also
+shows its child URL (read-only, copy / open), format, `lon`/`lat`/`height`/`radius`, editable
+project / scene / licence, and an optional **geometric-error override**. With several nodes selected,
+you can set one date on all of them.
+
+## Display modes and refine
+
+3D Tiles has no "show one of these" switch, so a group's **display mode** decides what the export
+keeps:
+
+| Mode | Export keeps | For |
+|---|---|---|
+| `all` | every child | pieces of one site, or unrelated sites |
+| `latest` | the child with the newest date (its own, else its newest descendant's). If nothing is dated, the first child. | a diachronic series of one site (Mes Aynak 2010 → 2022) |
+| `first` | the first child | a manual pick among alternatives; reorder to change it |
+
+Unlike the server's `&latest=1`, `latest` here needs no geometry test: you already said, by grouping
+them, that the children cover the same ground.
+
+**Refine** is written to the group tile as is. A group has no content, so `REPLACE` hides nothing.
+What it changes is timing: Cesium refines a `REPLACE` parent only once every visible child is ready,
+so siblings appear together. `ADD` is the usual choice.
+
+## What the export computes
+
+**tileset.json** is built client-side with the same bounding rules as `/aggregate`, so a hand-built
+mosaic refines exactly like a server-built one:
+
+- **Leaf sphere**: the ECEF centre of the row's `lon`/`lat`/`height` (WGS84), with `radius + 0.5 m`.
+  The slack covers `index.json`'s rounding (1e-6°, i.e. ≤ 0.11 m, and 0.1 m on the radius).
+- **Leaf geometric error**: the override if set, else `max(radius, 1)`. The reference tile's GE gates
+  *when the child tileset loads*, so it has to mean "the error of not showing this dataset", i.e. its
+  size (see [how a child's geometric error is chosen](/docs/guide/meta-tilesets#how-a-childs-geometric-error-is-chosen)).
+- **Group sphere**: the minimal union of its exported children's spheres (the server's `unionSphere`).
+  **Group GE**: `2 × max child GE`, strictly decreasing on refine. Empty groups are left out, because
+  3D Tiles cannot express a volume that bounds nothing.
+- **Root**: the tighter of the union sphere and an **Earth-centred** sphere
+  (`max |centre| + radius` over the leaves). Tileset `geometricError` is `2 × root GE`.
+- **Metadata** (3D Tiles 1.1): every tile gets `metadata`. Datasets use class `dataset` (`id`, `name`,
+  `project`, `scene`, `date`, `format`, `licence`, `notes`) and groups use class `group` (`name`,
+  `date`, `notes`, `mode`). Custom keys become extra `STRING` properties, and the schema declares only
+  the keys actually used. Property ids must match `^[A-Za-z_][A-Za-z0-9_]*$`, so keys are sanitised
+  (`survey team` → `survey_team`, `2nd` → `_2nd`) and never shadow a built-in (`name` → `x_name`).
+- `asset.extras.builder` records the version, the name, and the node counts in the whole tree
+  (`total`) and in the file (`exported`); the two differ when display modes dropped children. A
+  leaf's GE override is kept in `extras.builder.ge`, so an import restores it.
+
+**Set manifest** is the `{ label, entries }` shape of `packages/tile-server/aggregate-sets/*.json`.
+It flattens the tree (after display modes) and gives each entry a `group` path such as
+`Angkor park / Temples`. Entries hold the **source** URL: `/stream` and `/proxy` wrappers are undone
+into `format`, `crs` and `proxy: true`, because the server re-wraps entries with its own origin.
+Custom metadata goes under `properties`. Entries from a local set carry share links, which are
+credentials, so treat the file like the local manifest.
+
+**Project JSON** (`kind: "aggregate-builder-project"`) is the lossless format. It keeps the whole
+tree, including children a display mode leaves out, plus the rows added by URL. The project also
+autosaves to `localStorage`. Undo keeps the last 100 states. Typing in one field within a second
+counts as one step, and folding groups is not an undo step.
+
+## Importing a tileset
+
+**Import → tileset.json from URL** (or `?tileset=`, or a file) rebuilds a tree from any aggregate,
+builder or draft tileset. Content tiles become datasets, placed from their bounding volume (sphere,
+box or region, with tile transforms applied) and named from their metadata or their URL. Content-less
+tiles become groups, keeping `name`, `date`, `notes`, `mode`, refine and custom keys. The server's
+unnamed quadtree cells are **flattened** into their parent: they record where a dataset fell, not a
+choice anyone made. Relative URIs resolve against the tileset URL (a file import has no URL to
+resolve them against). Children a display mode left out are not in the file, so they cannot come
+back.
+
+## Preview: drafts on the tile-server
+
+**Preview in viewer** posts the exported tileset to the tile-server and opens the viewer on the
+result (Cesium or 3DTRjs):
+
+```
+POST /aggregate/draft                       body = tileset.json (≤ 5 MB)  →  201 { id, url, expiresInS }
+GET  /aggregate/draft/<id>/tileset.json     [&hide=] [&format=] [&from=] [&to=] [&latest=1]
+GET  /aggregate/draft/<id>/index.json       same query → /aggregate/index.json rows
+```
+
+A `blob:` URL would not do. Renderers resolve the root through URL maths that a `blob:` base breaks,
+and the viewer's search and picker need an `index.json` next to the tileset. The body must be a JSON
+object with `asset` and `root` (else `400`). Larger than 5 MB answers `413`. Drafts live **in memory**:
+at most 50, least recently used evicted first, each expiring 24 h after it was posted, with a random
+UUID as the id. A restart clears them all. A draft is a preview, not a publication.
+
+A draft's `index.json` has one row per content tile, read from its `dataset` metadata. `group` is the
+builder group path, so the viewer's picker lists a hand-made group's datasets together, as it does a
+site. The picker params work on drafts too: they prune leaves and then empty groups. Pruned groups keep
+their original, still enclosing, bounds.
+
+The viewer loads the draft through `?load=<tileset URL>&type=mesh|pointcloud` (the builder picks
+`pointcloud` as soon as one leaf is Potree or COPC, so the point-size control reaches it). The
+`?load=` value applies to the mode and format the page opened with. Picking another preset afterwards
+works as usual.
+
+<Callout type="info">
+Measured on the dev stack: 10 Angkor datasets in 3 groups export as 14 tiles (root sphere 23 km,
+root GE 1 984). In Cesium the draft's root is ready about 5 s after load and shows 10/10 markers.
+From 1 800 m over Angkor Thom, the site meshes in view stream in.
+</Callout>
+
+## Where the code lives
+
+| File | Role |
+|---|---|
+| `apps/viewer/src/builder/tree.ts` | the document model and every edit, as pure functions returning a new tree |
+| `apps/viewer/src/builder/export.ts` | tileset / manifest / project export, tileset import |
+| `apps/viewer/src/builder/geo.ts` | WGS84 ⇄ ECEF, sphere union, bounding volume → sphere |
+| `apps/viewer/src/builder/selftest.ts` | `node --experimental-strip-types apps/viewer/src/builder/selftest.ts` (62 checks) |
+| `packages/tile-server/aggregate-live.js` | the draft store (`handleDraft`) |

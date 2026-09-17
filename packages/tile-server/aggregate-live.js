@@ -21,7 +21,7 @@
 import { readdir, readFile } from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { createHash } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import { llhToEcef, ecefToLlh } from '../core/index.js';
 
 const CORS = { 'Access-Control-Allow-Origin': '*', 'Access-Control-Allow-Headers': '*' };
@@ -638,8 +638,154 @@ function formatOfUrl(x) {
   return '3dtiles';
 }
 
+// ── drafts: hand-built mosaics from the viewer's Aggregate Builder ─────────────────────────────────
+//
+// The builder assembles a tileset.json client-side. To PREVIEW it, a renderer needs a URL, and a
+// blob: URL does not work: every child content.uri is absolute already, but Cesium and 3DTRjs both
+// resolve the root through fetch + URL maths that a blob: base breaks, and the search overlay needs an
+// index.json next to it. So the draft is parked here, in memory, under an unguessable id.
+//
+// In memory on purpose: a draft is a preview, not a publication — a restart losing it is fine, and
+// nothing on disk has to be cleaned up. Bounded three ways (count, size, age) because the endpoint
+// accepts writes from anyone who can reach the server.
+//
+//   POST /aggregate/draft                         body = tileset.json → { id, url }
+//   GET  /aggregate/draft/<id>/tileset.json       [&hide=] [&format=] [&from=] [&to=] [&latest=1]
+//   GET  /aggregate/draft/<id>/index.json         same rows as /aggregate/index.json
+const DRAFT_MAX = 50;
+const DRAFT_TTL_MS = 24 * 3600 * 1000;
+const DRAFT_MAX_BYTES = 5 * 1024 * 1024;
+const drafts = new Map();                          // id → { at, tileset }; Map order = LRU order
+const DRAFT_PATH = /^\/aggregate\/draft\/([0-9a-f-]{36})\/(tileset|index)\.json$/;
+
+function getDraft(id) {
+  const d = drafts.get(id);
+  if (!d) return null;
+  if (Date.now() - d.at > DRAFT_TTL_MS) { drafts.delete(id); return null; }
+  drafts.delete(id);                               // re-insert: most recently used goes last
+  drafts.set(id, d);
+  return d.tileset;
+}
+
+function putDraft(tileset) {
+  const now = Date.now();
+  for (const [id, d] of drafts) if (now - d.at > DRAFT_TTL_MS) drafts.delete(id);
+  while (drafts.size >= DRAFT_MAX) drafts.delete(drafts.keys().next().value);
+  const id = randomUUID();
+  drafts.set(id, { at: now, tileset });
+  return id;
+}
+
+async function readJsonBody(req, limit) {
+  if (Number(req.headers['content-length']) > limit) throw Object.assign(new Error(`draft larger than ${limit} bytes`), { status: 413 });
+  const chunks = [];
+  let n = 0;
+  for await (const c of req) {
+    n += c.length;
+    if (n > limit) throw Object.assign(new Error(`draft larger than ${limit} bytes`), { status: 413 });
+    chunks.push(c);
+  }
+  try { return JSON.parse(Buffer.concat(chunks).toString('utf8')); }
+  catch (e) { throw Object.assign(new Error(`body is not JSON: ${e.message}`), { status: 400 }); }
+}
+
+/**
+ * One row per content tile of a draft, in the /aggregate/index.json shape. `group` is the builder
+ * group path, so the viewer's picker lists a hand-made group's datasets together, as it does a site.
+ */
+function draftRows(ts) {
+  const rows = [];
+  (function walk(t, groupPath) {
+    const props = t.metadata?.properties || {};
+    if (t.content?.uri) {
+      const bv = t.boundingVolume || {};
+      const [x, y, z, r] = sphereToParent(sphereOfVolume(bv), t.transform, !!bv.region);
+      const [lon, lat, height] = ecefToLlh(x, y, z);
+      rows.push({ tile: t, row: {
+        id: props.id || idOf(t.content.uri), name: props.name || nameFromUrl(t.content.uri),
+        project: props.project, scene: props.scene, group: groupPath || null, date: props.date || null,
+        ...(props.licence ? { licence: props.licence } : {}), format: props.format || formatOfUrl(t.content.uri),
+        url: t.content.uri, lon: +lon.toFixed(6), lat: +lat.toFixed(6), height: +height.toFixed(1), radius: +r.toFixed(1),
+      } });
+    }
+    // The root's own name is the project's, not a grouping — only groups below it make a path.
+    const here = t === ts.root ? '' : (groupPath ? `${groupPath}/` : '') + (props.name || '');
+    for (const c of t.children || []) walk(c, t.content?.uri ? groupPath : here);
+  })(ts.root, '');
+  return rows;
+}
+
+/**
+ * The picker params (&hide= &format= &from= &to= &latest=) applied to a draft, so the viewer's
+ * show/hide panel works on a preview exactly as on a server-built mosaic. Pruned groups keep their
+ * original bounds: still enclosing, merely looser — recomputing them is the builder's job.
+ */
+function selectDraft(ts, u) {
+  const rows = draftRows(ts);
+  const formats = u.searchParams.getAll('format').flatMap((s) => s.split(',')).map((s) => s.trim().toLowerCase()).filter(Boolean);
+  const hide = new Set(u.searchParams.getAll('hide').flatMap((s) => s.split(',')).map((s) => s.trim()).filter(Boolean));
+  const from = u.searchParams.get('from'), to = u.searchParams.get('to');
+  let kept = rows.filter(({ row }) => (!formats.length || formats.includes(row.format)) && !hide.has(row.id)
+    && (!from || !row.date || dateSpan(row.date)[1] >= dateSpan(from)[0])
+    && (!to || !row.date || dateSpan(row.date)[0] <= dateSpan(to)[1]));
+  if (['1', 'true'].includes(u.searchParams.get('latest') ?? '')) {
+    const pts = kept.filter((k) => k.row.date).map((k) => ({ it: k, s: sphereToParent(sphereOfVolume(k.tile.boundingVolume), k.tile.transform, !!k.tile.boundingVolume.region), date: k.row.date }));
+    const dropped = supersededSet(pts);
+    kept = kept.filter((k) => !dropped.has(k));
+  }
+  if (kept.length === rows.length) return { tileset: ts, rows: kept.map((k) => k.row) };
+  const keep = new Set(kept.map((k) => k.tile));
+  const prune = (t) => {
+    const children = (t.children || []).map(prune).filter(Boolean);
+    const hasContent = !!t.content?.uri && keep.has(t);
+    if (!hasContent && !children.length) return null;
+    const out = { ...t, children };
+    if (!children.length) delete out.children;
+    if (t.content?.uri && !hasContent) delete out.content;
+    return out;
+  };
+  // A root that pruned to nothing still has to be a valid tileset: keep it, childless and empty.
+  const root = prune(ts.root) ?? { ...ts.root, children: [] };
+  if (root.content && !keep.has(ts.root)) delete root.content;
+  return { tileset: { ...ts, root }, rows: kept.map((k) => k.row) };
+}
+
+async function handleDraft(req, res, u, origin) {
+  if (u.pathname === '/aggregate/draft') {
+    if (req.method === 'OPTIONS') {                // server.js answers preflights first; kept for direct use
+      res.writeHead(204, { ...CORS, 'Access-Control-Allow-Methods': 'GET, POST, OPTIONS' });
+      res.end();
+      return;
+    }
+    if (req.method !== 'POST') { res.writeHead(405, { ...CORS, Allow: 'POST' }); res.end('POST a tileset.json'); return; }
+    let ts;
+    try { ts = await readJsonBody(req, DRAFT_MAX_BYTES); }
+    catch (e) { res.writeHead(e.status || 400, CORS); res.end(e.message); return; }
+    if (!ts || typeof ts !== 'object' || typeof ts.asset !== 'object' || !ts.asset || typeof ts.root !== 'object' || !ts.root) {
+      res.writeHead(400, CORS); res.end('not a tileset: needs an `asset` and a `root` object'); return;
+    }
+    const id = putDraft(ts);
+    res.writeHead(201, { 'Content-Type': 'application/json', ...CORS });
+    res.end(JSON.stringify({ id, url: `${origin}/aggregate/draft/${id}/tileset.json`, expiresInS: DRAFT_TTL_MS / 1000 }));
+    return;
+  }
+  const m = DRAFT_PATH.exec(u.pathname);
+  const ts = m && getDraft(m[1]);
+  if (!ts) { res.writeHead(404, CORS); res.end('no such draft (drafts live in memory for 24 h, and a restart clears them)'); return; }
+  const sel = selectDraft(ts, u);
+  res.writeHead(200, { 'Content-Type': 'application/json', 'Cache-Control': 'no-store', ...CORS });
+  res.end(JSON.stringify(m[2] === 'tileset' ? sel.tileset
+    : { count: sel.rows.length, datasets: sel.rows, unplaced: [], failed: [] }));
+}
+
 /** Try to handle an /aggregate/* request. Returns true iff it owned the response. */
 export async function handleAggregate(req, res, u) {
+  // Before the set lookup: drafts never need the manifests read from disk.
+  if (u.pathname === '/aggregate/draft' || u.pathname.startsWith('/aggregate/draft/')) {
+    const proto = (req.headers['x-forwarded-proto'] || 'http').split(',')[0].trim();
+    await handleDraft(req, res, u, `${proto}://${req.headers['x-forwarded-host'] || req.headers.host}`);
+    return true;
+  }
   const localSets = await loadLocalSets();
   const sets = { ...DEMO_SETS, ...localSets };
 
@@ -744,7 +890,13 @@ function dateSpan(d) {
 async function keepLatest(items, ttlMs) {
   const dated = items.filter((it) => it.date);
   const infos = await pooledSettled(dated, (it) => childInfo(it.url, ttlMs));
-  const pts = dated.map((it, i) => ({ it, s: infos[i].status === 'fulfilled' ? infos[i].value.sphere : null })).filter((p) => p.s);
+  const pts = dated.map((it, i) => ({ it, date: it.date, s: infos[i].status === 'fulfilled' ? infos[i].value.sphere : null })).filter((p) => p.s);
+  const dropped = supersededSet(pts);
+  return items.filter((it) => !dropped.has(it));
+}
+
+/** The `it`s of `pts` ([{ it, s: sphere, date }]) that a newer capture of the same ground supersedes. */
+function supersededSet(pts) {
   const parent = pts.map((_, i) => i);
   const find = (i) => (parent[i] === i ? i : (parent[i] = find(parent[i])));
   for (let i = 0; i < pts.length; i++) {
@@ -759,11 +911,10 @@ async function keepLatest(items, ttlMs) {
   // honest: "2022-05" and "2022-05-19" overlap, so neither replaces the other.
   const newest = new Map();
   pts.forEach((p, i) => {
-    const r = find(i), start = dateSpan(p.it.date)[0];
+    const r = find(i), start = dateSpan(p.date)[0];
     if (!newest.has(r) || start > newest.get(r)) newest.set(r, start);
   });
-  const dropped = new Set(pts.filter((p, i) => dateSpan(p.it.date)[1] < newest.get(find(i))).map((p) => p.it));
-  return items.filter((it) => !dropped.has(it));
+  return new Set(pts.filter((p, i) => dateSpan(p.date)[1] < newest.get(find(i))).map((p) => p.it));
 }
 
 /** A readable name for an ad-hoc child: the inner source file of a /stream URL, else the URL's tail. */

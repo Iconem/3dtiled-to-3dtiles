@@ -106,6 +106,8 @@ export default defineConfig({
           if (req.url?.startsWith('/potree-lab') && !req.url.startsWith('/potree-lab.html')) {
             req.url = '/potree-lab.html' + req.url.slice('/potree-lab'.length);
           }
+          // The Aggregate Builder takes query params (?import=, ?tileset=), so keep them on the rewrite.
+          if (/^\/builder(\?|$)/.test(req.url ?? '')) req.url = '/builder.html' + req.url!.slice('/builder'.length);
           next();
         });
       },
@@ -158,6 +160,9 @@ export default defineConfig({
         // Point-cloud rendering test bench (PotreePlugin + PointCloudEffectsPlugin); own entry so the
         // main app doesn't carry the vendored, not-yet-released 3DTRjs plugins.
         'potree-lab': fileURLToPath(new URL('./potree-lab.html', import.meta.url)),
+        // Hand-assembled mosaics (tree editor + export); own entry for the same reason as hierarchy:
+        // it needs React and shadcn, not Cesium or three.
+        builder: fileURLToPath(new URL('./builder.html', import.meta.url)),
       },
     },
   },
