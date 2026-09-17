@@ -5,6 +5,46 @@ Format loosely follows [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+### Added / Changed — 2026-09-17c (per-dataset snap · cell default · in-place picker · Vexcel · Esri · Mapterhorn default)
+- **`&snap=`** on `/aggregate` snaps **each dataset separately**. Each leaf gets its own translation
+  along the local up, computed server-side from the dataset's own top geometry against Mapterhorn.
+  - New modules: `packages/core/dataset-ground.js` (shared with the viewer) and
+    `packages/core/terrain.js` (Terrarium in Node, WebP via WASM).
+  - Mes Aynak's seven captures: +3.2 to +6.5 m. The viewer's snap button now uses this on mosaics;
+    snapping the mosaic as one tileset was why "Mes Aynak multi" did not snap.
+  - Ground bins are now **8 × 8** (were 12 × 12).
+- **`bv=cell` is the default.** Group tiles are their quadtree cells. `index.json` rows now carry
+  `cell` and `depth`; the hover card and picker show where each dataset's root sits.
+- **Picker changes no longer reload the mosaic.** The renderers keep the unfiltered tileset and hide
+  datasets in place by their tile-metadata `id`.
+  - Cesium: `tileVisible` sets `model.show` and `model.color`.
+  - 3DTRjs: `scene.visible` and the materials.
+  - Rapid clicks no longer lose changes while the index loads.
+- **Picker controls:**
+  - **colour** `format | provider | dataset` colours the markers and the data (one colour per Mes
+    Aynak capture);
+  - **provider pills** show or hide markers;
+  - **bounds** and **snap** are segmented controls;
+  - switching a format off removes its markers instead of greying them.
+- **Vexcel:**
+  - 10 Australian collections in a `vexcel` set and in `world` (55 datasets);
+  - `/proxy` injects `VEXCEL_API_KEY` server-side and strips it from every URL it returns;
+  - the server reads machine-local secrets from the gitignored `.local/tile-server.env`;
+  - `requiresEnv` hides the set where the key is missing.
+- **CRS placement:** `georefFromCrs` builds a **1 m trihedron** through proj4 instead of a plain
+  ENU frame, keeping grid convergence and scale. The COPC offline converter uses it too.
+- **Viewer defaults:**
+  - **Esri World Imagery + labels** basemap in both renderers;
+  - terrain **Mapterhorn (auto)**: quantized mesh in Cesium, Terrarium in 3DTRjs;
+  - Re:Earth's z0 ellipsoid tile returns HTTP 500, so it is substituted;
+  - 3DTRjs fly-to is north-up.
+- **Aggregate Builder:** importing a tileset keeps its hierarchy (Angkor: 18 groups, 23 datasets,
+  depth 8), with Flatten / group-by options.
+- **Potree lab:** choosing a dataset in the select actually loads it (lil-gui `options()` dropped
+  the change handler).
+- **Desktop:** exports run either in the tile-server or as a CLI subprocess (allow-listed scripts,
+  cancel, output tail, chained pack step).
+
 ### Added / Fixed — 2026-09-17b (terrain · snap · bounds · export options · providers · 3DTRjs findings)
 - **Terrain:**
   - Added Mapterhorn in three forms: Re:Earth **quantized mesh (ellipsoidal)**, Re:Earth Terrarium

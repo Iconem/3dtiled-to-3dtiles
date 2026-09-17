@@ -120,7 +120,10 @@ artifacts — kept here since they'd bite anyone doing the equivalent Vite+Cesiu
   tile-server gotcha) so a real 404 surfaces instead of being masked.
 - The raw `mt1.google.com` "Google Hybrid" tile hotlink used as the default basemap sometimes answers
   with an HTML error page instead of image bytes, hitting the exact same Cesium crash independently —
-  default basemap changed to OSM (a properly public tile service); Google stays selectable.
+  default basemap changed to OSM (a properly public tile service); Google stays selectable. The
+  default is now **Esri World Imagery with the World Boundaries and Places labels** (`src/lib/basemaps.ts`):
+  public, keyless and CORS-open, in both renderers. Cesium stacks the two as imagery layers; 3DTRjs
+  textures its surface with the imagery and layers the labels through `ImageOverlayPlugin`.
 - TopBar's mount effect only auto-loaded a preset when the URL had **none** selected — meaning a
   reloaded/shared link (which always has `?preset=…` from the previous session) silently never
   fired the actual tileset load, since the resolved URL is deliberately not persisted (see above).
@@ -336,7 +339,9 @@ m up, 45° down, as 3DTRjs does. A builder preview of 660 datasets now opens on 
 
 ### Terrain and snap to ground
 
-**Terrain** — every open source is keyless and CORS-open:
+**Terrain** — every open source is keyless and CORS-open. The default, **Mapterhorn (auto)**, is the
+ellipsoidal Mapterhorn DEM in each renderer's native form: the quantized mesh in Cesium, the
+Terrarium tiles in 3DTRjs.
 
 | Mode | Source | Encoding | Max z | Heights |
 |---|---|---|---|---|
@@ -355,6 +360,11 @@ the moment", mapterhorn#255). Re:Earth's mirror blends in EGM2008 and publishes 
 (orthometric), `/ellipsoid/` (h = H + N) and `/geoid/` (N) variants. The 3DTRjs `terrainrgb` example
 uses `/elevation/`; we use `/ellipsoid/`, the right one to snap datasets against.
 
+Re:Earth's ellipsoidal Terrarium set answers its **z0** tile with HTTP 500
+(`Invalid typed array length`; z1 and deeper are fine), and `TerrariumMeshPlugin` cannot start
+without a root. `TerrariumRootFallbackPlugin` substitutes mapterhorn.com's z0 for it. That tile is
+sea level, but it is only seen at planet scale.
+
 **How each renderer draws them.**
 - **3DTRjs**: Terrarium sources through `TerrariumMeshPlugin` with the basemap draped on it (capped
   at z12 for mapterhorn.com, where coverage is global); quantized mesh through `QuantizedMeshPlugin`
@@ -365,18 +375,20 @@ uses `/elevation/`; we use `/ellipsoid/`, the right one to snap datasets against
   nearest available ancestor.
 
 **⤓ Snap to ground** (Local Frame section, both renderers) moves the loaded tileset vertically onto
-the active terrain. It runs **once, when you press it**. It sets the tileset-level Z offset: it does
+the active terrain. On an `/aggregate` mosaic it instead reloads it with `&snap=`, which snaps **each
+dataset separately**, server-side (see [Meta-tilesets](/docs/guide/meta-tilesets#snap-each-dataset-to-the-ground-snap)). It runs **once, when you press it**. It sets the tileset-level Z offset: it does
 not follow the camera, and does not re-run on entering the dataset (an "auto-snap on load" option
 would be a small addition).
 
-**Where the samples come from** (`src/lib/datasetGround.ts`): not from picks, but from the dataset's
-**own top geometry**.
+**Where the samples come from** (`packages/core/dataset-ground.js`, shared with the server): not from
+picks, but from the dataset's **own top geometry**.
 1. It fetches the root content: the implicit root's level-0 tile, or the first tiles under a
    content-less root, following external tilesets.
 2. It decodes the positions from GLB (node transforms, `CESIUM_RTC`), b3dm (`RTC_CENTER`) or pnts,
    with the root transform chain and glTF Y-up → Z-up (honouring `gltfUpAxis`).
-3. It bins them on a 12 × 12 east/north grid over the data's extent, and takes each bin's
-   **10th-percentile height** as the ground there.
+3. It bins them on an **8 × 8** east/north grid over the data's extent, and takes each bin's
+   **10th-percentile height** as the ground there. (It was 12 × 12; with a sparse root, many bins
+   then held too few points for a percentile to mean anything.)
 
 Every sample therefore sits **where the dataset has points**, whatever is loaded and whatever
 renderer shows it. Terrain is read at those same lon/lats:

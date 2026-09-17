@@ -13,8 +13,8 @@ error from it, and emits a parent whose children external-reference the child UR
 ```
 GET /aggregate/tileset.json?url=<u1>&url=<u2>&…        # repeated form
 GET /aggregate/tileset.json?urls=<u1>,<u2>,…           # comma form (each URL-encoded)
-GET /aggregate/tileset.json?set=opendata|angkor|world|flai|aerometrex|…  # a named set (below)
-    [&nest=auto|mercator|geodetic|flat]  [&bv=sphere|region]  [&ttl=<seconds>]
+GET /aggregate/tileset.json?set=opendata|angkor|world|flai|aerometrex|vexcel|…  # a named set (below)
+    [&nest=auto|mercator|geodetic|flat]  [&bv=cell|sphere|region|box]  [&snap=0|1|<terrain>]  [&ttl=<seconds>]
     [&format=…] [&only=…] [&exclude=…] [&hide=<id>] [&latest=1] [&from=…] [&to=…]
 GET /aggregate/index.json?<same query>                 # one row per dataset, for UIs
 ```
@@ -98,8 +98,9 @@ be *seen* rather than described. `GET /aggregate/demo.json` lists what each set 
 |---|---|
 | `opendata` | The ten open datasets from 3D Tiles' own [RESOURCES.md](https://github.com/CesiumGS/3d-tiles/blob/main/RESOURCES.md#open-data) — Strasbourg, Clermont-Ferrand, Saint-Étienne, Lille, Planet's Angkor Wat SkySat, Utrecht, Soest, Aarhus, AGI HQ, Tokyo Minato-ku. Four continents, and all three bounding-volume kinds (`region`, `box`, `sphere`). |
 | `angkor` | Iconem's Angkor campaign as **23 individual site tilesets** rather than its hand-authored merged root. |
-| `world` | Everything public at once — **45 tilesets**: the open data, the Angkor sites and the 12 Aerometrex cities (through `/proxy`, credited). |
+| `world` | Everything public at once — **55 tilesets**: the open data, the Angkor sites, the 12 Aerometrex cities and the 10 Vexcel cities (both through `/proxy`, credited). Without `VEXCEL_API_KEY` on the server it is the first 45. |
 | `flai` | [flai open LiDAR](https://github.com/flai-ai/open-lidar-data): **113 national LiDAR campaigns** (Estonia, UK, Finland, Belgium, Poland, Spain, Denmark, France, Germany, the Netherlands, NOAA …) as one COPC overview each, streamed through `/stream`. |
+| `vexcel` | Vexcel's **10 Australian 3D city collections** (Gold Coast, Canberra, Sydney and its Opera House prototypes, Perth, Brisbane, Melbourne, Adelaide). Key-protected, see [below](#key-protected-providers-vexcel). |
 | `aerometrex` | Aerometrex's **12 US city reality meshes** (Brooklyn, Hudson Yards, Denver, Las Vegas, LA, San Diego, Miami Beach, San Francisco, Tampa …), served through the tileset-aware `/proxy` because their host sends no CORS. These are sales previews, not declared open data. |
 
 `opendata`, `angkor` and `world` are defined in code. `flai` and `aerometrex` are committed manifests
@@ -170,7 +171,8 @@ share one selection function and one cached mosaic.
   its bounding sphere, picking a place frames its extent.
 - **Markers** (both renderers): one fixed-size dot per dataset on the ellipsoid, coloured by format
   (amber Potree, blue COPC, violet 3D Tiles). **Hovering shows a card** with the dataset, scene,
-  project, format, capture date and size; clicking flies to it. A marker disappears once its dataset
+  project, format, capture date, size, its quadtree cell and depth in the mosaic, and its snap offset;
+  clicking flies to it. A marker disappears once its dataset
   spans **more than 10% of the viewport height**, i.e. once the data speaks for itself. Cesium encodes
   that as a per-point `DistanceDisplayCondition` at `radius / (0.1 · tan(fovy/2))`; 3DTRjs evaluates
   the same formula in the vertex shader of one `THREE.Points` layer. Neither costs per-frame
@@ -182,12 +184,31 @@ share one selection function and one cached mosaic.
   (a diachronic series such as Mes Aynak 2010 → 2022); **all** shows every piece (Venice: the airborne
   scan plus San Marco, Rialto and the palazzi, all 2021-06, meant to be seen together). Above the
   list: **format chips** derived from the index with their counts, a global **latest only** switch
-  and a **capture-date range**. Hidden datasets keep a small grey marker so they can be found and
-  brought back.
+  and a **capture-date range**. Datasets hidden by hand, by date or by *latest only* keep a small grey
+  marker so they can be found and brought back; a **format** that is switched off takes its markers
+  with it.
+- **Marker pills per provider** (Iconem, Aerometrex, Vexcel, CRAIG …) show or hide the *markers* of a
+  provider's datasets, not the datasets.
+- **colour** `format | provider | dataset`: colours the markers — and, for *provider* and *dataset*,
+  the data itself (Cesium mixes the model colour in at 65%; 3DTRjs tints meshes and gives points a
+  flat colour). *dataset* gives every capture of Mes Aynak its own colour, and the picker's dots match.
+- **bounds** `cell | sphere | region | box` rewrites [`&bv=`](#group-bounding-volumes-bvcell--sphere--region--box)
+  and **snap** `off | ground` rewrites [`&snap=`](#snap-each-dataset-to-the-ground-snap). Both change
+  the tree, so both reload it.
 
 Every picker action rewrites the mosaic URL — `&hide=`, `&latest=1`, `&from=`/`&to=`, `&format=` (see
-[below](#showhide-latest-only-and-dates)) — and reloads it without moving the camera. The picker has
-no state of its own: a filtered view is still one shareable 3D Tiles URL.
+[below](#showhide-latest-only-and-dates)) — so the URL is still the whole state, and a filtered view is
+still one shareable 3D Tiles URL. **The renderer does not reload it**, though: it keeps the unfiltered
+mosaic and hides what the new URL excludes in place. Every mosaic leaf carries its dataset `id` in its
+3D Tiles 1.1 tile metadata, and a content tile belongs to the dataset of its nearest ancestor with one:
+- Cesium decides per rendered tile in `tileset.tileVisible`, which fires before the tile updates, by
+  setting the tile model's `show` and `color`;
+- 3DTRjs sets each loaded model's `visible` flag and material colours, on load and when the selection
+  changes (`forEachLoadedModel`).
+
+Which datasets the URL excludes still comes from the server (`index.json` of the filtered URL), so
+*latest only* keeps its geometric rule. A URL that was loaded already filtered is replaced by its
+unfiltered form on the first picker change, once.
 
 **Providers and credits.** Every `index.json` row, and every mosaic leaf's tile metadata, carries a
 `provider` ("Iconem", "Aerometrex", "CRAIG", "IGN (FR)" …) and an `attribution` line. Manifests declare
@@ -483,7 +504,7 @@ Years outside 1990–2035 are rejected ("Church of the Assumption, 1783" names a
 The share-link script writes `date`, `dateSource`, `projectId`, `sceneId` and `assetId` into the
 manifest; re-running it in dry-run mode refreshes them without creating any link.
 
-## Group bounding volumes: `&bv=sphere | region | cell | box`
+## Group bounding volumes: `&bv=cell | sphere | region | box`
 
 The nesting is always a quadtree: each group is a cell, and `extras.cell` records its key, level and
 Morton index. **What the renderer sees** as a group's volume (and what *Debug tiles* draws) is a
@@ -491,15 +512,113 @@ separate choice:
 
 | `bv=` | Group volume | Shape on screen |
 |---|---|---|
-| `sphere` (default) | minimal sphere around the children's spheres | balls |
+| `cell` (**default**) | **the quadtree cell itself** (web-mercator or geodetic 2×1 grid), widened only where a dataset near an edge pokes out, with the children's height range | the actual grid |
+| `sphere` | minimal sphere around the children's spheres | balls |
 | `region` | union of the children's lon/lat/height boxes | lon/lat boxes that **follow the data** |
-| `cell` | **the quadtree cell itself** (web-mercator or geodetic 2×1 grid), widened only where a dataset near an edge pokes out, with the children's height range | the actual grid |
 | `box` | an oriented box aligned with east/north/up at the group's centre | tight flat boxes |
+
+`cell` is the default because a group *is* its cell: sibling volumes never overlap, the tree reads
+as the grid it is, and a cell is a 3D Tiles `region`, which both Cesium and 3DTRjs support natively
+(3DTRjs handles `sphere`, `box` and `region` alike; the Angkor pills were checked in both). Below a
+leaf, **each dataset keeps its own volumes**: its root and nodes are whatever its own tileset says.
+The demo app's picker switches between the four with its **bounds** control.
 
 So `bv=region` does **not** show the webmerc/geodetic cells, because its regions hug the datasets;
 `bv=cell` does. The root takes the same kind of volume, except that `box` falls back to the
 Earth-centred sphere for a world-spanning mosaic, which has no single "up". Dataset entries always keep
 their own root's sphere. The demo app has an Angkor pill for each mode.
+
+### Where a dataset sits: `cell` and `depth`
+
+Each `index.json` row says where the dataset's external root hangs in the mosaic: `cell`
+(`{scheme, key, morton, level}` of the enclosing quadtree cell) and `depth` (its depth in the tree).
+The Vexcel Gold Coast collection, for example, sits under geodetic cell `1130330` at depth 5. The
+hover card and the picker's tooltips show both, so an Iconem scan can be located within the
+aggregate tileset and found with *Debug tiles*.
+
+## Snap each dataset to the ground: `&snap=`
+
+`&snap=1` (Mapterhorn on the ellipsoid) or `&snap=<terrain>` (`mapterhorn-ellipsoid`, `mapterhorn`,
+`terrarium`) moves **every dataset separately** onto the terrain. The offset is applied where the
+dataset's root is attached: the leaf tile gets a `transform`, a translation along the local up, which
+chains into the external tileset below it. The leaf's bounding sphere is expressed in that translated
+frame, so it stays as it is. `extras.snap` = `{terrain, dz, bins, spread}` records the result, and
+`index.json` reports it too, with `height` already including `dz`.
+
+The offset is computed server-side by `packages/core/dataset-ground.js`, the same module the viewer's
+single-tileset **⤓ Snap to ground** uses, against `packages/core/terrain.js`. That module decodes
+Terrarium tiles in Node: WebP through the `@jsquash/webp` WASM codec, with no native dependency, and
+PNG through `pngjs`. Results are cached per dataset like the child roots. Mes Aynak's seven captures
+take ~2 s the first time:
+
+| Dataset | dz |
+|---|---|
+| MesAynak_2010 | +3.17 m |
+| MesAynak_2011 | +3.53 m |
+| MesAynak_2012 | +3.61 m |
+| MesAynak_2015 | +6.51 m |
+| MesAynak_2022 | +3.46 m |
+| 2015-10 landscape | +5.82 m |
+| 2015-10 zones_HD | +3.98 m |
+
+**Why per dataset.** Snapping the loaded tileset as a whole — what the viewer button does for a
+single tileset — samples the top content of the *mosaic*, i.e. of whichever datasets its root happens
+to reach. That is why snapping "Mes Aynak multi" did not work. Each capture has its own vertical error,
+so each needs its own offset.
+
+**Why 8 × 8 bins.** The samples are the dataset's top content: a sparse, spatially uniform subsample
+(Potree/COPC root nodes, a mesh's coarsest LOD), typically a few thousand to ~60 000 points. At 8 × 8
+each bin still holds tens to hundreds of points, so its 10th-percentile height is a stable ground
+estimate. 3 × 3 mixes a building with its square in one bin; 16 × 16 (and the earlier 12 × 12) leaves
+many bins with a handful of points, where the percentile is noise. The offset is the 70th percentile
+of *terrain − ground* over the bins, so roofs and canopy do not pull it down.
+
+## Key-protected providers: Vexcel
+
+Vexcel's 3D Cities API needs an `api_key`. A mosaic is a public URL, so the key must never appear in
+it:
+- the `vexcel` manifest lists plain collection URLs (`api.vexcelgroup.com/v2/3d/tileset?collection=…&layer=…`),
+  all with `proxy: true`;
+- `/proxy` adds the key **on the way out**, from the server's `VEXCEL_API_KEY` (per-host table
+  `HOST_KEYS` in `proxy-live.js`);
+- it strips the key from any URL it hands back, including child URIs a response echoes;
+- the server reads machine-local secrets from the gitignored `.local/tile-server.env`
+  (`KEY=value` lines; real environment variables win);
+- a manifest with `requiresEnv` is skipped where that variable is unset, so the set, and its share
+  of `world`, only exist where the key does.
+
+Checked: neither the `world` tileset nor any proxied Vexcel response contains the key.
+
+## Coordinate systems: how sources end up in one mosaic
+
+**What the renderers accept.** A 3D Tiles tileset has exactly one frame: **ECEF, EPSG:4978** (metres,
+Earth-centred, Z to the north pole). Bounding `region`s are the one exception, written in EPSG:4979
+(radians plus ellipsoidal height). Cesium and 3DTRjs both assume exactly this and nothing else. A
+tileset in any other CRS is simply wrong unless a `transform` places it. Content that is not
+georeferenced at all can be placed with a root `transform`; the viewer's Local Frame does this.
+
+**So nothing is reprojected at mosaic time.** Every child already renders in ECEF, because the
+converters in this repo put each source there:
+- Potree and COPC are streamed through `/stream`, which reads the source CRS (WKT or EPSG from the
+  header or the manifest) and writes a **root transform**.
+- An aggregate only references those tilesets, so they compose without any per-point work.
+
+**The root transform is a 1 m trihedron** (`georefFromCrs`, `packages/core/geo.js`):
+- the origin is the source origin through proj4, `srcCrs → EPSG:4979`, then to ECEF;
+- the X and Y columns are the ECEF images of **one metre east and one metre north in the source CRS**,
+  from central differences over ±50 m through proj4;
+- Z is the ellipsoid normal.
+
+Unlike a plain east-north-up frame at the origin, this keeps the projection's **grid convergence**
+(the angle between grid north and true north) and its **scale factor**:
+- at Geghard in its UTM zone the convergence is 0.117°, about 1 m of error at 500 m from the origin;
+- 300 km from a UTM central meridian it is 1.379°.
+
+A geographic source CRS (lon/lat) keeps plain ENU. Per-point reprojection would be exact everywhere.
+The trihedron is exact at the origin and linear away from it: about 500 m out, the change in
+convergence adds up to ~1.5 cm, and treating source heights as a flat axis ignores the Earth's
+curvature (2 cm at 500 m, 20 cm at 1.6 km). That is fine for site-sized data; region-sized sources
+should be tiled so each tile gets its own origin.
 
 Cell bounds are decoded from the path key (`cellBounds`, the inverse of `cellAt`). Writing that
 decoder exposed a bug in the geodetic key: it re-encoded the hemisphere bit and dropped the finest
