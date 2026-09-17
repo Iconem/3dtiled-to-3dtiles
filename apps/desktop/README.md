@@ -34,7 +34,7 @@ CI job run — is completely unaffected by this app.
 
 ## How it works
 
-`src/bun/index.ts` (main process) brings up two Node children, both reusing existing repo scripts
+`src/bun/index.ts` (main process) brings up two Node children (the tile-server with `TILED_ALLOW_EXPORT=1`, which enables writing exports to disk), both reusing existing repo scripts
 rather than reimplementing anything:
 
 | child | purpose |
@@ -52,7 +52,7 @@ would only ever be right for one of them.
 
 | tab | what it is |
 |---|---|
-| **Build** | dataset + format + materialization + optional globe placement → paste-ready URL |
+| **Build** | dataset + format + materialization + optional globe placement → paste-ready URL, and **Export to a folder** (a static 3D Tiles copy, written by the server's `POST /export`) |
 | **Library** | saved datasets (`library.ts`), with a cached `/stats` check per row |
 | **Samples** | `catalog.ts` — a real public dataset per source format, one click into Build |
 

@@ -97,6 +97,53 @@ If a 3dtiled server is already listening on a candidate port (e.g. you have `pnp
   app's multi-tileset one when a viewer is reachable, otherwise the tile-server's own single-tileset
   page.
 
+### Export to a folder
+
+The **Export to a folder** card below the URL writes a finished, static OGC 3D Tiles tree for that URL
+into a local folder: the far end of the [materialization continuum](/docs/guide/architecture-caching),
+after `cache=none | hierarchy | full`. Any web server, S3 bucket or Cesium for Unreal can host the
+folder without this app. Pick an **empty** folder with **Folder…**, optionally a **max depth** (blank =
+every level), and press **Export**.
+
+- **Where the work runs.** The tile-server does the work (`POST /export`, polled with
+  `GET /export/{id}`), not the view. It already has every adapter, and a crawl of thousands of tiles
+  should survive switching tabs. **Cancel** stops it and leaves a partial copy.
+- **What gets written.** It works on the URL, not the source format, so every input the Build tab
+  accepts is exported the same way: a local or remote raw dataset through `/stream` or `/convert`, as
+  well as mosaics and proxied hosts.
+  - Every tileset JSON (the root and each external tileset) is rewritten with **relative** uris.
+  - Every content file is downloaded as is; nothing is re-encoded.
+  - An **implicit** tiling is expanded to explicit first. The copy must not depend on URL templates
+    whose query strings point back at this server, and with a depth cap only the kept levels'
+    subtrees are read.
+- **Layout.** `tileset.json`, then `tilesets/*.json` for externals and `tiles/<xx>/<name>` for
+  content, sharded by two hex digits of a hash so a million tiles never share a directory. Names keep
+  the source file name, taken from the wrapped `url=` for `/proxy` and `/stream` URLs, and get a
+  short hash prefix only when two sources share a name.
+- **Failures.** Files that fail after three attempts are listed in `export-report.json`, along with
+  counts, bytes, timings and the source URL. Their uris stay in place, so the tileset remains
+  structurally valid.
+- **Afterwards.** **Open folder** opens it in the OS file manager, and **Preview exported copy** loads
+  the copy in the stock Cesium harness, served back by the tile-server from that folder
+  (`/export/{id}/files/…`), i.e. exactly what a static host would serve.
+- **When it's off.** Writing to disk is off unless the server was started with `TILED_ALLOW_EXPORT=1`,
+  and it answers loopback clients only. The app sets the flag on the server it starts; an *adopted*
+  `pnpm dev` server keeps its own setting, and the card says so instead of failing on the first
+  click.
+
+Measured, through the app's own server:
+
+| Source | Depth | Files | Size | Time |
+|---|---|---|---|---|
+| Iconem Geghard, Potree via `/tiles` (implicit, expanded) | 3 | 48 | 8.6 MB | 5.3 s |
+| Iconem Geghard via `/stream` (CLI) | 4 | 111 | 25.0 MB | 22 s |
+| Aerometrex Brooklyn, remote explicit b3dm (CLI) | 3 | 69 | 20.3 MB | 11 s |
+| `/aggregate?set=aerometrex` (Brooklyn + Hudson Yards, proxied) | 3 | 3 tilesets + 10 files | 1.0 MB | 1.6 s |
+
+The exported Geghard and Brooklyn folders were then served by a plain static server and rendered in the
+viewer (48 and 42 tiles). The same exporter is on the CLI as
+[`3dtiled export`](/docs/guide/cli-usage#export-a-tileset-to-a-folder).
+
 ### Library
 
 Datasets you want to keep: local paths and remote URLs, each stored as its **source plus options**
@@ -168,6 +215,8 @@ localhost URL.
 
 ## Not done yet
 
-Packaging, signing and auto-update; a native file picker (the dataset field is typed/pasted today);
-and bundling Node so the app runs without a repo checkout — it currently locates and runs the
+Packaging, signing and auto-update; **pushing** an export to remote storage (S3, Azure, the Iconem
+platform) rather than a local folder, and packing it as `.3tz` from the app
+(`node scripts/pack-3dtiles.mjs <folder> <name>` does it today); and bundling Node so the app runs
+without a repo checkout — it currently locates and runs the
 tile-server from the surrounding repo. Library entries are per-install, as above.

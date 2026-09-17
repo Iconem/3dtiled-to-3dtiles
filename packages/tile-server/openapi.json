@@ -1064,6 +1064,151 @@
           }
         }
       }
+    },
+    "/export": {
+      "get": {
+        "tags": [
+          "misc"
+        ],
+        "summary": "GET /export — is export enabled, and the recent jobs",
+        "description": "Off unless the server was started with `TILED_ALLOW_EXPORT=1` (the desktop app sets it), and loopback clients only: it writes to this machine's disk.",
+        "responses": {
+          "200": {
+            "description": "`{ enabled: true, jobs: [...] }`"
+          },
+          "403": {
+            "description": "Export disabled, or not a loopback client"
+          }
+        }
+      },
+      "post": {
+        "tags": [
+          "misc"
+        ],
+        "summary": "POST /export — materialise a tileset into a local folder",
+        "description": "Crawls any 3D Tiles URL — this server's /stream, /convert, /tiles, /aggregate or /proxy outputs, or a remote tileset — and writes a self-contained static copy: every tileset JSON and content file, uris made relative, implicit tilings expanded to explicit (see `packages/tile-server/export-live.js`). Returns a job id to poll. The folder must be empty.\n\nOff unless the server was started with `TILED_ALLOW_EXPORT=1` (the desktop app sets it), and loopback clients only: it writes to this machine's disk.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "url",
+                  "outDir"
+                ],
+                "properties": {
+                  "url": {
+                    "type": "string",
+                    "description": "Tileset URL; a server-relative path (\"/stream/tileset.json?…\") means this server"
+                  },
+                  "outDir": {
+                    "type": "string",
+                    "description": "Absolute path of an empty (or new) folder"
+                  },
+                  "maxDepth": {
+                    "type": "integer",
+                    "nullable": true,
+                    "description": "Keep tiles down to this depth (counted across external tilesets); null = everything"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "202": {
+            "description": "`{ id, status }` — poll `GET /export/{id}`"
+          },
+          "400": {
+            "description": "Bad body or unusable folder"
+          },
+          "403": {
+            "description": "Export disabled, or not a loopback client"
+          },
+          "409": {
+            "description": "Folder not empty"
+          }
+        }
+      }
+    },
+    "/export/{id}": {
+      "parameters": [
+        {
+          "name": "id",
+          "in": "path",
+          "required": true,
+          "schema": {
+            "type": "string"
+          }
+        }
+      ],
+      "get": {
+        "tags": [
+          "misc"
+        ],
+        "summary": "GET /export/{id} — progress or result of an export",
+        "description": "`state` is running | done | failed | cancelled. `progress` counts tilesets, files discovered/written, bytes and failures; `preview` (when done) serves the exported copy back.",
+        "responses": {
+          "200": {
+            "description": "Job status"
+          },
+          "404": {
+            "description": "Unknown job"
+          }
+        }
+      },
+      "delete": {
+        "tags": [
+          "misc"
+        ],
+        "summary": "DELETE /export/{id} — cancel an export",
+        "description": "The folder keeps whatever was written so far.",
+        "responses": {
+          "200": {
+            "description": "Job status"
+          }
+        }
+      }
+    },
+    "/export/{id}/files/{path}": {
+      "get": {
+        "tags": [
+          "misc"
+        ],
+        "summary": "GET /export/{id}/files/{path} — a file of an exported folder",
+        "description": "Serves the exported copy as a static host would, to preview it. Only folders this server exported are served; paths outside them are refused.",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "path",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "example": "tileset.json"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The file"
+          },
+          "403": {
+            "description": "Outside the export folder"
+          },
+          "404": {
+            "description": "No such job or file"
+          }
+        }
+      }
     }
   }
 }

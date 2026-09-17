@@ -93,6 +93,39 @@
                 </div>
                 <div id="result" class="result"></div>
             </div>
+
+            <div class="card" id="export-card">
+                <span class="field-label">Export to a folder <span class="hint">— a finished, static 3D Tiles tree</span></span>
+                <p class="hint">
+                    Downloads every tileset JSON and tile of the URL above into a folder, with relative
+                    paths and implicit tilings expanded, so any web server, S3 bucket or Cesium for
+                    Unreal can host it without this app. Works for any source this app can serve.
+                </p>
+                <div class="urlbar">
+                    <input id="export-dir" type="text" spellcheck="false" placeholder="C:\exports\my-site   (an empty folder)">
+                    <button id="export-browse" class="btn">Folder…</button>
+                </div>
+                <div class="row">
+                    <label class="field">
+                        <span>Max depth <span class="hint">(blank = everything)</span></span>
+                        <input id="export-depth" type="text" placeholder="all levels">
+                    </label>
+                    <label class="field">
+                        <span>&nbsp;</span>
+                        <div class="actions" style="margin:0">
+                            <button id="export-start" class="btn btn-primary">Export</button>
+                            <button id="export-cancel" class="btn" disabled>Cancel</button>
+                        </div>
+                    </label>
+                </div>
+                <div class="progress" id="export-progress" hidden><div class="progress-bar" id="export-bar"></div></div>
+                <div id="export-status" class="result"></div>
+                <div class="actions" id="export-done" hidden>
+                    <button id="export-open" class="btn">Open folder</button>
+                    <button id="export-preview" class="btn">Preview exported copy</button>
+                    <button id="export-copy" class="btn btn-ghost">Copy folder path</button>
+                </div>
+            </div>
         </section>
 
         <!-- ── Library ───────────────────────────────────────────────────────────────────────── -->

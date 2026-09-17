@@ -10,7 +10,9 @@
  *
  * JS API:
  *   transcodeToExplicit(dir, outFile?)   local
- *   buildExplicitFromUrl(tilesetUrl)     remote → returns { tileset, avail, baseUrl }
+ *   buildExplicitFromUrl(tilesetUrl, { maxLevels }?)   remote → returns { tileset, avail, baseUrl }
+ *     maxLevels caps the expansion (levels 0 … maxLevels-1): a depth-limited export must not read
+ *     every subtree of a deep octree first.
  */
 
 import fs   from 'fs/promises';
@@ -254,7 +256,7 @@ export async function transcodeToExplicit(tilesetDir, outFile) {
  * Build an explicit tileset JSON from a remote implicit tileset URL.
  * Returns { tileset (the explicit JSON object), baseUrl, contentUriTemplate }.
  */
-export async function buildExplicitFromUrl(tilesetUrl) {
+export async function buildExplicitFromUrl(tilesetUrl, { maxLevels = null } = {}) {
   const r = await fetch(tilesetUrl);
   if (!r.ok) throw new Error(`fetch ${tilesetUrl} → ${r.status}`);
   const raw = await r.json();
@@ -267,14 +269,14 @@ export async function buildExplicitFromUrl(tilesetUrl) {
       if (!resp.ok) return null;
       return Buffer.from(await resp.arrayBuffer());
     } catch { return null; }
-  });
+  }, maxLevels);
 
   return { tileset, baseUrl };
 }
 
 // ── Core: build explicit tileset from parsed JSON + readSubtree callback ──────
 
-async function _buildExplicitTileset(raw, readSubtree) {
+async function _buildExplicitTileset(raw, readSubtree, maxLevels = null) {
   const imp = raw.root?.implicitTiling;
   if (!imp) {
     // Already explicit — return as-is
@@ -283,7 +285,8 @@ async function _buildExplicitTileset(raw, readSubtree) {
 
   const scheme        = imp.subdivisionScheme || 'OCTREE';
   const subtreeLevels = imp.subtreeLevels;
-  const availLevels   = imp.availableLevels ?? null;
+  const declared      = imp.availableLevels ?? null;
+  const availLevels   = maxLevels == null ? declared : Math.min(declared ?? Infinity, maxLevels);
   const subtreeUri    = imp.subtrees.uri;
   const contentUri    = raw.root.content?.uri ?? null;
 

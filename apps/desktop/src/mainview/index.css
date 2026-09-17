@@ -157,6 +157,12 @@ select option { background: hsl(var(--card)); color: hsl(var(--foreground)); }
 .btn-ghost { background: transparent; border-color: transparent; color: hsl(var(--muted-foreground)); }
 .btn-ghost:hover { background: hsl(var(--accent)); color: hsl(var(--foreground)); }
 
+/* `hidden` must win over the display rules below (.actions is flex) */
+[hidden] { display: none !important; }
+.progress { height: 6px; border-radius: 3px; background: rgba(255,255,255,.08); overflow: hidden; margin: 10px 0 4px; }
+.progress-bar { height: 100%; width: 0; background: #38bdf8; transition: width .3s ease; }
+.progress-bar.indeterminate { width: 30% !important; animation: slide 1.2s ease-in-out infinite; }
+@keyframes slide { from { margin-left: -30%; } to { margin-left: 100%; } }
 .result { margin-top: 12px; font-size: 12.5px; min-height: 18px; word-break: break-word; color: hsl(var(--muted-foreground)); }
 .result-ok { color: hsl(var(--success)); }
 .result-err { color: hsl(var(--destructive)); }

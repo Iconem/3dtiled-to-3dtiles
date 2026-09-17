@@ -33,6 +33,11 @@ export interface DesktopRPC {
        * here. That is why the layout stays inside a conservative fixed width and this call only
        * ever GROWS the window — anything cleverer would be guessing.
        */
+      /** Open a folder in the OS file manager (after an export). */
+      openFolder: {
+        params: { path: string };
+        response: boolean;
+      };
       fitWindow: {
         params: { cssWidth: number; cssHeight: number; viewportWidth: number; viewportHeight: number };
         response: { width: number; height: number };

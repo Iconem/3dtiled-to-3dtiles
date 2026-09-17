@@ -228,6 +228,121 @@ $('save').addEventListener('click', () => {
   showTab('library');
 });
 
+// ── export to a folder ──────────────────────────────────────────────────────────────────────────
+//
+// The server does the work (POST /export, see packages/tile-server/export-live.js): it already
+// holds the adapters, and a crawl of thousands of tiles must not die with this view. The view only
+// starts the job, polls it, and offers the result. The job keeps running if you switch tabs.
+const exportDirEl = $<HTMLInputElement>('export-dir');
+const exportBar = $<HTMLElement>('export-bar');
+let exportJob: string | null = null;
+let exportPreview = '';
+
+function exportSay(msg: string, kind: 'ok' | 'err' | 'info' = 'info') {
+  const el = $('export-status');
+  el.textContent = msg;
+  el.className = `result result-${kind}`;
+}
+
+const mb = (n: number) => `${(n / 1e6).toFixed(1)} MB`;
+
+$('export-browse').addEventListener('click', async () => {
+  if (!pickerAvailable()) return exportSay('The native picker needs the desktop app — type a folder path instead.', 'err');
+  const picked = await pickerRpc!.request.pickDataset({ directory: true, allowedFileTypes: '*' }).catch(() => []);
+  if (picked?.[0]) exportDirEl.value = picked[0];
+});
+
+$('export-start').addEventListener('click', async () => {
+  const u = buildUrl();
+  const outDir = exportDirEl.value.trim();
+  if (!u) return exportSay('Enter a dataset path or URL first.', 'err');
+  if (!outDir) return exportSay('Pick an empty output folder.', 'err');
+  const depth = $<HTMLInputElement>('export-depth').value.trim();
+  if (depth && !(Number(depth) >= 0)) return exportSay('Max depth must be a number of levels.', 'err');
+  $('export-done').hidden = true;
+  try {
+    const r = await fetch(`${base}/export`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ url: u, outDir, maxDepth: depth === '' ? null : Number(depth) }),
+    });
+    const j = await r.json().catch(() => ({}));
+    if (!r.ok) return exportSay(j.error || `HTTP ${r.status}`, 'err');
+    exportJob = j.id;
+    $('export-progress').hidden = false;
+    exportBar.classList.add('indeterminate');
+    ($('export-start') as HTMLButtonElement).disabled = true;
+    ($('export-cancel') as HTMLButtonElement).disabled = false;
+    exportSay('Reading the tileset tree…');
+    pollExport();
+  } catch (e) { exportSay(`Export request failed: ${e}`, 'err'); }
+});
+
+$('export-cancel').addEventListener('click', async () => {
+  if (exportJob) await fetch(`${base}/export/${exportJob}`, { method: 'DELETE' }).catch(() => {});
+});
+
+async function pollExport() {
+  const id = exportJob;
+  if (!id) return;
+  let j: any;
+  try { j = await (await fetch(`${base}/export/${id}`)).json(); }
+  catch { setTimeout(pollExport, 1000); return; }
+  const pr = j.progress ?? {};
+  const discovered = pr.tilesDiscovered ?? 0, written = pr.tilesWritten ?? 0;
+  // The total is unknown while external tilesets are still being crawled, hence the indeterminate bar.
+  if (pr.phase === 'downloading' || j.state !== 'running') {
+    exportBar.classList.remove('indeterminate');
+    exportBar.style.width = `${discovered ? Math.round((100 * written) / discovered) : 100}%`;
+  }
+  const line = `${pr.tilesets ?? 0} tilesets · ${written}/${discovered} files · ${mb(pr.bytes ?? 0)}`
+    + (pr.implicitExpanded ? ` · ${pr.implicitExpanded} implicit expanded` : '')
+    + (pr.failed ? ` · ${pr.failed} failed` : '');
+  if (j.state === 'running') {
+    const phase = pr.phase === 'downloading' ? 'Downloading' : pr.phase === 'expanding implicit tiling' ? 'Expanding implicit tiling' : 'Crawling';
+    exportSay(`${phase} — ${line}`);
+    setTimeout(pollExport, 500);
+    return;
+  }
+  exportJob = null;
+  ($('export-start') as HTMLButtonElement).disabled = false;
+  ($('export-cancel') as HTMLButtonElement).disabled = true;
+  if (j.state === 'done') {
+    exportPreview = j.preview ? `${base}${j.preview}` : '';
+    $('export-done').hidden = false;
+    exportSay(`Done in ${((pr.elapsedMs ?? 0) / 1000).toFixed(1)} s — ${line}.`
+      + (pr.failed ? ' Failed files are listed in export-report.json; re-run into a new folder to retry.' : ''), pr.failed ? 'info' : 'ok');
+  } else {
+    exportSay(j.state === 'cancelled' ? `Cancelled — ${line}. The folder holds a partial copy.` : `Export failed: ${j.error}`, 'err');
+  }
+}
+
+$('export-open').addEventListener('click', async () => {
+  const dir = exportDirEl.value.trim();
+  if (pickerAvailable()) await pickerRpc!.request.openFolder({ path: dir }).catch(() => {});
+  else exportSay(dir, 'info');
+});
+$('export-copy').addEventListener('click', async () => {
+  try { await navigator.clipboard.writeText(exportDirEl.value.trim()); exportSay('Folder path copied.', 'ok'); } catch { /* shown already */ }
+});
+$('export-preview').addEventListener('click', () => {
+  // The exported files, served back by the tile-server exactly as a static host would serve them.
+  const p = exportPreview && previewUrl(exportPreview);
+  if (p) location.href = p;
+});
+
+// A server started without TILED_ALLOW_EXPORT (e.g. an adopted `pnpm dev` one) can't export; say so
+// up front rather than on the first click.
+if (base) {
+  fetch(`${base}/export`).then(async (r) => {
+    if (r.status === 403) {
+      const j = await r.json().catch(() => ({}));
+      exportSay(j.error || 'Export is disabled on this tile-server.', 'err');
+      ($('export-start') as HTMLButtonElement).disabled = true;
+    }
+  }).catch(() => {});
+}
+
 /** Short display name from a path or URL — the entry file name is the same for every dataset. */
 function nameFor(src: string): string {
   const clean = src.split('?')[0].replace(/[\\/]+$/, '');

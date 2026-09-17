@@ -46,14 +46,15 @@ const PUBLIC_DOCS = 'https://docs.3dtiled.iconem.com';
 
 // Cottontail exposes Bun-style spawn; node:child_process is the fallback so this keeps working if the
 // main process is switched to the Bun runtime (electrobun.config.ts `build.mainProcess`).
-async function spawnDetached(cmd: string[], cwd: string): Promise<{ kill: () => void }> {
+async function spawnDetached(cmd: string[], cwd: string, extraEnv: Record<string, string> = {}): Promise<{ kill: () => void }> {
 	const anyGlobal = globalThis as any;
+	const env = { ...(anyGlobal.process?.env ?? {}), ...extraEnv };
 	if (anyGlobal.Bun?.spawn) {
-		const p = anyGlobal.Bun.spawn(cmd, { cwd, stdout: "inherit", stderr: "inherit" });
+		const p = anyGlobal.Bun.spawn(cmd, { cwd, env, stdout: "inherit", stderr: "inherit" });
 		return { kill: () => { try { p.kill(); } catch { /* already gone */ } } };
 	}
 	const { spawn } = await import("node:child_process");
-	const p = spawn(cmd[0], cmd.slice(1), { cwd, stdio: "inherit" });
+	const p = spawn(cmd[0], cmd.slice(1), { cwd, env, stdio: "inherit" });
 	return { kill: () => { try { p.kill(); } catch { /* already gone */ } } };
 }
 
@@ -111,11 +112,12 @@ const children: { kill: () => void }[] = [];
 async function ensureServer(opts: {
 	ports: number[]; cmd: (port: number) => string[]; cwd: string;
 	ready: (port: number) => Promise<boolean>; timeoutMs: number;
+	env?: Record<string, string>;
 }): Promise<number | null> {
 	for (const port of opts.ports) {
 		if (await opts.ready(port)) return port;                 // adopt an already-running instance
 		if (await probeAny(port)) continue;                      // something else owns this port
-		children.push(await spawnDetached(opts.cmd(port), opts.cwd));
+		children.push(await spawnDetached(opts.cmd(port), opts.cwd, opts.env));
 		if (await waitFor(() => opts.ready(port), opts.timeoutMs)) return port;
 	}
 	return null;
@@ -129,6 +131,9 @@ const tilePort = await ensureServer({
 	cwd: root,
 	ready: probeTileServer,
 	timeoutMs: 45_000,
+	// "Export to folder" writes to this machine's disk, so the server only enables it when asked; the
+	// app is exactly the place that asks. (An ADOPTED dev server keeps whatever it was started with.)
+	env: { TILED_ALLOW_EXPORT: "1" },
 });
 
 const staticPort = await ensureServer({
@@ -193,6 +198,8 @@ const rpc = defineElectrobunRPC<DesktopRPC, "bun">("bun", {
 			 * and an under-estimate can never clip content. Capped so a 30-row catalogue cannot open a
 			 * window taller than the screen.
 			 */
+			openFolder: ({ path }) => Utils.openPath(path),
+
 			fitWindow: ({ cssWidth, cssHeight, viewportWidth, viewportHeight }) => {
 				const sx = viewportWidth > 0 ? WIN.width / viewportWidth : 1;
 				const sy = viewportHeight > 0 ? WIN.height / viewportHeight : 1;

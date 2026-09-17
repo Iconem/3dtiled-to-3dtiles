@@ -37,6 +37,22 @@ npm run convert -- <input> <outDir> [--format rad|sog|lcc|copc|potree|i3s] \
 node packages/convert/cli.js sample-data/input/RAD/coit.rad sample-data/output/rad/coit-3dtiles-from-rad
 ```
 
+### Export a tileset to a folder
+
+`convert` turns a *source* into 3D Tiles. `export` materialises any *tileset URL*: a remote 3D Tiles
+tileset, or a `/stream`, `/convert`, `/aggregate` or `/proxy` URL of a running tile-server. The result is
+a self-contained static folder with relative uris and implicit tilings expanded (details in
+[the desktop app's export](/docs/guide/desktop-app#export-to-a-folder), which uses the same code).
+
+```sh
+node packages/convert/cli.js export <tileset-url> <outDir> [--max-depth N] [--overwrite]
+# e.g. a mosaic, through a running server:
+node packages/convert/cli.js export "http://localhost:3001/aggregate/tileset.json?set=angkor" out/angkor
+```
+
+For a raw local dataset, either `convert` it, or `3dtiled serve` it and export the printed URL. The
+HTTP form is `POST /export {url, outDir, maxDepth}` on a server started with `TILED_ALLOW_EXPORT=1`.
+
 ```js
 // JS/TS API — same detection + dispatch
 import { convert, detectFormat, supportedFormats } from '3dtiles-convert';
