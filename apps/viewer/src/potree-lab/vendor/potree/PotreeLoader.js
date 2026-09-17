@@ -1,6 +1,6 @@
-// Vendored verbatim from NASA-AMMOS/3DTilesRendererJS@70847eb9580479cc7bfa574abf15a868394a6f69
+// Vendored from NASA-AMMOS/3DTilesRendererJS@70847eb9580479cc7bfa574abf15a868394a6f69
 // src/three/plugins/potree/PotreeLoader.js — Apache-2.0 (see ./LICENSE; upstream copyright applies).
-// Not in any npm release yet (0.5.2 predates it); delete this copy once 3d-tiles-renderer ships it.
+// One local patch: v1Attributes() (Potree 1.8 attribute objects). Not in any npm release yet (0.5.2 predates it); delete this copy once 3d-tiles-renderer ships it.
 // @ts-nocheck
 import { BufferGeometry, BufferAttribute, Color, SRGBColorSpace, Vector3 } from 'three';
 
@@ -46,6 +46,26 @@ const V1_ATTRIBUTES = {
 	'RGB565': { name: 'rgb565', size: 2, type: 'uint16' },
 };
 
+// LOCAL PATCH (not upstream): Potree 1.8 writes `pointAttributes` as objects
+// { name, size, elements, elementSize, type } where 1.7 wrote bare names, so upstream's
+// `V1_ATTRIBUTES[ name ]` lookup returned undefined for every 1.8 cloud and loading failed with
+// "Cannot read properties of undefined (reading 'size')" — 95% of Iconem's clouds are 1.8.
+// "LAS"/"LAZ" (node files in LAS/LAZ instead of .bin) are not supported by this loader.
+function v1Attributes( list ) {
+
+	if ( ! Array.isArray( list ) ) throw new Error( `PotreeLoader: pointAttributes "${ list }" (LAS/LAZ nodes) is not supported` );
+	return list.map( a => {
+
+		const name = typeof a === 'string' ? a : a.name;
+		const known = V1_ATTRIBUTES[ name ];
+		if ( typeof a === 'string' ) return known;
+		const size = a.size ?? ( a.elements && a.elementSize ? a.elements * a.elementSize : known?.size );
+		return known ? { ...known, size } : { name: name.toLowerCase(), size, type: a.type };
+
+	} );
+
+}
+
 // Normalize cloud.js (v1) into the metadata.json (v2) format
 function normalizeV1( json ) {
 
@@ -60,7 +80,7 @@ function normalizeV1( json ) {
 			min: [ bb.lx, bb.ly, bb.lz ],
 			max: [ bb.ux, bb.uy, bb.uz ],
 		},
-		attributes: json.pointAttributes.map( name => V1_ATTRIBUTES[ name ] ),
+		attributes: v1Attributes( json.pointAttributes ),
 	};
 
 }

@@ -15,7 +15,7 @@ export interface ViewerHandle {
   // SAME global tileset URL, so the auto-frame target is the whole-world bounding sphere, not the city).
   load(url: string, type: AssetType, opts?: { sseOverride?: number | null; skipAutoFrame?: boolean }): void;
   setBasemap(id: string): void;
-  setTerrainMode(mode: 'wgs84' | 'cesium' | 'terrarium' | 'google'): void;
+  setTerrainMode(mode: 'wgs84' | 'cesium' | 'reearth-qm' | 'mapterhorn-ellipsoid' | 'mapterhorn' | 'terrarium' | 'google'): void;
   setMaxSSE(v: number | null): void;
   toggleAssetVisible(show: boolean): void;
   setOrtho(on: boolean): void;

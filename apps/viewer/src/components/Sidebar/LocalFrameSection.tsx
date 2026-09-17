@@ -16,7 +16,10 @@ export default function LocalFrameSection({ activeHandleRef }: { activeHandleRef
   const setGizmoOn = useViewerStore((s) => s.setTilesetGizmoOn);
   const h = () => activeHandleRef.current;
   const terrainMode = useViewerStore((s) => s.terrainMode);
-  const terrainLabel = { wgs84: 'ellipsoid', cesium: 'World Terrain', terrarium: 'Terrarium', google: 'Google 3D' }[terrainMode];
+  const terrainLabel = {
+    wgs84: 'ellipsoid', cesium: 'World Terrain', 'reearth-qm': 'Mapterhorn', 'mapterhorn-ellipsoid': 'Mapterhorn',
+    mapterhorn: 'Mapterhorn, sea level', terrarium: 'AWS, sea level', google: 'Google 3D',
+  }[terrainMode];
 
   function useCurrentView() {
     const v = h()?.useCurrentView();

@@ -47,6 +47,9 @@ export interface DatasetNode extends NodeBase {
   licence?: string;
   project?: string;
   scene?: string;
+  /** Who the data comes from ("Iconem", "CRAIG" …) and the credit line owed for it. */
+  provider?: string;
+  attribution?: string;
   /** The /aggregate/index.json id this leaf came from (hash of the source URL). */
   sourceId?: string;
   /** Geometric-error override; unset = max(radius, 1), like the server's reference tiles. */
@@ -75,6 +78,10 @@ export interface Row {
   height: number;
   radius: number;
   licence?: string;
+  provider?: string | null;
+  attribution?: string | null;
+  /** The server set the row was listed in. */
+  set?: string | null;
 }
 
 // crypto.randomUUID only exists in secure contexts, and the viewer is also opened over plain http on
@@ -92,6 +99,7 @@ export function datasetFromRow(r: Row): DatasetNode {
     lon: r.lon, lat: r.lat, height: r.height, radius: r.radius,
     ...(r.date ? { date: r.date } : {}), ...(r.licence ? { licence: r.licence } : {}),
     ...(r.project ? { project: r.project } : {}), ...(r.scene ? { scene: r.scene } : {}),
+    ...(r.provider ? { provider: r.provider } : {}), ...(r.attribution ? { attribution: r.attribution } : {}),
     sourceId: r.id,
   };
 }
@@ -226,6 +234,20 @@ export function updateNode<N extends BNode>(t: Tree, id: string, patch: Partial<
   return out;
 }
 
+/** One patch applied to many nodes, with ONE copy of the node map (folding 300 groups is one op). */
+export function updateNodes<N extends BNode>(t: Tree, ids: string[], patch: Partial<N> | ((n: BNode) => Partial<N> | null)): Tree {
+  let out: Tree | null = null;
+  for (const id of ids) {
+    const n = t.nodes[id];
+    if (!n) continue;
+    const pt = typeof patch === 'function' ? patch(n) : patch;
+    if (!pt) continue;
+    out ??= copy(t);
+    out.nodes[id] = { ...n, ...pt, id, kind: n.kind } as BNode;
+  }
+  return out ?? t;
+}
+
 function insertIds(out: Tree, parentId: string, index: number | undefined, ids: string[]) {
   const p = group(out, parentId)!;
   const children = [...p.children];
@@ -325,40 +347,58 @@ export function groupNodes(t: Tree, ids: string[], name = 'New group'): { tree: 
   return { tree: moveNodes(tree, sel, id), id };
 }
 
-export type GroupBy = 'scene' | 'project' | 'year';
+export type GroupBy = 'scene' | 'project' | 'provider' | 'year';
+export const GROUP_BYS: GroupBy[] = ['scene', 'project', 'provider', 'year'];
 
 const keyOf = (n: DatasetNode, by: GroupBy) =>
   by === 'year' ? (n.date && isValidDate(n.date) ? n.date.slice(0, 4) : '') : (n[by] ?? '').trim();
 
 /**
- * Bucket a group's DIRECT dataset children by scene / project / year into sub-groups. Datasets
- * without that field stay where they are; an existing child group of the same name is reused, so the
- * helper can be applied again after adding more datasets. Year groups get that year as their date, so
- * a parent in `latest` mode can pick between them.
+ * Bucket a group's DIRECT dataset children by scene / project / provider / year into sub-groups.
+ * Datasets without that field stay where they are; an existing child group of the same name is
+ * reused, so the helper can be applied again after adding more datasets. A new group takes the place
+ * of its first dataset. Year groups get that year as their date, so a parent in `latest` mode can
+ * pick between them.
+ *
+ * One pass over the children and one copy of the node map: 660 datasets into 289 scenes must not
+ * cost 289 copies of a 660-entry map.
  */
 export function groupChildrenBy(t: Tree, groupId: string, by: GroupBy): Tree {
   const g = group(t, groupId);
   if (!g) return t;
   const buckets = new Map<string, string[]>();
+  const existing = new Map<string, string>();
   for (const c of g.children) {
     const n = t.nodes[c];
-    if (n.kind !== 'dataset') continue;
+    if (n.kind === 'group') { if (!existing.has(n.name)) existing.set(n.name, c); continue; }
     const k = keyOf(n, by);
     if (!k) continue;
     if (!buckets.has(k)) buckets.set(k, []);
     buckets.get(k)!.push(c);
   }
-  let out = t;
+  if (!buckets.size) return t;
+  const out = copy(t);
+  const moved = new Set<string>();
+  const newAt = new Map<string, string>();
   for (const [k, ids] of buckets) {
-    const cur = group(out, groupId)!;
-    let target = cur.children.find((c) => { const n = out.nodes[c]; return n.kind === 'group' && n.name === k; });
-    if (!target) {
-      const made = addGroup(out, groupId, cur.children.indexOf(ids[0]), k, by === 'year' ? { date: k } : {});
-      out = made.tree;
-      target = made.id;
+    for (const id of ids) moved.add(id);
+    const target = existing.get(k);
+    if (target) {
+      const tg = out.nodes[target] as GroupNode;
+      out.nodes[target] = { ...tg, children: [...tg.children, ...ids] };
+    } else {
+      const ng = makeGroup(k, { ...(by === 'year' ? { date: k } : {}), children: ids });
+      out.nodes[ng.id] = ng;
+      newAt.set(ids[0], ng.id);
     }
-    out = moveNodes(out, ids, target);
   }
+  const children: string[] = [];
+  for (const c of g.children) {
+    const made = newAt.get(c);
+    if (made) children.push(made);
+    if (!moved.has(c)) children.push(c);
+  }
+  out.nodes[groupId] = { ...g, children };
   return out;
 }
 

@@ -12,9 +12,10 @@ export type MenuItem =
   | { separator: true }
   | { heading: string };
 
-export function Menu({ trigger, items, className, title, testId }: {
+export function Menu({ trigger, items: itemsProp, className, title, testId }: {
   trigger: React.ReactNode;
-  items: MenuItem[];
+  /** A function is only called when the menu opens: a row menu costs nothing until it is used. */
+  items: MenuItem[] | (() => MenuItem[]);
   className?: string;
   title?: string;
   testId?: string;
@@ -67,7 +68,7 @@ export function Menu({ trigger, items, className, title, testId }: {
       >
         {trigger}
       </button>
-      {pos && createPortal(
+      {pos && (() => { const items = typeof itemsProp === 'function' ? itemsProp() : itemsProp; return createPortal(
         <div
           ref={menu}
           role="menu"
@@ -97,7 +98,7 @@ export function Menu({ trigger, items, className, title, testId }: {
             ))}
         </div>,
         document.body,
-      )}
+      ); })()}
     </>
   );
 }

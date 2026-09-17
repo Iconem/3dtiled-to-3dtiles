@@ -103,11 +103,14 @@ export function currentPresets(p: MiddlewareParams & { toolName: ToolName; tiles
     // the park-wide altitude nothing is fetched (that is the mosaic working), which reads as "empty".
     const ANGKOR_THOM = { lon: 103.8590, lat: 13.4412, height: 1_800 };
     return [
-      { id: 'agg-world', label: '🧩 World — 33 open + Angkor', type: 'mesh', url: agg('set=world&nest=geodetic') },
+      { id: 'agg-world', label: '🧩 World — 45: open data + Angkor + Aerometrex', type: 'mesh', url: agg('set=world&nest=geodetic') },
       { id: 'agg-opendata', label: '🧩 Open data — 10 cities', type: 'mesh', url: agg('set=opendata&nest=geodetic'), flyTo: { lon: 4.8, lat: 47.5, height: 1_800_000 } },
       { id: 'agg-angkor', label: '🧩 Angkor — 23 sites (geodetic)', type: 'mesh', url: agg('set=angkor&nest=geodetic'), flyTo: ANGKOR_THOM },
       // Same tree with 3D Tiles `region` group volumes instead of spheres (see docs: bv=region).
       { id: 'agg-angkor-region', label: '🧩 Angkor — 23 sites (regions)', type: 'mesh', url: agg('set=angkor&nest=geodetic&bv=region'), flyTo: ANGKOR_THOM },
+      // Group volumes that ARE the quadtree cells (debug tiles show the 2×1 geodetic grid), and ENU boxes.
+      { id: 'agg-angkor-cell', label: '🧩 Angkor — 23 sites (cells)', type: 'mesh', url: agg('set=angkor&nest=geodetic&bv=cell'), flyTo: ANGKOR_THOM },
+      { id: 'agg-angkor-box', label: '🧩 Angkor — 23 sites (boxes)', type: 'mesh', url: agg('set=angkor&nest=geodetic&bv=box'), flyTo: ANGKOR_THOM },
       { id: 'agg-angkor-merc', label: '🧩 Angkor — 23 sites (mercator)', type: 'mesh', url: agg('set=angkor&nest=mercator'), flyTo: ANGKOR_THOM },
       { id: 'agg-phnomkulen', label: '🧩 Angkor — only PhnomKulen', type: 'mesh', url: agg('set=angkor&only=PhnomKulen'), flyTo: { lon: 104.0, lat: 13.55, height: 12_000 } },
       // Committed public sets (packages/tile-server/aggregate-sets/): flai's national open LiDAR as COPC

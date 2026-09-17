@@ -23,6 +23,11 @@ export interface DatasetMarker {
   height: number;
   radius: number;
   licence?: string;
+  /** Who the data comes from ("Iconem", "Aerometrex", "CRAIG" …) and the credit line to show for it. */
+  provider?: string | null;
+  attribution?: string | null;
+  /** The server set the row came from. */
+  set?: string | null;
   /** Set by the client: listed in the full index but excluded from the loaded mosaic. */
   inactive?: boolean;
 }

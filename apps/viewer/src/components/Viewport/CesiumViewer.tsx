@@ -6,7 +6,8 @@ import type { AssetType } from '@/lib/formats';
 import { CESIUM_ION_TOKEN } from '@/lib/ion';
 import { useViewerStore } from '@/state/store';
 import DatasetTooltip, { MARKER_COLORS, type TooltipChannel } from './DatasetTooltip';
-import { createTerrariumTerrainProvider } from '@/lib/terrarium';
+import { createRasterTerrainProvider, RASTER_TERRAINS, REEARTH_QM_URL, sampleRasterTerrain } from '@/lib/terrarium';
+import { datasetGroundSamples, offsetFromSamples } from '@/lib/datasetGround';
 import { SNAP_HALF, SNAP_SAMPLES, SNAP_MIN_HITS } from '@/lib/snapToGround';
 
 // Ported from viewer.html's Cesium section (lines ~855-1675), near-verbatim: a plain `Cesium.Viewer`
@@ -64,6 +65,7 @@ const CesiumViewer = forwardRef<ViewerHandle, Props>(function CesiumViewer({ vis
   const markersRef = useRef<Cesium.PointPrimitiveCollection | null>(null);
   const markerDataRef = useRef<DatasetMarker[] | null>(null);
   const tooltipRef: TooltipChannel = useRef(null);
+  const pendingFlyRef = useRef<{ lon: number; lat: number; height: number } | null>(null);
   const pendingLoadRef = useRef<{ url: string; type: AssetType; opts?: { sseOverride?: number | null; skipAutoFrame?: boolean } } | null>(null);
 
   const getViewer = () => viewerRef.current;
@@ -344,6 +346,24 @@ const CesiumViewer = forwardRef<ViewerHandle, Props>(function CesiumViewer({ vis
       pendingLoadRef.current = null;
       loadTilesetInternal(url, type, opts);
     }
+    if (pendingFlyRef.current) {
+      const { lon, lat, height } = pendingFlyRef.current;
+      pendingFlyRef.current = null;
+      lookAtFrom(v, lon, lat, height);
+    }
+  }
+
+  /**
+   * Fly so the point (lon, lat) is at the CENTRE of the view, seen 45° down from `height` metres up.
+   * (This used to put the camera directly above the point, pitched 45° — which looks `height` metres
+   * north of it: the target itself was out of view, and 3DTRjs, which looks at the point, disagreed.)
+   */
+  function lookAtFrom(v: Cesium.Viewer, lon: number, lat: number, height: number) {
+    const pitch = Cesium.Math.toRadians(-45);
+    v.camera.flyToBoundingSphere(new Cesium.BoundingSphere(Cesium.Cartesian3.fromDegrees(lon, lat, 0), 1), {
+      offset: new Cesium.HeadingPitchRange(0, pitch, height / Math.sin(-pitch)),
+      duration: 2,
+    });
   }
 
   function applyZOffsetInternal(dz: number) {
@@ -517,9 +537,21 @@ const CesiumViewer = forwardRef<ViewerHandle, Props>(function CesiumViewer({ vis
         v.terrainProvider = new Cesium.EllipsoidTerrainProvider();
         return;
       }
-      if (mode === 'terrarium') {
-        v.terrainProvider = createTerrariumTerrainProvider();
-        store.getState().setStatus('Terrarium terrain (AWS open elevation tiles, heights above mean sea level).');
+      if (mode === 'terrarium' || mode === 'mapterhorn' || mode === 'mapterhorn-ellipsoid') {
+        v.terrainProvider = createRasterTerrainProvider(mode);
+        const src = RASTER_TERRAINS[mode];
+        store.getState().setStatus(`${src.credit} — heights above the ${src.datum === 'ellipsoid' ? 'WGS84 ellipsoid' : 'geoid (mean sea level)'}.`);
+        return;
+      }
+      if (mode === 'reearth-qm') {
+        try {
+          v.terrainProvider = await Cesium.CesiumTerrainProvider.fromUrl(REEARTH_QM_URL, { requestVertexNormals: false });
+          store.getState().setStatus('Mapterhorn quantized mesh (Re:Earth Terrain) — heights above the WGS84 ellipsoid.');
+        } catch (e) {
+          v.terrainProvider = new Cesium.EllipsoidTerrainProvider();
+          store.getState().setTerrainMode('wgs84');
+          store.getState().setStatus(`Re:Earth quantized-mesh terrain failed to load:\n${(e as Error).message}`);
+        }
         return;
       }
       if (mode === 'cesium') {
@@ -586,6 +618,32 @@ const CesiumViewer = forwardRef<ViewerHandle, Props>(function CesiumViewer({ vis
       const ts = currentTilesetRef.current;
       if (!v || !ts) return 'Load a tileset first.';
       const exclude = [googleTilesetRef.current, markersRef.current].filter(Boolean) as object[];
+
+      // 1. Preferred: the dataset's own top geometry, binned (lib/datasetGround.ts). Renderer-independent.
+      const mode = store.getState().terrainMode;
+      const samples = await datasetGroundSamples(store.getState().lastLoadUrl).catch(() => null);
+      if (samples) {
+        const cartos = samples.map((s) => Cesium.Cartographic.fromDegrees(s.lon, s.lat, 0));
+        let terrain: (number | null)[];
+        if (mode === 'wgs84') terrain = samples.map(() => 0);
+        else if (mode === 'terrarium' || mode === 'mapterhorn' || mode === 'mapterhorn-ellipsoid') {
+          terrain = await Promise.all(samples.map((s) => sampleRasterTerrain(mode, s.lon, s.lat)));
+        } else if (googleTilesetRef.current) {
+          terrain = (await v.scene.sampleHeightMostDetailed(cartos, [ts, markersRef.current].filter(Boolean) as object[])).map((c) => c?.height ?? null);
+        } else {
+          const tp: any = v.terrainProvider;
+          const got = tp.availability ? await Cesium.sampleTerrainMostDetailed(tp, cartos) : await Cesium.sampleTerrain(tp, 14, cartos);
+          terrain = got.map((c) => c?.height ?? null);
+        }
+        const r = offsetFromSamples(samples, terrain);
+        if (r) {
+          const next = +r.dz.toFixed(2);                          // absolute: the samples come from the file, not the moved tileset
+          store.getState().setLocalFrame({ zOffset: next });
+          applyZOffsetInternal(next);
+          return `Snapped to ground: Z offset ${next} m — from the dataset's own top geometry (${r.used}/${samples.length} ground bins, spread ${r.spread.toFixed(1)} m).`;
+        }
+      }
+      // 2. Fallback (compressed or unreadable content): pick the rendered surface on a grid.
       let total = 0, last = '';
       // Two passes: the first move changes what LOD is on screen, the second settles on it.
       for (let pass = 0; pass < 2; pass++) {
@@ -752,8 +810,10 @@ const CesiumViewer = forwardRef<ViewerHandle, Props>(function CesiumViewer({ vis
     },
     flyToCity(lon, lat, height) {
       const v = getViewer();
-      if (!v) return;
-      v.camera.flyTo({ destination: Cesium.Cartesian3.fromDegrees(lon, lat, height), orientation: { heading: 0, pitch: Cesium.Math.toRadians(-45), roll: 0 }, duration: 2 });
+      // Before the viewer exists (a `?load=…&fly=…` start, a preset clicked during init) keep the
+      // request, like pendingLoadRef, instead of silently dropping it.
+      if (!v) { pendingFlyRef.current = { lon, lat, height }; return; }
+      lookAtFrom(v, lon, lat, height);
     },
     autoZoomToTileset() {
       const v = getViewer();

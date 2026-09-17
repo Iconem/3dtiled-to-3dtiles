@@ -38,7 +38,10 @@ export default function BasemapSection({ activeHandleRef }: { activeHandleRef: R
           <SelectContent>
             <SelectItem value="wgs84">WGS84 (none)</SelectItem>
             <SelectItem value="cesium">Cesium World Terrain</SelectItem>
-            <SelectItem value="terrarium">Terrarium (AWS, open)</SelectItem>
+            <SelectItem value="reearth-qm">Mapterhorn · quantized mesh (ellipsoid)</SelectItem>
+            <SelectItem value="mapterhorn-ellipsoid">Mapterhorn · Terrarium (ellipsoid)</SelectItem>
+            <SelectItem value="mapterhorn">Mapterhorn · Terrarium (sea level)</SelectItem>
+            <SelectItem value="terrarium">AWS Terrain Tiles (sea level)</SelectItem>
             <SelectItem value="google">Google 3D</SelectItem>
           </SelectContent>
         </Select>

@@ -136,9 +136,10 @@ export default function AggregateSearch({ activeHandleRef, renderer }: {
 
   // Year span of the dated datasets, for the timeline.
   const yearSpan = useMemo(() => {
-    const ys = (full?.datasets ?? []).filter((d) => d.date).flatMap((d) => dateSpan(d.date!)).map(Math.floor);
+    const dated = (full?.datasets ?? []).filter((d) => d.date);
+    const ys = dated.flatMap((d) => dateSpan(d.date!)).map(Math.floor);
     if (!ys.length) return null;
-    return { min: Math.min(...ys), max: Math.max(...ys), dated: ys.length };
+    return { min: Math.min(...ys), max: Math.max(...ys), dated: dated.length };
   }, [full]);
   useEffect(() => {
     if (!yearSpan || !picker) { setYears(null); return; }
@@ -168,6 +169,21 @@ export default function AggregateSearch({ activeHandleRef, renderer }: {
     }
     return out;
   }, [full, inView]);
+
+  // Credits for what is on screen — a mosaic mixes providers, and each one's attribution must be
+  // shown while its data is visible (Aerometrex's previews, the national agencies' LiDAR …).
+  const credits = useMemo(() => {
+    if (!full) return [];
+    const byId = new Map(full.datasets.map((d) => [d.id, d]));
+    const seen = new Set<string>();
+    for (const id of inView) {
+      if (!activeIds.has(id)) continue;
+      const d = byId.get(id);
+      const c = d?.attribution || d?.provider;
+      if (c) seen.add(c);
+    }
+    return [...seen];
+  }, [full, inView, activeIds]);
 
   if (!active || !picker) return null;
 
@@ -264,6 +280,11 @@ export default function AggregateSearch({ activeHandleRef, renderer }: {
         </button>
       </div>
 
+      {credits.length > 0 && (
+        <div data-testid="credits" className="mt-1 text-[10px] leading-snug text-muted-foreground" title="Attribution of the datasets on screen">
+          Data: {credits.join(' · ')}
+        </div>
+      )}
       {open && query.trim() && (
         <div className="mt-2 max-h-[360px] overflow-y-auto rounded-md border bg-popover text-sm">
           {datasetHits.length > 0 && <div className="px-2 pt-1.5 pb-0.5 text-[11px] font-medium text-muted-foreground">Datasets</div>}

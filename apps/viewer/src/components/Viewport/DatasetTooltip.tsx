@@ -41,6 +41,7 @@ export default function DatasetTooltip({ channel, visible }: { channel: TooltipC
         {d.format}{d.date ? ` · ${d.date.replace('/', ' → ')}` : ''} · {d.radius >= 1000 ? `${(d.radius / 1000).toFixed(1)} km` : `${Math.round(d.radius)} m`}
         {d.inactive ? ' · hidden' : ''}
       </div>
+      {(d.attribution || d.provider) && <div className="text-[10px] text-muted-foreground break-words">{d.attribution || d.provider}</div>}
       {d.licence && <div className="text-[10px] text-muted-foreground break-words">{d.licence.replace(/\[License\]\((.*?)\)/, '$1')}</div>}
       <div className="text-[10px] text-muted-foreground/70">click to fly there</div>
     </div>

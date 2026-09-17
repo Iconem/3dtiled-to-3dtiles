@@ -9,9 +9,9 @@
 import { ecefToLlh, llhToEcef, unionSphere, type Sphere } from './geo.ts';
 import {
   addGroup, canMove, counts, createTree, docOrder, duplicateNode, groupChildrenBy, groupNodes, insertRows,
-  moveNodes, removeNodes, shownChildren, updateNode, type GroupNode, type Row, type Tree,
+  moveNodes, removeNodes, shownChildren, updateNode, updateNodes, type GroupNode, type Row, type Tree,
 } from './tree.ts';
-import { fromTileset, leafSphere, propertyKey, toManifest, toTileset, unwrapChildUrl } from './export.ts';
+import { fromProject, fromTileset, leafSphere, propertyKey, toManifest, toProject, toTileset, unwrapChildUrl } from './export.ts';
 
 // `process` without @types/node: this file is type-checked with the browser app.
 const proc = (globalThis as any).process;
@@ -169,6 +169,56 @@ check(kids(t, gA.id).includes(grouped.id), 'selection group is created in the fi
   const flat = fromTileset(serverTs, 'https://srv/x/tileset.json');
   check(names(flat, flat.rootId).join() === 'A1,b', 'server cells flattened, names from metadata or URL');
   check((flat.nodes[kids(flat, flat.rootId)[1]] as any).url === 'https://srv/x/b/tileset.json', 'relative URIs resolved against the tileset');
+}
+
+// ── provider / attribution ──
+{
+  let p = createTree('P');
+  const ins = insertRows(p, p.rootId, undefined, [
+    row(1, { provider: 'Iconem', attribution: '© Iconem', set: 'iconem' }), row(2, { provider: 'CRAIG', attribution: '© CRAIG' }),
+    row(3, { provider: 'Iconem', attribution: null }), row(4, { provider: null }),
+  ]);
+  p = ins.tree;
+  const leaf = p.nodes[ins.ids[0]] as any;
+  check(leaf.provider === 'Iconem' && leaf.attribution === '© Iconem' && !('set' in leaf), 'row provider/attribution copied onto the dataset');
+  check(!('provider' in p.nodes[ins.ids[3]]) && !('attribution' in p.nodes[ins.ids[2]]), 'null provider/attribution not copied');
+  const ts = toTileset(p);
+  const props = ts.schema.classes.dataset.properties;
+  check(props.provider?.type === 'STRING' && props.attribution?.type === 'STRING', 'schema declares provider + attribution');
+  const tiles = ts.root.children.map((c: any) => c.metadata.properties);
+  check(tiles[0].provider === 'Iconem' && tiles[0].attribution === '© Iconem' && tiles[1].provider === 'CRAIG', 'tile metadata carries provider + attribution');
+  check(!('provider' in tiles[3]), 'no empty provider property');
+  const back = fromTileset(JSON.parse(JSON.stringify(ts)));
+  const b1 = Object.values(back.nodes).find((n) => n.name === 'site 1') as any;
+  check(b1.provider === 'Iconem' && b1.attribution === '© Iconem' && !b1.kv.some((x: any) => x.key === 'provider'), 'tileset import restores provider + attribution (not as custom keys)');
+  const m = toManifest(p);
+  check(m.entries[0].provider === 'Iconem' && m.entries[0].attribution === '© Iconem' && m.entries[1].provider === 'CRAIG' && !m.entries[3].provider, 'manifest entries carry provider + attribution');
+  const proj = fromProject(JSON.parse(JSON.stringify(toProject(p))));
+  check((proj.tree.nodes[ins.ids[1]] as any).attribution === '© CRAIG', 'project save/load keeps provider + attribution');
+  const byProv = groupChildrenBy(p, p.rootId, 'provider');
+  check(names(byProv, byProv.rootId).join() === 'Iconem,CRAIG,site 4', 'group by provider');
+  const iconem = kids(byProv, byProv.rootId)[0];
+  check(names(byProv, iconem).join() === 'site 1,site 3', 'provider group keeps document order');
+}
+
+// ── scale: 700 datasets ──
+{
+  let big = createTree('Big');
+  const rows = Array.from({ length: 700 }, (_, i) => row(i, { scene: `scene ${i % 290}`, provider: i % 7 ? 'Iconem' : 'Other', date: `20${10 + (i % 15)}` }));
+  let t0 = performance.now();
+  big = insertRows(big, big.rootId, undefined, rows).tree;
+  const grouped = groupChildrenBy(big, big.rootId, 'scene');
+  const msGroup = performance.now() - t0;
+  check(kids(grouped, grouped.rootId).length === 290 && counts(grouped).datasets === 700, 'group 700 datasets into 290 scenes');
+  t0 = performance.now();
+  const ts = toTileset(grouped);
+  const msExport = performance.now() - t0;
+  const gids = kids(grouped, grouped.rootId);
+  const folded = updateNodes<GroupNode>(grouped, gids, (n) => (n.kind === 'group' ? { collapsed: true } : null));
+  check(gids.every((g) => (folded.nodes[g] as GroupNode).collapsed) && !(grouped.nodes[gids[0]] as GroupNode).collapsed, 'updateNodes patches many, leaves the original alone');
+  check(updateNodes(grouped, gids, () => null) === grouped, 'updateNodes with nothing to change returns the same tree');
+  check(ts.asset.extras.builder.exported.datasets === 700, 'export 700 datasets');
+  check(msGroup < 500 && msExport < 1000, `700 datasets: insert+group ${msGroup.toFixed(1)} ms, export ${msExport.toFixed(1)} ms`);
 }
 
 console.log(`builder selftest: ${passed} checks passed`);

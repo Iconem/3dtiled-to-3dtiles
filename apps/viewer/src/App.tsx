@@ -31,7 +31,13 @@ export default function App() {
   // Switching the RENDERER pill doesn't automatically carry the currently-loaded tileset over — each
   // renderer only loads what it's explicitly told to. Mirror viewer.html's toggle3DT(), which re-issues
   // the last load() to whichever renderer just became active.
+  // Only on an actual SWITCH, not on mount: child effects run first, so TopBar's startup load
+  // (`?load=…&fly=…`, or a preset with its own fly-to) has already happened, and reloading it here
+  // without skipAutoFrame re-framed the whole tileset over that fly-to.
+  const shownRenderer = useRef(url.renderer);
   useEffect(() => {
+    if (shownRenderer.current === url.renderer) return;
+    shownRenderer.current = url.renderer;
     const { lastLoadUrl, currentType } = useViewerStore.getState();
     if (!lastLoadUrl) return;
     activeHandleRef.current?.load(lastLoadUrl, currentType);

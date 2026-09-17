@@ -21,7 +21,7 @@ export const BUILDER_VERSION = 1;
  */
 const RADIUS_PAD = 0.5;
 
-const DATASET_PROPS = ['id', 'name', 'project', 'scene', 'date', 'format', 'licence', 'notes'];
+const DATASET_PROPS = ['id', 'name', 'project', 'scene', 'date', 'format', 'provider', 'attribution', 'licence', 'notes'];
 const GROUP_PROPS = ['name', 'date', 'notes', 'mode'];
 
 /**
@@ -76,7 +76,7 @@ export function toTileset(tree: Tree, opts: { now?: Date } = {}): TilesetJson {
       leafSpheres.push(sphere);
       exportedDatasets++;
       const properties = {
-        ...clean({ id: n.sourceId ?? n.id, name: n.name, project: n.project, scene: n.scene, date: n.date, format: n.format, licence: n.licence, notes: n.notes }),
+        ...clean({ id: n.sourceId ?? n.id, name: n.name, project: n.project, scene: n.scene, date: n.date, format: n.format, provider: n.provider, attribution: n.attribution, licence: n.licence, notes: n.notes }),
         ...custom(n.kv, 'dataset'),
       };
       return {
@@ -162,6 +162,8 @@ export interface ManifestEntry {
   project?: string;
   scene?: string;
   date?: string;
+  provider?: string;
+  attribution?: string;
   licence?: string;
   notes?: string;
   group?: string;
@@ -203,7 +205,7 @@ export function toManifest(tree: Tree): { label: string; generator: string; entr
     entries.push({
       url: src.url,
       format: src.format ?? n.format,
-      ...clean({ name: n.name, project: n.project, scene: n.scene, date: n.date, licence: n.licence, notes: n.notes, crs: src.crs }),
+      ...clean({ name: n.name, project: n.project, scene: n.scene, date: n.date, provider: n.provider, attribution: n.attribution, licence: n.licence, notes: n.notes, crs: src.crs }),
       ...(path.length ? { group: path.join(' / ') } : {}),
       ...(src.proxy ? { proxy: true } : {}),
       ...(Object.keys(props).length ? { properties: props } : {}),
@@ -277,7 +279,10 @@ export function fromTileset(ts: any, baseUrl?: string, { flattenCells = true } =
           name: str('name') ?? nameFromUrl(url), format: str('format') ?? formatOfUrl(url),
           lon, lat, height, radius: Math.max(0, r - (t.metadata?.class === 'dataset' && ts.asset?.extras?.builder ? RADIUS_PAD : 0)),
           kv: kvOf(props, DATASET_PROPS),
-          ...clean({ project: str('project'), scene: str('scene'), licence: str('licence'), notes: str('notes'), sourceId: str('id') }),
+          ...clean({
+            project: str('project'), scene: str('scene'), provider: str('provider'), attribution: str('attribution'),
+            licence: str('licence'), notes: str('notes'), sourceId: str('id'),
+          }),
           ...(date && isValidDate(date) ? { date } : {}),
           ...(typeof ge === 'number' ? { ge } : {}),
         };

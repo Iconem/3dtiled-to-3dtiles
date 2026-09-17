@@ -10,7 +10,7 @@ import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
 import { ToggleGroup, ToggleGroupItem } from '@/components/ui/toggle-group';
 import { cn } from '@/lib/utils';
-import { counts, isValidDate, leaves, shownChildren, updateNode, type BNode, type DatasetNode, type DisplayMode, type GroupNode, type KV } from './tree';
+import { GROUP_BYS, counts, isValidDate, leaves, shownChildren, updateNode, updateNodes, type BNode, type DatasetNode, type DisplayMode, type GroupNode, type KV } from './tree';
 import { leafGE } from './export';
 import { useBuilder } from './store';
 import { actions } from './TreePanel';
@@ -166,8 +166,8 @@ function GroupFields({ node }: { node: GroupNode }) {
       </Field>
       <Field label="Group children by">
         <div className="flex gap-1">
-          {(['scene', 'project', 'year'] as const).map((b) => (
-            <Button key={b} size="sm" variant="outline" className="h-7 flex-1 text-xs" onClick={() => actions.groupBy(node.id, b)}>{b}</Button>
+          {GROUP_BYS.map((b) => (
+            <Button key={b} size="sm" variant="outline" className="h-7 flex-1 px-1 text-xs" onClick={() => actions.groupBy(node.id, b)} data-testid={`insp-group-by-${b}`}>{b}</Button>
           ))}
         </div>
       </Field>
@@ -215,6 +215,12 @@ function DatasetFields({ node }: { node: DatasetNode }) {
           <Input value={node.scene ?? ''} onChange={(e) => edit(node.id, { scene: e.target.value || undefined }, 'scene')} className="h-8 text-xs" />
         </Field>
       </div>
+      <Field label="Provider" hint="Who the data comes from — exported as the tile's `provider` property.">
+        <Input value={node.provider ?? ''} onChange={(e) => edit(node.id, { provider: e.target.value || undefined }, 'provider')} className="h-8 text-xs" data-testid="insp-provider" />
+      </Field>
+      <Field label="Attribution" hint="The credit line owed to the provider (`attribution`).">
+        <Input value={node.attribution ?? ''} onChange={(e) => edit(node.id, { attribution: e.target.value || undefined }, 'attribution')} className="h-8 text-xs" data-testid="insp-attribution" />
+      </Field>
       <Field label="Licence">
         <Input value={node.licence ?? ''} onChange={(e) => edit(node.id, { licence: e.target.value || undefined }, 'licence')} className="h-8 text-xs" />
       </Field>

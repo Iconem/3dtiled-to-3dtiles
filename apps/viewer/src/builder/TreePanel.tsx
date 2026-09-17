@@ -1,11 +1,15 @@
 /**
  * The mosaic's tree: groups and datasets, edited by drag and drop, keyboard and per-row menus.
  *
+ * Rows have a fixed height, so the list is windowed like the library: a 660-dataset mosaic mounts
+ * only the rows in view. Row props are kept stable (handlers behind a ref, no `tree` prop), so an
+ * edit re-renders the rows whose node changed, not all of them.
+ *
  * Drop position comes from where the pointer sits in the row: top quarter = before, bottom quarter =
  * after, middle = inside (groups only; datasets split in halves). Validity is checked during
  * dragover, so a forbidden drop (a group into its own descendant) never shows an indicator.
  */
-import { memo, useEffect, useMemo, useRef, useState } from 'react';
+import { memo, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import {
   ArrowDownAZ, CalendarArrowDown, ChevronDown, ChevronRight, ChevronsDownUp, ChevronsUpDown, Copy, Folder, FolderOpen,
   FolderPlus, Group, Layers, MoreHorizontal, Pencil, Trash2,
@@ -14,8 +18,8 @@ import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { cn } from '@/lib/utils';
 import {
-  addGroup, canMove, docOrder, duplicateNode, groupChildrenBy, groupNodes, insertRows, moveNodes, removeNodes, shownChildren,
-  sortChildren, updateNode, visibleRows, type BNode, type GroupBy, type GroupNode, type Tree, type VisibleRow,
+  GROUP_BYS, addGroup, canMove, docOrder, duplicateNode, groupChildrenBy, groupNodes, insertRows, moveNodes, removeNodes, shownChildren,
+  sortChildren, updateNode, updateNodes, visibleRows, type BNode, type GroupBy, type GroupNode, type Tree, type VisibleRow,
 } from './tree';
 import { endDrag, readDrag, startDrag, type DragPayload } from './dnd';
 import { useBuilder } from './store';
@@ -94,6 +98,8 @@ export const actions = {
   },
 };
 
+const cap = (s: string) => s[0].toUpperCase() + s.slice(1);
+
 function expand(t: Tree, id: string): Tree {
   const n = t.nodes[id];
   return n?.kind === 'group' && n.collapsed ? updateNode<GroupNode>(t, id, { collapsed: false }) : t;
@@ -106,9 +112,7 @@ export function nodeMenu(t: Tree, n: BNode): MenuItem[] {
     items.push(
       { label: 'New group inside', icon: <FolderPlus />, onSelect: () => actions.newGroup(n.id) },
       { heading: 'Group children by' },
-      { label: 'Scene', icon: <Layers />, onSelect: () => actions.groupBy(n.id, 'scene'), testId: 'group-by-scene' },
-      { label: 'Project', icon: <Layers />, onSelect: () => actions.groupBy(n.id, 'project') },
-      { label: 'Year', icon: <Layers />, onSelect: () => actions.groupBy(n.id, 'year') },
+      ...GROUP_BYS.map((b): MenuItem => ({ label: cap(b), icon: <Layers />, onSelect: () => actions.groupBy(n.id, b), testId: `group-by-${b}` })),
       { heading: 'Sort children' },
       { label: 'By name', icon: <ArrowDownAZ />, onSelect: () => actions.sort(n.id, 'name') },
       { label: 'By date', icon: <CalendarArrowDown />, onSelect: () => actions.sort(n.id, 'date') },
@@ -135,11 +139,26 @@ export default function TreePanel() {
   const selectedSet = useMemo(() => new Set(selected), [selected]);
   const [drop, setDrop] = useState<Drop | null>(null);
   const listRef = useRef<HTMLDivElement>(null);
+  const [scroll, setScroll] = useState(0);
+  const [height, setHeight] = useState(600);
+  useLayoutEffect(() => {
+    const el = listRef.current;
+    if (!el) return;
+    setHeight(el.clientHeight);
+    const ro = new ResizeObserver(() => setHeight(el.clientHeight));
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, []);
 
-  // Keep the focused row in view when it moves by keyboard.
+  // Keep the focused row in view when it moves by keyboard (it may not be mounted: scroll by index).
   useEffect(() => {
-    if (!focus) return;
-    listRef.current?.querySelector(`[data-node="${focus}"]`)?.scrollIntoView({ block: 'nearest' });
+    const el = listRef.current;
+    const i = focus ? rows.findIndex((r) => r.id === focus) : -1;
+    if (!el || i < 0) return;
+    const top = i * ROW_H;
+    if (top < el.scrollTop) el.scrollTop = top;
+    else if (top + ROW_H > el.scrollTop + el.clientHeight) el.scrollTop = top + ROW_H - el.clientHeight;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [focus]);
 
   function click(e: React.MouseEvent, id: string) {
@@ -233,6 +252,18 @@ export default function TreePanel() {
     endDrag();
   }
 
+  // Rows get stable handlers that call the latest closures, so memo(TreeRow) holds across renders.
+  const handlers = useRef({ click, dragOver, onDrop });
+  handlers.current = { click, dragOver, onDrop };
+  const stable = useMemo(() => ({
+    click: (e: React.MouseEvent, id: string) => handlers.current.click(e, id),
+    dragOver: (e: React.DragEvent, r: VisibleRow) => handlers.current.dragOver(e, r),
+    drop: (e: React.DragEvent, r: VisibleRow) => handlers.current.onDrop(e, r),
+  }), []);
+
+  const first = Math.max(0, Math.floor(scroll / ROW_H) - 8);
+  const last = Math.min(rows.length, Math.ceil((scroll + height) / ROW_H) + 8);
+
   const focusedGroup = focus && tree.nodes[focus]?.kind === 'group' ? focus : tree.rootId;
   const groupIds = useMemo(() => docOrder(tree).filter((id) => tree.nodes[id].kind === 'group' && id !== tree.rootId), [tree]);
 
@@ -247,11 +278,10 @@ export default function TreePanel() {
           className="h-7 border px-2 text-xs hover:bg-accent"
           trigger={<><Layers className="size-3.5" />Group by…</>}
           title={`Group the direct children of “${tree.nodes[focusedGroup].name}”`}
+          testId="toolbar-group-by"
           items={[
             { heading: `Children of “${tree.nodes[focusedGroup].name}”` },
-            { label: 'Scene', onSelect: () => actions.groupBy(focusedGroup, 'scene') },
-            { label: 'Project', onSelect: () => actions.groupBy(focusedGroup, 'project') },
-            { label: 'Year', onSelect: () => actions.groupBy(focusedGroup, 'year') },
+            ...GROUP_BYS.map((b): MenuItem => ({ label: cap(b), onSelect: () => actions.groupBy(focusedGroup, b), testId: `toolbar-group-by-${b}` })),
           ]}
         />
         <div className="ml-auto flex gap-0.5">
@@ -267,24 +297,33 @@ export default function TreePanel() {
         onDragOver={(e) => dragOver(e, null)}
         onDragLeave={(e) => { if (!e.currentTarget.contains(e.relatedTarget as Node)) setDrop(null); }}
         onDrop={(e) => onDrop(e, null)}
-        className="min-h-0 flex-1 overflow-y-auto py-1 outline-none focus-visible:ring-1 focus-visible:ring-ring/60"
+        onScroll={(e) => setScroll(e.currentTarget.scrollTop)}
+        className="relative min-h-0 flex-1 overflow-y-auto outline-none focus-visible:ring-1 focus-visible:ring-ring/60"
         data-testid="tree-list"
       >
-        {rows.map((r) => (
-          <TreeRow
-            key={r.id}
-            row={r}
-            node={tree.nodes[r.id]}
-            tree={tree}
-            selected={selectedSet.has(r.id)}
-            focused={focus === r.id}
-            renaming={renaming === r.id}
-            drop={drop?.id === r.id ? drop.pos : null}
-            onClick={click}
-            onDragOver={dragOver}
-            onDrop={onDrop}
-          />
-        ))}
+        <div style={{ height: rows.length * ROW_H + 4 }} />
+        {rows.slice(first, last).map((r, k) => {
+          const node = tree.nodes[r.id];
+          return (
+            <TreeRow
+              key={r.id}
+              top={(first + k) * ROW_H + 2}
+              depth={r.depth}
+              parent={r.parent}
+              index={r.index}
+              node={node}
+              isRoot={r.id === tree.rootId}
+              shown={node.kind === 'group' ? shownChildren(tree, node).length : 0}
+              selected={selectedSet.has(r.id)}
+              focused={focus === r.id}
+              renaming={renaming === r.id}
+              drop={drop?.id === r.id ? drop.pos : null}
+              onClick={stable.click}
+              onDragOver={stable.dragOver}
+              onDrop={stable.drop}
+            />
+          );
+        })}
         {rows.length === 1 && (
           <div className="mx-4 mt-6 rounded-lg border border-dashed p-6 text-center text-sm text-muted-foreground">
             Drag datasets here from the library — or select them and press <b>Add</b>.
@@ -296,10 +335,16 @@ export default function TreePanel() {
   );
 }
 
-const TreeRow = memo(function TreeRow({ row, node, tree, selected, focused, renaming, drop, onClick, onDragOver, onDrop }: {
-  row: VisibleRow;
+const TreeRow = memo(function TreeRow({ top, depth, parent, index, node, isRoot, shown, selected, focused, renaming, drop, onClick, onDragOver, onDrop }: {
+  top: number;
+  /** VisibleRow's fields as primitives: visibleRows() makes new objects on every edit. */
+  depth: number;
+  parent: string | null;
+  index: number;
   node: BNode;
-  tree: Tree;
+  isRoot: boolean;
+  /** Children the export keeps (groups only). */
+  shown: number;
   selected: boolean;
   focused: boolean;
   renaming: boolean;
@@ -308,9 +353,7 @@ const TreeRow = memo(function TreeRow({ row, node, tree, selected, focused, rena
   onDragOver: (e: React.DragEvent, r: VisibleRow) => void;
   onDrop: (e: React.DragEvent, r: VisibleRow) => void;
 }) {
-  const isRoot = !row.parent;
   const isGroup = node.kind === 'group';
-  const shown = isGroup ? shownChildren(tree, node).length : 0;
   return (
     <div
       data-node={node.id}
@@ -318,24 +361,24 @@ const TreeRow = memo(function TreeRow({ row, node, tree, selected, focused, rena
       draggable={!isRoot && !renaming}
       onDragStart={(e) => {
         const st = useBuilder.getState();
-        const ids = st.selected.includes(node.id) ? st.selected.filter((id) => id !== tree.rootId) : [node.id];
+        const ids = st.selected.includes(node.id) ? st.selected.filter((id) => id !== st.tree.rootId) : [node.id];
         startDrag(e, { kind: 'nodes', ids });
       }}
       onDragEnd={endDrag}
-      onDragOver={(e) => onDragOver(e, row)}
-      onDrop={(e) => onDrop(e, row)}
+      onDragOver={(e) => onDragOver(e, { id: node.id, depth, parent, index })}
+      onDrop={(e) => onDrop(e, { id: node.id, depth, parent, index })}
       onClick={(e) => onClick(e, node.id)}
       onDoubleClick={() => useBuilder.getState().setRenaming(node.id)}
-      style={{ paddingLeft: 6 + row.depth * 16, height: ROW_H, contentVisibility: 'auto', containIntrinsicSize: `auto ${ROW_H}px` }}
+      style={{ top, paddingLeft: 6 + depth * 16, height: ROW_H }}
       className={cn(
-        'group relative flex cursor-default items-center gap-1.5 pr-1 text-sm select-none',
+        'group absolute inset-x-0 flex cursor-default items-center gap-1.5 pr-1 text-sm select-none',
         selected ? 'bg-sky-500/20' : 'hover:bg-accent/50',
         focused && 'shadow-[inset_2px_0_0_0_rgb(56_189_248)]',
         drop === 'inside' && 'bg-sky-500/30 ring-1 ring-sky-400 ring-inset',
       )}
     >
-      {drop === 'before' && <div className="pointer-events-none absolute inset-x-0 top-0 h-0.5 bg-sky-400" style={{ left: 6 + row.depth * 16 }} />}
-      {drop === 'after' && <div className="pointer-events-none absolute inset-x-0 bottom-0 h-0.5 bg-sky-400" style={{ left: 6 + row.depth * 16 }} />}
+      {drop === 'before' && <div className="pointer-events-none absolute inset-x-0 top-0 h-0.5 bg-sky-400" style={{ left: 6 + depth * 16 }} />}
+      {drop === 'after' && <div className="pointer-events-none absolute inset-x-0 bottom-0 h-0.5 bg-sky-400" style={{ left: 6 + depth * 16 }} />}
       {isGroup ? (
         <button type="button" className="flex size-4 items-center justify-center text-muted-foreground" disabled={isRoot}
           onClick={(e) => { e.stopPropagation(); actions.setCollapsed([node.id], !node.collapsed); }}>
@@ -362,7 +405,7 @@ const TreeRow = memo(function TreeRow({ row, node, tree, selected, focused, rena
         trigger={<MoreHorizontal className="size-4" />}
         title="Actions"
         testId="row-menu"
-        items={nodeMenu(tree, node)}
+        items={() => nodeMenu(useBuilder.getState().tree, node)}
       />
     </div>
   );
