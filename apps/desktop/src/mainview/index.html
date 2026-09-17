@@ -97,33 +97,68 @@
             <div class="card" id="export-card">
                 <span class="field-label">Export to a folder <span class="hint">— a finished, static 3D Tiles tree</span></span>
                 <p class="hint">
-                    Downloads every tileset JSON and tile of the URL above into a folder, with relative
-                    paths and implicit tilings expanded, so any web server, S3 bucket or Cesium for
-                    Unreal can host it without this app. Works for any source this app can serve.
+                    Writes the dataset above into a folder that any web server, S3 bucket or Cesium for
+                    Unreal can host without this app. The tile-server does the work, so it keeps going
+                    while you use the other tabs; the equivalent CLI command is shown below.
                 </p>
+                <div class="row">
+                    <label class="field">
+                        <span>Method</span>
+                        <select id="export-method">
+                            <option value="crawl">Crawl the tileset URL above — any source</option>
+                            <option value="convert">Offline converter — raw source, per format</option>
+                        </select>
+                    </label>
+                    <label class="field">
+                        <span>Max depth <span class="hint">(crawl; blank = all)</span></span>
+                        <input id="export-depth" type="text" placeholder="all levels">
+                    </label>
+                </div>
+                <div class="options" id="export-crawl-opts">
+                    <label class="check" title="Copy the .subtree files and templated tiles as they are, instead of expanding the tree into explicit children. Smaller JSON; needs a client with implicit tiling (CesiumJS, 3DTRjs, Cesium for Unreal).">
+                        <input type="checkbox" id="export-keep-implicit"> keep implicit tiling
+                    </label>
+                </div>
+                <div class="options" id="export-convert-opts" hidden>
+                    <label class="field compact"><span>Tiling</span>
+                        <select id="conv-tiling"><option value="">converter default</option><option value="implicit">implicit</option><option value="explicit">explicit</option></select>
+                    </label>
+                    <label class="field compact"><span>Scale</span><input id="conv-scale" type="text" placeholder="1"></label>
+                    <label class="field compact"><span>GE scale</span><input id="conv-ge-scale" type="text" placeholder="1"></label>
+                    <label class="field compact"><span>GE layer</span><input id="conv-ge-layer" type="text" placeholder="—"></label>
+                    <label class="check" title="Splat formats only: write the splat centres as a point cloud"><input type="checkbox" id="conv-centroids"> splat centroids only</label>
+                </div>
+                <div class="options">
+                    <span class="hint">Also pack as</span>
+                    <label class="check"><input type="checkbox" id="pack-3tz"> .3tz</label>
+                    <label class="check"><input type="checkbox" id="pack-3dtiles"> .3dtiles</label>
+                </div>
                 <div class="urlbar">
                     <input id="export-dir" type="text" spellcheck="false" placeholder="C:\exports\my-site   (an empty folder)">
                     <button id="export-browse" class="btn">Folder…</button>
                 </div>
-                <div class="row">
-                    <label class="field">
-                        <span>Max depth <span class="hint">(blank = everything)</span></span>
-                        <input id="export-depth" type="text" placeholder="all levels">
-                    </label>
-                    <label class="field">
-                        <span>&nbsp;</span>
-                        <div class="actions" style="margin:0">
-                            <button id="export-start" class="btn btn-primary">Export</button>
-                            <button id="export-cancel" class="btn" disabled>Cancel</button>
-                        </div>
-                    </label>
+                <div class="actions">
+                    <button id="export-start" class="btn btn-primary">Export</button>
+                    <button id="export-cancel" class="btn" disabled>Cancel</button>
                 </div>
                 <div class="progress" id="export-progress" hidden><div class="progress-bar" id="export-bar"></div></div>
                 <div id="export-status" class="result"></div>
                 <div class="actions" id="export-done" hidden>
                     <button id="export-open" class="btn">Open folder</button>
                     <button id="export-preview" class="btn">Preview exported copy</button>
+                    <button id="export-viewer" class="btn">Open copy in demo viewer</button>
                     <button id="export-copy" class="btn btn-ghost">Copy folder path</button>
+                </div>
+                <span class="field-label" style="margin-top:14px">Equivalent CLI <span class="hint">(from the repo root)</span></span>
+                <div class="urlbar">
+                    <code id="export-cli" class="cli">—</code>
+                    <button id="export-cli-copy" class="btn">Copy</button>
+                </div>
+                <div class="links">
+                    <a id="export-doc" href="#" target="_blank" rel="noreferrer">Export docs</a>
+                    <a id="export-cli-doc" href="#" target="_blank" rel="noreferrer">CLI docs</a>
+                    <a id="export-mw" href="#" target="_blank" rel="noreferrer">Middleware home</a>
+                    <a id="export-live" href="#" target="_blank" rel="noreferrer">Open the live tileset in the demo viewer</a>
                 </div>
             </div>
         </section>

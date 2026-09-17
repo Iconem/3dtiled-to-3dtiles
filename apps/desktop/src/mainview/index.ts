@@ -230,11 +230,17 @@ $('save').addEventListener('click', () => {
 
 // ── export to a folder ──────────────────────────────────────────────────────────────────────────
 //
-// The server does the work (POST /export, see packages/tile-server/export-live.js): it already
-// holds the adapters, and a crawl of thousands of tiles must not die with this view. The view only
-// starts the job, polls it, and offers the result. The job keeps running if you switch tabs.
+// Two ways to fill a folder, both run BY THE SERVER (POST /export, packages/tile-server/export-live.js):
+//   crawl   — download the tileset URL above as served: any source (raw via /stream or /convert,
+//             remote 3D Tiles, mosaics), implicit tilings expanded or kept.
+//   convert — the per-format offline converter (packages/convert) on the raw source: faster for the
+//             formats it covers, with their own options.
+// The server rather than a CLI child because it is already running with every adapter loaded, it can
+// report progress and be cancelled, and the job survives switching tabs. The same command is shown
+// for the CLI, for scripts and CI.
 const exportDirEl = $<HTMLInputElement>('export-dir');
 const exportBar = $<HTMLElement>('export-bar');
+const methodEl = $<HTMLSelectElement>('export-method');
 let exportJob: string | null = null;
 let exportPreview = '';
 
@@ -245,35 +251,101 @@ function exportSay(msg: string, kind: 'ok' | 'err' | 'info' = 'info') {
 }
 
 const mb = (n: number) => `${(n / 1e6).toFixed(1)} MB`;
+const val = (id: string) => $<HTMLInputElement>(id).value.trim();
+const checked = (id: string) => $<HTMLInputElement>(id).checked;
+const q = (s: string) => `"${s.replace(/"/g, '\\"')}"`;
+
+function exportRequest() {
+  const f = currentForm();
+  const depth = val('export-depth');
+  const pack = [checked('pack-3tz') && '3tz', checked('pack-3dtiles') && '3dtiles'].filter(Boolean) as string[];
+  const options: Record<string, unknown> = {};
+  if ($<HTMLSelectElement>('conv-tiling').value) options['tiling'] = $<HTMLSelectElement>('conv-tiling').value;
+  for (const [id, key] of [['conv-scale', 'scale'], ['conv-ge-scale', 'geScale'], ['conv-ge-layer', 'geLayer']] as const) {
+    if (val(id) !== '') options[key] = Number(val(id));
+  }
+  if (checked('conv-centroids')) options['centroidsOnly'] = true;
+  return {
+    method: methodEl.value as 'crawl' | 'convert',
+    url: buildUrl(), src: f.src, format: f.format, outDir: exportDirEl.value.trim(),
+    maxDepth: depth === '' ? null : Number(depth), keepImplicit: checked('export-keep-implicit'), pack, options,
+  };
+}
+
+/** The CLI command doing the same thing (from the repo root; `3dtiled` once the package is linked). */
+function exportCli(r = exportRequest()): string {
+  const out = r.outDir || '<empty folder>';
+  if (r.method === 'crawl') {
+    return [`node packages/convert/cli.js export ${q(r.url || '<tileset url>')} ${q(out)}`,
+      r.maxDepth != null ? `--max-depth ${r.maxDepth}` : '', r.keepImplicit ? '--keep-implicit' : '',
+      r.pack.length ? `--pack ${r.pack.join(',')}` : ''].filter(Boolean).join(' ');
+  }
+  const o = r.options as Record<string, unknown>;
+  const cmd = [`node packages/convert/cli.js ${q(r.src || '<source>')} ${q(out)}`,
+    r.format ? `--format ${r.format}` : '', o['tiling'] ? `--tiling ${o['tiling']}` : '',
+    o['scale'] != null ? `--scale ${o['scale']}` : '', o['geScale'] != null ? `--ge-scale ${o['geScale']}` : '',
+    o['geLayer'] != null ? `--ge-layer ${o['geLayer']}` : '', o['centroidsOnly'] ? '--centroids-only' : ''].filter(Boolean).join(' ');
+  const name = out.split(/[\\/]/).filter(Boolean).pop() || 'tileset';
+  return r.pack.length ? `${cmd}\n# then (writes both .3tz and .3dtiles):\nnode scripts/pack-3dtiles.mjs ${q(out)} ${q(`${out}/${name}`)}` : cmd;
+}
+
+/** The demo viewer, told to load a tileset on start (its `?load=` parameter). */
+function viewerLink(tilesetUrl: string, type = 'mesh'): string {
+  if (!viewerUrl || !tilesetUrl) return '';
+  return `${viewerUrl}/?mode=stream&format=3dtiles&renderer=cesium&type=${type}&load=${encodeURIComponent(tilesetUrl)}`;
+}
+const assetType = () => (['copc', 'potree'].includes(formatEl.value) ? 'pointcloud' : ['sog', 'lcc', 'rad', 'geosplats'].includes(formatEl.value) ? 'splat' : 'mesh');
+
+function refreshExport() {
+  const convert = methodEl.value === 'convert';
+  $('export-crawl-opts').hidden = convert;
+  $('export-convert-opts').hidden = !convert;
+  $<HTMLInputElement>('export-depth').disabled = convert;
+  $('export-cli').textContent = exportCli();
+  const live = viewerLink(buildUrl(), assetType());
+  const a = $<HTMLAnchorElement>('export-live');
+  a.href = live || '#';
+  a.hidden = !live;
+}
+for (const el of document.querySelectorAll('#export-card input, #export-card select')) {
+  el.addEventListener('input', refreshExport);
+  el.addEventListener('change', refreshExport);
+}
+for (const el of [srcEl, formatEl, cacheEl, ...placement.map((k) => $<HTMLInputElement>(k))]) { el.addEventListener('input', refreshExport); el.addEventListener('change', refreshExport); }
+const docsBase = docsUrl.replace(/\/$/, '');
+$<HTMLAnchorElement>('export-doc').href = docsBase ? `${docsBase}/guide/desktop-app#export-to-a-folder` : '#';
+$<HTMLAnchorElement>('export-cli-doc').href = docsBase ? `${docsBase}/guide/cli-usage#export-a-tileset-to-a-folder` : '#';
+$<HTMLAnchorElement>('export-mw').href = base ? `${base}/` : '#';
+refreshExport();
+
+$('export-cli-copy').addEventListener('click', async () => {
+  try { await navigator.clipboard.writeText(exportCli()); exportSay('Command copied.', 'ok'); } catch { /* visible anyway */ }
+});
 
 $('export-browse').addEventListener('click', async () => {
   if (!pickerAvailable()) return exportSay('The native picker needs the desktop app — type a folder path instead.', 'err');
   const picked = await pickerRpc!.request.pickDataset({ directory: true, allowedFileTypes: '*' }).catch(() => []);
-  if (picked?.[0]) exportDirEl.value = picked[0];
+  if (picked?.[0]) { exportDirEl.value = picked[0]; refreshExport(); }
 });
 
 $('export-start').addEventListener('click', async () => {
-  const u = buildUrl();
-  const outDir = exportDirEl.value.trim();
-  if (!u) return exportSay('Enter a dataset path or URL first.', 'err');
-  if (!outDir) return exportSay('Pick an empty output folder.', 'err');
-  const depth = $<HTMLInputElement>('export-depth').value.trim();
-  if (depth && !(Number(depth) >= 0)) return exportSay('Max depth must be a number of levels.', 'err');
+  const r = exportRequest();
+  if (r.method === 'crawl' && !r.url) return exportSay('Enter a dataset path or URL first.', 'err');
+  if (r.method === 'convert' && !r.src) return exportSay('Enter a dataset path or URL first.', 'err');
+  if (!r.outDir) return exportSay('Pick an empty output folder.', 'err');
+  if (r.maxDepth != null && !(r.maxDepth >= 0)) return exportSay('Max depth must be a number of levels.', 'err');
   $('export-done').hidden = true;
   try {
-    const r = await fetch(`${base}/export`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ url: u, outDir, maxDepth: depth === '' ? null : Number(depth) }),
-    });
-    const j = await r.json().catch(() => ({}));
-    if (!r.ok) return exportSay(j.error || `HTTP ${r.status}`, 'err');
+    const resp = await fetch(`${base}/export`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(r) });
+    const j = await resp.json().catch(() => ({}));
+    if (!resp.ok) return exportSay(j.error || `HTTP ${resp.status}`, 'err');
     exportJob = j.id;
     $('export-progress').hidden = false;
     exportBar.classList.add('indeterminate');
     ($('export-start') as HTMLButtonElement).disabled = true;
-    ($('export-cancel') as HTMLButtonElement).disabled = false;
-    exportSay('Reading the tileset tree…');
+    // the offline converters run in-process and can't be interrupted part-way
+    ($('export-cancel') as HTMLButtonElement).disabled = r.method === 'convert';
+    exportSay(r.method === 'convert' ? 'Converting…' : 'Reading the tileset tree…');
     pollExport();
   } catch (e) { exportSay(`Export request failed: ${e}`, 'err'); }
 });
@@ -281,6 +353,11 @@ $('export-start').addEventListener('click', async () => {
 $('export-cancel').addEventListener('click', async () => {
   if (exportJob) await fetch(`${base}/export/${exportJob}`, { method: 'DELETE' }).catch(() => {});
 });
+
+const PHASES: Record<string, string> = {
+  crawling: 'Crawling', downloading: 'Downloading', converting: 'Converting',
+  'expanding implicit tiling': 'Expanding implicit tiling', 'reading implicit availability': 'Reading implicit availability',
+};
 
 async function pollExport() {
   const id = exportJob;
@@ -295,11 +372,14 @@ async function pollExport() {
     exportBar.classList.remove('indeterminate');
     exportBar.style.width = `${discovered ? Math.round((100 * written) / discovered) : 100}%`;
   }
-  const line = `${pr.tilesets ?? 0} tilesets · ${written}/${discovered} files · ${mb(pr.bytes ?? 0)}`
-    + (pr.implicitExpanded ? ` · ${pr.implicitExpanded} implicit expanded` : '')
-    + (pr.failed ? ` · ${pr.failed} failed` : '');
+  const line = pr.phase === 'converting' || j.result?.method === 'convert'
+    ? (j.state === 'running' ? `${((pr.elapsedMs ?? 0) / 1000).toFixed(0)} s` : `${written} files · ${mb(pr.bytes ?? 0)}`)
+    : `${pr.tilesets ?? 0} tilesets · ${written}/${discovered} files · ${mb(pr.bytes ?? 0)}`
+      + (pr.implicitExpanded ? ` · ${pr.implicitExpanded} implicit expanded` : '')
+      + (pr.implicitKept ? ` · ${pr.implicitKept} implicit kept` : '')
+      + (pr.failed ? ` · ${pr.failed} failed` : '');
   if (j.state === 'running') {
-    const phase = pr.phase === 'downloading' ? 'Downloading' : pr.phase === 'expanding implicit tiling' ? 'Expanding implicit tiling' : 'Crawling';
+    const phase = PHASES[pr.phase] ?? (pr.phase ? pr.phase[0].toUpperCase() + pr.phase.slice(1) : 'Working');
     exportSay(`${phase} — ${line}`);
     setTimeout(pollExport, 500);
     return;
@@ -310,7 +390,8 @@ async function pollExport() {
   if (j.state === 'done') {
     exportPreview = j.preview ? `${base}${j.preview}` : '';
     $('export-done').hidden = false;
-    exportSay(`Done in ${((pr.elapsedMs ?? 0) / 1000).toFixed(1)} s — ${line}.`
+    const packs = j.result?.packages?.length ? ` Packed: ${j.result.packages.join(', ')}.` : '';
+    exportSay(`Done in ${((j.result?.elapsedMs ?? pr.elapsedMs ?? 0) / 1000).toFixed(1)} s — ${line}.${packs}`
       + (pr.failed ? ' Failed files are listed in export-report.json; re-run into a new folder to retry.' : ''), pr.failed ? 'info' : 'ok');
   } else {
     exportSay(j.state === 'cancelled' ? `Cancelled — ${line}. The folder holds a partial copy.` : `Export failed: ${j.error}`, 'err');
@@ -329,6 +410,10 @@ $('export-preview').addEventListener('click', () => {
   // The exported files, served back by the tile-server exactly as a static host would serve them.
   const p = exportPreview && previewUrl(exportPreview);
   if (p) location.href = p;
+});
+$('export-viewer').addEventListener('click', () => {
+  const v = exportPreview && viewerLink(exportPreview, assetType());
+  if (v) window.open(v, '_blank');
 });
 
 // A server started without TILED_ALLOW_EXPORT (e.g. an adopted `pnpm dev` one) can't export; say so
