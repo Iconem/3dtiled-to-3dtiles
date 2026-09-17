@@ -1,7 +1,9 @@
 {
   "label": "flai open LiDAR — 113 national COPC overviews",
+  "provider": "flai open LiDAR",
+  "attribution": "National mapping agencies, mirrored by flai (github.com/flai-ai/open-lidar-data)",
   "source": "https://github.com/flai-ai/open-lidar-data",
-  "generatedAt": "2026-09-16T18:35:36.771Z",
+  "generatedAt": "2026-09-17T06:58:20.314Z",
   "entries": [
     {
       "format": "copc",
@@ -12,7 +14,9 @@
       "scene": "Belgium",
       "date": "2021-01-01/2022-12-31",
       "density": 14.75,
-      "licence": "SPW, LIDAR point cloud 2021-2022 [License](https://creativecommons.org/licenses/by/4.0/deed.fr)"
+      "licence": "SPW, LIDAR point cloud 2021-2022 [License](https://creativecommons.org/licenses/by/4.0/deed.fr)",
+      "provider": "SPW",
+      "attribution": "SPW — via flai open LiDAR"
     },
     {
       "format": "copc",
@@ -23,7 +27,9 @@
       "scene": "Belgium",
       "date": "2021-01-01/2022-12-31",
       "density": 11.35,
-      "licence": "SPW, LIDAR point cloud 2021-2022 [License](https://creativecommons.org/licenses/by/4.0/deed.fr)"
+      "licence": "SPW, LIDAR point cloud 2021-2022 [License](https://creativecommons.org/licenses/by/4.0/deed.fr)",
+      "provider": "SPW",
+      "attribution": "SPW — via flai open LiDAR"
     },
     {
       "format": "copc",
@@ -34,7 +40,9 @@
       "scene": "Belgium",
       "date": "2021-01-01/2022-12-31",
       "density": 14.55,
-      "licence": "SPW, LIDAR point cloud 2021-2022 [License](https://creativecommons.org/licenses/by/4.0/deed.fr)"
+      "licence": "SPW, LIDAR point cloud 2021-2022 [License](https://creativecommons.org/licenses/by/4.0/deed.fr)",
+      "provider": "SPW",
+      "attribution": "SPW — via flai open LiDAR"
     },
     {
       "format": "copc",
@@ -45,7 +53,9 @@
       "scene": "Belgium",
       "date": "2021-01-01/2022-12-31",
       "density": 11,
-      "licence": "SPW, LIDAR point cloud 2021-2022 [License](https://creativecommons.org/licenses/by/4.0/deed.fr)"
+      "licence": "SPW, LIDAR point cloud 2021-2022 [License](https://creativecommons.org/licenses/by/4.0/deed.fr)",
+      "provider": "SPW",
+      "attribution": "SPW — via flai open LiDAR"
     },
     {
       "format": "copc",
@@ -56,7 +66,9 @@
       "scene": "Belgium",
       "date": "2021-01-01/2022-12-31",
       "density": 13.49,
-      "licence": "SPW, LIDAR point cloud 2021-2022 [License](https://creativecommons.org/licenses/by/4.0/deed.fr)"
+      "licence": "SPW, LIDAR point cloud 2021-2022 [License](https://creativecommons.org/licenses/by/4.0/deed.fr)",
+      "provider": "SPW",
+      "attribution": "SPW — via flai open LiDAR"
     },
     {
       "format": "copc",
@@ -67,7 +79,9 @@
       "scene": "Belgium",
       "date": "2013-06-01/2015-12-31",
       "density": 30.93,
-      "licence": "EODaS Openlidar [License](https://assets.vlaanderen.be/image/upload/v1679331485/GratisopendatalicentieVlaanderenv12_bqxu2t.pdf)"
+      "licence": "EODaS Openlidar [License](https://assets.vlaanderen.be/image/upload/v1679331485/GratisopendatalicentieVlaanderenv12_bqxu2t.pdf)",
+      "provider": "EODaS",
+      "attribution": "EODaS Openlidar — via flai open LiDAR"
     },
     {
       "format": "copc",
@@ -78,7 +92,9 @@
       "scene": "Denmark",
       "date": "2018-01-01/2022-12-31",
       "density": 18.57,
-      "licence": "Danish Agency for Data Supply and Infrastructure, Denmark's height model - Point cloud, March 2024 [License](https://dataforsyningen.dk/asset/PDF/rettigheder_vilkaar/Vilk%C3%A5r%20for%20brug%20af%20frie%20geografiske%20data.pdf)"
+      "licence": "Danish Agency for Data Supply and Infrastructure, Denmark's height model - Point cloud, March 2024 [License](https://dataforsyningen.dk/asset/PDF/rettigheder_vilkaar/Vilk%C3%A5r%20for%20brug%20af%20frie%20geografiske%20data.pdf)",
+      "provider": "SDFI",
+      "attribution": "Danish Agency for Data Supply and Infrastructure — via flai open LiDAR"
     },
     {
       "format": "copc",
@@ -89,7 +105,9 @@
       "scene": "Dublin City",
       "date": "2015-03-01/2015-03-31",
       "density": 208.7,
-      "licence": "[License](https://creativecommons.org/licenses/by/4.0/)"
+      "licence": "[License](https://creativecommons.org/licenses/by/4.0/)",
+      "provider": "NYU_EDU",
+      "attribution": " — via flai open LiDAR"
     },
     {
       "format": "copc",
@@ -100,7 +118,9 @@
       "scene": "Estonia (madal)",
       "date": "2023-01-01/2023-12-31",
       "density": 30.6,
-      "licence": "Estonian Land Board, Elevation data 2017-2020 [License](https://geoportaal.maaamet.ee/docs/Avaandmed/Licence-of-open-data-of-Estonian-Land-Board.pdf)"
+      "licence": "Estonian Land Board, Elevation data 2017-2020 [License](https://geoportaal.maaamet.ee/docs/Avaandmed/Licence-of-open-data-of-Estonian-Land-Board.pdf)",
+      "provider": "Maa_amet",
+      "attribution": "Estonian Land Board — via flai open LiDAR"
     },
     {
       "format": "copc",
@@ -111,7 +131,9 @@
       "scene": "Estonia (madal)",
       "date": "2022-01-01/2022-12-31",
       "density": 29.51,
-      "licence": "Estonian Land Board, Elevation data 2017-2020 [License](https://geoportaal.maaamet.ee/docs/Avaandmed/Licence-of-open-data-of-Estonian-Land-Board.pdf)"
+      "licence": "Estonian Land Board, Elevation data 2017-2020 [License](https://geoportaal.maaamet.ee/docs/Avaandmed/Licence-of-open-data-of-Estonian-Land-Board.pdf)",
+      "provider": "Maa_amet",
+      "attribution": "Estonian Land Board — via flai open LiDAR"
     },
     {
       "format": "copc",
@@ -122,7 +144,9 @@
       "scene": "Estonia (madal)",
       "date": "2021-01-01/2021-12-31",
       "density": 30.63,
-      "licence": "Estonian Land Board, Elevation data 2017-2020 [License](https://geoportaal.maaamet.ee/docs/Avaandmed/Licence-of-open-data-of-Estonian-Land-Board.pdf)"
+      "licence": "Estonian Land Board, Elevation data 2017-2020 [License](https://geoportaal.maaamet.ee/docs/Avaandmed/Licence-of-open-data-of-Estonian-Land-Board.pdf)",
+      "provider": "Maa_amet",
+      "attribution": "Estonian Land Board — via flai open LiDAR"
     },
     {
       "format": "copc",
@@ -133,7 +157,9 @@
       "scene": "Estonia (madal)",
       "date": "2020-01-01/2020-12-31",
       "density": 28.79,
-      "licence": "Estonian Land Board, Elevation data 2017-2020 [License](https://geoportaal.maaamet.ee/docs/Avaandmed/Licence-of-open-data-of-Estonian-Land-Board.pdf)"
+      "licence": "Estonian Land Board, Elevation data 2017-2020 [License](https://geoportaal.maaamet.ee/docs/Avaandmed/Licence-of-open-data-of-Estonian-Land-Board.pdf)",
+      "provider": "Maa_amet",
+      "attribution": "Estonian Land Board — via flai open LiDAR"
     },
     {
       "format": "copc",
@@ -144,7 +170,9 @@
       "scene": "Estonia (madal)",
       "date": "2019-01-01/2019-12-31",
       "density": 28.12,
-      "licence": "Estonian Land Board, Elevation data 2017-2020 [License](https://geoportaal.maaamet.ee/docs/Avaandmed/Licence-of-open-data-of-Estonian-Land-Board.pdf)"
+      "licence": "Estonian Land Board, Elevation data 2017-2020 [License](https://geoportaal.maaamet.ee/docs/Avaandmed/Licence-of-open-data-of-Estonian-Land-Board.pdf)",
+      "provider": "Maa_amet",
+      "attribution": "Estonian Land Board — via flai open LiDAR"
     },
     {
       "format": "copc",
@@ -155,7 +183,9 @@
       "scene": "Estonia (madal)",
       "date": "2018-01-01/2018-12-31",
       "density": 26.48,
-      "licence": "Estonian Land Board, Elevation data 2017-2020 [License](https://geoportaal.maaamet.ee/docs/Avaandmed/Licence-of-open-data-of-Estonian-Land-Board.pdf)"
+      "licence": "Estonian Land Board, Elevation data 2017-2020 [License](https://geoportaal.maaamet.ee/docs/Avaandmed/Licence-of-open-data-of-Estonian-Land-Board.pdf)",
+      "provider": "Maa_amet",
+      "attribution": "Estonian Land Board — via flai open LiDAR"
     },
     {
       "format": "copc",
@@ -166,7 +196,9 @@
       "scene": "Estonia (madal)",
       "date": "2017-01-01/2017-12-31",
       "density": 16.14,
-      "licence": "Estonian Land Board, Elevation data 2017-2020 [License](https://geoportaal.maaamet.ee/docs/Avaandmed/Licence-of-open-data-of-Estonian-Land-Board.pdf)"
+      "licence": "Estonian Land Board, Elevation data 2017-2020 [License](https://geoportaal.maaamet.ee/docs/Avaandmed/Licence-of-open-data-of-Estonian-Land-Board.pdf)",
+      "provider": "Maa_amet",
+      "attribution": "Estonian Land Board — via flai open LiDAR"
     },
     {
       "format": "copc",
@@ -177,7 +209,9 @@
       "scene": "Estonia (madal)",
       "date": "2016-01-01/2016-12-31",
       "density": 0.97,
-      "licence": "Estonian Land Board, Elevation data 2017-2020 [License](https://geoportaal.maaamet.ee/docs/Avaandmed/Licence-of-open-data-of-Estonian-Land-Board.pdf)"
+      "licence": "Estonian Land Board, Elevation data 2017-2020 [License](https://geoportaal.maaamet.ee/docs/Avaandmed/Licence-of-open-data-of-Estonian-Land-Board.pdf)",
+      "provider": "Maa_amet",
+      "attribution": "Estonian Land Board — via flai open LiDAR"
     },
     {
       "format": "copc",
@@ -188,7 +222,9 @@
       "scene": "Estonia (madal)",
       "date": "2015-01-01/2015-12-31",
       "density": 2.64,
-      "licence": "Estonian Land Board, Elevation data 2017-2020 [License](https://geoportaal.maaamet.ee/docs/Avaandmed/Licence-of-open-data-of-Estonian-Land-Board.pdf)"
+      "licence": "Estonian Land Board, Elevation data 2017-2020 [License](https://geoportaal.maaamet.ee/docs/Avaandmed/Licence-of-open-data-of-Estonian-Land-Board.pdf)",
+      "provider": "Maa_amet",
+      "attribution": "Estonian Land Board — via flai open LiDAR"
     },
     {
       "format": "copc",
@@ -199,7 +235,9 @@
       "scene": "Estonia (madal)",
       "date": "2014-01-01/2014-12-31",
       "density": 2.7,
-      "licence": "Estonian Land Board, Elevation data 2017-2020 [License](https://geoportaal.maaamet.ee/docs/Avaandmed/Licence-of-open-data-of-Estonian-Land-Board.pdf)"
+      "licence": "Estonian Land Board, Elevation data 2017-2020 [License](https://geoportaal.maaamet.ee/docs/Avaandmed/Licence-of-open-data-of-Estonian-Land-Board.pdf)",
+      "provider": "Maa_amet",
+      "attribution": "Estonian Land Board — via flai open LiDAR"
     },
     {
       "format": "copc",
@@ -210,7 +248,9 @@
       "scene": "Estonia (madal)",
       "date": "2013-01-01/2013-12-31",
       "density": 2.76,
-      "licence": "Estonian Land Board, Elevation data 2017-2020 [License](https://geoportaal.maaamet.ee/docs/Avaandmed/Licence-of-open-data-of-Estonian-Land-Board.pdf)"
+      "licence": "Estonian Land Board, Elevation data 2017-2020 [License](https://geoportaal.maaamet.ee/docs/Avaandmed/Licence-of-open-data-of-Estonian-Land-Board.pdf)",
+      "provider": "Maa_amet",
+      "attribution": "Estonian Land Board — via flai open LiDAR"
     },
     {
       "format": "copc",
@@ -221,7 +261,9 @@
       "scene": "Estonia (madal)",
       "date": "2012-01-01/2012-12-31",
       "density": 2.4,
-      "licence": "Estonian Land Board, Elevation data 2017-2020 [License](https://geoportaal.maaamet.ee/docs/Avaandmed/Licence-of-open-data-of-Estonian-Land-Board.pdf)"
+      "licence": "Estonian Land Board, Elevation data 2017-2020 [License](https://geoportaal.maaamet.ee/docs/Avaandmed/Licence-of-open-data-of-Estonian-Land-Board.pdf)",
+      "provider": "Maa_amet",
+      "attribution": "Estonian Land Board — via flai open LiDAR"
     },
     {
       "format": "copc",
@@ -232,7 +274,9 @@
       "scene": "Estonia (madal)",
       "date": "2010-01-01/2010-12-31",
       "density": 1.57,
-      "licence": "Estonian Land Board, Elevation data 2017-2020 [License](https://geoportaal.maaamet.ee/docs/Avaandmed/Licence-of-open-data-of-Estonian-Land-Board.pdf)"
+      "licence": "Estonian Land Board, Elevation data 2017-2020 [License](https://geoportaal.maaamet.ee/docs/Avaandmed/Licence-of-open-data-of-Estonian-Land-Board.pdf)",
+      "provider": "Maa_amet",
+      "attribution": "Estonian Land Board — via flai open LiDAR"
     },
     {
       "format": "copc",
@@ -243,7 +287,9 @@
       "scene": "Estonia (madal)",
       "date": "2009-01-01/2009-12-31",
       "density": 2.13,
-      "licence": "Estonian Land Board, Elevation data 2017-2020 [License](https://geoportaal.maaamet.ee/docs/Avaandmed/Licence-of-open-data-of-Estonian-Land-Board.pdf)"
+      "licence": "Estonian Land Board, Elevation data 2017-2020 [License](https://geoportaal.maaamet.ee/docs/Avaandmed/Licence-of-open-data-of-Estonian-Land-Board.pdf)",
+      "provider": "Maa_amet",
+      "attribution": "Estonian Land Board — via flai open LiDAR"
     },
     {
       "format": "copc",
@@ -254,7 +300,9 @@
       "scene": "Estonia (madal)",
       "date": "2008-01-01/2008-12-31",
       "density": 1.5,
-      "licence": "Estonian Land Board, Elevation data 2017-2020 [License](https://geoportaal.maaamet.ee/docs/Avaandmed/Licence-of-open-data-of-Estonian-Land-Board.pdf)"
+      "licence": "Estonian Land Board, Elevation data 2017-2020 [License](https://geoportaal.maaamet.ee/docs/Avaandmed/Licence-of-open-data-of-Estonian-Land-Board.pdf)",
+      "provider": "Maa_amet",
+      "attribution": "Estonian Land Board — via flai open LiDAR"
     },
     {
       "format": "copc",
@@ -265,7 +313,9 @@
       "scene": "Estonia (mets)",
       "date": "2023-01-01/2023-12-31",
       "density": 1.35,
-      "licence": "Estonian Land Board, Elevation data 2017-2020 [License](https://geoportaal.maaamet.ee/docs/Avaandmed/Licence-of-open-data-of-Estonian-Land-Board.pdf)"
+      "licence": "Estonian Land Board, Elevation data 2017-2020 [License](https://geoportaal.maaamet.ee/docs/Avaandmed/Licence-of-open-data-of-Estonian-Land-Board.pdf)",
+      "provider": "Maa_amet",
+      "attribution": "Estonian Land Board — via flai open LiDAR"
     },
     {
       "format": "copc",
@@ -276,7 +326,9 @@
       "scene": "Estonia (mets)",
       "date": "2022-01-01/2022-12-31",
       "density": 1.38,
-      "licence": "Estonian Land Board, Elevation data 2017-2020 [License](https://geoportaal.maaamet.ee/docs/Avaandmed/Licence-of-open-data-of-Estonian-Land-Board.pdf)"
+      "licence": "Estonian Land Board, Elevation data 2017-2020 [License](https://geoportaal.maaamet.ee/docs/Avaandmed/Licence-of-open-data-of-Estonian-Land-Board.pdf)",
+      "provider": "Maa_amet",
+      "attribution": "Estonian Land Board — via flai open LiDAR"
     },
     {
       "format": "copc",
@@ -287,7 +339,9 @@
       "scene": "Estonia (mets)",
       "date": "2021-01-01/2021-12-31",
       "density": 1.35,
-      "licence": "Estonian Land Board, Elevation data 2017-2020 [License](https://geoportaal.maaamet.ee/docs/Avaandmed/Licence-of-open-data-of-Estonian-Land-Board.pdf)"
+      "licence": "Estonian Land Board, Elevation data 2017-2020 [License](https://geoportaal.maaamet.ee/docs/Avaandmed/Licence-of-open-data-of-Estonian-Land-Board.pdf)",
+      "provider": "Maa_amet",
+      "attribution": "Estonian Land Board — via flai open LiDAR"
     },
     {
       "format": "copc",
@@ -298,7 +352,9 @@
       "scene": "Estonia (mets)",
       "date": "2020-01-01/2020-12-31",
       "density": 1.51,
-      "licence": "Estonian Land Board, Elevation data 2017-2020 [License](https://geoportaal.maaamet.ee/docs/Avaandmed/Licence-of-open-data-of-Estonian-Land-Board.pdf)"
+      "licence": "Estonian Land Board, Elevation data 2017-2020 [License](https://geoportaal.maaamet.ee/docs/Avaandmed/Licence-of-open-data-of-Estonian-Land-Board.pdf)",
+      "provider": "Maa_amet",
+      "attribution": "Estonian Land Board — via flai open LiDAR"
     },
     {
       "format": "copc",
@@ -309,7 +365,9 @@
       "scene": "Estonia (mets)",
       "date": "2019-01-01/2019-12-31",
       "density": 1.31,
-      "licence": "Estonian Land Board, Elevation data 2017-2020 [License](https://geoportaal.maaamet.ee/docs/Avaandmed/Licence-of-open-data-of-Estonian-Land-Board.pdf)"
+      "licence": "Estonian Land Board, Elevation data 2017-2020 [License](https://geoportaal.maaamet.ee/docs/Avaandmed/Licence-of-open-data-of-Estonian-Land-Board.pdf)",
+      "provider": "Maa_amet",
+      "attribution": "Estonian Land Board — via flai open LiDAR"
     },
     {
       "format": "copc",
@@ -320,7 +378,9 @@
       "scene": "Estonia (mets)",
       "date": "2018-01-01/2018-12-31",
       "density": 1.07,
-      "licence": "Estonian Land Board, Elevation data 2017-2020 [License](https://geoportaal.maaamet.ee/docs/Avaandmed/Licence-of-open-data-of-Estonian-Land-Board.pdf)"
+      "licence": "Estonian Land Board, Elevation data 2017-2020 [License](https://geoportaal.maaamet.ee/docs/Avaandmed/Licence-of-open-data-of-Estonian-Land-Board.pdf)",
+      "provider": "Maa_amet",
+      "attribution": "Estonian Land Board — via flai open LiDAR"
     },
     {
       "format": "copc",
@@ -331,7 +391,9 @@
       "scene": "Estonia (mets)",
       "date": "2017-01-01/2017-12-31",
       "density": 1,
-      "licence": "Estonian Land Board, Elevation data 2017-2020 [License](https://geoportaal.maaamet.ee/docs/Avaandmed/Licence-of-open-data-of-Estonian-Land-Board.pdf)"
+      "licence": "Estonian Land Board, Elevation data 2017-2020 [License](https://geoportaal.maaamet.ee/docs/Avaandmed/Licence-of-open-data-of-Estonian-Land-Board.pdf)",
+      "provider": "Maa_amet",
+      "attribution": "Estonian Land Board — via flai open LiDAR"
     },
     {
       "format": "copc",
@@ -342,7 +404,9 @@
       "scene": "Estonia (mets)",
       "date": "2016-01-01/2016-12-31",
       "density": 0.22,
-      "licence": "Estonian Land Board, Elevation data 2017-2020 [License](https://geoportaal.maaamet.ee/docs/Avaandmed/Licence-of-open-data-of-Estonian-Land-Board.pdf)"
+      "licence": "Estonian Land Board, Elevation data 2017-2020 [License](https://geoportaal.maaamet.ee/docs/Avaandmed/Licence-of-open-data-of-Estonian-Land-Board.pdf)",
+      "provider": "Maa_amet",
+      "attribution": "Estonian Land Board — via flai open LiDAR"
     },
     {
       "format": "copc",
@@ -353,7 +417,9 @@
       "scene": "Estonia (mets)",
       "date": "2015-01-01/2015-12-31",
       "density": 0.17,
-      "licence": "Estonian Land Board, Elevation data 2017-2020 [License](https://geoportaal.maaamet.ee/docs/Avaandmed/Licence-of-open-data-of-Estonian-Land-Board.pdf)"
+      "licence": "Estonian Land Board, Elevation data 2017-2020 [License](https://geoportaal.maaamet.ee/docs/Avaandmed/Licence-of-open-data-of-Estonian-Land-Board.pdf)",
+      "provider": "Maa_amet",
+      "attribution": "Estonian Land Board — via flai open LiDAR"
     },
     {
       "format": "copc",
@@ -364,7 +430,9 @@
       "scene": "Estonia (mets)",
       "date": "2013-01-01/2013-12-31",
       "density": 0.18,
-      "licence": "Estonian Land Board, Elevation data 2017-2020 [License](https://geoportaal.maaamet.ee/docs/Avaandmed/Licence-of-open-data-of-Estonian-Land-Board.pdf)"
+      "licence": "Estonian Land Board, Elevation data 2017-2020 [License](https://geoportaal.maaamet.ee/docs/Avaandmed/Licence-of-open-data-of-Estonian-Land-Board.pdf)",
+      "provider": "Maa_amet",
+      "attribution": "Estonian Land Board — via flai open LiDAR"
     },
     {
       "format": "copc",
@@ -375,7 +443,9 @@
       "scene": "Estonia (mets)",
       "date": "2012-01-01/2012-12-31",
       "density": 0.19,
-      "licence": "Estonian Land Board, Elevation data 2017-2020 [License](https://geoportaal.maaamet.ee/docs/Avaandmed/Licence-of-open-data-of-Estonian-Land-Board.pdf)"
+      "licence": "Estonian Land Board, Elevation data 2017-2020 [License](https://geoportaal.maaamet.ee/docs/Avaandmed/Licence-of-open-data-of-Estonian-Land-Board.pdf)",
+      "provider": "Maa_amet",
+      "attribution": "Estonian Land Board — via flai open LiDAR"
     },
     {
       "format": "copc",
@@ -386,7 +456,9 @@
       "scene": "Estonia (tava)",
       "date": "2023-01-01/2023-12-31",
       "density": 3.87,
-      "licence": "Estonian Land Board, Elevation data 2017-2020 [License](https://geoportaal.maaamet.ee/docs/Avaandmed/Licence-of-open-data-of-Estonian-Land-Board.pdf)"
+      "licence": "Estonian Land Board, Elevation data 2017-2020 [License](https://geoportaal.maaamet.ee/docs/Avaandmed/Licence-of-open-data-of-Estonian-Land-Board.pdf)",
+      "provider": "Maa_amet",
+      "attribution": "Estonian Land Board — via flai open LiDAR"
     },
     {
       "format": "copc",
@@ -397,7 +469,9 @@
       "scene": "Estonia (tava)",
       "date": "2022-01-01/2022-12-31",
       "density": 4.16,
-      "licence": "Estonian Land Board, Elevation data 2017-2020 [License](https://geoportaal.maaamet.ee/docs/Avaandmed/Licence-of-open-data-of-Estonian-Land-Board.pdf)"
+      "licence": "Estonian Land Board, Elevation data 2017-2020 [License](https://geoportaal.maaamet.ee/docs/Avaandmed/Licence-of-open-data-of-Estonian-Land-Board.pdf)",
+      "provider": "Maa_amet",
+      "attribution": "Estonian Land Board — via flai open LiDAR"
     },
     {
       "format": "copc",
@@ -408,7 +482,9 @@
       "scene": "Estonia (tava)",
       "date": "2021-01-01/2021-12-31",
       "density": 3.57,
-      "licence": "Estonian Land Board, Elevation data 2017-2020 [License](https://geoportaal.maaamet.ee/docs/Avaandmed/Licence-of-open-data-of-Estonian-Land-Board.pdf)"
+      "licence": "Estonian Land Board, Elevation data 2017-2020 [License](https://geoportaal.maaamet.ee/docs/Avaandmed/Licence-of-open-data-of-Estonian-Land-Board.pdf)",
+      "provider": "Maa_amet",
+      "attribution": "Estonian Land Board — via flai open LiDAR"
     },
     {
       "format": "copc",
@@ -419,7 +495,9 @@
       "scene": "Estonia (tava)",
       "date": "2020-01-01/2020-12-31",
       "density": 3.66,
-      "licence": "Estonian Land Board, Elevation data 2017-2020 [License](https://geoportaal.maaamet.ee/docs/Avaandmed/Licence-of-open-data-of-Estonian-Land-Board.pdf)"
+      "licence": "Estonian Land Board, Elevation data 2017-2020 [License](https://geoportaal.maaamet.ee/docs/Avaandmed/Licence-of-open-data-of-Estonian-Land-Board.pdf)",
+      "provider": "Maa_amet",
+      "attribution": "Estonian Land Board — via flai open LiDAR"
     },
     {
       "format": "copc",
@@ -430,7 +508,9 @@
       "scene": "Estonia (tava)",
       "date": "2019-01-01/2019-12-31",
       "density": 3.85,
-      "licence": "Estonian Land Board, Elevation data 2017-2020 [License](https://geoportaal.maaamet.ee/docs/Avaandmed/Licence-of-open-data-of-Estonian-Land-Board.pdf)"
+      "licence": "Estonian Land Board, Elevation data 2017-2020 [License](https://geoportaal.maaamet.ee/docs/Avaandmed/Licence-of-open-data-of-Estonian-Land-Board.pdf)",
+      "provider": "Maa_amet",
+      "attribution": "Estonian Land Board — via flai open LiDAR"
     },
     {
       "format": "copc",
@@ -441,7 +521,9 @@
       "scene": "Estonia (tava)",
       "date": "2018-01-01/2018-12-31",
       "density": 2.91,
-      "licence": "Estonian Land Board, Elevation data 2017-2020 [License](https://geoportaal.maaamet.ee/docs/Avaandmed/Licence-of-open-data-of-Estonian-Land-Board.pdf)"
+      "licence": "Estonian Land Board, Elevation data 2017-2020 [License](https://geoportaal.maaamet.ee/docs/Avaandmed/Licence-of-open-data-of-Estonian-Land-Board.pdf)",
+      "provider": "Maa_amet",
+      "attribution": "Estonian Land Board — via flai open LiDAR"
     },
     {
       "format": "copc",
@@ -452,7 +534,9 @@
       "scene": "Estonia (tava)",
       "date": "2017-01-01/2017-12-31",
       "density": 2.37,
-      "licence": "Estonian Land Board, Elevation data 2017-2020 [License](https://geoportaal.maaamet.ee/docs/Avaandmed/Licence-of-open-data-of-Estonian-Land-Board.pdf)"
+      "licence": "Estonian Land Board, Elevation data 2017-2020 [License](https://geoportaal.maaamet.ee/docs/Avaandmed/Licence-of-open-data-of-Estonian-Land-Board.pdf)",
+      "provider": "Maa_amet",
+      "attribution": "Estonian Land Board — via flai open LiDAR"
     },
     {
       "format": "copc",
@@ -463,7 +547,9 @@
       "scene": "Estonia (tava)",
       "date": "2016-01-01/2016-12-31",
       "density": 0.21,
-      "licence": "Estonian Land Board, Elevation data 2017-2020 [License](https://geoportaal.maaamet.ee/docs/Avaandmed/Licence-of-open-data-of-Estonian-Land-Board.pdf)"
+      "licence": "Estonian Land Board, Elevation data 2017-2020 [License](https://geoportaal.maaamet.ee/docs/Avaandmed/Licence-of-open-data-of-Estonian-Land-Board.pdf)",
+      "provider": "Maa_amet",
+      "attribution": "Estonian Land Board — via flai open LiDAR"
     },
     {
       "format": "copc",
@@ -474,7 +560,9 @@
       "scene": "Estonia (tava)",
       "date": "2015-01-01/2015-12-31",
       "density": 0.43,
-      "licence": "Estonian Land Board, Elevation data 2017-2020 [License](https://geoportaal.maaamet.ee/docs/Avaandmed/Licence-of-open-data-of-Estonian-Land-Board.pdf)"
+      "licence": "Estonian Land Board, Elevation data 2017-2020 [License](https://geoportaal.maaamet.ee/docs/Avaandmed/Licence-of-open-data-of-Estonian-Land-Board.pdf)",
+      "provider": "Maa_amet",
+      "attribution": "Estonian Land Board — via flai open LiDAR"
     },
     {
       "format": "copc",
@@ -485,7 +573,9 @@
       "scene": "Estonia (tava)",
       "date": "2014-01-01/2014-12-31",
       "density": 0.47,
-      "licence": "Estonian Land Board, Elevation data 2017-2020 [License](https://geoportaal.maaamet.ee/docs/Avaandmed/Licence-of-open-data-of-Estonian-Land-Board.pdf)"
+      "licence": "Estonian Land Board, Elevation data 2017-2020 [License](https://geoportaal.maaamet.ee/docs/Avaandmed/Licence-of-open-data-of-Estonian-Land-Board.pdf)",
+      "provider": "Maa_amet",
+      "attribution": "Estonian Land Board — via flai open LiDAR"
     },
     {
       "format": "copc",
@@ -496,7 +586,9 @@
       "scene": "Estonia (tava)",
       "date": "2013-01-01/2013-12-31",
       "density": 0.48,
-      "licence": "Estonian Land Board, Elevation data 2017-2020 [License](https://geoportaal.maaamet.ee/docs/Avaandmed/Licence-of-open-data-of-Estonian-Land-Board.pdf)"
+      "licence": "Estonian Land Board, Elevation data 2017-2020 [License](https://geoportaal.maaamet.ee/docs/Avaandmed/Licence-of-open-data-of-Estonian-Land-Board.pdf)",
+      "provider": "Maa_amet",
+      "attribution": "Estonian Land Board — via flai open LiDAR"
     },
     {
       "format": "copc",
@@ -507,7 +599,9 @@
       "scene": "Estonia (tava)",
       "date": "2012-01-01/2012-12-31",
       "density": 0.43,
-      "licence": "Estonian Land Board, Elevation data 2017-2020 [License](https://geoportaal.maaamet.ee/docs/Avaandmed/Licence-of-open-data-of-Estonian-Land-Board.pdf)"
+      "licence": "Estonian Land Board, Elevation data 2017-2020 [License](https://geoportaal.maaamet.ee/docs/Avaandmed/Licence-of-open-data-of-Estonian-Land-Board.pdf)",
+      "provider": "Maa_amet",
+      "attribution": "Estonian Land Board — via flai open LiDAR"
     },
     {
       "format": "copc",
@@ -518,7 +612,9 @@
       "scene": "Estonia (tava)",
       "date": "2011-01-01/2011-12-31",
       "density": 0.47,
-      "licence": "Estonian Land Board, Elevation data 2017-2020 [License](https://geoportaal.maaamet.ee/docs/Avaandmed/Licence-of-open-data-of-Estonian-Land-Board.pdf)"
+      "licence": "Estonian Land Board, Elevation data 2017-2020 [License](https://geoportaal.maaamet.ee/docs/Avaandmed/Licence-of-open-data-of-Estonian-Land-Board.pdf)",
+      "provider": "Maa_amet",
+      "attribution": "Estonian Land Board — via flai open LiDAR"
     },
     {
       "format": "copc",
@@ -529,7 +625,9 @@
       "scene": "Estonia (tava)",
       "date": "2010-01-01/2010-12-31",
       "density": 0.47,
-      "licence": "Estonian Land Board, Elevation data 2017-2020 [License](https://geoportaal.maaamet.ee/docs/Avaandmed/Licence-of-open-data-of-Estonian-Land-Board.pdf)"
+      "licence": "Estonian Land Board, Elevation data 2017-2020 [License](https://geoportaal.maaamet.ee/docs/Avaandmed/Licence-of-open-data-of-Estonian-Land-Board.pdf)",
+      "provider": "Maa_amet",
+      "attribution": "Estonian Land Board — via flai open LiDAR"
     },
     {
       "format": "copc",
@@ -540,7 +638,9 @@
       "scene": "Estonia (tava)",
       "date": "2009-01-01/2009-12-31",
       "density": 0.46,
-      "licence": "Estonian Land Board, Elevation data 2017-2020 [License](https://geoportaal.maaamet.ee/docs/Avaandmed/Licence-of-open-data-of-Estonian-Land-Board.pdf)"
+      "licence": "Estonian Land Board, Elevation data 2017-2020 [License](https://geoportaal.maaamet.ee/docs/Avaandmed/Licence-of-open-data-of-Estonian-Land-Board.pdf)",
+      "provider": "Maa_amet",
+      "attribution": "Estonian Land Board — via flai open LiDAR"
     },
     {
       "format": "copc",
@@ -551,7 +651,9 @@
       "scene": "Estonia (tava)",
       "date": "2008-01-01/2008-12-31",
       "density": 0.42,
-      "licence": "Estonian Land Board, Elevation data 2017-2020 [License](https://geoportaal.maaamet.ee/docs/Avaandmed/Licence-of-open-data-of-Estonian-Land-Board.pdf)"
+      "licence": "Estonian Land Board, Elevation data 2017-2020 [License](https://geoportaal.maaamet.ee/docs/Avaandmed/Licence-of-open-data-of-Estonian-Land-Board.pdf)",
+      "provider": "Maa_amet",
+      "attribution": "Estonian Land Board — via flai open LiDAR"
     },
     {
       "format": "copc",
@@ -562,7 +664,9 @@
       "scene": "Finland",
       "date": "2023-01-01/2023-12-31",
       "density": 0.78,
-      "licence": "[License](https://creativecommons.org/licenses/by/4.0/)"
+      "licence": "[License](https://creativecommons.org/licenses/by/4.0/)",
+      "provider": "NLS",
+      "attribution": " — via flai open LiDAR"
     },
     {
       "format": "copc",
@@ -573,7 +677,9 @@
       "scene": "Finland",
       "date": "2022-01-01/2022-12-31",
       "density": 0.72,
-      "licence": "[License](https://creativecommons.org/licenses/by/4.0/)"
+      "licence": "[License](https://creativecommons.org/licenses/by/4.0/)",
+      "provider": "NLS",
+      "attribution": " — via flai open LiDAR"
     },
     {
       "format": "copc",
@@ -584,7 +690,9 @@
       "scene": "Finland",
       "date": "2021-01-01/2021-12-31",
       "density": 0.7,
-      "licence": "[License](https://creativecommons.org/licenses/by/4.0/)"
+      "licence": "[License](https://creativecommons.org/licenses/by/4.0/)",
+      "provider": "NLS",
+      "attribution": " — via flai open LiDAR"
     },
     {
       "format": "copc",
@@ -595,7 +703,9 @@
       "scene": "Finland",
       "date": "2020-01-01/2020-12-31",
       "density": 0.8,
-      "licence": "[License](https://creativecommons.org/licenses/by/4.0/)"
+      "licence": "[License](https://creativecommons.org/licenses/by/4.0/)",
+      "provider": "NLS",
+      "attribution": " — via flai open LiDAR"
     },
     {
       "format": "copc",
@@ -606,7 +716,9 @@
       "scene": "Finland",
       "date": "2019-01-01/2019-12-31",
       "density": 1.18,
-      "licence": "[License](https://creativecommons.org/licenses/by/4.0/)"
+      "licence": "[License](https://creativecommons.org/licenses/by/4.0/)",
+      "provider": "NLS",
+      "attribution": " — via flai open LiDAR"
     },
     {
       "format": "copc",
@@ -617,7 +729,9 @@
       "scene": "Finland",
       "date": "2018-01-01/2018-12-31",
       "density": 1.42,
-      "licence": "[License](https://creativecommons.org/licenses/by/4.0/)"
+      "licence": "[License](https://creativecommons.org/licenses/by/4.0/)",
+      "provider": "NLS",
+      "attribution": " — via flai open LiDAR"
     },
     {
       "format": "copc",
@@ -628,7 +742,9 @@
       "scene": "Finland",
       "date": "2017-01-01/2017-12-31",
       "density": 2.2,
-      "licence": "[License](https://creativecommons.org/licenses/by/4.0/)"
+      "licence": "[License](https://creativecommons.org/licenses/by/4.0/)",
+      "provider": "NLS",
+      "attribution": " — via flai open LiDAR"
     },
     {
       "format": "copc",
@@ -639,7 +755,9 @@
       "scene": "Finland",
       "date": "2016-01-01/2016-12-31",
       "density": 1.83,
-      "licence": "[License](https://creativecommons.org/licenses/by/4.0/)"
+      "licence": "[License](https://creativecommons.org/licenses/by/4.0/)",
+      "provider": "NLS",
+      "attribution": " — via flai open LiDAR"
     },
     {
       "format": "copc",
@@ -650,7 +768,9 @@
       "scene": "Finland",
       "date": "2015-01-01/2015-12-31",
       "density": 1.54,
-      "licence": "[License](https://creativecommons.org/licenses/by/4.0/)"
+      "licence": "[License](https://creativecommons.org/licenses/by/4.0/)",
+      "provider": "NLS",
+      "attribution": " — via flai open LiDAR"
     },
     {
       "format": "copc",
@@ -661,7 +781,9 @@
       "scene": "Finland",
       "date": "2014-01-01/2014-12-31",
       "density": 1.48,
-      "licence": "[License](https://creativecommons.org/licenses/by/4.0/)"
+      "licence": "[License](https://creativecommons.org/licenses/by/4.0/)",
+      "provider": "NLS",
+      "attribution": " — via flai open LiDAR"
     },
     {
       "format": "copc",
@@ -672,7 +794,9 @@
       "scene": "Finland",
       "date": "2013-01-01/2013-12-31",
       "density": 1.04,
-      "licence": "[License](https://creativecommons.org/licenses/by/4.0/)"
+      "licence": "[License](https://creativecommons.org/licenses/by/4.0/)",
+      "provider": "NLS",
+      "attribution": " — via flai open LiDAR"
     },
     {
       "format": "copc",
@@ -683,7 +807,9 @@
       "scene": "Finland",
       "date": "2012-01-01/2012-12-31",
       "density": 1.24,
-      "licence": "[License](https://creativecommons.org/licenses/by/4.0/)"
+      "licence": "[License](https://creativecommons.org/licenses/by/4.0/)",
+      "provider": "NLS",
+      "attribution": " — via flai open LiDAR"
     },
     {
       "format": "copc",
@@ -694,7 +820,9 @@
       "scene": "Finland",
       "date": "2011-01-01/2011-12-31",
       "density": 1.12,
-      "licence": "[License](https://creativecommons.org/licenses/by/4.0/)"
+      "licence": "[License](https://creativecommons.org/licenses/by/4.0/)",
+      "provider": "NLS",
+      "attribution": " — via flai open LiDAR"
     },
     {
       "format": "copc",
@@ -705,7 +833,9 @@
       "scene": "Finland",
       "date": "2010-01-01/2010-12-31",
       "density": 1.17,
-      "licence": "[License](https://creativecommons.org/licenses/by/4.0/)"
+      "licence": "[License](https://creativecommons.org/licenses/by/4.0/)",
+      "provider": "NLS",
+      "attribution": " — via flai open LiDAR"
     },
     {
       "format": "copc",
@@ -716,7 +846,9 @@
       "scene": "Finland",
       "date": "2009-01-01/2009-12-31",
       "density": 1.07,
-      "licence": "[License](https://creativecommons.org/licenses/by/4.0/)"
+      "licence": "[License](https://creativecommons.org/licenses/by/4.0/)",
+      "provider": "NLS",
+      "attribution": " — via flai open LiDAR"
     },
     {
       "format": "copc",
@@ -727,7 +859,9 @@
       "scene": "Finland",
       "date": "2008-01-01/2008-12-31",
       "density": 0.92,
-      "licence": "[License](https://creativecommons.org/licenses/by/4.0/)"
+      "licence": "[License](https://creativecommons.org/licenses/by/4.0/)",
+      "provider": "NLS",
+      "attribution": " — via flai open LiDAR"
     },
     {
       "format": "copc",
@@ -738,7 +872,9 @@
       "scene": "France",
       "date": "2021-01-01/2025-01-01",
       "density": 29.9,
-      "licence": "IGN, [License](https://geoservices.ign.fr/cgu-licences)"
+      "licence": "IGN, [License](https://geoservices.ign.fr/cgu-licences)",
+      "provider": "IGN",
+      "attribution": "IGN — via flai open LiDAR"
     },
     {
       "format": "copc",
@@ -749,7 +885,9 @@
       "scene": "Germany",
       "date": "2015-01-01/2023-12-31",
       "density": 13.25,
-      "licence": "GeoSN, [dl-de/by-2-0](https://www.govdata.de/dl-de/by-2-0)"
+      "licence": "GeoSN, [dl-de/by-2-0](https://www.govdata.de/dl-de/by-2-0)",
+      "provider": "GeoSN",
+      "attribution": "GeoSN — via flai open LiDAR"
     },
     {
       "format": "copc",
@@ -760,7 +898,9 @@
       "scene": "Latvia",
       "date": "2013-01-11/2019-12-31",
       "density": 8.24,
-      "licence": "The Latvian Geospatial Information Agency [License](https://www.lgia.gov.lv/sites/lgia/files/document/Atverto%20datu%20licence%20CC%20BY_0.pdf)"
+      "licence": "The Latvian Geospatial Information Agency [License](https://www.lgia.gov.lv/sites/lgia/files/document/Atverto%20datu%20licence%20CC%20BY_0.pdf)",
+      "provider": "LGIA",
+      "attribution": "The Latvian Geospatial Information Agency — via flai open LiDAR"
     },
     {
       "format": "copc",
@@ -771,7 +911,9 @@
       "scene": "Luxembourg",
       "date": "2019-01-01/2019-12-31",
       "density": 29.98,
-      "licence": "[License](https://creativecommons.org/publicdomain/zero/1.0/)"
+      "licence": "[License](https://creativecommons.org/publicdomain/zero/1.0/)",
+      "provider": "Gouvernement_LUX",
+      "attribution": " — via flai open LiDAR"
     },
     {
       "format": "copc",
@@ -782,7 +924,9 @@
       "scene": "Netherlands",
       "date": "2020-01-01/2022-12-31",
       "density": 23.36,
-      "licence": "The government has shared the AHN publicly in the form of open data in full and without any conditions"
+      "licence": "The government has shared the AHN publicly in the form of open data in full and without any conditions",
+      "provider": "AHN",
+      "attribution": "The government has shared the AHN publicly in the form of open data in full and without any conditions — via flai open LiDAR"
     },
     {
       "format": "copc",
@@ -793,7 +937,9 @@
       "scene": "Poland",
       "date": "2023-01-01/2023-12-31",
       "density": 21.3,
-      "licence": "The user can download any required data, without any limitations."
+      "licence": "The user can download any required data, without any limitations.",
+      "provider": "GUGiK",
+      "attribution": "The user can download any required data — via flai open LiDAR"
     },
     {
       "format": "copc",
@@ -804,7 +950,9 @@
       "scene": "Poland",
       "date": "2022-01-01/2022-12-31",
       "density": 18.51,
-      "licence": "The user can download any required data, without any limitations."
+      "licence": "The user can download any required data, without any limitations.",
+      "provider": "GUGiK",
+      "attribution": "The user can download any required data — via flai open LiDAR"
     },
     {
       "format": "copc",
@@ -815,7 +963,9 @@
       "scene": "Poland",
       "date": "2021-01-01/2021-12-31",
       "density": 19.77,
-      "licence": "The user can download any required data, without any limitations."
+      "licence": "The user can download any required data, without any limitations.",
+      "provider": "GUGiK",
+      "attribution": "The user can download any required data — via flai open LiDAR"
     },
     {
       "format": "copc",
@@ -826,7 +976,9 @@
       "scene": "Poland",
       "date": "2020-01-01/2020-12-31",
       "density": 37.97,
-      "licence": "The user can download any required data, without any limitations."
+      "licence": "The user can download any required data, without any limitations.",
+      "provider": "GUGiK",
+      "attribution": "The user can download any required data — via flai open LiDAR"
     },
     {
       "format": "copc",
@@ -837,7 +989,9 @@
       "scene": "Poland",
       "date": "2019-01-01/2019-12-31",
       "density": 17.45,
-      "licence": "The user can download any required data, without any limitations."
+      "licence": "The user can download any required data, without any limitations.",
+      "provider": "GUGiK",
+      "attribution": "The user can download any required data — via flai open LiDAR"
     },
     {
       "format": "copc",
@@ -848,7 +1002,9 @@
       "scene": "Poland",
       "date": "2018-01-01/2018-12-31",
       "density": 36.54,
-      "licence": "The user can download any required data, without any limitations."
+      "licence": "The user can download any required data, without any limitations.",
+      "provider": "GUGiK",
+      "attribution": "The user can download any required data — via flai open LiDAR"
     },
     {
       "format": "copc",
@@ -859,7 +1015,9 @@
       "scene": "Slovenia",
       "date": "2024-01-01/2024-12-12",
       "density": 33.66,
-      "licence": "GURS, CLSS 2024 [License](https://creativecommons.org/licenses/by/4.0/deed.sl)"
+      "licence": "GURS, CLSS 2024 [License](https://creativecommons.org/licenses/by/4.0/deed.sl)",
+      "provider": "GURS",
+      "attribution": "GURS — via flai open LiDAR"
     },
     {
       "format": "copc",
@@ -870,7 +1028,9 @@
       "scene": "Slovenia",
       "date": "2023-01-01/2023-12-31",
       "density": 29.87,
-      "licence": "GURS, CLS 2023 [License](https://creativecommons.org/licenses/by/4.0/deed.sl)"
+      "licence": "GURS, CLS 2023 [License](https://creativecommons.org/licenses/by/4.0/deed.sl)",
+      "provider": "GURS",
+      "attribution": "GURS — via flai open LiDAR"
     },
     {
       "format": "copc",
@@ -881,7 +1041,9 @@
       "scene": "Slovenia",
       "date": "2011-01-01/2015-12-31",
       "density": 20.22,
-      "licence": "Slovenian Environment Agency, LIDAR data 2011 - 2015 [License](https://creativecommons.org/licenses/by/4.0/deed.sl)"
+      "licence": "Slovenian Environment Agency, LIDAR data 2011 - 2015 [License](https://creativecommons.org/licenses/by/4.0/deed.sl)",
+      "provider": "GURS",
+      "attribution": "Slovenian Environment Agency — via flai open LiDAR"
     },
     {
       "format": "copc",
@@ -892,7 +1054,9 @@
       "scene": "Slovenia - extension",
       "date": "2023-01-01/2023-12-31",
       "density": 54.29,
-      "licence": "GURS, CLS 2023 [License](https://creativecommons.org/licenses/by/4.0/deed.sl)"
+      "licence": "GURS, CLS 2023 [License](https://creativecommons.org/licenses/by/4.0/deed.sl)",
+      "provider": "GURS",
+      "attribution": "GURS — via flai open LiDAR"
     },
     {
       "format": "copc",
@@ -903,7 +1067,9 @@
       "scene": "Slovenia - Water Corridors",
       "date": "2023-07-01/2023-12-31",
       "density": 80.03,
-      "licence": "GURS, PLS 2023 [License](https://creativecommons.org/licenses/by/4.0/deed.sl)"
+      "licence": "GURS, PLS 2023 [License](https://creativecommons.org/licenses/by/4.0/deed.sl)",
+      "provider": "GURS",
+      "attribution": "GURS — via flai open LiDAR"
     },
     {
       "format": "copc",
@@ -914,7 +1080,9 @@
       "scene": "Spain",
       "date": "2015-01-01/2021-12-31",
       "density": 1.61,
-      "licence": "[License](https://creativecommons.org/licenses/by/4.0/)"
+      "licence": "[License](https://creativecommons.org/licenses/by/4.0/)",
+      "provider": "CNIG",
+      "attribution": " — via flai open LiDAR"
     },
     {
       "format": "copc",
@@ -925,7 +1093,9 @@
       "scene": "Spain",
       "date": "2015-01-01/2021-12-31",
       "density": 2.8,
-      "licence": "[License](https://creativecommons.org/licenses/by/4.0/)"
+      "licence": "[License](https://creativecommons.org/licenses/by/4.0/)",
+      "provider": "CNIG",
+      "attribution": " — via flai open LiDAR"
     },
     {
       "format": "copc",
@@ -936,7 +1106,9 @@
       "scene": "Spain",
       "date": "2008-01-01/2015-01-01",
       "density": 0.99,
-      "licence": "[License](https://creativecommons.org/licenses/by/4.0/)"
+      "licence": "[License](https://creativecommons.org/licenses/by/4.0/)",
+      "provider": "CNIG",
+      "attribution": " — via flai open LiDAR"
     },
     {
       "format": "copc",
@@ -947,7 +1119,9 @@
       "scene": "Spain",
       "date": "2008-01-01/2015-01-01",
       "density": 0.9,
-      "licence": "[License](https://creativecommons.org/licenses/by/4.0/)"
+      "licence": "[License](https://creativecommons.org/licenses/by/4.0/)",
+      "provider": "CNIG",
+      "attribution": " — via flai open LiDAR"
     },
     {
       "format": "copc",
@@ -958,7 +1132,9 @@
       "scene": "Spain",
       "date": "2008-01-01/2015-01-01",
       "density": 1.14,
-      "licence": "[License](https://creativecommons.org/licenses/by/4.0/)"
+      "licence": "[License](https://creativecommons.org/licenses/by/4.0/)",
+      "provider": "CNIG",
+      "attribution": " — via flai open LiDAR"
     },
     {
       "format": "copc",
@@ -969,7 +1145,9 @@
       "scene": "Spain - Canary Islands",
       "date": "2022-01-01/2025-01-01",
       "density": 8.6,
-      "licence": "[License](https://creativecommons.org/licenses/by/4.0/)"
+      "licence": "[License](https://creativecommons.org/licenses/by/4.0/)",
+      "provider": "CNIG",
+      "attribution": " — via flai open LiDAR"
     },
     {
       "format": "copc",
@@ -980,7 +1158,9 @@
       "scene": "Spain - Canary Islands",
       "date": "2015-01-01/2021-12-31",
       "density": 1.74,
-      "licence": "[License](https://creativecommons.org/licenses/by/4.0/)"
+      "licence": "[License](https://creativecommons.org/licenses/by/4.0/)",
+      "provider": "CNIG",
+      "attribution": " — via flai open LiDAR"
     },
     {
       "format": "copc",
@@ -991,7 +1171,9 @@
       "scene": "Spain - Canary Islands",
       "date": "2008-01-01/2015-01-01",
       "density": 1.5,
-      "licence": "[License](https://creativecommons.org/licenses/by/4.0/)"
+      "licence": "[License](https://creativecommons.org/licenses/by/4.0/)",
+      "provider": "CNIG",
+      "attribution": " — via flai open LiDAR"
     },
     {
       "format": "copc",
@@ -1002,7 +1184,9 @@
       "scene": "Switzerland",
       "date": "2023-01-01/2023-12-31",
       "density": 14.98,
-      "licence": "Federal Office of Topography swisstopo [License](https://www.swisstopo.admin.ch/en/terms-of-use-free-geodata-and-geoservices)"
+      "licence": "Federal Office of Topography swisstopo [License](https://www.swisstopo.admin.ch/en/terms-of-use-free-geodata-and-geoservices)",
+      "provider": "Swiss_federal_authorities",
+      "attribution": "Federal Office of Topography swisstopo — via flai open LiDAR"
     },
     {
       "format": "copc",
@@ -1013,7 +1197,9 @@
       "scene": "Switzerland",
       "date": "2017-01-01/2022-12-31",
       "density": 19.56,
-      "licence": "Federal Office of Topography swisstopo [License](https://www.swisstopo.admin.ch/en/terms-of-use-free-geodata-and-geoservices)"
+      "licence": "Federal Office of Topography swisstopo [License](https://www.swisstopo.admin.ch/en/terms-of-use-free-geodata-and-geoservices)",
+      "provider": "Swiss_federal_authorities",
+      "attribution": "Federal Office of Topography swisstopo — via flai open LiDAR"
     },
     {
       "format": "copc",
@@ -1024,7 +1210,9 @@
       "scene": "United Kingdom",
       "date": "2022-01-01/2022-12-31",
       "density": 3.45,
-      "licence": "© Environment Agency [License](https://www.nationalarchives.gov.uk/doc/open-government-licence/version/3/)"
+      "licence": "© Environment Agency [License](https://www.nationalarchives.gov.uk/doc/open-government-licence/version/3/)",
+      "provider": "DEFRA",
+      "attribution": "© Environment Agency — via flai open LiDAR"
     },
     {
       "format": "copc",
@@ -1035,7 +1223,9 @@
       "scene": "United Kingdom",
       "date": "2021-01-01/2021-12-31",
       "density": 2.22,
-      "licence": "© Environment Agency [License](https://www.nationalarchives.gov.uk/doc/open-government-licence/version/3/)"
+      "licence": "© Environment Agency [License](https://www.nationalarchives.gov.uk/doc/open-government-licence/version/3/)",
+      "provider": "DEFRA",
+      "attribution": "© Environment Agency — via flai open LiDAR"
     },
     {
       "format": "copc",
@@ -1046,7 +1236,9 @@
       "scene": "United Kingdom",
       "date": "2020-01-01/2020-12-31",
       "density": 2.25,
-      "licence": "© Environment Agency [License](https://www.nationalarchives.gov.uk/doc/open-government-licence/version/3/)"
+      "licence": "© Environment Agency [License](https://www.nationalarchives.gov.uk/doc/open-government-licence/version/3/)",
+      "provider": "DEFRA",
+      "attribution": "© Environment Agency — via flai open LiDAR"
     },
     {
       "format": "copc",
@@ -1057,7 +1249,9 @@
       "scene": "United Kingdom",
       "date": "2019-01-01/2019-12-31",
       "density": 2.83,
-      "licence": "© Environment Agency [License](https://www.nationalarchives.gov.uk/doc/open-government-licence/version/3/)"
+      "licence": "© Environment Agency [License](https://www.nationalarchives.gov.uk/doc/open-government-licence/version/3/)",
+      "provider": "DEFRA",
+      "attribution": "© Environment Agency — via flai open LiDAR"
     },
     {
       "format": "copc",
@@ -1068,7 +1262,9 @@
       "scene": "United Kingdom",
       "date": "2018-01-01/2018-12-31",
       "density": 2.69,
-      "licence": "© Environment Agency [License](https://www.nationalarchives.gov.uk/doc/open-government-licence/version/3/)"
+      "licence": "© Environment Agency [License](https://www.nationalarchives.gov.uk/doc/open-government-licence/version/3/)",
+      "provider": "DEFRA",
+      "attribution": "© Environment Agency — via flai open LiDAR"
     },
     {
       "format": "copc",
@@ -1079,7 +1275,9 @@
       "scene": "United Kingdom",
       "date": "2017-01-01/2017-12-31",
       "density": 3.28,
-      "licence": "© Environment Agency [License](https://www.nationalarchives.gov.uk/doc/open-government-licence/version/3/)"
+      "licence": "© Environment Agency [License](https://www.nationalarchives.gov.uk/doc/open-government-licence/version/3/)",
+      "provider": "DEFRA",
+      "attribution": "© Environment Agency — via flai open LiDAR"
     },
     {
       "format": "copc",
@@ -1090,7 +1288,9 @@
       "scene": "United Kingdom",
       "date": "2016-01-01/2016-12-31",
       "density": 4.38,
-      "licence": "© Environment Agency [License](https://www.nationalarchives.gov.uk/doc/open-government-licence/version/3/)"
+      "licence": "© Environment Agency [License](https://www.nationalarchives.gov.uk/doc/open-government-licence/version/3/)",
+      "provider": "DEFRA",
+      "attribution": "© Environment Agency — via flai open LiDAR"
     },
     {
       "format": "copc",
@@ -1101,7 +1301,9 @@
       "scene": "United Kingdom",
       "date": "2015-01-01/2015-12-31",
       "density": 3.15,
-      "licence": "© Environment Agency [License](https://www.nationalarchives.gov.uk/doc/open-government-licence/version/3/)"
+      "licence": "© Environment Agency [License](https://www.nationalarchives.gov.uk/doc/open-government-licence/version/3/)",
+      "provider": "DEFRA",
+      "attribution": "© Environment Agency — via flai open LiDAR"
     },
     {
       "format": "copc",
@@ -1112,7 +1314,9 @@
       "scene": "United Kingdom",
       "date": "2014-01-01/2014-01-30",
       "density": 1.91,
-      "licence": "© Environment Agency [License](https://www.nationalarchives.gov.uk/doc/open-government-licence/version/3/)"
+      "licence": "© Environment Agency [License](https://www.nationalarchives.gov.uk/doc/open-government-licence/version/3/)",
+      "provider": "DEFRA",
+      "attribution": "© Environment Agency — via flai open LiDAR"
     },
     {
       "format": "copc",
@@ -1123,7 +1327,9 @@
       "scene": "United Kingdom",
       "date": "2013-01-01/2013-12-31",
       "density": 1.58,
-      "licence": "© Environment Agency [License](https://www.nationalarchives.gov.uk/doc/open-government-licence/version/3/)"
+      "licence": "© Environment Agency [License](https://www.nationalarchives.gov.uk/doc/open-government-licence/version/3/)",
+      "provider": "DEFRA",
+      "attribution": "© Environment Agency — via flai open LiDAR"
     },
     {
       "format": "copc",
@@ -1134,7 +1340,9 @@
       "scene": "United Kingdom",
       "date": "2012-01-01/2012-12-31",
       "density": 2.01,
-      "licence": "© Environment Agency [License](https://www.nationalarchives.gov.uk/doc/open-government-licence/version/3/)"
+      "licence": "© Environment Agency [License](https://www.nationalarchives.gov.uk/doc/open-government-licence/version/3/)",
+      "provider": "DEFRA",
+      "attribution": "© Environment Agency — via flai open LiDAR"
     },
     {
       "format": "copc",
@@ -1145,7 +1353,9 @@
       "scene": "United Kingdom",
       "date": "2011-01-01/2011-12-31",
       "density": 1.65,
-      "licence": "© Environment Agency [License](https://www.nationalarchives.gov.uk/doc/open-government-licence/version/3/)"
+      "licence": "© Environment Agency [License](https://www.nationalarchives.gov.uk/doc/open-government-licence/version/3/)",
+      "provider": "DEFRA",
+      "attribution": "© Environment Agency — via flai open LiDAR"
     },
     {
       "format": "copc",
@@ -1156,7 +1366,9 @@
       "scene": "United Kingdom",
       "date": "2010-01-01/2010-12-31",
       "density": 2.33,
-      "licence": "© Environment Agency [License](https://www.nationalarchives.gov.uk/doc/open-government-licence/version/3/)"
+      "licence": "© Environment Agency [License](https://www.nationalarchives.gov.uk/doc/open-government-licence/version/3/)",
+      "provider": "DEFRA",
+      "attribution": "© Environment Agency — via flai open LiDAR"
     },
     {
       "format": "copc",
@@ -1167,7 +1379,9 @@
       "scene": "United Kingdom",
       "date": "2009-01-01/2009-12-31",
       "density": 1.69,
-      "licence": "© Environment Agency [License](https://www.nationalarchives.gov.uk/doc/open-government-licence/version/3/)"
+      "licence": "© Environment Agency [License](https://www.nationalarchives.gov.uk/doc/open-government-licence/version/3/)",
+      "provider": "DEFRA",
+      "attribution": "© Environment Agency — via flai open LiDAR"
     },
     {
       "format": "copc",
@@ -1178,7 +1392,9 @@
       "scene": "United Kingdom",
       "date": "2008-01-01/2008-12-31",
       "density": 1.72,
-      "licence": "© Environment Agency [License](https://www.nationalarchives.gov.uk/doc/open-government-licence/version/3/)"
+      "licence": "© Environment Agency [License](https://www.nationalarchives.gov.uk/doc/open-government-licence/version/3/)",
+      "provider": "DEFRA",
+      "attribution": "© Environment Agency — via flai open LiDAR"
     },
     {
       "format": "copc",
@@ -1189,7 +1405,9 @@
       "scene": "United Kingdom",
       "date": "2007-01-01/2007-12-31",
       "density": 1.22,
-      "licence": "© Environment Agency [License](https://www.nationalarchives.gov.uk/doc/open-government-licence/version/3/)"
+      "licence": "© Environment Agency [License](https://www.nationalarchives.gov.uk/doc/open-government-licence/version/3/)",
+      "provider": "DEFRA",
+      "attribution": "© Environment Agency — via flai open LiDAR"
     },
     {
       "format": "copc",
@@ -1200,7 +1418,9 @@
       "scene": "United Kingdom",
       "date": "2006-01-01/2006-12-31",
       "density": 1.35,
-      "licence": "© Environment Agency [License](https://www.nationalarchives.gov.uk/doc/open-government-licence/version/3/)"
+      "licence": "© Environment Agency [License](https://www.nationalarchives.gov.uk/doc/open-government-licence/version/3/)",
+      "provider": "DEFRA",
+      "attribution": "© Environment Agency — via flai open LiDAR"
     },
     {
       "format": "copc",
@@ -1211,7 +1431,9 @@
       "scene": "United Kingdom",
       "date": "2005-01-01/2005-12-31",
       "density": 0.85,
-      "licence": "© Environment Agency [License](https://www.nationalarchives.gov.uk/doc/open-government-licence/version/3/)"
+      "licence": "© Environment Agency [License](https://www.nationalarchives.gov.uk/doc/open-government-licence/version/3/)",
+      "provider": "DEFRA",
+      "attribution": "© Environment Agency — via flai open LiDAR"
     },
     {
       "format": "copc",
@@ -1222,7 +1444,9 @@
       "scene": "USA Topobathy",
       "date": "2021-02-24/2021-06-01",
       "density": 16.9,
-      "licence": "NOAA, [License](https://nauticalcharts.noaa.gov/data/data-licensing.html)"
+      "licence": "NOAA, [License](https://nauticalcharts.noaa.gov/data/data-licensing.html)",
+      "provider": "NOAA",
+      "attribution": "NOAA — via flai open LiDAR"
     },
     {
       "format": "copc",
@@ -1233,7 +1457,9 @@
       "scene": "USA Topobathy",
       "date": "2021-01-26/2021-02-27",
       "density": 16.14,
-      "licence": "NOAA, [License](https://nauticalcharts.noaa.gov/data/data-licensing.html)"
+      "licence": "NOAA, [License](https://nauticalcharts.noaa.gov/data/data-licensing.html)",
+      "provider": "NOAA",
+      "attribution": "NOAA — via flai open LiDAR"
     },
     {
       "format": "copc",
@@ -1244,7 +1470,9 @@
       "scene": "USA Topobathy",
       "date": "2019-01-01/2020-12-31",
       "density": 42.83,
-      "licence": "NOAA, [License](https://nauticalcharts.noaa.gov/data/data-licensing.html)"
+      "licence": "NOAA, [License](https://nauticalcharts.noaa.gov/data/data-licensing.html)",
+      "provider": "NOAA",
+      "attribution": "NOAA — via flai open LiDAR"
     }
   ]
 }

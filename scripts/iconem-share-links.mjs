@@ -193,7 +193,8 @@ for (const p of projects) {
 
 // The manifest is exactly the shape /aggregate's local sets read: { label, entries: [{url, format}] }.
 await fs.mkdir(path.dirname(OUT), { recursive: true });
-await fs.writeFile(OUT, JSON.stringify({ label: `Iconem — ${NAME} (${entries.length} datasets)`, generatedAt: new Date().toISOString(), entries }, null, 2));
+await fs.writeFile(OUT, JSON.stringify({ label: `Iconem — ${NAME} (${entries.length} datasets)`,
+  provider: 'Iconem', attribution: '© Iconem', generatedAt: new Date().toISOString(), entries }, null, 2));
 console.log(`\n${projects.length} projects · reused ${counts.reused} · created ${counts.created} · would-create ${counts.wouldCreate} · failed ${counts.failed}`);
 console.log(`manifest → ${OUT}  (gitignored — share URLs are bearer credentials)`);
 if (!APPLY && counts.wouldCreate) console.log('Dry run only. Re-run with --apply to create the missing links.');

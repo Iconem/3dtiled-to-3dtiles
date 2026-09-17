@@ -14,11 +14,12 @@
  *   4. Scale-awareness: a country-sized dataset must NOT be buried inside a city-sized cell.
  *   5. Monotonic geometric error — a parent's GE must exceed every child's, or clients mis-refine.
  *   6. bv=region — groups become lon/lat/height regions that still enclose every dataset below them.
+ *   7. bv=cell / bv=box — quadtree-cell regions and ENU-aligned boxes, with the same containment check.
  *
  * Run: node scripts/debug-aggregate-nesting.mjs
  */
 import http from 'node:http';
-import { buildAggregate } from '../packages/tile-server/aggregate-live.js';
+import { buildAggregate, __test } from '../packages/tile-server/aggregate-live.js';
 import { llhToEcef, ecefToLlh } from '../packages/core/index.js';
 
 // name, lon, lat, radius(m) — radius is what decides how deep a dataset is allowed to nest
@@ -164,6 +165,52 @@ for (const nest of ['mercator', 'geodetic']) {
   check(`${nest}/region: same grouping as the sphere tree`,
         JSON.stringify(ts.root, (k, v) => (k === 'boundingVolume' ? undefined : v))
           === JSON.stringify(sphereTree.root, (k, v) => (k === 'boundingVolume' ? undefined : v)));
+}
+
+// ── bv=cell (quadtree cells, widened only where a dataset pokes out) and bv=box (ENU-aligned OBBs) ──
+/** Every leaf sphere inside every ancestor box (8 axis points + centre of the ball, in box coordinates). */
+function boxMisses(tile, ancestors = []) {
+  const here = tile.boundingVolume.box ? [...ancestors, tile.boundingVolume.box] : ancestors;
+  if (tile.content) {
+    const [x, y, z, r] = tile.boundingVolume.sphere;
+    for (const b of here) {
+      const c = b.slice(0, 3), axes = [b.slice(3, 6), b.slice(6, 9), b.slice(9, 12)];
+      const d = [x - c[0], y - c[1], z - c[2]];
+      for (const ax of axes) {
+        const len = Math.hypot(...ax);
+        const t = (d[0] * ax[0] + d[1] * ax[1] + d[2] * ax[2]) / len;
+        if (Math.abs(t) + r > len + 1e-3) return 1;
+      }
+    }
+    return 0;
+  }
+  return (tile.children || []).reduce((acc, c) => acc + boxMisses(c, here), 0);
+}
+// cellBounds must invert cellAt: a point's own cell contains it, at every level, in both schemes
+for (const scheme of ['mercator', 'geodetic']) {
+  let bad = 0;
+  for (let i = 0; i < 2000; i++) {
+    const lon = -179.9 + ((i * 97.13) % 359.8), lat = -80 + ((i * 53.71) % 160), L = i % 17;
+    const { key } = __test.SCHEMES[scheme].cellAt(lon, lat, L);
+    const b = __test.cellBounds(scheme, key);
+    if (lon < b.west - 1e-9 || lon > b.east + 1e-9 || lat < b.south - 1e-9 || lat > b.north + 1e-9) bad++;
+  }
+  check(`${scheme}: cellBounds(cellAt(p)) contains p`, bad === 0, `${bad}/2000 outside`);
+}
+for (const nest of ['mercator', 'geodetic']) {
+  const cell = await buildAggregate(urls, { nest, ttlMs: 0, bv: 'cell' });
+  const misses = regionMisses(cell.root);
+  check(`${nest}/cell: every group is a region`, countGroups(cell.root, (t) => !t.boundingVolume.region) === 0);
+  check(`${nest}/cell: every dataset inside all its ancestor cells`, misses === 0, `${misses} poke out`);
+  // a group's cell region is at least as large as the plain union region
+  const reg = await buildAggregate(urls, { nest, ttlMs: 0, bv: 'region' });
+  const area = (r) => (r[2] - r[0]) * (r[3] - r[1]);
+  check(`${nest}/cell: cell regions contain the union regions`,
+        area(cell.root.children[0].boundingVolume.region) >= area(reg.root.children[0].boundingVolume.region) - 1e-12);
+  const box = await buildAggregate(urls, { nest, ttlMs: 0, bv: 'box' });
+  const bm = boxMisses(box.root);
+  check(`${nest}/box: every dataset inside all its ancestor boxes`, bm === 0, `${bm} poke out`);
+  check(`${nest}/box: regional groups are boxes`, countGroups(box.root, (t) => !!t.boundingVolume.box) > 0);
 }
 
 // ── scale: does this hold up at "every Iconem dataset in one endpoint" size? ──────────────────────

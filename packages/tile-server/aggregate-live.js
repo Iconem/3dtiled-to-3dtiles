@@ -206,12 +206,37 @@ const SCHEMES = {
       const nx = 2 ** (level + 1), ny = 2 ** level;                   // 2:1 at level 0
       const x = clamp(Math.floor(((lonDeg + 180) / 360) * nx), 0, nx - 1);
       const y = clamp(Math.floor(((latDeg + 90) / 180) * ny), 0, ny - 1);
-      // The extra lon bit selects the root cell (W/E hemisphere); the rest bisect in lockstep.
-      const key = digitsFromXY(x >> 1, y, level, String(x >> level));
+      // The extra lon bit selects the root cell (W/E hemisphere); the remaining `level` lon bits and the
+      // `level` lat bits bisect in lockstep. (Passing `x >> 1` here, as this once did, re-encoded the
+      // hemisphere bit and dropped the finest lon bit: cells were twice as wide as their key said.)
+      const key = digitsFromXY(x & ((1 << level) - 1), y, level, String(x >> level));
       return { x, y, key, morton: mortonIndex(x, y, level + 1) };
     },
   },
 };
+
+/**
+ * Lon/lat bounds (degrees) of the cell a path key names — the inverse of `cellAt`. Path digits are
+ * base 4, coarsest first: bit 0 = the x half, bit 1 = the y half (see digitsFromXY).
+ */
+function cellBounds(schemeName, key) {
+  if (schemeName === 'geodetic') {
+    if (!key) return { west: -180, south: -90, east: 180, north: 90 };
+    let west = -180 + 180 * Number(key[0]), south = -90, w = 180, h = 180;
+    for (const ch of key.slice(1)) {
+      const d = Number(ch);
+      w /= 2; h /= 2;
+      if (d & 1) west += w;
+      if (d & 2) south += h;                   // geodetic y grows northwards
+    }
+    return { west, south, east: west + w, north: south + h };
+  }
+  let x = 0, y = 0;
+  for (const ch of key) { const d = Number(ch); x = x * 2 + (d & 1); y = y * 2 + ((d >> 1) & 1); }
+  const n = 2 ** key.length;
+  const lat = (row) => (Math.atan(Math.sinh(Math.PI * (1 - (2 * row) / n))) * 180) / Math.PI;
+  return { west: (x / n) * 360 - 180, east: ((x + 1) / n) * 360 - 180, north: lat(y), south: lat(y + 1) };   // mercator y grows southwards
+}
 
 /** Deepest level whose cell still comfortably contains a sphere of this radius. */
 function levelForRadius(scheme, radiusM, latDeg) {
@@ -264,6 +289,38 @@ function sphereToRegion([x, y, z, r]) {
   return [west, south, east, north, h - r, h + r];
 }
 
+/**
+ * An oriented `box` around a set of spheres, aligned with the local east/north/up frame at their
+ * union's centre: the tightest simple box for datasets spread over the ground (flat and wide), where
+ * a sphere is mostly empty sky and rock. Null when there is no meaningful "up" (a centre near the
+ * Earth's core, i.e. a continent-spanning group), in which case the caller keeps a sphere.
+ */
+function boxAround(spheres, centreSphere) {
+  const [cx, cy, cz] = centreSphere;
+  if (Math.hypot(cx, cy, cz) < 1e6) return null;
+  const [lon, lat] = ecefToLlh(cx, cy, cz);
+  const lo = lon * Math.PI / 180, la = lat * Math.PI / 180;
+  const E = [-Math.sin(lo), Math.cos(lo), 0];
+  const N = [-Math.sin(la) * Math.cos(lo), -Math.sin(la) * Math.sin(lo), Math.cos(la)];
+  const U = [Math.cos(la) * Math.cos(lo), Math.cos(la) * Math.sin(lo), Math.sin(la)];
+  const min = [Infinity, Infinity, Infinity], max = [-Infinity, -Infinity, -Infinity];
+  for (const [x, y, z, r] of spheres) {
+    const d = [x - cx, y - cy, z - cz];
+    [E, N, U].forEach((ax, i) => {
+      const t = d[0] * ax[0] + d[1] * ax[1] + d[2] * ax[2];
+      min[i] = Math.min(min[i], t - r);
+      max[i] = Math.max(max[i], t + r);
+    });
+  }
+  const mid = [0, 1, 2].map((i) => (min[i] + max[i]) / 2);
+  const half = [0, 1, 2].map((i) => Math.max((max[i] - min[i]) / 2, 1e-3));
+  const c = [0, 1, 2].map((k) => [cx, cy, cz][k] + mid[0] * E[k] + mid[1] * N[k] + mid[2] * U[k]);
+  return [...c, ...E.map((v) => v * half[0]), ...N.map((v) => v * half[1]), ...U.map((v) => v * half[2])];
+}
+
+/** The volumes `&bv=` can emit for groups. Leaves always keep their own root's sphere. */
+const BV_MODES = ['sphere', 'region', 'cell', 'box'];
+
 function unionRegion(a, b) {
   if (!a) return b;
   return [Math.min(a[0], b[0]), Math.min(a[1], b[1]), Math.max(a[2], b[2]), Math.max(a[3], b[3]),
@@ -313,8 +370,23 @@ function nestLeaves(leaves, schemeName, bv = 'sphere') {
     const geometricError = Math.max(...children.map(c => c.geometricError)) * 2;
     // The geodetic path's first digit is the 2×1 root-cell selector, so its level is one shorter.
     const level = schemeName === 'geodetic' ? Math.max(0, node.path.length - 1) : node.path.length;
+    const union = () => children.reduce((acc, c) => unionRegion(acc, reg(c)), null);
+    let volume;
+    if (bv === 'region') volume = { region: union() };
+    else if (bv === 'cell') {
+      // The quadtree cell itself — what an implicit QUADTREE tileset would use — widened where a
+      // dataset near the cell's edge pokes out (it is placed by its centre), and given the
+      // children's height range. Exactly the cell whenever everything fits.
+      const u = union();
+      const c = cellBounds(schemeName, node.path);
+      const D = Math.PI / 180;
+      volume = { region: [Math.min(u[0], c.west * D), Math.min(u[1], c.south * D), Math.max(u[2], c.east * D), Math.max(u[3], c.north * D), u[4], u[5]] };
+    } else if (bv === 'box') {
+      const box = boxAround(children.map(sph), sphere);
+      volume = box ? { box } : { sphere };
+    } else volume = { sphere };
     const group = {
-      boundingVolume: bv === 'region' ? { region: children.reduce((acc, c) => unionRegion(acc, reg(c)), null) } : { sphere },
+      boundingVolume: volume,
       geometricError,
       refine: 'ADD',
       extras: { cell: { scheme: schemeName, key: node.path || '(root)', level } },
@@ -364,7 +436,7 @@ const DATASET_SCHEMA = {
   classes: {
     dataset: {
       description: 'One source dataset referenced by an /aggregate mosaic',
-      properties: Object.fromEntries(['id', 'name', 'project', 'scene', 'date', 'format', 'licence']
+      properties: Object.fromEntries(['id', 'name', 'project', 'scene', 'date', 'format', 'licence', 'provider', 'attribution']
         .map((k) => [k, { type: 'STRING' }])),
     },
   },
@@ -450,9 +522,15 @@ export async function buildAggregate(urls, { nest = 'auto', ttlMs = DEFAULT_TTL_
     const earthR = Math.max(...children.map((c) => { const [x, y, z, r] = c.boundingVolume.sphere; return Math.hypot(x, y, z) + r; }));
     // union of the children's regions — the nested root already is one; a region around the union
     // SPHERE would be useless (that sphere can be larger than the planet)
-    if (bv === 'region') root.boundingVolume.region ??= root.children.reduce((acc, c) => unionRegion(acc, c.boundingVolume.region ?? sphereToRegion(c.boundingVolume.sphere)), null);
-    if (bv === 'region') delete root.boundingVolume.sphere;
-    else if (earthR < rootSphere[3]) root.boundingVolume = { sphere: [0, 0, 0, earthR] };
+    const regionOf = (c) => c.boundingVolume.region ?? sphereToRegion(c.boundingVolume.sphere ?? sphereOfVolume(c.boundingVolume));
+    if (bv === 'region' || bv === 'cell') {
+      root.boundingVolume = { region: root.boundingVolume.region ?? root.children.reduce((acc, c) => unionRegion(acc, regionOf(c)), null) };
+    } else if (bv === 'box' && root.boundingVolume.box) {
+      // a box that is looser than the Earth-centred sphere (a world mosaic) falls back to the sphere
+      const [, , , ...axes] = root.boundingVolume.box;
+      const boxR = Math.hypot(...axes.slice(0, 3)) + Math.hypot(...axes.slice(3, 6)) + Math.hypot(...axes.slice(6, 9));
+      if (earthR < boxR) root.boundingVolume = { sphere: [0, 0, 0, earthR] };
+    } else if (earthR < rootSphere[3]) root.boundingVolume = { sphere: [0, 0, 0, earthR] };
   }
 
   // depth/fanout of what we produced — cheap to compute, and the only way to see the nesting worked
@@ -498,16 +576,16 @@ export async function buildAggregate(urls, { nest = 'auto', ttlMs = DEFAULT_TTL_
 
 /** Open data from the 3D Tiles spec's own RESOURCES.md — nine cities on four continents. */
 const OPEN_DATA = [
-  { id: 'strasbourg', label: 'Strasbourg Od@CiT (FR)', url: 'https://s3.eu-west-2.wasabisys.com/ems-sgct-photomaillage/ODACIT/EMS_PM2022/tileset.json' },
-  { id: 'clermont', label: 'Clermont-Ferrand (FR)', url: 'https://3d.craig.fr/datasets/Clermont/3dtiles/tileset.json' },
-  { id: 'st-etienne', label: 'Saint-Étienne (FR)', url: 'https://3d.craig.fr/datasets/St-Etienne/3dtiles/tileset.json' },
-  { id: 'lille', label: 'Métropole de Lille (FR)', url: 'https://webimaging.lillemetropole.fr/externe/maillage/2016_mel_10cm/3dtiles/tileset.json' },
-  { id: 'angkor-planet', label: 'Angkor Wat — Planet SkySat (KH)', url: 'https://storage.googleapis.com/open-cogs/planet-stac/angkor-wat/3d-geofox.ai/3DTiles/tileset.json' },
-  { id: 'utrecht', label: 'Utrecht integrated mesh (NL)', url: 'https://tiles.arcgis.com/tiles/V6ZHFr6zdgNZuVG0/arcgis/rest/services/Utrecht_3D_Tiles_Integrated_Mesh/3DTilesServer/tileset.json' },
-  { id: 'soest', label: 'Soest 3D mesh (DE)', url: 'https://soest.virtualcitymap.de/datasource-data/HOSTING-Soest/3D-Mesh_2023/tileset.json' },
-  { id: 'aarhus', label: 'Aarhus mesh (DK)', url: 'https://sdfe-hosting.virtualcitymap.de/Aarhus/datasource-data/Aarhus_Mesh/tileset.json' },
-  { id: 'agi-hq', label: 'AGI Headquarters (US)', url: 'https://pelican-public.s3.amazonaws.com/3dtiles/agi-hq/tileset.json' },
-  { id: 'minato', label: 'Tokyo Minato-ku LOD4 — PLATEAU (JP)', url: 'https://assets.cms.plateau.reearth.io/assets/99/e2a800-7d75-4d11-94e1-bef604c39d01/13103_minato-ku_pref_2023_citygml_1_op_bldg_3dtiles_13103_minato-ku_lod4/tileset.json' },
+  { id: 'strasbourg', provider: "Eurométropole de Strasbourg", attribution: "© Eurométropole de Strasbourg, Od@CiT", label: 'Strasbourg Od@CiT (FR)', url: 'https://s3.eu-west-2.wasabisys.com/ems-sgct-photomaillage/ODACIT/EMS_PM2022/tileset.json' },
+  { id: 'clermont', provider: "CRAIG", attribution: "© CRAIG / Clermont Auvergne Métropole", label: 'Clermont-Ferrand (FR)', url: 'https://3d.craig.fr/datasets/Clermont/3dtiles/tileset.json' },
+  { id: 'st-etienne', provider: "CRAIG", attribution: "© CRAIG / Saint-Étienne Métropole", label: 'Saint-Étienne (FR)', url: 'https://3d.craig.fr/datasets/St-Etienne/3dtiles/tileset.json' },
+  { id: 'lille', provider: "Métropole Européenne de Lille", attribution: "© Métropole Européenne de Lille", label: 'Métropole de Lille (FR)', url: 'https://webimaging.lillemetropole.fr/externe/maillage/2016_mel_10cm/3dtiles/tileset.json' },
+  { id: 'angkor-planet', provider: "Planet", attribution: "© Planet Labs PBC, SkySat; 3D by geofox.ai", label: 'Angkor Wat — Planet SkySat (KH)', url: 'https://storage.googleapis.com/open-cogs/planet-stac/angkor-wat/3d-geofox.ai/3DTiles/tileset.json' },
+  { id: 'utrecht', provider: "Gemeente Utrecht", attribution: "© Gemeente Utrecht, hosted by Esri", label: 'Utrecht integrated mesh (NL)', url: 'https://tiles.arcgis.com/tiles/V6ZHFr6zdgNZuVG0/arcgis/rest/services/Utrecht_3D_Tiles_Integrated_Mesh/3DTilesServer/tileset.json' },
+  { id: 'soest', provider: "Stadt Soest", attribution: "© Stadt Soest, virtualcitySYSTEMS", label: 'Soest 3D mesh (DE)', url: 'https://soest.virtualcitymap.de/datasource-data/HOSTING-Soest/3D-Mesh_2023/tileset.json' },
+  { id: 'aarhus', provider: "SDFI", attribution: "© Klimadatastyrelsen (SDFI) / Aarhus Kommune", label: 'Aarhus mesh (DK)', url: 'https://sdfe-hosting.virtualcitymap.de/Aarhus/datasource-data/Aarhus_Mesh/tileset.json' },
+  { id: 'agi-hq', provider: "Cesium", attribution: "© Cesium (AGI)", label: 'AGI Headquarters (US)', url: 'https://pelican-public.s3.amazonaws.com/3dtiles/agi-hq/tileset.json' },
+  { id: 'minato', provider: "Project PLATEAU", attribution: "© MLIT Japan, Project PLATEAU", label: 'Tokyo Minato-ku LOD4 — PLATEAU (JP)', url: 'https://assets.cms.plateau.reearth.io/assets/99/e2a800-7d75-4d11-94e1-bef604c39d01/13103_minato-ku_pref_2023_citygml_1_op_bldg_3dtiles_13103_minato-ku_lod4/tileset.json' },
 ];
 
 /**
@@ -518,6 +596,7 @@ const OPEN_DATA = [
  * A grouping derived only from bounding spheres should discover that split on its own.
  */
 const ANGKOR_BASE = 'https://api.iconem.com/s/is52XRiz30fn30HPjbgGe-KrydjSA3r0';
+const ICONEM = { provider: 'Iconem', attribution: '© Iconem' };
 const ANGKOR_SITES = [
   'AkYum_231M_d202411_p202412_epsg32648',
   'AngkorThom_SouthGate_817M_d202411_p202412_epsg32648',
@@ -558,13 +637,15 @@ export const DEMO_SETS = {
   angkor: {
     label: 'Iconem Angkor — 23 individual site tilesets',
     urls: ANGKOR_SITES.map((s) => `${ANGKOR_BASE}/${s}/tileset.json`),
-    entries: ANGKOR_SITES.map((s) => ({ id: s, label: angkorLabel(s), url: `${ANGKOR_BASE}/${s}/tileset.json` })),
+    entries: ANGKOR_SITES.map((s) => ({ id: s, label: angkorLabel(s), url: `${ANGKOR_BASE}/${s}/tileset.json`, ...ICONEM })),
   },
   /** Everything at once — the "one endpoint, heterogeneous sources, whole planet" pitch. */
   world: {
-    label: 'Open data + Angkor — 33 tilesets across four continents',
+    label: 'Open data + Angkor + Aerometrex — 45 tilesets across four continents',
     urls: [...OPEN_DATA.map((d) => d.url), ...ANGKOR_SITES.map((s) => `${ANGKOR_BASE}/${s}/tileset.json`)],
-    entries: [...OPEN_DATA, ...ANGKOR_SITES.map((s) => ({ id: s, label: angkorLabel(s), url: `${ANGKOR_BASE}/${s}/tileset.json` }))],
+    entries: [...OPEN_DATA, ...ANGKOR_SITES.map((s) => ({ id: s, label: angkorLabel(s), url: `${ANGKOR_BASE}/${s}/tileset.json`, ...ICONEM }))],
+    // Aerometrex's US city previews come from the committed manifest (proxied, with its attribution)
+    include: ['aerometrex'],
   },
 };
 
@@ -603,7 +684,8 @@ async function readSetsDir(dir, local) {
   for (const f of files) {
     try {
       const m = JSON.parse(await readFile(path.join(dir, f), 'utf8'));
-      if (Array.isArray(m.entries)) sets[f.replace(/\.json$/, '')] = { label: m.label ?? f, entries: m.entries, manifest: true, local };
+      if (Array.isArray(m.entries)) sets[f.replace(/\.json$/, '')] = { label: m.label ?? f, entries: m.entries, manifest: true, local,
+        provider: m.provider ?? null, attribution: m.attribution ?? null };
     } catch (e) { console.warn(`[aggregate] ignoring unreadable set ${f}: ${e.message}`); }
   }
   return sets;
@@ -705,6 +787,7 @@ function draftRows(ts) {
         id: props.id || idOf(t.content.uri), name: props.name || nameFromUrl(t.content.uri),
         project: props.project, scene: props.scene, group: groupPath || null, date: props.date || null,
         ...(props.licence ? { licence: props.licence } : {}), format: props.format || formatOfUrl(t.content.uri),
+        provider: props.provider ?? null, ...(props.attribution ? { attribution: props.attribution } : {}),
         url: t.content.uri, lon: +lon.toFixed(6), lat: +lat.toFixed(6), height: +height.toFixed(1), radius: +r.toFixed(1),
       } });
     }
@@ -796,7 +879,7 @@ export async function handleAggregate(req, res, u) {
     res.writeHead(200, { 'Content-Type': 'application/json', ...CORS });
     res.end(JSON.stringify(Object.fromEntries(Object.entries(sets).map(([k, v]) => [k, v.local
       ? { label: v.label, count: v.entries.length, local: true, names: v.entries.map((e) => e.name ?? null) }
-      : { label: v.label, count: v.entries.length, entries: v.entries }]))));
+      : { label: v.label, count: v.entries.length + (v.include || []).reduce((n, i) => n + (sets[i]?.entries.length ?? 0), 0), entries: v.entries, ...(v.include ? { include: v.include } : {}) }]))));
     return true;
   }
   const isTileset = u.pathname === '/aggregate/tileset.json';
@@ -812,6 +895,7 @@ export async function handleAggregate(req, res, u) {
   const urls = items.map((it) => it.url);
   const labels = Object.fromEntries(items.map((it) => [it.url, {
     id: it.id, name: it.name, project: it.project, scene: it.scene, date: it.date, format: it.fmt, licence: it.licence,
+    provider: it.provider, attribution: it.attribution,
   }]));
 
   const key = JSON.stringify({ urls, nest, ttlMs, bv, labels });
@@ -844,6 +928,8 @@ export async function handleAggregate(req, res, u) {
           // `group` is the platform scene when known: datasets sharing one are either a diachronic
           // series (show the latest) or pieces of one site (show them all) — a UI decides which.
           group: it.group ?? null, date: it.date ?? null, ...(it.licence ? { licence: it.licence } : {}),
+          // who the data comes from — the library/picker filter on it, and viewers show `attribution`
+          provider: it.provider ?? null, set: it.set ?? null, ...(it.attribution ? { attribution: it.attribution } : {}),
           format: it.fmt || '3dtiles', url: t.content.uri,
           lon: +lon.toFixed(6), lat: +lat.toFixed(6), height: +height.toFixed(1), radius: +r.toFixed(1),
         });
@@ -946,12 +1032,24 @@ function selectChildren(req, u, sets) {
   // and a display NAME for the index.
   const set = setName ? sets[setName] : null;
   const labelByUrl = new Map((set && !set.manifest ? set.entries : []).map((e) => [e.url, e.label || e.id]));
+  const fromManifest = (entries, m) => entries.map((e) => ({ id: idOf(e.url), url: childUrlFor(e, origin), fmt: e.format || '3dtiles',
+        name: e.name, project: e.project, scene: e.scene, date: e.date ?? null, licence: e.licence,
+        provider: e.provider ?? m.provider ?? null, attribution: e.attribution ?? m.attribution ?? null, set: m.name,
+        group: e.sceneId != null ? `scene:${e.sceneId}` : e.scene ? `scene:${e.project ?? ''}/${e.scene}` : null,
+        text: [e.url, e.name, e.project, e.scene, e.date, e.provider ?? m.provider].filter(Boolean).join(' ') }));
   const fromSet = !set ? [] : set.manifest
     ? set.entries.map((e) => ({ id: idOf(e.url), url: childUrlFor(e, origin), fmt: e.format || '3dtiles',
         name: e.name, project: e.project, scene: e.scene, date: e.date ?? null, licence: e.licence,
+        provider: e.provider ?? set.provider ?? null, attribution: e.attribution ?? set.attribution ?? null, set: setName,
         group: e.sceneId != null ? `scene:${e.sceneId}` : e.scene ? `scene:${e.project ?? ''}/${e.scene}` : null,
-        text: [e.url, e.name, e.project, e.scene, e.date].filter(Boolean).join(' ') }))
-    : set.urls.map((x) => ({ id: idOf(x), url: x, fmt: '3dtiles', name: labelByUrl.get(x), text: `${x} ${labelByUrl.get(x) ?? ''}` }));
+        text: [e.url, e.name, e.project, e.scene, e.date, e.provider ?? set.provider].filter(Boolean).join(' ') }))
+    : [
+        ...set.entries.map((e) => ({ id: idOf(e.url), url: e.url, fmt: '3dtiles', name: e.label || e.id,
+          provider: e.provider ?? null, attribution: e.attribution ?? null, set: setName,
+          text: [e.url, e.label, e.provider].filter(Boolean).join(' ') })),
+        // code sets may pull in public manifests (the world set includes Aerometrex, through /proxy)
+        ...(set.include || []).flatMap((name) => (sets[name]?.manifest ? fromManifest(sets[name].entries, { ...sets[name], name }) : [])),
+      ];
   const adhoc = (x) => ({ id: idOf(x), url: x, fmt: formatOfUrl(x), name: nameFromUrl(x), text: x });
   let items = [
     ...fromSet,
@@ -991,7 +1089,10 @@ function selectChildren(req, u, sets) {
   // what you want while iterating on a dataset that is actively being re-tiled.
   const ttlParam = u.searchParams.get('ttl');
   const ttlMs = ttlParam == null ? DEFAULT_TTL_MS : Math.max(0, Number(ttlParam) || 0) * 1000;
-  const bv = u.searchParams.get('bv') === 'region' ? 'region' : 'sphere';
+  const bv = BV_MODES.includes(u.searchParams.get('bv')) ? u.searchParams.get('bv') : 'sphere';
   const latest = ['1', 'true'].includes(u.searchParams.get('latest') ?? '');
   return { items, nest, ttlMs, bv, latest };
 }
+
+/** Internals exposed for scripts/debug-aggregate-nesting.mjs. */
+export const __test = { cellBounds, SCHEMES };

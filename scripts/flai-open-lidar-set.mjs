@@ -52,12 +52,17 @@ for (const [country, epsg, dataPath, start, end, density, licence] of rows) {
     date: start && end ? `${start}/${end}` : start || null,
     density: Number(density) || null,
     licence: licence.replace(/<br\/?>/g, ' '),
+    // the agency is the data's author; flai is who mirrored it as COPC
+    provider: agency,
+    attribution: `${licence.split(/[,[]/)[0].trim()} — via flai open LiDAR`,
   });
 }
 
 await fs.mkdir(path.dirname(OUT), { recursive: true });
 await fs.writeFile(OUT, JSON.stringify({
   label: `flai open LiDAR — ${entries.length} national COPC overviews`,
+  provider: 'flai open LiDAR',
+  attribution: 'National mapping agencies, mirrored by flai (github.com/flai-ai/open-lidar-data)',
   source: 'https://github.com/flai-ai/open-lidar-data',
   generatedAt: new Date().toISOString(),
   entries,
