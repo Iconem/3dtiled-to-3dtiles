@@ -21,7 +21,8 @@
  */
 import * as Cesium from 'cesium';
 
-export type RasterTerrainId = 'terrarium' | 'mapterhorn' | 'mapterhorn-ellipsoid';
+import type { RasterTerrainId } from './terrainModes';
+export type { RasterTerrainId };
 
 export interface RasterTerrain {
   url: string;
@@ -29,6 +30,8 @@ export interface RasterTerrain {
   maxZoom: number;
   datum: 'sea level' | 'ellipsoid';
   credit: string;
+  /** Replacement for a broken z0 tile (see ThreeDTRjsViewer's TerrariumRootFallbackPlugin). */
+  rootUrl?: string;
 }
 
 export const RASTER_TERRAINS: Record<RasterTerrainId, RasterTerrain> = {
@@ -45,9 +48,12 @@ export const RASTER_TERRAINS: Record<RasterTerrainId, RasterTerrain> = {
   'mapterhorn-ellipsoid': {
     url: 'https://terrain.reearth.land/mapterhorn-egm08/terrarium/ellipsoid/{z}/{x}/{y}.webp',
     tileSize: 512, maxZoom: 14, datum: 'ellipsoid',
+    rootUrl: 'https://tiles.mapterhorn.com/0/0/0.webp',
     credit: 'Mapterhorn + EGM2008, served by Re:Earth Terrain (terrain.reearth.land)',
   },
 };
+
+export { resolveTerrainMode, snapRasterFor, type TerrainMode } from './terrainModes';
 
 /** Re:Earth's quantized-mesh version of the ellipsoidal Mapterhorn DEM (layer.json at this base). */
 export const REEARTH_QM_URL = 'https://terrain.reearth.land/cesium-mesh/ellipsoid';
@@ -96,7 +102,7 @@ function bilinear(h: Float32Array, n: number, px: number, py: number): number {
 async function ancestorTile(src: RasterTerrain, level: number, x: number, y: number) {
   for (let d = Math.max(0, level - src.maxZoom); d <= level; d++) {
     const z = level - d, ax = x >> d, ay = y >> d;
-    const h = await sourceTile(src, z, ax, ay);
+    const h = z === 0 && src.rootUrl ? await sourceTile({ ...src, url: src.rootUrl }, 0, 0, 0) : await sourceTile(src, z, ax, ay);
     if (h) return { h, d, ax, ay };
   }
   return null;

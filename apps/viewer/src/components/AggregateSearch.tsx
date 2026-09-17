@@ -5,8 +5,11 @@
  *  - the FULL index (the loaded URL minus every picker param): what search, markers and the picker
  *    can offer — including datasets the current filters exclude, so they can be brought back;
  *  - the CURRENT index (the loaded URL as is): which of those are actually in the mosaic.
- * Every picker change (show/hide, latest only, dates, formats) rewrites the mosaic URL and reloads
- * it, so the URL stays the whole state and a filtered view is still a plain 3D Tiles endpoint.
+ * Every picker change (show/hide, latest only, dates, formats) rewrites the mosaic URL, so the URL
+ * stays the whole state and a filtered view is still a plain 3D Tiles endpoint — but the renderer
+ * does not reload it: it keeps the unfiltered mosaic and hides the excluded datasets in place, by the
+ * `id` in each leaf's tile metadata (ViewerHandle.setDatasetStyle). Only the bounding volumes (`bv`)
+ * and the snap to ground change the tree itself, and reload it.
  */
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { Input } from '@/components/ui/input';
@@ -15,9 +18,11 @@ import { Slider } from '@/components/ui/slider';
 import { useViewerStore } from '@/state/store';
 import type { ViewerHandle } from '@/lib/viewer-handle';
 import {
-  dateSpan, dateToYear, fetchAggregateIndex, heightForPlace, isAggregateUrl, pickerBaseUrl, readPicker, searchDatasets,
-  searchPlaces, withPicker, type AggregateIndex, type DatasetMarker, type PickerState, type Place,
+  BV_MODES, dateSpan, fetchAggregateIndex, heightForPlace, isAggregateUrl, pickerBaseUrl, readBv, readPicker, readSnap,
+  searchDatasets, searchPlaces, withBv, withPicker, withSnap, type AggregateIndex, type BvMode, type DatasetMarker,
+  type PickerState, type Place,
 } from '@/lib/aggregate';
+import { markerColors, providerColor, type ColorMode, type DatasetStyle } from '@/lib/datasetStyle';
 import { MARKER_COLORS } from './Viewport/DatasetTooltip';
 
 type Row = { kind: 'dataset'; d: DatasetMarker } | { kind: 'place'; p: Place };
@@ -26,9 +31,28 @@ type Row = { kind: 'dataset'; d: DatasetMarker } | { kind: 'place'; p: Place };
 const IN_VIEW_FRACTION = 0.03;
 const IN_VIEW_POLL_MS = 1000;
 
-const Dot = ({ format, dim }: { format: string; dim?: boolean }) => (
-  <span className="size-2 shrink-0 rounded-full" style={{ background: dim ? '#6b7280' : MARKER_COLORS[format] ?? '#94a3b8' }} />
+const Dot = ({ color, dim }: { color?: string; dim?: boolean }) => (
+  <span className="size-2 shrink-0 rounded-full" style={{ background: dim ? '#6b7280' : color ?? '#94a3b8' }} />
 );
+
+/** A small segmented control. */
+function Segmented<T extends string>({ value, options, onChange, title }: {
+  value: T; options: readonly T[]; onChange: (v: T) => void; title?: string;
+}) {
+  return (
+    <span className="inline-flex overflow-hidden rounded border" title={title}>
+      {options.map((o) => (
+        <button key={o} type="button" onClick={() => o !== value && onChange(o)}
+          className={`px-1.5 py-0.5 ${o === value ? 'bg-primary text-primary-foreground' : 'hover:bg-accent'}`}>{o}</button>
+      ))}
+    </span>
+  );
+}
+
+const BV_HELP = 'Bounding volume of the mosaic\'s group tiles. cell: the quadtree cell itself (default — tight, never overlapping); '
+  + 'sphere / region / box: fitted to the datasets inside. Each dataset keeps its own volumes below.';
+
+const cellLabel = (d: DatasetMarker) => (d.cell ? ` · cell ${d.cell.key || '(root)'} z${d.cell.level}, depth ${d.depth}` : '');
 
 export default function AggregateSearch({ activeHandleRef, renderer }: {
   activeHandleRef: React.RefObject<ViewerHandle | null>;
@@ -51,7 +75,21 @@ export default function AggregateSearch({ activeHandleRef, renderer }: {
   const [panel, setPanel] = useState(false);
   const [inView, setInView] = useState<string[]>([]);
   const [years, setYears] = useState<number[] | null>(null);
+  const [colorMode, setColorMode] = useState<ColorMode>('format');
+  // providers whose MARKERS are hidden (the data itself is the picker's business)
+  const [mutedProviders, setMutedProviders] = useState<Set<string>>(new Set());
   const boxRef = useRef<HTMLDivElement>(null);
+  const terrainMode = useViewerStore((s) => s.terrainMode);
+
+  // What the active renderer actually has loaded. The picker only rewrites the URL (selfUrl) when the
+  // renderer already holds this mosaic unfiltered; anything else — another load, a renderer switch —
+  // is a real load of `lastLoadUrl`.
+  const loadedRef = useRef({ renderer: '', url: '' });
+  const selfUrlRef = useRef('');
+  useEffect(() => {
+    if (renderer !== loadedRef.current.renderer || lastLoadUrl !== selfUrlRef.current) loadedRef.current = { renderer, url: lastLoadUrl };
+    selfUrlRef.current = '';
+  }, [lastLoadUrl, renderer]);
 
   // Full index: only when the underlying mosaic changes, not on every picker tweak.
   useEffect(() => {
@@ -62,9 +100,10 @@ export default function AggregateSearch({ activeHandleRef, renderer }: {
     return () => ac.abort();
   }, [baseUrl]);
 
-  // Current index: what the loaded (filtered) URL actually contains.
+  // Current index: what the loaded (filtered) URL actually contains. The previous one stays until the
+  // next arrives, so rapid clicks keep working instead of every row flashing disabled meanwhile.
+  useEffect(() => { setCurrent(null); }, [baseUrl]);
   useEffect(() => {
-    setCurrent(null);
     if (!active || !filtered) return;
     const ac = new AbortController();
     fetchAggregateIndex(lastLoadUrl, ac.signal).then(setCurrent).catch((e) => { if (!ac.signal.aborted) setError(String(e.message || e)); });
@@ -74,21 +113,44 @@ export default function AggregateSearch({ activeHandleRef, renderer }: {
   const activeIds = useMemo(() => {
     if (!full) return new Set<string>();
     const src = filtered ? current : full;
-    return new Set((src?.datasets ?? (filtered ? [] : full.datasets)).map((d) => d.id));
-  }, [full, current, filtered]);
+    // index on its way: the hand-hidden set is known already, the rest follows with the index
+    if (!src) return new Set(full.datasets.filter((d) => !picker?.hide.has(d.id)).map((d) => d.id));
+    return new Set(src.datasets.map((d) => d.id));
+  }, [full, current, filtered, picker]);
 
+  const colors = useMemo(() => markerColors(full?.datasets ?? [], colorMode), [full, colorMode]);
+
+  /**
+   * Markers: datasets of a type that is filtered out, or of a muted provider, are not shown at all;
+   * those hidden by hand, by date or by "latest only" stay as grey dots, so they can be found again.
+   */
   const markers = useMemo(() => {
-    if (!full) return null;
-    if (!filtered) return full.datasets;
-    if (!current) return null;                                  // wait, rather than flash everything as hidden
-    return full.datasets.map((d) => (activeIds.has(d.id) ? d : { ...d, inactive: true }));
-  }, [full, current, filtered, activeIds]);
+    if (!full || !picker) return null;
+    if (filtered && !current) return null;                      // wait, rather than flash everything as hidden
+    return full.datasets
+      .filter((d) => !(picker.formats.length && !picker.formats.includes(d.format)))
+      .filter((d) => !mutedProviders.has(d.provider ?? ''))
+      .map((d) => ({ ...d, color: colors.get(d.id), ...(activeIds.has(d.id) ? {} : { inactive: true }) }));
+  }, [full, current, filtered, activeIds, picker, mutedProviders, colors]);
 
   // Push markers to the renderer. Re-run on renderer switch: the handle behind the ref changes.
   useEffect(() => {
     activeHandleRef.current?.setDatasetMarkers?.(active && showMarkers && markers ? markers : null);
     return () => { activeHandleRef.current?.setDatasetMarkers?.(null); };
   }, [markers, showMarkers, active, renderer, activeHandleRef]);
+
+  // Hide / tint the datasets themselves, in place. `undefined` = the current index is still on its way.
+  const style = useMemo((): DatasetStyle | null | undefined => {
+    if (!full) return null;
+    if (filtered && !current) return undefined;
+    const hidden = new Set(full.datasets.filter((d) => !activeIds.has(d.id)).map((d) => d.id));
+    const tint = colorMode === 'format' ? null : colors;
+    return hidden.size || tint ? { hidden, colors: tint } : null;
+  }, [full, current, filtered, activeIds, colorMode, colors]);
+  useEffect(() => {
+    if (style !== undefined) activeHandleRef.current?.setDatasetStyle?.(active ? style : null);
+  }, [style, active, renderer, activeHandleRef]);
+  useEffect(() => () => { activeHandleRef.current?.setDatasetStyle?.(null); }, [renderer, activeHandleRef]);
 
   // Which datasets are on screen and big enough to be rendering (or about to).
   useEffect(() => {
@@ -133,6 +195,13 @@ export default function AggregateSearch({ activeHandleRef, renderer }: {
     for (const d of full?.datasets ?? []) m.set(d.format, (m.get(d.format) ?? 0) + 1);
     return [...m].sort((a, b) => b[1] - a[1]);
   }, [full]);
+
+  const providerCounts = useMemo(() => {
+    const m = new Map<string, number>();
+    for (const d of full?.datasets ?? []) m.set(d.provider ?? '', (m.get(d.provider ?? '') ?? 0) + 1);
+    return [...m].sort((a, b) => b[1] - a[1]);
+  }, [full]);
+  const providerNames = useMemo(() => providerCounts.map(([p]) => p), [providerCounts]);
 
   // Year span of the dated datasets, for the timeline.
   const yearSpan = useMemo(() => {
@@ -187,16 +256,26 @@ export default function AggregateSearch({ activeHandleRef, renderer }: {
 
   if (!active || !picker) return null;
 
-  function apply(next: PickerState) {
+  /**
+   * Make `url` the mosaic's state. The renderer keeps (or gets) the UNFILTERED mosaic and hides what
+   * `url` excludes itself, so a selection change never reloads; `reload` forces one (the tree changed).
+   */
+  function commit(url: string, reload = false) {
     const h = activeHandleRef.current;
-    const url = withPicker(lastLoadUrl, next);
     if (!h || url === lastLoadUrl) return;
     const st = useViewerStore.getState();
+    const base = pickerBaseUrl(url);
+    const inPlace = !reload && typeof h.setDatasetStyle === 'function'
+      && loadedRef.current.renderer === renderer && loadedRef.current.url === base;
+    selfUrlRef.current = url;
     st.setLastLoadUrl(url);
     st.setUrlField(url);
+    if (inPlace) return;
+    loadedRef.current = { renderer, url: base };
     // keep the camera where it is: the user is looking at what they are filtering
-    h.load(url, st.currentType, { skipAutoFrame: true });
+    h.load(base, st.currentType, { skipAutoFrame: true });
   }
+  const apply = (next: PickerState) => commit(withPicker(lastLoadUrl, next));
   const patch = (p: Partial<PickerState>) => apply({ ...picker!, ...p });
 
   function toggleDataset(d: DatasetMarker, show: boolean) {
@@ -249,6 +328,9 @@ export default function AggregateSearch({ activeHandleRef, renderer }: {
   }
 
   const supportsMarkers = typeof activeHandleRef.current?.setDatasetMarkers === 'function';
+  const bv = readBv(lastLoadUrl);
+  const snap = readSnap(lastLoadUrl);
+  const colorOf = (d: DatasetMarker) => colors.get(d.id) ?? MARKER_COLORS[d.format];
   const shownCount = filtered ? (current?.count ?? '…') : full?.count;
   const reasonOf = (d: DatasetMarker) => (picker.hide.has(d.id) ? 'hidden'
     : picker.formats.length && !picker.formats.includes(d.format) ? 'format filter'
@@ -301,7 +383,7 @@ export default function AggregateSearch({ activeHandleRef, renderer }: {
                 >
                   {row.kind === 'dataset' ? (
                     <>
-                      <span className="mt-1.5"><Dot format={row.d.format} dim={!activeIds.has(row.d.id)} /></span>
+                      <span className="mt-1.5"><Dot color={colorOf(row.d)} dim={!activeIds.has(row.d.id)} /></span>
                       <span className="min-w-0">
                         <span className="block truncate">{row.d.name}</span>
                         <span className="block truncate text-xs text-muted-foreground">
@@ -336,7 +418,7 @@ export default function AggregateSearch({ activeHandleRef, renderer }: {
               return (
                 <button key={f} type="button" onClick={() => toggleFormat(f)} title={on ? `hide ${f}` : `show ${f}`}
                   className={`flex items-center gap-1 rounded-full border px-2 py-0.5 ${on ? 'bg-accent' : 'opacity-50'}`}>
-                  <Dot format={f} dim={!on} />{f} <span className="text-muted-foreground">{n}</span>
+                  <Dot color={MARKER_COLORS[f]} dim={!on} />{f} <span className="text-muted-foreground">{n}</span>
                 </button>
               );
             })}
@@ -344,6 +426,39 @@ export default function AggregateSearch({ activeHandleRef, renderer }: {
               <Checkbox checked={picker.latest} onCheckedChange={(v) => patch({ latest: v === true })} />
               latest only
             </label>
+          </div>
+          {providerCounts.length > 1 && (
+            <div className="flex flex-wrap items-center gap-1" title="Show or hide the markers of a provider's datasets (not the datasets)">
+              <span className="text-muted-foreground">markers</span>
+              {providerCounts.map(([p, n]) => {
+                const on = !mutedProviders.has(p);
+                return (
+                  <button key={p || '-'} type="button"
+                    onClick={() => setMutedProviders((m) => { const x = new Set(m); if (on) x.add(p); else x.delete(p); return x; })}
+                    className={`flex items-center gap-1 rounded-full border px-2 py-0.5 ${on ? 'bg-accent' : 'opacity-50'}`}>
+                    <Dot color={colorMode === 'provider' ? providerColor(p, providerNames) : undefined} dim={!on} />
+                    {p || 'unknown'} <span className="text-muted-foreground">{n}</span>
+                  </button>
+                );
+              })}
+            </div>
+          )}
+          <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
+            <span className="flex items-center gap-1">
+              <span className="text-muted-foreground">colour</span>
+              <Segmented value={colorMode} options={['format', 'provider', 'dataset'] as const} onChange={setColorMode}
+                title="Colour markers — and, for provider / dataset, the data itself — by format, provider or dataset" />
+            </span>
+            <span className="flex items-center gap-1">
+              <span className="text-muted-foreground">bounds</span>
+              <Segmented value={bv} options={BV_MODES} onChange={(v: BvMode) => commit(withBv(lastLoadUrl, v), true)} title={BV_HELP} />
+            </span>
+            <span className="flex items-center gap-1">
+              <span className="text-muted-foreground">snap</span>
+              <Segmented value={snap ? 'ground' : 'off'} options={['off', 'ground'] as const}
+                onChange={(v) => commit(withSnap(lastLoadUrl, v === 'ground' ? terrainMode : null), true)}
+                title="Put every dataset on the terrain, each with its own vertical offset (server-side, from its own geometry against Mapterhorn)" />
+            </span>
           </div>
           {yearSpan && years && yearSpan.max > yearSpan.min && (
             <div>
@@ -387,9 +502,10 @@ export default function AggregateSearch({ activeHandleRef, renderer }: {
                   const lockedOff = !on && !picker.hide.has(d.id);
                   return (
                     <label key={d.id} className={`flex items-center gap-1.5 py-0.5 pl-1 ${lockedOff ? 'opacity-50' : ''}`}
-                      title={on ? d.name : `${d.name} — ${reasonOf(d)}`}>
+                      title={(on ? d.name : `${d.name} — ${reasonOf(d)}`) + cellLabel(d)
+                        + (d.snap?.dz != null ? ` · snapped ${d.snap.dz} m` : '')}>
                       <Checkbox checked={on} disabled={lockedOff} onCheckedChange={(v) => toggleDataset(d, v === true)} />
-                      <Dot format={d.format} dim={!on} />
+                      <Dot color={colorOf(d)} dim={!on} />
                       <span className="min-w-0 flex-1 truncate">{d.name}</span>
                       <span className="shrink-0 text-muted-foreground">{d.date ? d.date.replace(/-\d\d(?=\/|$)/g, '').replace('/', '→') : '—'}</span>
                       <button type="button" className="shrink-0 text-muted-foreground hover:text-foreground" title="fly to"

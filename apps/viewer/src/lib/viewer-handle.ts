@@ -1,5 +1,8 @@
 import type { AssetType } from './formats';
 import type { DatasetMarker } from './aggregate';
+import type { DatasetStyle } from './datasetStyle';
+import type { BasemapId } from './basemaps';
+import type { TerrainMode } from './terrainModes';
 
 /**
  * Renderer-agnostic contract both CesiumViewer and ThreeDTRjsViewer implement via
@@ -14,8 +17,8 @@ export interface ViewerHandle {
   // behind "Berlin/Washington pills don't zoom to their own location" (all Bing city pills load the
   // SAME global tileset URL, so the auto-frame target is the whole-world bounding sphere, not the city).
   load(url: string, type: AssetType, opts?: { sseOverride?: number | null; skipAutoFrame?: boolean }): void;
-  setBasemap(id: string): void;
-  setTerrainMode(mode: 'wgs84' | 'cesium' | 'reearth-qm' | 'mapterhorn-ellipsoid' | 'mapterhorn' | 'terrarium' | 'google'): void;
+  setBasemap(id: BasemapId): void;
+  setTerrainMode(mode: TerrainMode): void;
   setMaxSSE(v: number | null): void;
   toggleAssetVisible(show: boolean): void;
   setOrtho(on: boolean): void;
@@ -35,6 +38,11 @@ export interface ViewerHandle {
   // Aggregate mosaics (optional — both renderers implement them; callers fall back when absent).
   /** Show one "there is data here" marker per dataset, or clear them with null. */
   setDatasetMarkers?(list: DatasetMarker[] | null): void;
+  /**
+   * Hide and/or tint datasets of the loaded mosaic in place (by their tile metadata id) — the picker's
+   * show/hide and colour modes, without reloading the tileset. null restores everything.
+   */
+  setDatasetStyle?(style: DatasetStyle | null): void;
   /** Frame a dataset from its bounding sphere (degrees, metres). */
   flyToSphere?(lon: number, lat: number, height: number, radius: number): void;
   /**

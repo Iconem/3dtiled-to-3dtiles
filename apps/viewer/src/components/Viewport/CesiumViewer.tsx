@@ -6,7 +6,9 @@ import type { AssetType } from '@/lib/formats';
 import { CESIUM_ION_TOKEN } from '@/lib/ion';
 import { useViewerStore } from '@/state/store';
 import DatasetTooltip, { MARKER_COLORS, type TooltipChannel } from './DatasetTooltip';
-import { createRasterTerrainProvider, RASTER_TERRAINS, REEARTH_QM_URL, sampleRasterTerrain } from '@/lib/terrarium';
+import { createRasterTerrainProvider, RASTER_TERRAINS, REEARTH_QM_URL, resolveTerrainMode, sampleRasterTerrain, snapRasterFor } from '@/lib/terrarium';
+import { BASEMAPS, type BasemapId } from '@/lib/basemaps';
+import { tileDatasetId, type DatasetStyle } from '@/lib/datasetStyle';
 import { datasetGroundSamples, offsetFromSamples } from '@/lib/datasetGround';
 import { SNAP_HALF, SNAP_SAMPLES, SNAP_MIN_HITS } from '@/lib/snapToGround';
 
@@ -34,6 +36,28 @@ interface Props {
 // Extract whatever's actually there, falling back to an actionable hint instead of "undefined".
 // Aggregate markers: hide once a dataset's bounds span more than this fraction of the viewport height.
 const MARKER_HIDE_FRACTION = 0.1;
+
+/** Replace the imagery with a basemap's layers (lib/basemaps.ts), bottom first. */
+function setImagery(v: Cesium.Viewer, id: BasemapId) {
+  v.imageryLayers.removeAll();
+  if (id === 'none') return;
+  for (const l of BASEMAPS[id].layers) {
+    v.imageryLayers.addImageryProvider(new Cesium.UrlTemplateImageryProvider({ url: l.url, maximumLevel: l.maxZoom, credit: l.credit }));
+  }
+}
+
+/** A mosaic leaf's own dataset id (3D Tiles 1.1 tile metadata, class `dataset`). */
+const cesiumTileId = (t: any): string | undefined => {
+  const m = t.metadata;
+  if (!m?.hasProperty?.('id')) return undefined;
+  return m.getProperty('id');
+};
+const cssColors = new Map<string, Cesium.Color>();
+const cssColor = (c: string) => {
+  let col = cssColors.get(c);
+  if (!col) { col = Cesium.Color.fromCssColorString(c); cssColors.set(c, col); }
+  return col;
+};
 
 function describeLoadError(e: any): string {
   if (typeof e === 'string' && e) return e;
@@ -66,6 +90,7 @@ const CesiumViewer = forwardRef<ViewerHandle, Props>(function CesiumViewer({ vis
   const markerDataRef = useRef<DatasetMarker[] | null>(null);
   const tooltipRef: TooltipChannel = useRef(null);
   const pendingFlyRef = useRef<{ lon: number; lat: number; height: number } | null>(null);
+  const datasetStyleRef = useRef<DatasetStyle | null>(null);
   const pendingLoadRef = useRef<{ url: string; type: AssetType; opts?: { sseOverride?: number | null; skipAutoFrame?: boolean } } | null>(null);
 
   const getViewer = () => viewerRef.current;
@@ -97,6 +122,20 @@ const CesiumViewer = forwardRef<ViewerHandle, Props>(function CesiumViewer({ vis
         v.scene.primitives.add(tileset);
         currentTilesetRef.current = tileset;
         tileset.show = store.getState().assetVisible;
+        // Per-dataset show/hide and tint (the aggregate picker): decided per rendered tile, every frame,
+        // before Cesium updates it — so it applies to tiles as they stream in, and no reload is needed.
+        tileset.colorBlendMode = Cesium.Cesium3DTileColorBlendMode.MIX;
+        tileset.colorBlendAmount = 0.65;
+        tileset.tileVisible.addEventListener((tile: any) => {
+          const model = tile.content?._model;
+          if (!model) return;
+          const st = datasetStyleRef.current;
+          const id = st ? tileDatasetId(tile, cesiumTileId) : null;
+          model.show = !(id && st!.hidden.has(id));
+          const c = id ? st!.colors?.get(id) : undefined;
+          if (c) model.color = cssColor(c);
+          else if (model.color && !store.getState().debugTiles) model.color = undefined;
+        });
         if (store.getState().debugTiles) {
           (tileset as any).debugShowBoundingVolume = true;
           (tileset as any).debugColorizeTiles = true;
@@ -224,7 +263,7 @@ const CesiumViewer = forwardRef<ViewerHandle, Props>(function CesiumViewer({ vis
         pixelSize: d.inactive ? 6 : 9,
         color: d.inactive
           ? Cesium.Color.fromCssColorString('#9ca3af').withAlpha(0.55)
-          : Cesium.Color.fromCssColorString(MARKER_COLORS[d.format] ?? '#94a3b8'),
+          : cssColor(d.color ?? MARKER_COLORS[d.format] ?? '#94a3b8'),
         outlineColor: outline,
         outlineWidth: 1.5,
         distanceDisplayCondition: new Cesium.DistanceDisplayCondition(d.radius * hideBelow, Number.MAX_VALUE),
@@ -291,13 +330,7 @@ const CesiumViewer = forwardRef<ViewerHandle, Props>(function CesiumViewer({ vis
     v.scene.requestRenderMode = true;
     v.scene.backgroundColor = Cesium.Color.fromCssColorString('#0a0a0f');
     (window as any).viewer = v;
-    const initialBasemap = store.getState().basemap;
-    if (initialBasemap !== 'osm') {
-      v.imageryLayers.removeAll();
-      if (initialBasemap === 'google') {
-        v.imageryLayers.addImageryProvider(new Cesium.UrlTemplateImageryProvider({ url: 'https://mt1.google.com/vt/lyrs=y&x={x}&y={y}&z={z}', credit: 'Google Hybrid' }));
-      }
-    }
+    setImagery(v, store.getState().basemap);
     const handler = new Cesium.ScreenSpaceEventHandler(v.scene.canvas);
     handler.setInputAction((movement: any) => {
       const picked = v.scene.pickPosition(movement.position);
@@ -339,7 +372,9 @@ const CesiumViewer = forwardRef<ViewerHandle, Props>(function CesiumViewer({ vis
         tooltipRef.current?.(d ? { d, x: at.x, y: at.y, w: canvas.clientWidth, h: canvas.clientHeight } : null);
       });
     }, Cesium.ScreenSpaceEventType.MOUSE_MOVE);
-    store.getState().setStatus('Cesium ready. Select a preset or enter a tileset.json URL.');
+    if (visibleRef.current) store.getState().setStatus('Cesium ready. Select a preset or enter a tileset.json URL.');
+    // The sidebar pushed the terrain before this viewer existed (construction waits a frame).
+    void applyTerrainMode(store.getState().terrainMode);
     cleanupRef.current = () => { cancelAnimationFrame(hoverRaf); handler.destroy(); v.destroy(); viewerRef.current = null; };
     if (pendingLoadRef.current) {
       const { url, type, opts } = pendingLoadRef.current;
@@ -364,6 +399,61 @@ const CesiumViewer = forwardRef<ViewerHandle, Props>(function CesiumViewer({ vis
       offset: new Cesium.HeadingPitchRange(0, pitch, height / Math.sin(-pitch)),
       duration: 2,
     });
+  }
+
+  async function applyTerrainMode(requested: Parameters<ViewerHandle['setTerrainMode']>[0]) {
+    const v = getViewer();
+    if (!v) return;
+    const mode = resolveTerrainMode(requested, 'cesium');
+    // both renderers stay mounted: only the one on screen reports into the status panel
+    const say = (m: string) => { if (visibleRef.current) store.getState().setStatus(m); };
+    if (googleTilesetRef.current) {
+      v.scene.primitives.remove(googleTilesetRef.current);
+      googleTilesetRef.current = null;
+    }
+    if (mode === 'wgs84') {
+      v.terrainProvider = new Cesium.EllipsoidTerrainProvider();
+      return;
+    }
+    if (mode === 'terrarium' || mode === 'mapterhorn' || mode === 'mapterhorn-ellipsoid') {
+      v.terrainProvider = createRasterTerrainProvider(mode);
+      const src = RASTER_TERRAINS[mode];
+      say(`${src.credit} — heights above the ${src.datum === 'ellipsoid' ? 'WGS84 ellipsoid' : 'geoid (mean sea level)'}.`);
+      return;
+    }
+    if (mode === 'reearth-qm') {
+      try {
+        v.terrainProvider = await Cesium.CesiumTerrainProvider.fromUrl(REEARTH_QM_URL, { requestVertexNormals: false });
+        say('Mapterhorn quantized mesh (Re:Earth Terrain) — heights above the WGS84 ellipsoid.');
+      } catch (e) {
+        v.terrainProvider = new Cesium.EllipsoidTerrainProvider();
+        store.getState().setTerrainMode('wgs84');
+        say(`Re:Earth quantized-mesh terrain failed to load:\n${(e as Error).message}`);
+      }
+      return;
+    }
+    if (mode === 'cesium') {
+      try {
+        v.terrainProvider = await Cesium.createWorldTerrainAsync();
+      } catch (e) {
+        v.terrainProvider = new Cesium.EllipsoidTerrainProvider();
+        store.getState().setTerrainMode('wgs84');
+        say(`Cesium World Terrain failed to load:\n${(e as Error).message}`);
+      }
+      return;
+    }
+    // 'google': a photorealistic textured mesh that embeds its own ground — no separate terrain
+    // provider needed (leave whatever elevation provider was active; the tileset sits on top of it).
+    try {
+      say('Loading Google Photorealistic 3D Tiles…');
+      const tileset = await Cesium.createGooglePhotorealistic3DTileset();
+      googleTilesetRef.current = tileset;
+      v.scene.primitives.add(tileset);
+      say('Google Photorealistic 3D Tiles loaded.');
+    } catch (e) {
+      store.getState().setTerrainMode('wgs84');
+      say(`Google Photorealistic 3D Tiles failed to load:\n${(e as Error).message}`);
+    }
   }
 
   function applyZOffsetInternal(dz: number) {
@@ -517,66 +607,9 @@ const CesiumViewer = forwardRef<ViewerHandle, Props>(function CesiumViewer({ vis
     },
     setBasemap(id) {
       const v = getViewer();
-      if (!v) return;
-      const layers = v.imageryLayers;
-      layers.removeAll();
-      if (id === 'google') {
-        layers.addImageryProvider(new Cesium.UrlTemplateImageryProvider({ url: 'https://mt1.google.com/vt/lyrs=y&x={x}&y={y}&z={z}', credit: 'Google Hybrid' }));
-      } else if (id === 'osm') {
-        layers.addImageryProvider(new Cesium.OpenStreetMapImageryProvider({ url: 'https://tile.openstreetmap.org/' }));
-      }
+      if (v) setImagery(v, id);
     },
-    async setTerrainMode(mode) {
-      const v = getViewer();
-      if (!v) return;
-      if (googleTilesetRef.current) {
-        v.scene.primitives.remove(googleTilesetRef.current);
-        googleTilesetRef.current = null;
-      }
-      if (mode === 'wgs84') {
-        v.terrainProvider = new Cesium.EllipsoidTerrainProvider();
-        return;
-      }
-      if (mode === 'terrarium' || mode === 'mapterhorn' || mode === 'mapterhorn-ellipsoid') {
-        v.terrainProvider = createRasterTerrainProvider(mode);
-        const src = RASTER_TERRAINS[mode];
-        store.getState().setStatus(`${src.credit} — heights above the ${src.datum === 'ellipsoid' ? 'WGS84 ellipsoid' : 'geoid (mean sea level)'}.`);
-        return;
-      }
-      if (mode === 'reearth-qm') {
-        try {
-          v.terrainProvider = await Cesium.CesiumTerrainProvider.fromUrl(REEARTH_QM_URL, { requestVertexNormals: false });
-          store.getState().setStatus('Mapterhorn quantized mesh (Re:Earth Terrain) — heights above the WGS84 ellipsoid.');
-        } catch (e) {
-          v.terrainProvider = new Cesium.EllipsoidTerrainProvider();
-          store.getState().setTerrainMode('wgs84');
-          store.getState().setStatus(`Re:Earth quantized-mesh terrain failed to load:\n${(e as Error).message}`);
-        }
-        return;
-      }
-      if (mode === 'cesium') {
-        try {
-          v.terrainProvider = await Cesium.createWorldTerrainAsync();
-        } catch (e) {
-          v.terrainProvider = new Cesium.EllipsoidTerrainProvider();
-          store.getState().setTerrainMode('wgs84');
-          store.getState().setStatus(`Cesium World Terrain failed to load:\n${(e as Error).message}`);
-        }
-        return;
-      }
-      // 'google': a photorealistic textured mesh that embeds its own ground — no separate terrain
-      // provider needed (leave whatever elevation provider was active; the tileset sits on top of it).
-      try {
-        store.getState().setStatus('Loading Google Photorealistic 3D Tiles…');
-        const tileset = await Cesium.createGooglePhotorealistic3DTileset();
-        googleTilesetRef.current = tileset;
-        v.scene.primitives.add(tileset);
-        store.getState().setStatus('Google Photorealistic 3D Tiles loaded.');
-      } catch (e) {
-        store.getState().setTerrainMode('wgs84');
-        store.getState().setStatus(`Google Photorealistic 3D Tiles failed to load:\n${(e as Error).message}`);
-      }
-    },
+    setTerrainMode(mode) { return applyTerrainMode(mode); },
     setMaxSSE(v) {
       if (currentTilesetRef.current) (currentTilesetRef.current as any).maximumScreenSpaceError = v ?? (currentTilesetRef.current as any).maximumScreenSpaceError;
     },
@@ -608,6 +641,10 @@ const CesiumViewer = forwardRef<ViewerHandle, Props>(function CesiumViewer({ vis
       // Marker hide distances are derived from the vertical field of view.
       if (markerDataRef.current) applyDatasetMarkers();
     },
+    setDatasetStyle(style) {
+      datasetStyleRef.current = style;
+      // tiles that are not rendered this frame get re-decided when they are
+    },
     setDatasetMarkers(list) {
       markerDataRef.current = list;
       applyDatasetMarkers();
@@ -621,13 +658,15 @@ const CesiumViewer = forwardRef<ViewerHandle, Props>(function CesiumViewer({ vis
 
       // 1. Preferred: the dataset's own top geometry, binned (lib/datasetGround.ts). Renderer-independent.
       const mode = store.getState().terrainMode;
+      const raster = snapRasterFor(mode);
       const samples = await datasetGroundSamples(store.getState().lastLoadUrl).catch(() => null);
       if (samples) {
         const cartos = samples.map((s) => Cesium.Cartographic.fromDegrees(s.lon, s.lat, 0));
         let terrain: (number | null)[];
         if (mode === 'wgs84') terrain = samples.map(() => 0);
-        else if (mode === 'terrarium' || mode === 'mapterhorn' || mode === 'mapterhorn-ellipsoid') {
-          terrain = await Promise.all(samples.map((s) => sampleRasterTerrain(mode, s.lon, s.lat)));
+        else if (raster) {
+          // the quantized mesh is the same DEM as its Terrarium twin — read the raster directly
+          terrain = await Promise.all(samples.map((s) => sampleRasterTerrain(raster, s.lon, s.lat)));
         } else if (googleTilesetRef.current) {
           terrain = (await v.scene.sampleHeightMostDetailed(cartos, [ts, markersRef.current].filter(Boolean) as object[])).map((c) => c?.height ?? null);
         } else {

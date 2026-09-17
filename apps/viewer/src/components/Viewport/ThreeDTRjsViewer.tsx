@@ -27,7 +27,9 @@ import { CESIUM_ION_TOKEN } from '@/lib/ion';
 import { GOOGLE_MAPS_API_KEY } from '@/lib/google';
 import { installB3dmClientFixes } from '@/lib/b3dmClientFix';
 import { useViewerStore } from '@/state/store';
-import { RASTER_TERRAINS, REEARTH_QM_URL, sampleRasterTerrain, type RasterTerrainId } from '@/lib/terrarium';
+import { RASTER_TERRAINS, REEARTH_QM_URL, resolveTerrainMode, sampleRasterTerrain, snapRasterFor, type RasterTerrainId } from '@/lib/terrarium';
+import { BASEMAPS, type BasemapId } from '@/lib/basemaps';
+import { tileDatasetId, type DatasetStyle } from '@/lib/datasetStyle';
 import { datasetGroundSamples, offsetFromSamples } from '@/lib/datasetGround';
 import { ImplicitAddRefineFixPlugin } from '@/lib/implicitAddFix';
 import { SNAP_HALF, SNAP_SAMPLES, SNAP_MIN_HITS } from '@/lib/snapToGround';
@@ -153,13 +155,14 @@ type LoadArgs = { url: string; type: AssetType; sseOverride?: number | null; ski
 // `%7B`/`%7D`, and XYZImageSource's placeholder-replace regex (which matches literal `{x}` etc.) then
 // never matches — every tile silently requests the exact same broken literal-`{x}` URL forever. That's
 // almost certainly what "a previous attempt through the proxy fired zero *varying* tile requests" was.
-const BASEMAP_URL: Record<'osm' | 'google', string> = {
-  osm: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
-  google: 'https://mt1.google.com/vt/lyrs=y&x={x}&y={y}&z={z}',
-};
-function makeBasemapOverlay(basemap: 'osm' | 'google') {
-  const preprocessURL = basemap === 'google' ? (url: string) => `${MW}/proxy?url=${encodeURIComponent(url)}` : undefined;
-  return new XYZTilesOverlay({ url: BASEMAP_URL[basemap], preprocessURL } as any);
+/** A basemap's layers as overlays, bottom first (lib/basemaps.ts) — Esri is imagery + a label layer. */
+function makeBasemapOverlays(basemap: BasemapId): any[] {
+  if (basemap === 'none') return [];
+  return BASEMAPS[basemap].layers.map((l) => new XYZTilesOverlay({
+    url: l.url,
+    levels: l.maxZoom + 1,
+    preprocessURL: l.proxy ? (url: string) => `${MW}/proxy?url=${encodeURIComponent(url)}` : undefined,
+  } as any));
 }
 
 // Real slippy-map (XYZ) tile draping over a procedurally-generated WGS84 ellipsoid — no real terrain
@@ -167,10 +170,13 @@ function makeBasemapOverlay(basemap: 'osm' | 'google') {
 // content-tileset is loaded below) generates the ellipsoid mesh itself and textures it directly from
 // the overlay (`applyOverlayTexture: true`); ImageOverlayPlugin, by contrast, only textures EXISTING
 // tile geometry, so it can't be used here on its own for a basemap-with-no-real-terrain case.
-function Globe({ basemap }: { basemap: 'google' | 'osm' | 'none' }) {
-  const pluginArgs = useMemo(() => {
-    if (basemap === 'none') return null;
-    return { overlay: makeBasemapOverlay(basemap), shape: 'ellipsoid' as const, applyOverlayTexture: true };
+function Globe({ basemap, gl }: { basemap: BasemapId; gl: THREE.WebGLRenderer }) {
+  // The first layer textures the generated surface; any further ones (labels) are layered on top by
+  // ImageOverlayPlugin.
+  const [pluginArgs, extra] = useMemo(() => {
+    const [base, ...rest] = makeBasemapOverlays(basemap);
+    if (!base) return [null, null];
+    return [{ overlay: base, shape: 'ellipsoid' as const, applyOverlayTexture: true }, rest.length ? { renderer: gl, overlays: rest } : null];
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [basemap]);
   if (!pluginArgs) return null;
@@ -185,6 +191,7 @@ function Globe({ basemap }: { basemap: 'google' | 'osm' | 'none' }) {
   return (
     <TilesRendererR3F key={basemap} onLoadModel={(e: any) => buildBoundsTrees(e.scene)}>
       <TilesPlugin plugin={GeneratedSurfacePlugin as any} args={pluginArgs as any} />
+      {extra && <TilesPlugin plugin={ImageOverlayPlugin as any} args={extra as any} />}
     </TilesRendererR3F>
   );
 }
@@ -196,16 +203,16 @@ function Globe({ basemap }: { basemap: 'google' | 'osm' | 'none' }) {
 // fight with QuantizedMeshPlugin's real one) drapes the SAME basemap imagery on top of that real
 // geometry when a basemap is selected; terrain itself still renders (bare, Cesium's own material) with
 // basemap 'none'. This is the 3DTRJS equivalent of CesiumViewer's terrainMode==='cesium'.
-function TerrainGlobe({ basemap, gl, url }: { basemap: 'google' | 'osm' | 'none'; gl: THREE.WebGLRenderer; url?: string }) {
-  const overlay = useMemo(() => (basemap === 'none' ? null : makeBasemapOverlay(basemap)),
+function TerrainGlobe({ basemap, gl, url }: { basemap: BasemapId; gl: THREE.WebGLRenderer; url?: string }) {
+  const overlays = useMemo(() => makeBasemapOverlays(basemap),
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [basemap]);
   // `url` = an open quantized-mesh base (its layer.json is resolved against it); else Cesium ion asset 1.
   return (
-    <TilesRendererR3F key={url ?? 'ion'} url={url} onLoadModel={(e: any) => buildBoundsTrees(e.scene)}>
+    <TilesRendererR3F key={`${url ?? 'ion'}|${basemap}`} url={url} onLoadModel={(e: any) => buildBoundsTrees(e.scene)}>
       {!url && <TilesPlugin plugin={PrioritizedCesiumIonAuthPlugin as any} args={{ apiToken: CESIUM_ION_TOKEN, assetId: '1', autoRefreshToken: true } as any} />}
       <TilesPlugin plugin={QuantizedMeshPlugin as any} />
-      {overlay && <TilesPlugin plugin={ImageOverlayPlugin as any} args={{ renderer: gl, overlays: [overlay] } as any} />}
+      {overlays.length > 0 && <TilesPlugin plugin={ImageOverlayPlugin as any} args={{ renderer: gl, overlays } as any} />}
     </TilesRendererR3F>
   );
 }
@@ -215,18 +222,50 @@ function TerrainGlobe({ basemap, gl, url }: { basemap: 'google' | 'osm' | 'none'
 // a module variable so "snap to ground" can ask the plugin for heights (sampleCartographicElevation) —
 // GPU-displaced geometry is invisible to a plain raycast.
 let terrariumTiles: TilesRendererImpl | null = null;
-function TerrariumGlobe({ basemap, source }: { basemap: 'google' | 'osm' | 'none'; source: RasterTerrainId }) {
-  const args = useMemo(() => {
-    const overlay = basemap === 'none' ? null : makeBasemapOverlay(basemap);
+
+/**
+ * Re:Earth's ellipsoidal Terrarium set answers its z0 tile with HTTP 500 ("Invalid typed array
+ * length"; z1+ are fine), and TerrariumMeshPlugin cannot start without a root. The root is only ever
+ * seen at planet scale, so it comes from the source's `rootUrl` instead (Mapterhorn's own sea-level
+ * z0 — the ~±100 m geoid difference is invisible there, and every deeper level is the real thing).
+ */
+class TerrariumRootFallbackPlugin extends TerrariumMeshPlugin {
+  constructor(opts: any) {
+    super(opts);
+    const rootUrl: string | undefined = opts.rootUrl;
+    if (!rootUrl) return;
+    // The plugin builds its XYZ image source in loadRootTileset and asks IT for every tile URL (for
+    // tile content and for the texture fetch alike), so the substitution goes on the source.
+    let source: any = (this as any)._source;
+    Object.defineProperty(this, '_source', {
+      configurable: true,
+      get: () => source,
+      set: (v: any) => {
+        source = v;
+        if (!v) return;
+        const getUrl = v.getUrl.bind(v);
+        v.getUrl = (x: number, y: number, level: number) => (level === 0 ? rootUrl : getUrl(x, y, level));
+      },
+    });
+  }
+}
+function TerrariumGlobe({ basemap, source, gl }: { basemap: BasemapId; source: RasterTerrainId; gl: THREE.WebGLRenderer }) {
+  const [args, extra] = useMemo(() => {
+    const [overlay = null, ...rest] = makeBasemapOverlays(basemap);
     const src = RASTER_TERRAINS[source];
     // Mapterhorn is z12 everywhere and deeper only where regional DEMs exist; the plugin has no
     // per-tile fallback, so it stops at the globally complete level.
     const maxZoom = source === 'mapterhorn' ? 12 : src.maxZoom;
-    return { url: src.url, maxZoom, tileDimension: src.tileSize, overlay, applyOverlayTexture: !!overlay };
+    return [
+      { url: src.url, rootUrl: src.rootUrl, maxZoom, tileDimension: src.tileSize, overlay, applyOverlayTexture: !!overlay },
+      rest.length ? { renderer: gl, overlays: rest } : null,
+    ];
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [basemap, source]);
   return (
     <TilesRendererR3F key={`${basemap}|${source}`} ref={(t: any) => { terrariumTiles = t ?? null; }}>
-      <TilesPlugin plugin={TerrariumMeshPlugin as any} args={args as any} />
+      <TilesPlugin plugin={TerrariumRootFallbackPlugin as any} args={args as any} />
+      {extra && <TilesPlugin plugin={ImageOverlayPlugin as any} args={extra as any} />}
     </TilesRendererR3F>
   );
 }
@@ -372,6 +411,35 @@ function CropGizmo({ tilesRef, pickScene }: { tilesRef: React.MutableRefObject<T
   );
 }
 
+/** A mosaic leaf's own dataset id (tile metadata, raw from the tileset JSON). */
+const threeTileId = (t: any): string | undefined => t.metadata?.properties?.id;
+
+/**
+ * Hide / tint one loaded content model by its dataset (the aggregate picker). Visibility is the
+ * scene's own flag, which TilesRenderer leaves alone (it adds/removes the scene from its group).
+ * Points get a flat colour; meshes keep their texture, multiplied by the tint.
+ */
+function styleDatasetModel(scene: THREE.Object3D, tile: any, st: DatasetStyle | null) {
+  const id = st ? tileDatasetId(tile, threeTileId) : null;
+  scene.visible = !(id && st!.hidden.has(id));
+  const c = id ? st!.colors?.get(id) : undefined;
+  scene.traverse((o: any) => {
+    for (const m of Array.isArray(o.material) ? o.material : o.material ? [o.material] : []) {
+      if (!m.color) continue;
+      const u = m.userData;
+      if (c) {
+        if (!u.dsOrig) u.dsOrig = { color: m.color.clone(), vertexColors: m.vertexColors };
+        m.color.set(c);
+        if (o.isPoints && m.vertexColors) { m.vertexColors = false; m.needsUpdate = true; }
+      } else if (u.dsOrig) {
+        m.color.copy(u.dsOrig.color);
+        if (m.vertexColors !== u.dsOrig.vertexColors) { m.vertexColors = u.dsOrig.vertexColors; m.needsUpdate = true; }
+        delete u.dsOrig;
+      }
+    }
+  });
+}
+
 const Scene = forwardRef<ViewerHandle, { loadArgs: LoadArgs; tooltip: TooltipChannel }>(function Scene({ loadArgs, tooltip }, ref) {
   const tilesRef = useRef<TilesRendererImpl | null>(null);
   // Individually-selected (not `const {...} = useThree()`, which subscribes to the ENTIRE R3F root
@@ -440,6 +508,8 @@ const Scene = forwardRef<ViewerHandle, { loadArgs: LoadArgs; tooltip: TooltipCha
   const pointSize = useViewerStore((s) => s.pointSize);
   const basemap = useViewerStore((s) => s.basemap);
   const terrainMode = useViewerStore((s) => s.terrainMode);
+  const terrain = resolveTerrainMode(terrainMode, '3dtrjs');
+  const datasetStyleRef = useRef<DatasetStyle | null>(null);
   // Whether the WGS84-radius wireframe globe is meaningful to show at all — see frameToTileset below.
   const [showGlobe, setShowGlobe] = useState(true);
   useEffect(() => { if (!loadArgs) setShowGlobe(true); }, [loadArgs]);
@@ -805,6 +875,7 @@ const Scene = forwardRef<ViewerHandle, { loadArgs: LoadArgs; tooltip: TooltipCha
   // user nudged the slider by hand. Apply it per newly-loaded tile too, not just on slider changes.
   const onLoadContentModel = useCallback((e: any) => {
     buildBoundsTrees(e.scene);
+    styleDatasetModel(e.scene, e.tile, datasetStyleRef.current);
     if (isPoints) {
       e.scene.traverse((o: any) => { if (o.isPoints && o.material) o.material.size = pointSizeRef.current; });
     }
@@ -974,18 +1045,24 @@ const Scene = forwardRef<ViewerHandle, { loadArgs: LoadArgs; tooltip: TooltipCha
     },
     flyToCity(lon, lat, height) { setPendingFlyTo({ lon, lat, height }); },
     setDatasetMarkers(list) { setMarkers(list); },
+    setDatasetStyle(style) {
+      datasetStyleRef.current = style;
+      tilesRef.current?.forEachLoadedModel((sc: THREE.Object3D, tile: any) => styleDatasetModel(sc, tile, style));
+      invalidate();
+    },
     async snapToGround() {
       const tiles = tilesRef.current;
       if (!tiles) return 'Load a tileset first.';
       const E = WGS84_ELLIPSOID;
-      const mode = store.getState().terrainMode;
-      const raster = mode === 'terrarium' || mode === 'mapterhorn' || mode === 'mapterhorn-ellipsoid';
+      const mode = resolveTerrainMode(store.getState().terrainMode, '3dtrjs');
+      const rasterId = snapRasterFor(mode);
+      const raster = rasterId != null;
       const terrarium = raster ? (terrariumTiles as any)?.getPluginByName?.('TERRARIUM_MESH_PLUGIN') : null;
       const raycaster = new THREE.Raycaster();
       /** Terrain under a lon/lat: the raster tiles directly, or a ray against whatever real ground is shown. */
       const groundAt = async (lonDeg: number, latDeg: number): Promise<number | null> => {
         if (mode === 'wgs84') return 0;
-        if (raster) return sampleRasterTerrain(mode, lonDeg, latDeg);
+        if (rasterId) return sampleRasterTerrain(rasterId, lonDeg, latDeg);
         const lat = THREE.MathUtils.degToRad(latDeg), lon = THREE.MathUtils.degToRad(lonDeg);
         const pt = E.getCartographicToPosition(lat, lon, 20000, new THREE.Vector3());
         const nrm = E.getCartographicToNormal(lat, lon, new THREE.Vector3());
@@ -1107,6 +1184,9 @@ const Scene = forwardRef<ViewerHandle, { loadArgs: LoadArgs; tooltip: TooltipCha
     ellipsoid.getCartographicToPosition(THREE.MathUtils.degToRad(lat), THREE.MathUtils.degToRad(lon), alt, pos);
     const dir = pos.clone().normalize();
     camera.position.copy(pos.clone().add(dir.multiplyScalar(range)));
+    // north up, like Cesium's fly-to (three's default up is ECEF +Y, an arbitrary heading on the ground)
+    const la = THREE.MathUtils.degToRad(lat), lo = THREE.MathUtils.degToRad(lon);
+    camera.up.set(-Math.sin(la) * Math.cos(lo), -Math.sin(la) * Math.sin(lo), Math.cos(la));
     camera.lookAt(pos);
     invalidate();
   }
@@ -1133,13 +1213,13 @@ const Scene = forwardRef<ViewerHandle, { loadArgs: LoadArgs; tooltip: TooltipCha
           above, same Ion token, no basemap overlay needed); otherwise a real OSM/Google-tile-draped
           WGS84 ellipsoid (Globe above) when imagery is on, or a plain wireframe sphere as a ground
           reference when imagery is off. */}
-      {showGlobe && (terrainMode === 'cesium' ? (
+      {showGlobe && (terrain === 'cesium' ? (
         <TerrainGlobe basemap={basemap} gl={gl} />
-      ) : terrainMode === 'reearth-qm' ? (
+      ) : terrain === 'reearth-qm' ? (
         <TerrainGlobe basemap={basemap} gl={gl} url={`${REEARTH_QM_URL}/`} />
-      ) : terrainMode === 'terrarium' || terrainMode === 'mapterhorn' || terrainMode === 'mapterhorn-ellipsoid' ? (
-        <TerrariumGlobe basemap={basemap} source={terrainMode} />
-      ) : terrainMode === 'google' ? (
+      ) : terrain === 'terrarium' || terrain === 'mapterhorn' || terrain === 'mapterhorn-ellipsoid' ? (
+        <TerrariumGlobe basemap={basemap} source={terrain} gl={gl} />
+      ) : terrain === 'google' ? (
         <GoogleGlobe ktxLoader={ktxLoader} />
       ) : basemap === 'none' ? (
         <mesh>
@@ -1147,7 +1227,7 @@ const Scene = forwardRef<ViewerHandle, { loadArgs: LoadArgs; tooltip: TooltipCha
           <meshBasicMaterial color="#1a2a3a" wireframe />
         </mesh>
       ) : (
-        <Globe basemap={basemap} />
+        <Globe basemap={basemap} gl={gl} />
       ))}
       {loadArgs && (
         <TilesRendererR3F
@@ -1286,6 +1366,7 @@ const ThreeDTRjsViewer = forwardRef<ViewerHandle, Props>(function ThreeDTRjsView
     flyToCity: (...a) => whenScene((h) => h.flyToCity(...a)),
     autoZoomToTileset: () => sceneRef.current?.autoZoomToTileset(),
     setDatasetMarkers: (list) => whenScene((h) => h.setDatasetMarkers?.(list)),
+    setDatasetStyle: (style) => whenScene((h) => h.setDatasetStyle?.(style)),
     snapToGround: () => sceneRef.current?.snapToGround?.() ?? Promise.resolve('3DTRjs scene not ready.'),
     flyToSphere: (...a) => whenScene((h) => h.flyToSphere?.(...a)),
     datasetsInView: (list, f) => sceneRef.current?.datasetsInView?.(list, f) ?? [],

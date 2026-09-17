@@ -4,6 +4,7 @@
  */
 import { useEffect, useState } from 'react';
 import { MW } from './formats';
+import { snapRasterFor, type TerrainMode } from './terrainModes';
 
 /** One placed dataset of a mosaic, as returned by /aggregate/index.json. */
 export interface DatasetMarker {
@@ -28,6 +29,13 @@ export interface DatasetMarker {
   attribution?: string | null;
   /** The server set the row came from. */
   set?: string | null;
+  /** The quadtree cell the dataset's external root hangs under, and its depth in the mosaic tree. */
+  cell?: { scheme: string; key: string; morton?: string; level: number };
+  depth?: number;
+  /** Server-side snap to ground (&snap=): the vertical offset applied to this dataset. */
+  snap?: { terrain: string; dz: number | null; bins?: number; spread?: number };
+  /** Set by the client: the marker colour of the active colour mode. */
+  color?: string;
   /** Set by the client: listed in the full index but excluded from the loaded mosaic. */
   inactive?: boolean;
 }
@@ -87,6 +95,26 @@ export function withPicker(url: string, st: PickerState): string {
   if (st.to) u.searchParams.set('to', st.to);
   if (st.hide.size) u.searchParams.set('hide', [...st.hide].sort().join(','));
   return u.toString();
+}
+
+/** How group tiles are bounded (`&bv=`). `cell` — the quadtree cell itself — is the server default. */
+export const BV_MODES = ['cell', 'sphere', 'region', 'box'] as const;
+export type BvMode = typeof BV_MODES[number];
+export const readBv = (url: string): BvMode =>
+  (new URL(url, location.href).searchParams.get('bv') as BvMode | null) ?? 'cell';
+
+function withParam(url: string, key: string, value: string | null): string {
+  const u = new URL(url, location.href);
+  if (value == null) u.searchParams.delete(key); else u.searchParams.set(key, value);
+  return u.toString();
+}
+export const withBv = (url: string, bv: BvMode) => withParam(url, 'bv', bv === 'cell' ? null : bv);
+
+/** `&snap=` for the terrain on screen (its raster twin for the quantized mesh), or off. */
+export const readSnap = (url: string) => new URL(url, location.href).searchParams.get('snap');
+export function withSnap(url: string, terrain: TerrainMode | null): string {
+  if (!terrain) return withParam(url, 'snap', null);
+  return withParam(url, 'snap', snapRasterFor(terrain) ?? 'mapterhorn-ellipsoid');
 }
 
 /** The index shares the mosaic's exact query, so both describe the same selection. */

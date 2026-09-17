@@ -8,6 +8,7 @@ import { ChevronDown } from 'lucide-react';
 import { useViewerStore } from '@/state/store';
 import type { ViewerHandle } from '@/lib/viewer-handle';
 import { SidebarCollapsibleSection } from './SidebarSection';
+import { isAggregateUrl, withSnap } from '@/lib/aggregate';
 
 export default function LocalFrameSection({ activeHandleRef }: { activeHandleRef: React.RefObject<ViewerHandle | null> }) {
   const lf = useViewerStore((s) => s.localFrame);
@@ -17,7 +18,7 @@ export default function LocalFrameSection({ activeHandleRef }: { activeHandleRef
   const h = () => activeHandleRef.current;
   const terrainMode = useViewerStore((s) => s.terrainMode);
   const terrainLabel = {
-    wgs84: 'ellipsoid', cesium: 'World Terrain', 'reearth-qm': 'Mapterhorn', 'mapterhorn-ellipsoid': 'Mapterhorn',
+    auto: 'Mapterhorn', wgs84: 'ellipsoid', cesium: 'World Terrain', 'reearth-qm': 'Mapterhorn', 'mapterhorn-ellipsoid': 'Mapterhorn',
     mapterhorn: 'Mapterhorn, sea level', terrarium: 'AWS, sea level', google: 'Google 3D',
   }[terrainMode];
 
@@ -33,8 +34,20 @@ export default function LocalFrameSection({ activeHandleRef }: { activeHandleRef
         <Input type="number" className="h-7 w-28" value={lf.zOffset} onChange={(e) => { const v = Number(e.target.value); setLocalFrame({ zOffset: v }); h()?.applyZOffset(v); }} />
       </div>
       <Button size="sm" variant="outline"
-        title="Sample the dataset's surface and the active terrain on a 9×9 grid around its centre, and set the Z offset to their difference (80th percentile, so roofs and trees don't pull it down). Pick a real terrain first."
-        onClick={async () => { const st = useViewerStore.getState(); st.setStatus('Snapping to ground…'); st.setStatus((await h()?.snapToGround?.()) ?? 'Not supported by this renderer.'); }}>
+        title="Bin the dataset's own top geometry on an 8×8 grid, compare each bin's low points with the active terrain, and set the Z offset to the difference. On an /aggregate mosaic every dataset is snapped separately, server-side (&snap=)."
+        onClick={async () => {
+          const st = useViewerStore.getState();
+          // a mosaic: one offset per dataset, computed by the server and baked into each leaf
+          if (isAggregateUrl(st.lastLoadUrl)) {
+            const url = withSnap(st.lastLoadUrl, st.terrainMode);
+            st.setLastLoadUrl(url); st.setUrlField(url);
+            h()?.load(url, st.currentType, { skipAutoFrame: true });
+            st.setStatus('Snapping every dataset of the mosaic to the ground (server-side, per dataset)…');
+            return;
+          }
+          st.setStatus('Snapping to ground…');
+          st.setStatus((await h()?.snapToGround?.()) ?? 'Not supported by this renderer.');
+        }}>
         ⤓ Snap to ground ({terrainLabel})
       </Button>
       <Label className="text-xs" title="Drag (or press W/E/R to switch translate/rotate/scale) a gizmo on the loaded tileset itself">

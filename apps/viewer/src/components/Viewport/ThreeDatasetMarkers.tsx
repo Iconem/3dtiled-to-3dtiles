@@ -98,7 +98,7 @@ export default function ThreeDatasetMarkers({ list, tilesRef, tooltip, onPick }:
     list.forEach((d, i) => {
       localPosition(d, v).toArray(pos, i * 3);
       // Picker-hidden datasets stay as small grey dots so they can be found and re-shown.
-      c.set(d.inactive ? '#6b7280' : MARKER_COLORS[d.format] ?? '#94a3b8').toArray(col, i * 3);
+      c.set(d.inactive ? '#6b7280' : d.color ?? MARKER_COLORS[d.format] ?? '#94a3b8').toArray(col, i * 3);
       rad[i] = d.radius;
       size[i] = d.inactive ? 6 : 9;
     });

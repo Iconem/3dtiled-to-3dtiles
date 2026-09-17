@@ -3,6 +3,8 @@
 // for the shareable slice. Mirrors viewer.html's remaining module-level `let`s.
 import { create } from 'zustand';
 import type { AssetType } from '@/lib/formats';
+import type { BasemapId } from '@/lib/basemaps';
+import type { TerrainMode } from '@/lib/terrainModes';
 
 export interface CropBbox {
   w: number; s: number; minH: number; e: number; n: number; maxH: number;
@@ -39,10 +41,10 @@ interface ViewerStore {
   setLastLoadUrl: (v: string) => void;
 
   // Basemap / terrain
-  basemap: 'google' | 'osm' | 'none';
-  // 'wgs84' = flat ellipsoid (no elevation), 'cesium' = Cesium World Terrain (Ion), 'google' = Google
-  // Photorealistic 3D Tiles (a textured mesh that embeds its own terrain — Cesium-only, no-op on 3DTRJS).
-  terrainMode: 'wgs84' | 'cesium' | 'reearth-qm' | 'mapterhorn-ellipsoid' | 'mapterhorn' | 'terrarium' | 'google';
+  basemap: BasemapId;
+  // 'auto' = Mapterhorn (ellipsoid) in each renderer's native form (lib/terrarium.ts), 'wgs84' = flat
+  // ellipsoid, 'cesium' = Cesium World Terrain (Ion), 'google' = Google Photorealistic 3D Tiles.
+  terrainMode: TerrainMode;
   setBasemap: (v: ViewerStore['basemap']) => void;
   setTerrainMode: (v: ViewerStore['terrainMode']) => void;
 
@@ -138,14 +140,12 @@ export const useViewerStore = create<ViewerStore>((set, get) => ({
   lastLoadUrl: '',
   setLastLoadUrl: (v) => set({ lastLoadUrl: v }),
 
-  // OSM (not 'google'): mt1.google.com's raw tile endpoint is an unofficial hotlink that sometimes
-  // answers with an HTML error page instead of image bytes for a given x/y/z — Cesium's imagery
-  // pipeline doesn't gracefully skip that (it tries to decode the HTML as a texture and crashes the
-  // whole render loop: "InvalidStateError: the source image could not be decoded"). OSM is a properly
-  // public tile service that doesn't do this. 'google' stays selectable in the Basemap dropdown for
-  // when you want it — this only changes the safe DEFAULT.
-  basemap: 'osm',
-  terrainMode: 'wgs84',
+  // Esri imagery + labels (not 'google'): mt1.google.com's raw tile endpoint is an unofficial hotlink
+  // that sometimes answers with an HTML error page instead of image bytes — Cesium's imagery pipeline
+  // doesn't gracefully skip that ("InvalidStateError: the source image could not be decoded"). Esri's
+  // tile service is public, keyless and sends CORS headers (lib/basemaps.ts).
+  basemap: 'esri',
+  terrainMode: 'auto',
   setBasemap: (v) => set({ basemap: v }),
   setTerrainMode: (v) => set({ terrainMode: v }),
 
