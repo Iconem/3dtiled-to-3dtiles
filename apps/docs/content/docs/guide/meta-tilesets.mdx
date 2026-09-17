@@ -98,7 +98,7 @@ be *seen* rather than described. `GET /aggregate/demo.json` lists what each set 
 |---|---|
 | `opendata` | The ten open datasets from 3D Tiles' own [RESOURCES.md](https://github.com/CesiumGS/3d-tiles/blob/main/RESOURCES.md#open-data) — Strasbourg, Clermont-Ferrand, Saint-Étienne, Lille, Planet's Angkor Wat SkySat, Utrecht, Soest, Aarhus, AGI HQ, Tokyo Minato-ku. Four continents, and all three bounding-volume kinds (`region`, `box`, `sphere`). |
 | `angkor` | Iconem's Angkor campaign as **23 individual site tilesets** rather than its hand-authored merged root. |
-| `world` | Both at once — 33 tilesets. |
+| `world` | Everything public at once — **45 tilesets**: the open data, the Angkor sites and the 12 Aerometrex cities (through `/proxy`, credited). |
 | `flai` | [flai open LiDAR](https://github.com/flai-ai/open-lidar-data): **113 national LiDAR campaigns** (Estonia, UK, Finland, Belgium, Poland, Spain, Denmark, France, Germany, the Netherlands, NOAA …) as one COPC overview each, streamed through `/stream`. |
 | `aerometrex` | Aerometrex's **12 US city reality meshes** (Brooklyn, Hudson Yards, Denver, Las Vegas, LA, San Diego, Miami Beach, San Francisco, Tampa …), served through the tileset-aware `/proxy` because their host sends no CORS. These are sales previews, not declared open data. |
 
@@ -188,6 +188,12 @@ share one selection function and one cached mosaic.
 Every picker action rewrites the mosaic URL — `&hide=`, `&latest=1`, `&from=`/`&to=`, `&format=` (see
 [below](#showhide-latest-only-and-dates)) — and reloads it without moving the camera. The picker has
 no state of its own: a filtered view is still one shareable 3D Tiles URL.
+
+**Providers and credits.** Every `index.json` row, and every mosaic leaf's tile metadata, carries a
+`provider` ("Iconem", "Aerometrex", "CRAIG", "IGN (FR)" …) and an `attribution` line. Manifests declare
+them at set level (`provider`, `attribution`) and entries may override them. The demo app lists the
+credits of the datasets on screen under its search box ("Data: © Iconem · © Aerometrex …"), and the
+hover card shows them. The builder filters its library by provider.
 
 <Callout type="info">
 **"Why is a Bing dataset visible over Rome?"** It is not the `/bing` endpoint leaking into the mosaic:
@@ -477,20 +483,37 @@ Years outside 1990–2035 are rejected ("Church of the Assumption, 1783" names a
 The share-link script writes `date`, `dateSource`, `projectId`, `sceneId` and `assetId` into the
 manifest; re-running it in dry-run mode refreshes them without creating any link.
 
-## Region bounding volumes: `&bv=region`
+## Group bounding volumes: `&bv=sphere | region | cell | box`
 
-The nesting is already a quadtree: each group is a cell (`extras.cell` records its key, level and
-Morton index). By default groups are bounded by **spheres**, the union of the children's balls.
-`&bv=region` emits the same tree with group and root volumes as 3D Tiles `region`s
-(`[west, south, east, north, minH, maxH]`), the union of each child ball's lon/lat/height box. That is
-the volume an implicit quadtree would use, and it is much tighter for long thin groups.
+The nesting is always a quadtree: each group is a cell, and `extras.cell` records its key, level and
+Morton index. **What the renderer sees** as a group's volume (and what *Debug tiles* draws) is a
+separate choice:
+
+| `bv=` | Group volume | Shape on screen |
+|---|---|---|
+| `sphere` (default) | minimal sphere around the children's spheres | balls |
+| `region` | union of the children's lon/lat/height boxes | lon/lat boxes that **follow the data** |
+| `cell` | **the quadtree cell itself** (web-mercator or geodetic 2×1 grid), widened only where a dataset near an edge pokes out, with the children's height range | the actual grid |
+| `box` | an oriented box aligned with east/north/up at the group's centre | tight flat boxes |
+
+So `bv=region` does **not** show the webmerc/geodetic cells, because its regions hug the datasets;
+`bv=cell` does. The root takes the same kind of volume, except that `box` falls back to the
+Earth-centred sphere for a world-spanning mosaic, which has no single "up". Dataset entries always keep
+their own root's sphere. The demo app has an Angkor pill for each mode.
+
+Cell bounds are decoded from the path key (`cellBounds`, the inverse of `cellAt`). Writing that
+decoder exposed a bug in the geodetic key: it re-encoded the hemisphere bit and dropped the finest
+longitude bit, so geodetic cells were twice as wide as their key said. The key is fixed, and a test
+now round-trips 2,000 points through `cellAt` → `cellBounds` in both schemes.
+
+**How regions are computed.** A region is `[west, south, east, north, minH, maxH]`.
 
 A ball of radius `r` whose centre is `d` from the Earth's centre spans `asin(r/d)` of arc, plus 1%
 for the gap between geocentric and geodetic latitude. Longitude widens by `1/cos` of the most poleward
 latitude reached. A ball that touches a pole or crosses the antimeridian gets the full longitude
 range, which is loose but never wrong. Dataset entries keep their own sphere, derived from their own
 root. `scripts/debug-aggregate-nesting.mjs` checks that every dataset lies inside all of its
-ancestor regions, under both schemes.
+ancestor volumes (regions, cells and boxes) under both schemes.
 
 ```
 …/aggregate/tileset.json?set=iconem&nest=geodetic&bv=region

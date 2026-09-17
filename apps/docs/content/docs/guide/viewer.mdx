@@ -281,14 +281,41 @@ this app. `npm run dev:3dtr-master` runs the whole viewer on a from-source rende
 page).
 
 <Callout type="warn">
-**Fixed: implicit point clouds disappeared in 3DTRjs at normal viewing distances.** 3d-tiles-renderer
-0.5.2 and current master skip a child of an `ADD` tile when "the parent already meets the error
-target", without checking that the parent has anything to draw. An implicit subtree root has only its
-`.subtree`; its points live in a content child with the same geometric error. So once that child was
-"good enough", the whole subtree was skipped, and every `/stream` COPC/Potree cloud vanished until
-the camera was close (Geghard from 1.2 km: 2.3 px < target 4). `ImplicitAddRefineFixPlugin`
-(`src/lib/implicitAddFix.ts`, registered in the viewer and the lab) raises that child's view error
-just above the target, so it is never skipped. Worth reporting upstream.
+**Fixed: implicit point clouds disappeared in 3DTRjs at normal viewing distances.** Our data is fine:
+the Potree/COPC root node *has* points, and `/stream` puts them in the implicit root tile's content.
+The problem is how 3DTRjs represents that tile.
+- `SUBTREELoader` turns the implicit root into a placeholder whose only content is the `.subtree`,
+  and moves the real content into a cloned **content child** with the *same* geometric error.
+- Since **v0.5.1**, `markUsedTiles` skips a child of an `ADD` tile when "the parent already meets the
+  error target in the child's region" (`traverseFunctions.js`, added in
+  [#1673](https://github.com/NASA-AMMOS/3DTilesRendererJS/pull/1673)).
+- With a ratio of 1, the content child is skipped exactly when it should be shown. Every `/stream`
+  COPC/Potree cloud vanished until the camera got close (Geghard from 1.2 km: 2.3 px < target 4).
+  The same applies at every subtree root and under external-tileset placeholders.
+
+CesiumJS builds the same placeholder structure (`Implicit3DTileContent.js`) but its version of the
+skip, `meetsScreenSpaceErrorEarly` in `Cesium3DTilesetTraversal.js`, returns early when the parent
+`hasTilesetContent || hasImplicitContent`. So Cesium never skips under a placeholder.
+
+**Our workaround.** `ImplicitAddRefineFixPlugin` (`src/lib/implicitAddFix.ts`, registered in the
+viewer and the lab) raises the content child's view error just above the target through the plugin
+error hook.
+
+**Upstream status.**
+- Not reported as of 2026-09-17. The nearest open PR,
+  [#1749](https://github.com/NASA-AMMOS/3DTilesRendererJS/pull/1749) "Make empty additive tile state
+  consistent", does not touch the skip.
+- Background threads:
+  - [3d-tiles#426](https://github.com/CesiumGS/3d-tiles/issues/426) (lilleyse: traversal stops when
+    the SSE is met "regardless of the tile's content"; give an empty root a large geometric error);
+  - [3d-tiles#416](https://github.com/CesiumGS/3d-tiles/issues/416) (ADD semantics);
+  - [3d-tiles#776](https://github.com/CesiumGS/3d-tiles/issues/776) (gkjohnson on spec vs CesiumJS);
+  - [3DTRjs#1304](https://github.com/NASA-AMMOS/3DTilesRendererJS/issues/1304) (empty external
+    roots: lilleyse calls CesiumJS "incorrect" there and suggests external tilesets be unconditionally
+    refinable);
+  - [3DTRjs#670](https://github.com/NASA-AMMOS/3DTilesRendererJS/issues/670) (empty root tiles).
+- Suggested upstream fix, mirroring CesiumJS: apply the skip only when the parent has renderable
+  content. A draft issue is in the changelog entry of 2026-09-17.
 </Callout>
 
 <Callout type="warn">
@@ -297,39 +324,89 @@ just above the target, so it is never skipped. Worth reporting upstream.
 then `flyToCity()` immediately. `load()` is React state and survived, but `flyToCity()` hit a null
 ref and vanished, so the Angkor pills stayed on the whole globe and loaded nothing. Calls made before
 the scene exists (fly-to, markers) are now queued until it mounts; 4 of 4 runs fly correctly.
+
+The same held in Cesium (a fly-to before the viewer existed was dropped). A third cause affected both
+renderers: `App`'s "reload on renderer switch" effect also ran **on mount**, after the start-up load,
+and re-framed the whole tileset over the fly-to. It now runs only on a real switch.
+
+**Fly-to semantics changed in Cesium.** A preset used to place the camera *directly above* its point,
+pitched 45°, so it looked `height` m north of the point. It now looks **at** the point from `height`
+m up, 45° down, as 3DTRjs does. A builder preview of 660 datasets now opens on its first dataset.
 </Callout>
 
 ### Terrain and snap to ground
 
-**Terrain** offers four modes:
-- **WGS84**: the plain ellipsoid.
-- **Cesium World Terrain**: quantized mesh through ion.
-- **Terrarium (AWS, open)**: the keyless AWS Terrain Tiles.
-  - 3DTRjs renders it with its `TerrariumMeshPlugin` and drapes the basemap on it.
-  - Cesium has no Terrarium support, so `src/lib/terrarium.ts` adapts the same tiles as a
-    `CustomHeightmapTerrainProvider` on a web-mercator scheme; below zoom 15 it cuts tiles out of
-    their zoom-15 ancestor.
-- **Google 3D**: Google's photorealistic 3D tiles.
+**Terrain** — every open source is keyless and CORS-open:
 
-Terrarium heights are above mean sea level, not the ellipsoid.
+| Mode | Source | Encoding | Max z | Heights |
+|---|---|---|---|---|
+| WGS84 | the plain ellipsoid | — | — | ellipsoid (0) |
+| Cesium World Terrain | Cesium ion asset 1 | quantized mesh | — | ellipsoid |
+| **Mapterhorn · quantized mesh** | [Re:Earth Terrain](https://terrain.reearth.land/) `cesium-mesh/ellipsoid` | quantized mesh | 14 | **ellipsoid** |
+| **Mapterhorn · Terrarium (ellipsoid)** | Re:Earth `mapterhorn-egm08/terrarium/ellipsoid/{z}/{x}/{y}.webp` | Terrarium, 512 px | 14 | **ellipsoid** |
+| Mapterhorn · Terrarium (sea level) | [tiles.mapterhorn.com](https://tiles.mapterhorn.com/tilejson.json) `{z}/{x}/{y}.webp` | Terrarium, 512 px | 12 (17 regionally) | sea level |
+| AWS Terrain Tiles | `elevation-tiles-prod/terrarium` | Terrarium, 256 px | 15 | sea level |
+| Google 3D | Google Photorealistic 3D Tiles | mesh | — | ellipsoid |
+
+**Datum matters when data meets terrain.** 3D Tiles sit in ECEF, i.e. on the WGS84 ellipsoid, while
+sea-level heights differ by the geoid undulation: +55 m in the Alps, about +16 m at Geghard,
+−100 m off India. Mapterhorn itself serves orthometric heights (vertical datums are "not treated at
+the moment", mapterhorn#255). Re:Earth's mirror blends in EGM2008 and publishes `/elevation/`
+(orthometric), `/ellipsoid/` (h = H + N) and `/geoid/` (N) variants. The 3DTRjs `terrainrgb` example
+uses `/elevation/`; we use `/ellipsoid/`, the right one to snap datasets against.
+
+**How each renderer draws them.**
+- **3DTRjs**: Terrarium sources through `TerrariumMeshPlugin` with the basemap draped on it (capped
+  at z12 for mapterhorn.com, where coverage is global); quantized mesh through `QuantizedMeshPlugin`
+  pointed at the Re:Earth base.
+- **Cesium**: quantized mesh through `CesiumTerrainProvider.fromUrl`. Terrarium has no native Cesium
+  provider, so `src/lib/terrarium.ts` adapts it as a `CustomHeightmapTerrainProvider` on a
+  web-mercator scheme. Deeper than a source goes, or wherever it has no tile, a tile is cut out of its
+  nearest available ancestor.
 
 **⤓ Snap to ground** (Local Frame section, both renderers) moves the loaded tileset vertically onto
-the active terrain. It samples a 9 × 9 grid over the central half of the dataset:
-1. At each node it reads the dataset's **top surface**, using a narrow vertical pick with the globe
-   hidden.
-2. It reads the **terrain height** at the same node:
-   - Cesium: `sampleTerrain` / `sampleTerrainMostDetailed`;
-   - 3DTRjs: `sampleCartographicElevation` for Terrarium, a raycast for real meshes;
-   - Google 3D: a pick on that tileset.
-3. It applies the **80th percentile** of *terrain − dataset* as the Z offset. Roofs, canopy and
-   monuments give the most negative differences, and bare ground the largest.
-4. It runs a second pass once the moved tileset has refined.
+the active terrain. It runs **once, when you press it**. It sets the tileset-level Z offset: it does
+not follow the camera, and does not re-run on entering the dataset (an "auto-snap on load" option
+would be a small addition).
 
-Tested on Iconem's Geghard with Terrarium: Cesium −68.9 m (35 of 81 samples), 3DTRjs −74.3 m (27 of
-81). The two agree because both pick the top surface narrowly. A wide point-pick cylinder, or letting
-the pick fall through to the globe, gave contradictory answers, and the implementation notes in
-`src/lib/snapToGround.ts` explain why. A dataset in a narrow gorge is only as well matched as the
-~30 m terrain allows.
+**Where the samples come from** (`src/lib/datasetGround.ts`): not from picks, but from the dataset's
+**own top geometry**.
+1. It fetches the root content: the implicit root's level-0 tile, or the first tiles under a
+   content-less root, following external tilesets.
+2. It decodes the positions from GLB (node transforms, `CESIUM_RTC`), b3dm (`RTC_CENTER`) or pnts,
+   with the root transform chain and glTF Y-up → Z-up (honouring `gltfUpAxis`).
+3. It bins them on a 12 × 12 east/north grid over the data's extent, and takes each bin's
+   **10th-percentile height** as the ground there.
+
+Every sample therefore sits **where the dataset has points**, whatever is loaded and whatever
+renderer shows it. Terrain is read at those same lon/lats:
+- Terrarium sources: the raster tiles directly, the same code in both renderers;
+- quantized mesh: `sampleTerrain(MostDetailed)` in Cesium, a raycast in 3DTRjs;
+- Google 3D: a pick on that tileset.
+
+The Z offset is set to the **70th percentile** of *terrain − ground* over the bins. Bins on roofs
+or canopy give smaller differences, noise below the ground larger ones.
+
+Measured on Iconem's Geghard (88 of 88 bins, identical in both renderers):
+
+| Terrain | Z offset |
+|---|---|
+| Mapterhorn ellipsoid (Terrarium) | −53.5 m |
+| Mapterhorn ellipsoid (quantized mesh) | −56.2 m |
+| AWS, sea level (earlier pick-based run) | ≈ −69 m |
+
+The ~16 m gap between sea-level and ellipsoidal terrain is Armenia's geoid undulation, so **Geghard
+really floats ~55 m above the ground**, most likely a vertical-datum slip in its georeference.
+
+**Why not picks.** The first version picked the rendered surface on a 9 × 9 grid; it remains as
+the fallback for Draco- or meshopt-compressed content. It depended on what was loaded and on each
+renderer's pick volume:
+- over sparse points most narrow rays miss;
+- a wide one returns the highest point in the column;
+- Cesium's `sampleHeight` silently falls through to the globe.
+
+The two renderers disagreed until the method changed. A dataset in a narrow gorge is still only as
+well matched as the terrain's resolution allows.
 
 ### Tools mode datasets (implicit-to-explicit / upgrade)
 

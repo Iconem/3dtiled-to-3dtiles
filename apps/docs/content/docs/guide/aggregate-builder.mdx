@@ -20,13 +20,37 @@ library opens on exactly those datasets.
 
 ## The three panes
 
-**Library** (left). Pick a source: any set from `/aggregate/demo.json` (rows come from
-`/aggregate/index.json?set=<name>`), the imported selection, or **Added by URL**. Search is the
-viewer's typo-tolerant dataset search. Format chips filter the list, and the list can be grouped by
-project or scene. Only the rows in view are mounted, so the 692-row Iconem set scrolls smoothly.
-Rows can be dragged, multi-selected with Shift/Ctrl, added with **Add to "…"** (the non-drag path,
-which targets the focused group), or added with a double-click. A group header drags all of its
-rows, and its **+ group** button adds them as a new group.
+**Library** (left). Under **Sources**, tick any number of sources at once: the sets of
+`/aggregate/demo.json` (each with its count; `660/692` once loaded means 32 entries could not be
+placed), the imported selection, and **Added by URL**. Each set is fetched once from
+`/aggregate/index.json?set=<name>`, and all sets load concurrently. Rows are merged and
+**de-duplicated by id** (the hash of the source URL), so `world`, which includes `angkor` and
+`aerometrex`, adds no duplicates when those sets are also ticked. A set that fails to load shows a
+small error row with **retry** and **remove**. The other sets still list. On a first visit the
+library opens on `world` (or the first set if there is no `world`). A remembered set that the server
+no longer lists is dropped before anything is fetched.
+
+Rows are narrowed in three ways:
+
+- **Search**: the viewer's typo-tolerant dataset search over name, project, scene, format and date.
+- **Tag**: a plain substring filter over project, scene, date, provider, attribution, licence and
+  set. Every word must match, e.g. `2024 iconem`.
+- **Chips** for **format**, **provider** and **set** (the set row appears once more than one source
+  is ticked). With nothing chosen in a row, that row does not filter. Choices combine as **OR within
+  a row and AND across rows**: `provider = Iconem` with `set = iconem` gives the 660 Iconem datasets
+  of that set, not the 23 Angkor sites that `world` also lists. Each chip's count is what it would
+  show given the *other* rows' choices. Values that would show nothing are dimmed and folded behind
+  **+N more**. **Clear filters** resets chips and tag.
+
+The chosen sources, chips, tag and list grouping are remembered in `localStorage`
+(`aggregate-builder:library`). The list can be grouped by project, scene, provider or set. Rows show
+`provider · project · scene · date · radius`, and the tooltip adds the attribution and the sets a row
+was listed in.
+
+Rows can be dragged, multi-selected with Shift/Ctrl, selected with **all** (every listed row), added
+with **Add to "…"** (the non-drag path, which targets the focused group), or added with a
+double-click. Rows hidden by a filter are never added, even if they were selected before. A group
+header drags all of its rows, and its **+ group** button adds them as a new group.
 
 **Add URL** accepts a `tileset.json`, a Potree `cloud.js` / `metadata.json`, or a `.copc.laz`.
 Point clouds are wrapped through `/stream` exactly as the server wraps manifest entries (with
@@ -42,7 +66,7 @@ library into any group. Within the tree, drag to reorder or re-parent: the top q
 An invalid drop, such as a group into its own descendant, shows no indicator and does nothing.
 Each row shows its format dot, date, child count (`shown/total` when a display mode drops children)
 and its mode or refine when not the default. Its **⋯** menu offers rename, new group,
-**group children by scene / project / year**, sort by name / date, duplicate and delete.
+**group children by scene / project / provider / year**, sort by name / date, duplicate and delete.
 
 | Key | Action |
 |---|---|
@@ -60,7 +84,9 @@ between them. Running a helper again reuses the groups it made earlier.
 **Inspector** (right). Every node has a name, a date (`YYYY`, `YYYY-MM`, `YYYY-MM-DD` or an ISO
 interval `start/end`, committed only when valid), notes and free key/value metadata. A dataset also
 shows its child URL (read-only, copy / open), format, `lon`/`lat`/`height`/`radius`, editable
-project / scene / licence, and an optional **geometric-error override**. With several nodes selected,
+project / scene / **provider** / **attribution** / licence, and an optional **geometric-error
+override**. Provider and attribution come from the index row (`provider`, `attribution`), so a
+dataset keeps its credit line wherever you move it. With several nodes selected,
 you can set one date on all of them.
 
 ## Display modes and refine
@@ -97,8 +123,8 @@ mosaic refines exactly like a server-built one:
 - **Root**: the tighter of the union sphere and an **Earth-centred** sphere
   (`max |centre| + radius` over the leaves). Tileset `geometricError` is `2 × root GE`.
 - **Metadata** (3D Tiles 1.1): every tile gets `metadata`. Datasets use class `dataset` (`id`, `name`,
-  `project`, `scene`, `date`, `format`, `licence`, `notes`) and groups use class `group` (`name`,
-  `date`, `notes`, `mode`). Custom keys become extra `STRING` properties, and the schema declares only
+  `project`, `scene`, `date`, `format`, `provider`, `attribution`, `licence`, `notes`) and groups use
+  class `group` (`name`, `date`, `notes`, `mode`). Empty values are left out of a tile's properties. Custom keys become extra `STRING` properties, and the schema declares only
   the keys actually used. Property ids must match `^[A-Za-z_][A-Za-z0-9_]*$`, so keys are sanitised
   (`survey team` → `survey_team`, `2nd` → `_2nd`) and never shadow a built-in (`name` → `x_name`).
 - `asset.extras.builder` records the version, the name, and the node counts in the whole tree
@@ -109,7 +135,8 @@ mosaic refines exactly like a server-built one:
 It flattens the tree (after display modes) and gives each entry a `group` path such as
 `Angkor park / Temples`. Entries hold the **source** URL: `/stream` and `/proxy` wrappers are undone
 into `format`, `crs` and `proxy: true`, because the server re-wraps entries with its own origin.
-Custom metadata goes under `properties`. Entries from a local set carry share links, which are
+`provider` and `attribution` are entry fields, as in the server's own set files. Custom metadata
+goes under `properties`. Entries from a local set carry share links, which are
 credentials, so treat the file like the local manifest.
 
 **Project JSON** (`kind: "aggregate-builder-project"`) is the lossless format. It keeps the whole
@@ -161,6 +188,45 @@ root GE 1 984). In Cesium the draft's root is ready about 5 s after load and sho
 From 1 800 m over Angkor Thom, the site meshes in view stream in.
 </Callout>
 
+## Scale: all 692 Iconem tilesets
+
+Both lists are windowed with a fixed row height, so only the rows in view are mounted: about 15 in
+the library and 34 in the tree, whether there are 45 rows or 2 000. The library's pipeline
+(merge → search → tag → chips → grouping) is split into memoised stages, so a chip click does not
+re-run the search. Search and tag input are debounced (120 ms), and search results are cached per
+query. Tree rows are memoised on primitive props, and the library no longer re-renders when a node
+is merely renamed. "Group by" is a single pass with one copy of the node map, and fold / unfold
+patches every group in one copy.
+
+Measured in headless Chrome against the **Vite dev build** (React development mode, StrictMode),
+with `iconem` (660 placed of 692), `world` (45) and `flai` (113) giving 818 unique rows:
+
+| Action | Time |
+|---|---|
+| tick `iconem` → 660 rows listed | ≈ 100–120 ms (fetch 40–60 ms) |
+| tick `world` + `flai` on top → 818 rows | ≈ 100 ms with warm server caches (a cold `flai` index takes 3.7–4.4 s on the server) |
+| merge 818 rows · tag filter · chip counts | 0.2 ms · < 1 ms · < 1 ms |
+| search, per debounced query (`temp`, `bayon`, `danemark` …) | 3–10 ms below 4 letters, 30–85 ms from 4 letters (typo matching) |
+| keystroke to next frame (input only) | 25–50 ms |
+| chips `provider = Iconem` + `set = iconem` → 660 rows | ≈ 35 ms |
+| **all** (select 660) → **Add to "My mosaic"** | ≈ 40 ms → 130–240 ms (model op 2–3 ms, the rest is React dev rendering) |
+| `toTileset` of the 660-dataset tree | 2–6 ms (17 ms cold), 348 KB · `toManifest` 9–18 ms |
+| `POST /aggregate/draft` (348 KB) · draft `index.json` | 12–30 ms · 16–55 ms (660 rows, `provider` included) |
+| group 660 by **scene** → 289 groups | 60–160 ms · export of the grouped tree 4–7 ms (290 groups) |
+| group 1 478 datasets by **provider** → 27 groups | 50–125 ms |
+| rename one node (949-node tree) · undo | 20–65 ms · 20–40 ms |
+| collapse · expand 289 groups | ≈ 70 ms · 130–170 ms |
+
+**Preview** of the flat 660-dataset draft in Cesium: the draft's `index.json` and `tileset.json` are
+loaded about 3 s after navigation (dev build, cold page). The aggregate overlay shows **660/660
+markers**, and child tilesets start streaming right away (24 tiles ready 16 s in, looking at the
+whole globe). The root sphere is Earth-centred (6 401 km), and its root GE is 47 876.
+
+What remains slow: the typo-tolerant search costs 30–85 ms per new query of 4 letters or more on
+~800 rows. It is debounced and cached, so it runs once per pause, not per key. Expand-all of a few
+hundred groups is ≈ 150 ms in dev. Production builds of React are several times faster on all
+rendering rows above.
+
 ## Where the code lives
 
 | File | Role |
@@ -168,5 +234,5 @@ From 1 800 m over Angkor Thom, the site meshes in view stream in.
 | `apps/viewer/src/builder/tree.ts` | the document model and every edit, as pure functions returning a new tree |
 | `apps/viewer/src/builder/export.ts` | tileset / manifest / project export, tileset import |
 | `apps/viewer/src/builder/geo.ts` | WGS84 ⇄ ECEF, sphere union, bounding volume → sphere |
-| `apps/viewer/src/builder/selftest.ts` | `node --experimental-strip-types apps/viewer/src/builder/selftest.ts` (62 checks) |
+| `apps/viewer/src/builder/selftest.ts` | `node --experimental-strip-types apps/viewer/src/builder/selftest.ts` (77 checks, including provider round-trips and a 700-dataset group/export) |
 | `packages/tile-server/aggregate-live.js` | the draft store (`handleDraft`) |

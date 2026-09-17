@@ -5,6 +5,64 @@ Format loosely follows [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+### Added / Fixed — 2026-09-17b (terrain · snap · bounds · export options · providers · 3DTRjs findings)
+- **Terrain:**
+  - Added Mapterhorn in three forms: Re:Earth **quantized mesh (ellipsoidal)**, Re:Earth Terrarium
+    (ellipsoidal) and mapterhorn.com Terrarium (sea level), next to the AWS Terrain Tiles, in both
+    renderers.
+  - Cesium's raster provider now falls back to the nearest available ancestor tile.
+  - The docs explain the datum: 3D Tiles are ellipsoidal, and sea-level DEMs are off by the geoid
+    undulation.
+- **Snap to ground reads the dataset's own geometry.** It decodes the root content (glb/b3dm/pnts),
+  bins it 12 × 12 and takes each bin's 10th-percentile height as the ground; the Z offset is the 70th
+  percentile of terrain − ground. Both renderers now agree exactly: Geghard −53.5 m on Mapterhorn
+  ellipsoid, 88/88 bins, i.e. the dataset floats ~55 m high. Picking remains as the fallback for
+  compressed content.
+- **`&bv=cell` and `&bv=box`:** groups bounded by their actual quadtree cells (geodetic 2×1 or
+  web-mercator, widened only where a dataset pokes out), or by ENU-oriented boxes. Angkor pills for
+  both.
+  - **Fixed:** the geodetic cell key re-encoded the hemisphere bit and dropped the finest longitude
+    bit, so cells were twice as wide as their key said.
+  - Nesting tests now cover cell and box containment, plus a 2,000-point `cellAt` → `cellBounds`
+    round trip.
+- **Providers and attribution** on every dataset:
+  - carried in index rows and tile metadata, and set in manifests and code sets;
+  - the viewer shows "Data: …" credits for what is on screen;
+  - the `world` set now includes the 12 Aerometrex cities (45 datasets), credited.
+- **Aggregate Builder:**
+  - several sources at once, with provider/set/format chips and a tag filter;
+  - provider metadata end to end;
+  - windowed tree;
+  - tested on all 692 Iconem datasets (660 rows in ~100 ms; export of 660 datasets in 2–6 ms).
+- **Export:**
+  - `keepImplicit` (copies subtrees and templated tiles);
+  - `method: "convert"` (the per-format offline converter, with its options);
+  - `pack: ["3tz", "3dtiles"]` via the new `packages/convert/pack.js`;
+  - CLI `--keep-implicit --pack`;
+  - the desktop card gains method/option controls, a live "equivalent CLI" block, and links to the
+    docs, the middleware home and the demo viewer (`?load=`).
+- **Fixed: fly-tos lost at start-up in both renderers.**
+  - Cesium dropped a fly-to issued before the viewer existed.
+  - `App`'s renderer-switch reload also ran on mount and re-framed the whole tileset.
+  - Cesium's preset fly-to now **looks at** its point (it used to look `height` m north of it).
+- **Found: 3DTRjs `PotreePlugin` fails on every Potree 1.8 cloud** (attribute objects; 95% of
+  Iconem's clouds). The lab's vendored loader carries a local patch. COPC and BROTLI Potree 2.0 are
+  unsupported upstream, so COPC keeps going through `/stream`.
+- **Upstream research, the ADD skip:**
+  - It is a 3DTRjs **v0.5.1 regression** (#1673).
+  - CesiumJS avoids it (`meetsScreenSpaceErrorEarly` returns early for implicit/tileset-content
+    parents).
+  - It is not reported yet. Draft issue:
+
+    > **Traversal: implicit ADD tilesets render nothing at distance — the ADD-parent error skip
+    > applies to SUBTREELoader's content child (regression in 0.5.1).** Load an implicit tileset with
+    > `refine: "ADD"` (e.g. a point cloud) and move back until the root's SSE ≤ `errorTarget`: nothing
+    > renders. `markUsedTiles` (traverseFunctions.js, #1673) skips a child when
+    > `error × parent.geometricError / child.geometricError ≤ errorTarget`, and
+    > `SUBTREELoader.expandSubtree` moves the root content into a clone with the *same* geometric
+    > error under an unrenderable parent, so the ratio is 1. Suggested fix, as CesiumJS does: apply
+    > the skip only when the parent has renderable content.
+
 ### Added — 2026-09-17 (export to folder · aggregate builder)
 - **Added: export any tileset to a local folder.** `POST /export` on the tile-server, `3dtiled export`
   on the CLI, and an *Export to a folder* card in the desktop app. It crawls the URL, so `/stream`,

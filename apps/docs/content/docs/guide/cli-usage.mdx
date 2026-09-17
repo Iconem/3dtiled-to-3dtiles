@@ -45,13 +45,16 @@ a self-contained static folder with relative uris and implicit tilings expanded 
 [the desktop app's export](/docs/guide/desktop-app#export-to-a-folder), which uses the same code).
 
 ```sh
-node packages/convert/cli.js export <tileset-url> <outDir> [--max-depth N] [--overwrite]
+node packages/convert/cli.js export <tileset-url> <outDir> [--max-depth N] [--keep-implicit] [--pack 3tz,3dtiles] [--overwrite]
 # e.g. a mosaic, through a running server:
 node packages/convert/cli.js export "http://localhost:3001/aggregate/tileset.json?set=angkor" out/angkor
 ```
 
-For a raw local dataset, either `convert` it, or `3dtiled serve` it and export the printed URL. The
-HTTP form is `POST /export {url, outDir, maxDepth}` on a server started with `TILED_ALLOW_EXPORT=1`.
+For a raw local dataset, either `convert` it, or `3dtiled serve` it and export the printed URL. `--keep-implicit`
+copies subtrees and templated tiles instead of expanding them; `--pack` also writes `.3tz` / `.3dtiles`
+into the folder. The HTTP form is `POST /export {url, outDir, maxDepth, keepImplicit, pack}` (or
+`{method: "convert", src, format, options, pack}` for the offline converter) on a server started
+with `TILED_ALLOW_EXPORT=1`.
 
 ```js
 // JS/TS API — same detection + dispatch

@@ -13,6 +13,26 @@ Open it from the demo app with **✺ potree lab** in the top bar. A raw `cloud.j
 URL field opens as itself; a loaded point-cloud tileset (a `/stream` or `/aggregate` URL) opens in
 `tileset` mode.
 
+## What 3DTRjs's own loader reads (master, `70847eb`)
+
+| Source | `PotreePlugin` (raw, in the browser) | Through our `/stream` (3D Tiles) |
+|---|---|---|
+| Potree 1.7 `cloud.js` (attribute **names**) | ✅ | ✅ |
+| Potree 1.8 `cloud.js` (attribute **objects**) | ❌ upstream: `Cannot read properties of undefined (reading 'size')`. ✅ **with our local patch** | ✅ |
+| Potree 1.x with LAS/LAZ node files | ❌ (always fetches `.bin`) | ✅ |
+| Potree 2.0 `metadata.json`, DEFAULT encoding | ✅ | ✅ |
+| Potree 2.0, BROTLI encoding | ❌ (`encoding` is never checked) | ✅ |
+| COPC / LAS / LAZ / EPT | ❌ no loader in 3DTRjs (COPC is an open item of roadmap [#943](https://github.com/NASA-AMMOS/3DTilesRendererJS/issues/943)) | ✅ COPC |
+
+**Potree 1.8 is most of our data.** 38 of 40 sampled Iconem clouds are 1.8. The version is decided
+by file name only (`metadata.json` → v2, anything else → v1) and v1 attributes are looked up by name,
+which is the same bug our own decoder had. The vendored `PotreeLoader.js` carries one local patch,
+`v1Attributes()`, that accepts 1.8's objects (their `size`, or `elements × elementSize`). With it an
+Iconem 1.8 cloud loads raw (12,343 points on screen; 0 before). It is worth an upstream PR.
+
+**COPC therefore always goes through the middleware**, in `stream` mode (a `.copc.laz` URL is
+detected), and the lab's `potree` mode is the raw, middleware-free path for Potree only.
+
 ## The load modes
 
 | `mode=` | How the dataset is read | Point sizing |
@@ -57,7 +77,15 @@ cd apps/viewer && npm run dev:3dtr-master      # the viewer, aliased onto that b
 `three` / `react` / `@react-three/fiber`, because the clone has its own copies and two `three`
 instances break everything. On Windows, upstream's library build externalises its own `C:\…`
 aliases and emits a 253-byte `index.js`; the script builds through a wrapper config that fixes the
-`external` test without touching upstream files. Verified at `70847eb`: implicit `/stream` Potree
+`external` test without touching upstream files.
+
+Why it breaks: its library config makes every module external unless the import starts with `.`, `/`
+or `\`. Its own `packageAliases` are `path.resolve()`d, which on Windows gives `C:\…`, a string
+that starts with none of those. So every internal module was treated as an external package and
+`build/index.js` came out as 253 bytes of re-exports with mangled paths such as
+`"C:Usersjonathan…"`. The wrapper (`.local/3dtr-vite.lib-config.win.mjs`, written by the script) only
+replaces `external` with a test that also accepts absolute paths and `3d-tiles-renderer/…`
+self-imports. Verified at `70847eb`: implicit `/stream` Potree
 loads in the main viewer, and this lab renders a 149,695-point Mes Aynak aggregate with EDL. Once a
 release ships the work, bump the dependency and delete `.local/3DTilesRendererJS`.
 

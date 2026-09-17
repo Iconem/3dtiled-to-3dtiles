@@ -105,6 +105,25 @@ after `cache=none | hierarchy | full`. Any web server, S3 bucket or Cesium for U
 folder without this app. Pick an **empty** folder with **Folder…**, optionally a **max depth** (blank =
 every level), and press **Export**.
 
+- **Two methods.**
+  - **Crawl** downloads the tileset URL above as served, so it works for any source. Options: max
+    depth, and **keep implicit tiling**. Keeping implicit copies the `.subtree` files and templated
+    tiles as they are, under `implicit/<hash>/`, and rewrites the templates and `availableLevels`.
+    That gives smaller JSON, and needs an implicit-capable client.
+  - **Offline converter** runs the per-format converter on the raw source. It is faster for the
+    formats it covers and has their options: tiling (implicit/explicit), scale, GE scale, GE layer,
+    splat centroids.
+- **Packing.** Both methods can also pack the result as **`.3tz`** and/or **`.3dtiles`** inside the
+  folder (`packages/convert/pack.js`, shared with `scripts/pack-3dtiles.mjs`).
+- **Equivalent CLI.** The card shows the command doing the same thing, updated live:
+  `3dtiled export …` for a crawl, `3dtiled <source> <dir> --format …` (plus the pack script) for the
+  converter.
+- **Links.** Export and CLI docs, the middleware's home page, *Open the live tileset in the demo
+  viewer*, and after an export *Open copy in demo viewer*. The last two use the viewer's
+  `?load=<url>` start parameter.
+- **Server or CLI?** The server. It is already running with every adapter loaded, it reports progress
+  and can cancel a crawl, the job survives switching tabs, and the app needs no shell or second Node
+  process. The CLI runs the same code for scripts and CI, hence the command shown.
 - **Where the work runs.** The tile-server does the work (`POST /export`, polled with
   `GET /export/{id}`), not the view. It already has every adapter, and a crawl of thousands of tiles
   should survive switching tabs. **Cancel** stops it and leaves a partial copy.
@@ -139,6 +158,11 @@ Measured, through the app's own server:
 | Iconem Geghard via `/stream` (CLI) | 4 | 111 | 25.0 MB | 22 s |
 | Aerometrex Brooklyn, remote explicit b3dm (CLI) | 3 | 69 | 20.3 MB | 11 s |
 | `/aggregate?set=aerometrex` (Brooklyn + Hudson Yards, proxied) | 3 | 3 tilesets + 10 files | 1.0 MB | 1.6 s |
+| Geghard, crawl, **keep implicit** + `.3tz` (desktop UI) | 3 | 81 files + 8.6 MB `.3tz` | 8.6 MB | 4.9 s |
+| Potree `lion_takanawa`, **offline converter**, `--tiling explicit` + `.3tz` (desktop UI) | all | 169 files + 7.9 MB `.3tz` | 15.7 MB | 42.5 s |
+
+The implicit copy renders from a static server in Cesium (48 tiles) and in 3DTRjs, and its `.3tz`
+renders through `/3dtiles-self-contained` (48 tiles).
 
 The exported Geghard and Brooklyn folders were then served by a plain static server and rendered in the
 viewer (48 and 42 tiles). The same exporter is on the CLI as
