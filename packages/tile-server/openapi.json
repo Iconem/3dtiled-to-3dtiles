@@ -1093,10 +1093,6 @@
             "application/json": {
               "schema": {
                 "type": "object",
-                "required": [
-                  "url",
-                  "outDir"
-                ],
                 "properties": {
                   "url": {
                     "type": "string",
@@ -1110,8 +1106,45 @@
                     "type": "integer",
                     "nullable": true,
                     "description": "Keep tiles down to this depth (counted across external tilesets); null = everything"
+                  },
+                  "method": {
+                    "type": "string",
+                    "enum": [
+                      "crawl",
+                      "convert"
+                    ],
+                    "default": "crawl",
+                    "description": "crawl = download `url` as served (any source); convert = run the per-format offline converter on `src`"
+                  },
+                  "keepImplicit": {
+                    "type": "boolean",
+                    "description": "crawl: copy .subtree files and templated tiles instead of expanding implicit tilings"
+                  },
+                  "pack": {
+                    "type": "array",
+                    "items": {
+                      "type": "string",
+                      "enum": [
+                        "3tz",
+                        "3dtiles"
+                      ]
+                    },
+                    "description": "also pack the folder into these single-file formats"
+                  },
+                  "src": {
+                    "type": "string",
+                    "description": "convert: local path or URL of the raw source"
+                  },
+                  "format": {
+                    "type": "string",
+                    "description": "convert: source format (auto-detected when omitted)"
+                  },
+                  "options": {
+                    "type": "object",
+                    "description": "convert: {tiling: implicit|explicit, scale, geScale, geLayer, centroidsOnly}"
                   }
-                }
+                },
+                "description": "crawl needs {url, outDir}; convert needs {method: \"convert\", src, outDir}"
               }
             }
           }

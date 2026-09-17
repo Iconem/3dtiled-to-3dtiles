@@ -89,6 +89,7 @@ function parseSubtree(buf) {
 async function collectAvailability(uriTemplate, scheme, subtreeLevels, availableLevels, readSubtree) {
   const avail   = new Set();
   const content = new Set();
+  const subtrees = new Set();                  // keys of the subtree files actually read
 
   async function walk(rootLevel, rootX, rootY, rootZ) {
     if (availableLevels !== null && rootLevel >= availableLevels) return;
@@ -99,6 +100,7 @@ async function collectAvailability(uriTemplate, scheme, subtreeLevels, available
 
     const buf = await readSubtree(uri);
     if (!buf) return;
+    subtrees.add(coordsToKey(rootLevel, rootX, rootY, rootZ));
 
     const { tileAvail, contentAvail, childAvail } = parseSubtree(buf);
 
@@ -131,7 +133,7 @@ async function collectAvailability(uriTemplate, scheme, subtreeLevels, available
   }
 
   await walk(0, 0, 0, 0);
-  return { avail, content };
+  return { avail, content, subtrees };
 }
 
 // ── Bounding volume helpers ────────────────────────────────────────────────────
@@ -262,7 +264,7 @@ export async function buildExplicitFromUrl(tilesetUrl, { maxLevels = null } = {}
   const raw = await r.json();
   const baseUrl = tilesetUrl.replace(/\/[^/]+$/, '/');
 
-  const { tileset } = await _buildExplicitTileset(raw, async (uri) => {
+  const { tileset, avail, content, subtrees, availLevels } = await _buildExplicitTileset(raw, async (uri) => {
     const u = new URL(uri, baseUrl).href;
     try {
       const resp = await fetch(u);
@@ -271,7 +273,8 @@ export async function buildExplicitFromUrl(tilesetUrl, { maxLevels = null } = {}
     } catch { return null; }
   }, maxLevels);
 
-  return { tileset, baseUrl };
+  // avail/content/subtrees: coordinate keys ("level-x-y-z") — what a copy that STAYS implicit needs
+  return { tileset, baseUrl, raw, avail, content, subtrees, availLevels };
 }
 
 // ── Core: build explicit tileset from parsed JSON + readSubtree callback ──────
@@ -291,7 +294,7 @@ async function _buildExplicitTileset(raw, readSubtree, maxLevels = null) {
   const contentUri    = raw.root.content?.uri ?? null;
 
   console.log(`[i→e] ${scheme} subtreeLevels=${subtreeLevels} availableLevels=${availLevels ?? 'walk'} …`);
-  const { avail, content } = await collectAvailability(subtreeUri, scheme, subtreeLevels, availLevels, readSubtree);
+  const { avail, content, subtrees } = await collectAvailability(subtreeUri, scheme, subtreeLevels, availLevels, readSubtree);
   console.log(`[i→e] ${avail.size} tile nodes, ${content.size} with content`);
 
   // content Set drives actual URI assignment; avail Set drives hierarchy existence
@@ -311,7 +314,7 @@ async function _buildExplicitTileset(raw, readSubtree, maxLevels = null) {
     geometricError: raw.geometricError ?? raw.root.geometricError,
     root: explicitRoot,
   };
-  return { tileset, avail, content };
+  return { tileset, avail, content, subtrees, availLevels };
 }
 
 // ── CLI ───────────────────────────────────────────────────────────────────────

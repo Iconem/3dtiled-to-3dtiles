@@ -9,17 +9,24 @@
  * a raw dataset wrapped by /stream or /convert, an /aggregate mosaic, a /proxy'd non-CORS host, or any
  * remote 3D Tiles. The tree keeps its shape; nothing is re-encoded:
  *   - each tileset JSON (root and every external tileset) is downloaded, rewritten, and written out;
- *   - an IMPLICIT tileset is expanded to explicit first (its .subtree availability is read with the
- *     implicit-to-explicit package), because a folder copy must not depend on URL templates whose
- *     query strings point back at this server;
- *   - every content file is downloaded and its uri rewritten to a relative local path.
+ *   - an IMPLICIT tileset is expanded to explicit (its .subtree availability is read with the
+ *     implicit-to-explicit package) — or, with `keepImplicit`, stays implicit: every available subtree
+ *     and content file is copied under implicit/<hash>/ and the URI templates are rewritten to point
+ *     there (the originals carry query strings back to this server, which a copy must not depend on);
+ *   - every content file is downloaded and its uri rewritten to a relative local path;
+ *   - optionally the folder is packed into .3tz and/or .3dtiles (packages/convert/pack.js).
+ *
+ * `convertToFolder()` is the other way to fill a folder: the per-format OFFLINE converter
+ * (packages/convert), for raw sources — faster than crawling a served tileset, and it has the
+ * format-specific options (tiling, scale, GE scaling, splat centroids).
  *
  * Layout:  <out>/tileset.json · <out>/tilesets/<name>.json · <out>/tiles/<xx>/<name> · export-report.json
  * Tile files are sharded by two hex digits of a hash so a million-tile dataset never puts a million
  * files in one directory. File names keep the source basename, prefixed by a short hash when two
  * different URLs share a basename (every /stream dataset has a "tile/0-0-0-0.glb").
  *
- *   POST   /export            {url, outDir, maxDepth?, overwrite?}   → 202 {id}
+ *   POST   /export            {url, outDir, maxDepth?, keepImplicit?, pack?: ['3tz','3dtiles']}   → 202 {id}
+ *          /export            {method: 'convert', src, format?, outDir, options?: {tiling, scale, geScale, geLayer, centroidsOnly}, pack?}
  *   GET    /export/<id>       → progress / result
  *   DELETE /export/<id>       → cancel
  *   GET    /export/<id>/files/<path>  → a file of that export's folder (to preview the result as it
@@ -32,7 +39,7 @@
 import { createHash, randomUUID } from 'node:crypto';
 import { mkdir, readdir, readFile, writeFile, stat } from 'node:fs/promises';
 import path from 'node:path';
-import { CORS } from '../core/index.js';
+import { CORS, keyToCoords } from '../core/index.js';
 import { buildExplicitFromUrl } from '../implicit-to-explicit/index.js';
 
 const hash = (s, n = 8) => createHash('sha1').update(s).digest('hex').slice(0, n);
@@ -89,7 +96,7 @@ async function fetchOk(url, signal, attempts = 3) {
  * Export `rootUrl` into `outDir`. Resolves to the report written to export-report.json.
  * `onProgress(p)` is called as work completes; `signal` cancels.
  */
-export async function exportTileset(rootUrl, outDir, { maxDepth = Infinity, concurrency = 8, signal, onProgress, overwrite = false } = {}) {
+export async function exportTileset(rootUrl, outDir, { maxDepth = Infinity, concurrency = 8, signal, onProgress, overwrite = false, keepImplicit = false, pack = [] } = {}) {
   outDir = path.resolve(outDir);
   await mkdir(outDir, { recursive: true });
   if (!overwrite) {
@@ -98,7 +105,7 @@ export async function exportTileset(rootUrl, outDir, { maxDepth = Infinity, conc
   }
 
   const t0 = Date.now();
-  const p = { tilesets: 0, tilesDiscovered: 0, tilesWritten: 0, bytes: 0, failed: 0, implicitExpanded: 0, phase: 'crawling' };
+  const p = { tilesets: 0, tilesDiscovered: 0, tilesWritten: 0, bytes: 0, failed: 0, implicitExpanded: 0, implicitKept: 0, phase: 'crawling' };
   const failures = [];
   const report = () => onProgress?.({ ...p, elapsedMs: Date.now() - t0 });
 
@@ -156,18 +163,41 @@ export async function exportTileset(rootUrl, outDir, { maxDepth = Infinity, conc
     signal?.throwIfAborted();
     crawled.add(url);
     let json = await (await fetchOk(url, signal)).json();
+    const fromDir = path.posix.dirname(rel);
+    const relTo = (target) => path.posix.relative(fromDir, target) || path.posix.basename(target);
     if (json.root?.implicitTiling) {
-      p.phase = 'expanding implicit tiling';
+      p.phase = keepImplicit ? 'reading implicit availability' : 'expanding implicit tiling';
       report();
       // Only the levels the depth cap keeps: `depth0` is where this tileset's root sits.
       const maxLevels = Number.isFinite(maxDepth) ? Math.max(1, maxDepth - depth0 + 1) : null;
-      json = (await buildExplicitFromUrl(url, { maxLevels })).tileset;
-      p.implicitExpanded++;
+      const ex = await buildExplicitFromUrl(url, { maxLevels });
+      if (keepImplicit) {
+        json = ex.raw;
+        const imp = json.root.implicitTiling;
+        const dir = `implicit/${hash(url)}`;
+        const expand = (template, key) => {
+          const { level, x, y, z } = keyToCoords(key);
+          return template.replace('{level}', level).replace('{x}', x).replace('{y}', y).replace('{z}', z);
+        };
+        const subT = imp.subtrees.uri;
+        for (const key of ex.subtrees) schedule(new URL(expand(subT, key), url).href, `${dir}/subtrees/${key}.subtree`);
+        imp.subtrees.uri = `${path.posix.relative(fromDir, `${dir}/subtrees`)}/{level}-{x}-{y}-{z}.subtree`;
+        const conT = json.root.content?.uri ?? json.root.content?.url;
+        if (conT) {
+          const ext = (conT.split('?')[0].match(/\.\w+$/) || ['.glb'])[0];
+          for (const key of ex.content) schedule(new URL(expand(conT, key), url).href, `${dir}/tiles/${key}${ext}`);
+          setUri(json.root.content, `${path.posix.relative(fromDir, `${dir}/tiles`)}/{level}-{x}-{y}-{z}${ext}`);
+        }
+        // a depth-capped copy must say where it stops, or clients will ask for subtrees it doesn't have
+        if (ex.availLevels != null) imp.availableLevels = ex.availLevels;
+        p.implicitKept++;
+      } else {
+        json = ex.tileset;
+        p.implicitExpanded++;
+      }
       p.phase = 'crawling';
     }
     p.tilesets++;
-    const fromDir = path.posix.dirname(rel);
-    const relTo = (target) => path.posix.relative(fromDir, target) || path.posix.basename(target);
 
     const external = [];
     const tiles = [];
@@ -227,13 +257,45 @@ export async function exportTileset(rootUrl, outDir, { maxDepth = Infinity, conc
   await Promise.all(downloads);
   signal?.throwIfAborted();
 
+  const packages = pack?.length ? await packFolder(outDir, pack, (ph) => { p.phase = ph; report(); }) : [];
   const result = {
-    source: rootUrl, outDir, ...p, phase: 'done', elapsedMs: Date.now() - t0,
-    maxDepth: Number.isFinite(maxDepth) ? maxDepth : null,
+    method: 'crawl', source: rootUrl, outDir, ...p, phase: 'done', elapsedMs: Date.now() - t0,
+    maxDepth: Number.isFinite(maxDepth) ? maxDepth : null, keepImplicit, packages,
     // A failed tile keeps its uri: the tileset stays structurally valid and the gap is listed here,
     // so re-running the export (or fetching just these) can fill it.
     failures,
   };
+  await writeFile(path.join(outDir, 'export-report.json'), JSON.stringify(result, null, 2));
+  return result;
+}
+
+/** Pack a finished folder into `<folder>/<folder name>.3tz|.3dtiles`. */
+async function packFolder(outDir, formats, onPhase) {
+  onPhase?.(`packing ${formats.join(' + ')}`);
+  const { packTileset } = await import('../convert/pack.js');
+  const r = await packTileset(outDir, path.join(outDir, path.basename(outDir)), formats);
+  return r.written.map((w) => path.basename(w));
+}
+
+/**
+ * Fill `outDir` with the per-format offline converter (packages/convert) — for raw sources. `options`
+ * are the converter's: tiling ('implicit' | 'explicit'), scale, geScale, geLayer, centroidsOnly.
+ */
+export async function convertToFolder(src, outDir, { format, options = {}, pack = [], onProgress } = {}) {
+  outDir = path.resolve(outDir);
+  const t0 = Date.now();
+  const tick = (phase) => onProgress?.({ phase, elapsedMs: Date.now() - t0 });
+  tick('converting');
+  const timer = setInterval(() => tick('converting'), 1000);
+  let r;
+  try {
+    const { convert } = await import('../convert/index.js');
+    r = await convert(src, outDir, { format: format || undefined, ...options });
+  } finally { clearInterval(timer); }
+  const packages = pack?.length ? await packFolder(outDir, pack, tick) : [];
+  const { files, bytes } = await folderStats(outDir);
+  const result = { method: 'convert', source: src, format: r?.format ?? format, options, outDir, tilesWritten: files, bytes,
+    tilesets: 1, failed: 0, phase: 'done', elapsedMs: Date.now() - t0, packages };
   await writeFile(path.join(outDir, 'export-report.json'), JSON.stringify(result, null, 2));
   return result;
 }
@@ -275,12 +337,15 @@ export async function handleExport(req, res, u) {
     let body;
     try { body = await readBody(req); } catch (e) { json(res, 400, { error: e.message }); return true; }
     const { outDir, overwrite } = body;
+    const method = body.method === 'convert' ? 'convert' : 'crawl';
     const maxDepth = body.maxDepth == null || body.maxDepth === '' ? Infinity : Number(body.maxDepth);
-    if (!body.url || !outDir) { json(res, 400, { error: 'body must be {"url": <tileset url>, "outDir": <absolute folder>}' }); return true; }
+    const pack = (Array.isArray(body.pack) ? body.pack : []).filter((f) => f === '3tz' || f === '3dtiles');
+    if (method === 'crawl' && (!body.url || !outDir)) { json(res, 400, { error: 'body must be {"url": <tileset url>, "outDir": <absolute folder>}' }); return true; }
+    if (method === 'convert' && (!body.src || !outDir)) { json(res, 400, { error: 'body must be {"method": "convert", "src": <path or url>, "outDir": <absolute folder>}' }); return true; }
     if (!path.isAbsolute(outDir)) { json(res, 400, { error: 'outDir must be an absolute path' }); return true; }
     // A server-relative url ("/stream/tileset.json?…") means this server.
-    const url = new URL(body.url, `http://127.0.0.1:${req.socket.localPort}`).href;
-    if (!/^https?:/.test(url)) { json(res, 400, { error: 'url must be http(s)' }); return true; }
+    const url = method === 'crawl' ? new URL(body.url, `http://127.0.0.1:${req.socket.localPort}`).href : body.src;
+    if (method === 'crawl' && !/^https?:/.test(url)) { json(res, 400, { error: 'url must be http(s)' }); return true; }
     try {
       await mkdir(outDir, { recursive: true });
       if (!overwrite && (await readdir(outDir)).some((f) => !f.startsWith('.'))) {
@@ -295,8 +360,11 @@ export async function handleExport(req, res, u) {
     }
     const job = { id: randomUUID(), state: 'running', url, outDir, startedAt: new Date().toISOString(), progress: null, ctrl: new AbortController() };
     jobs.set(job.id, job);
-    exportTileset(url, outDir, { maxDepth, overwrite: true, signal: job.ctrl.signal, onProgress: (pr) => { job.progress = pr; } })
-      .then((r) => { job.state = 'done'; job.result = r; job.progress = { ...job.progress, ...r, failures: undefined }; })
+    const onProgress = (pr) => { job.progress = { ...job.progress, ...pr }; };
+    const run = method === 'convert'
+      ? convertToFolder(body.src, outDir, { format: body.format, options: body.options ?? {}, pack, onProgress })
+      : exportTileset(url, outDir, { maxDepth, overwrite: true, keepImplicit: !!body.keepImplicit, pack, signal: job.ctrl.signal, onProgress });
+    run.then((r) => { job.state = 'done'; job.result = r; job.progress = { ...job.progress, ...r, failures: undefined }; })
       .catch((e) => { job.state = job.ctrl.signal.aborted ? 'cancelled' : 'failed'; job.error = String(e.message || e); });
     json(res, 202, { id: job.id, status: `/export/${job.id}` });
     return true;

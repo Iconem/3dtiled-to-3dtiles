@@ -13,7 +13,7 @@
  *     (converted once on first request, then cached). --lon/--lat append the tileset-level globe
  *     placement params (see tile-server docs).
  *
- *   3dtiled export <tileset-url> <outDir> [--max-depth N] [--overwrite]
+ *   3dtiled export <tileset-url> <outDir> [--max-depth N] [--keep-implicit] [--pack 3tz,3dtiles] [--overwrite]
  *     Materialise any 3D Tiles tileset (a remote one, or a /stream, /convert or /aggregate URL of a
  *     running server) into a self-contained folder: every tileset JSON and tile file, uris made
  *     relative, implicit tilings expanded. For a raw dataset (a .copc.laz, a Potree folder…), either
@@ -35,14 +35,14 @@ const sepIdx = rawArgv.indexOf('--');
 const argv = sepIdx >= 0 ? rawArgv.slice(0, sepIdx) : rawArgv;
 const extraArgs = sepIdx >= 0 ? rawArgv.slice(sepIdx + 1) : [];
 
-const VALUE_FLAGS = new Set(['max-depth', 'format', 'scale', 'ge-scale', 'ge-layer', 'tiling', 'port', 'lon', 'lat', 'alt', 'heading', 'place-scale']);
+const VALUE_FLAGS = new Set(['max-depth', 'pack', 'format', 'scale', 'ge-scale', 'ge-layer', 'tiling', 'port', 'lon', 'lat', 'alt', 'heading', 'place-scale']);
 function flag(name) { const i = argv.indexOf(`--${name}`); return i >= 0 ? argv[i + 1] : undefined; }
 
 // ── `3dtiled export` — materialise a tileset URL into a folder ─────────────────────────────────────
 if (argv[0] === 'export') {
   const [, src, out] = argv.filter((a, i) => !a.startsWith('--') && !(i > 0 && argv[i - 1].startsWith('--') && VALUE_FLAGS.has(argv[i - 1].slice(2))));
   if (!src || !out || !/^https?:\/\//.test(src)) {
-    console.error('Usage: 3dtiled export <tileset-url> <outDir> [--max-depth N] [--overwrite]');
+    console.error('Usage: 3dtiled export <tileset-url> <outDir> [--max-depth N] [--keep-implicit] [--pack 3tz,3dtiles] [--overwrite]');
     process.exit(1);
   }
   (async () => {
@@ -51,14 +51,17 @@ if (argv[0] === 'export') {
     const r = await exportTileset(src, out, {
       maxDepth: flag('max-depth') != null ? Number(flag('max-depth')) : Infinity,
       overwrite: argv.includes('--overwrite'),
+      keepImplicit: argv.includes('--keep-implicit'),
+      pack: (flag('pack') ?? '').split(',').map((s) => s.trim()).filter(Boolean),
       onProgress: (p) => {
         if (Date.now() - last < 1000) return;
         last = Date.now();
         process.stdout.write(`\r  ${p.phase}: ${p.tilesets} tilesets · ${p.tilesWritten}/${p.tilesDiscovered} files · ${(p.bytes / 1e6).toFixed(1)} MB${p.failed ? ` · ${p.failed} failed` : ''}   `);
       },
     });
-    console.log(`\n[3dtiled export] ${r.tilesets} tilesets (${r.implicitExpanded} implicit expanded), ${r.tilesWritten} files, `
-      + `${(r.bytes / 1e6).toFixed(1)} MB in ${(r.elapsedMs / 1000).toFixed(1)} s → ${r.outDir}${r.failed ? `  (${r.failed} failed — see export-report.json)` : ''}`);
+    console.log(`\n[3dtiled export] ${r.tilesets} tilesets (${r.implicitExpanded} implicit expanded, ${r.implicitKept} kept), ${r.tilesWritten} files, `
+      + `${(r.bytes / 1e6).toFixed(1)} MB in ${(r.elapsedMs / 1000).toFixed(1)} s → ${r.outDir}${r.failed ? `  (${r.failed} failed — see export-report.json)` : ''}${r.packages.length ? `
+  packed: ${r.packages.join(', ')}` : ''}`);
   })().catch((e) => { console.error('\n[3dtiled export]', e.message); process.exit(1); });
 } else if (argv[0] === 'serve') {
   const input = argv.slice(1).find((a, i, arr) => !a.startsWith('--') && !(i > 0 && arr[i-1].startsWith('--') && VALUE_FLAGS.has(arr[i-1].slice(2))));
