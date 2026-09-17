@@ -159,16 +159,66 @@ check(kids(t, gA.id).includes(grouped.id), 'selection group is created in the fi
   check(a?.date === '2020' && a.refine === 'REPLACE', 'round-trip keeps group date + refine');
   const leaf = Object.values(back.nodes).find((n) => n.name === 'site 1') as any;
   check(leaf.ge === 42 && leaf.notes === 'n' && leaf.kv[0]?.key === 'team' && near(leaf.radius, 101, 1e-6) && near(leaf.lon, 103.81, 1e-7), 'round-trip keeps leaf fields');
-  // Server-style quadtree cells (no metadata) are flattened.
+  // Server-style quadtree cells (no metadata) are flattened on request.
   const serverTs = { asset: { version: '1.1' }, geometricError: 1, root: { boundingVolume: { sphere: [0, 0, 0, 7e6] }, geometricError: 1, children: [
     { boundingVolume: { sphere: [...llhToEcef(1, 1, 0), 10] }, geometricError: 1, extras: { cell: { key: '0' } }, children: [
       { boundingVolume: { sphere: [...llhToEcef(1, 1, 0), 10] }, geometricError: 1, content: { uri: 'a/tileset.json' }, metadata: { class: 'dataset', properties: { name: 'A1' } } },
       { boundingVolume: { region: [0, 0, 0.1, 0.1, 0, 10] }, geometricError: 1, content: { uri: 'b/tileset.json' } },
     ] },
   ] } };
-  const flat = fromTileset(serverTs, 'https://srv/x/tileset.json');
+  const flat = fromTileset(serverTs, 'https://srv/x/tileset.json', { flatten: true });
   check(names(flat, flat.rootId).join() === 'A1,b', 'server cells flattened, names from metadata or URL');
   check((flat.nodes[kids(flat, flat.rootId)[1]] as any).url === 'https://srv/x/b/tileset.json', 'relative URIs resolved against the tileset');
+  // By default a root whose only child is a plain cell absorbs it (a chain), which gives the same list.
+  const kept = fromTileset(serverTs, 'https://srv/x/tileset.json');
+  check(counts(kept).groups === 1 && names(kept, kept.rootId).join() === 'A1,b', 'root absorbs its single cell');
+}
+
+// ── hierarchical import of a server mosaic (3-level cell tree) ──
+{
+  const sph = (lon: number, lat: number, r = 10) => ({ sphere: [...llhToEcef(lon, lat, 0), r] });
+  const cell = (key: string, level?: number) => ({ cell: { scheme: 'geodetic', key, ...(level != null ? { level } : {}) } });
+  const leaf = (name: string, lon: number, lat: number, key: string, extra: Record<string, string> = {}) => ({
+    boundingVolume: sph(lon, lat), geometricError: 10, refine: 'ADD', content: { uri: `${name}/tileset.json` }, extras: cell(key),
+    metadata: { class: 'dataset', properties: { id: `id-${name}`, name, format: '3dtiles', provider: 'Iconem', attribution: '© Iconem', ...extra } },
+  });
+  const grp = (key: string, level: number, children: any[], refine = 'ADD') =>
+    ({ boundingVolume: sph(1, 1, 1e4), geometricError: 100, refine, extras: cell(key, level), children });
+  const ts = { asset: { version: '1.1' }, geometricError: 1000, root: grp('1', 1, [
+    grp('10', 2, [
+      leaf('L1', 1, 1, '1000', { scene: 'S1' }),
+      grp('103', 3, [leaf('L2', 1.1, 1, '1030', { scene: 'S1' }), leaf('L3', 1.2, 1, '1031', { scene: 'S2' })], 'REPLACE'),
+    ]),
+    // A chain: 11 → 112 → (two leaves). 11 has no dataset and one child group, so it is collapsed.
+    grp('11', 2, [grp('112', 4, [leaf('L4', 2, 2, '1120'), leaf('L5', 2.1, 2, '1121')])]),
+    leaf('L6', 3, 3, '12'),
+  ]) };
+  const h = fromTileset(JSON.parse(JSON.stringify(ts)), 'https://srv/agg/tileset.json');
+  check(counts(h).datasets === 6 && counts(h).groups === 4, `hierarchy: 6 datasets, root + 3 groups (got ${counts(h).groups})`);
+  check(names(h, h.rootId).join() === 'cell 10 (L2, geodetic),cell 112 (L4, geodetic),L6', 'hierarchy: root children named from cells, chain collapsed');
+  const g10 = kids(h, h.rootId)[0];
+  check(names(h, g10).join() === 'L1,cell 103 (L3, geodetic)', 'hierarchy: datasets and sub-cells keep their order');
+  const g103 = h.nodes[kids(h, g10)[1]] as GroupNode;
+  check(g103.refine === 'REPLACE' && names(h, g103.id).join() === 'L2,L3', 'hierarchy: refine kept, leaves nested 3 levels deep');
+  const l2 = h.nodes[g103.children[0]] as any;
+  check(l2.provider === 'Iconem' && l2.attribution === '© Iconem' && l2.sourceId === 'id-L2' && l2.url === 'https://srv/agg/L2/tileset.json', 'hierarchy: leaves keep provider/attribution/id/url');
+  // Exported and imported again, the groups come back with their names (now as metadata).
+  const again = fromTileset(JSON.parse(JSON.stringify(toTileset(h))));
+  check(counts(again).groups === 4 && counts(again).datasets === 6 && names(again, kids(again, again.rootId)[0]).join() === 'L1,cell 103 (L3, geodetic)', 'hierarchy: builder round-trip keeps the groups');
+  // A named group over a single unnamed cell adopts the cell's children.
+  const named = { asset: { version: '1.1' }, geometricError: 1, root: { boundingVolume: sph(1, 1, 1e4), geometricError: 1, children: [
+    { boundingVolume: sph(1, 1, 1e4), geometricError: 1, metadata: { class: 'group', properties: { name: 'Site' } }, children: [grp('7', 3, [leaf('A', 1, 1, '70'), leaf('B', 1, 1, '71')])] },
+    leaf('C', 1, 1, '8'),
+  ] } };
+  const n2 = fromTileset(named);
+  check(names(n2, n2.rootId).join() === 'Site,C' && names(n2, kids(n2, n2.rootId)[0]).join() === 'A,B', 'named group absorbs its single unnamed cell');
+  // Flatten keeps the old flat list; groupBy buckets every group's datasets.
+  const f = fromTileset(ts, undefined, { flatten: true });
+  check(names(f, f.rootId).join() === 'L1,L2,L3,L4,L5,L6', 'flatten: one flat list');
+  const fs = fromTileset(ts, undefined, { flatten: true, groupBy: 'scene' });
+  check(names(fs, fs.rootId).join() === 'S1,S2,L4,L5,L6' && names(fs, kids(fs, fs.rootId)[0]).join() === 'L1,L2', 'flatten + group by scene');
+  const hs = fromTileset(ts, undefined, { groupBy: 'provider' });
+  check(counts(hs).datasets === 6 && names(hs, kids(hs, hs.rootId)[0]).join() === 'Iconem,cell 103 (L3, geodetic)', 'hierarchy + group by provider in every group');
 }
 
 // ── provider / attribution ──

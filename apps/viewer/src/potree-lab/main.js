@@ -143,6 +143,8 @@ function initTiles() {
   tiles.setCamera(camera);
   scene.add(tiles.group);
   LAB.tiles = tiles;                               // devtools / headless inspection
+  LAB.url = params.url;                            // potree mode keeps it in the plugin (tiles.rootURL is null)
+  LAB.mode = params.mode;
 
   // Frame whatever loaded: datasets range from metres to kilometres, so everything scales off the bounds.
   // A bounding SPHERE, not a box: in stream mode ReorientationPlugin rotates the group, and the
@@ -186,14 +188,31 @@ function syncUrl() {
 // ── GUI ─────────────────────────────────────────────────────────────────────────────────────────
 const gui = new GUI({ title: 'Potree lab' });
 const datasets = { ...BUILTIN };
-const datasetCtl = gui.add(params, 'dataset', Object.keys(datasets)).name('dataset').onChange((name) => {
+
+/**
+ * lil-gui's `controller.options(list)` does not update in place: it DESTROYS the controller and returns
+ * a new one, appended at the end of its parent, without the old onChange. So swap in the returned
+ * controller, re-attach the handler and put it back where the old one was.
+ */
+function replaceOptions(ctl, list, onChange) {
+  const el = ctl.domElement;
+  const next = el.nextSibling;
+  const parentEl = el.parentElement;
+  const fresh = ctl.options(list).onChange(onChange);
+  if (parentEl) parentEl.insertBefore(fresh.domElement, next);
+  return fresh;
+}
+
+function onDatasetChange(name) {
+  if (!(name in datasets)) return;
   params.url = datasets[name];
   const mode = MODE_OF(params.url);
   if (mode) { params.mode = mode; modeCtl.updateDisplay(); streamFolder.show(true); }
   else if (params.mode === 'tileset') { params.mode = 'stream'; modeCtl.updateDisplay(); }
   urlCtl.updateDisplay();
   initTiles();
-});
+}
+let datasetCtl = gui.add(params, 'dataset', Object.keys(datasets)).name('dataset').onChange(onDatasetChange);
 const urlCtl = gui.add(params, 'url').name('source url').onFinishChange(initTiles);
 const modeCtl = gui.add(params, 'mode', { 'PotreePlugin (adaptive size)': 'potree', '/stream 3D Tiles + effects': 'stream', 'any 3D Tiles url + effects': 'tileset' })
   .name('load as').onChange(() => { streamFolder.show(params.mode !== 'potree'); scaleCtl.name(params.mode === 'potree' ? 'point scale' : 'size multiplier'); initTiles(); });
@@ -231,9 +250,9 @@ fetch('/local-sets/iconem.json')
   .then((m) => {
     if (!m?.entries) return;
     for (const e of m.entries.filter((x) => x.format === 'potree')) datasets[`Iconem · ${e.project} / ${e.name}`] = e.url;
-    datasetCtl.options(Object.keys(datasets));
     const match = Object.entries(datasets).find(([, u]) => u === params.url);
     params.dataset = match ? match[0] : '';
+    datasetCtl = replaceOptions(datasetCtl, Object.keys(datasets), onDatasetChange);
     datasetCtl.updateDisplay();
     hud.dataset.iconem = String(Object.keys(datasets).length - Object.keys(BUILTIN).length);
   })

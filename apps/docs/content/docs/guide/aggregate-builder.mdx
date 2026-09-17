@@ -16,7 +16,9 @@ library opens on exactly those datasets.
 | Query param | Effect |
 |---|---|
 | `?import=<index.json URL>` | preloads the library with that selection (an `/aggregate/…/tileset.json` URL works too) |
-| `?tileset=<tileset.json URL>` | imports an existing aggregate or builder tileset as the tree |
+| `?tileset=<tileset.json URL>` | imports an existing aggregate or builder tileset as the tree, keeping its hierarchy |
+| `&flatten=1` | with `?tileset=`: import as one flat list instead (see [Importing a tileset](#importing-a-tileset)) |
+| `&groupby=scene\|project\|provider\|year` | with `?tileset=`: bucket every group's datasets after the import |
 
 ## The three panes
 
@@ -147,13 +149,33 @@ counts as one step, and folding groups is not an undo step.
 ## Importing a tileset
 
 **Import → tileset.json from URL** (or `?tileset=`, or a file) rebuilds a tree from any aggregate,
-builder or draft tileset. Content tiles become datasets, placed from their bounding volume (sphere,
-box or region, with tile transforms applied) and named from their metadata or their URL. Content-less
-tiles become groups, keeping `name`, `date`, `notes`, `mode`, refine and custom keys. The server's
-unnamed quadtree cells are **flattened** into their parent: they record where a dataset fell, not a
-choice anyone made. Relative URIs resolve against the tileset URL (a file import has no URL to
-resolve them against). Children a display mode left out are not in the file, so they cannot come
-back.
+builder or draft tileset, **keeping its hierarchy**:
+
+- **Content tiles become datasets**, placed from their bounding volume (sphere, box or region, with
+  tile transforms applied) and named from their metadata or their URL. The `dataset` metadata of an
+  `/aggregate` leaf (`id`, `name`, `project`, `scene`, `date`, `format`, `licence`, `provider`,
+  `attribution`) fills the matching fields; other keys become custom keys.
+- **Every tile with children becomes a group**, keeping its refine. A builder group keeps `name`,
+  `date`, `notes`, `mode` and custom keys. A server quadtree cell has no metadata, only
+  `extras.cell = { scheme, key, level }`, so it is named after its cell: `cell 13003003 (L7, geodetic)`.
+- **Chains are collapsed.** A group with no dataset and exactly one child group adds nothing: an
+  unnamed cell is replaced by its child, and a named group (or the root) over a single unnamed cell
+  adopts that cell's children. The server already path-compresses its cells; this also covers builder
+  files and plain tilesets. The imported root becomes the document root.
+
+For example `/aggregate/tileset.json?set=angkor&nest=geodetic` imports as 23 datasets in 17 groups
+(18 with the root, eight levels deep), and `set=world&nest=geodetic` as 45 datasets in 37 groups.
+
+The URL dialog has two options (the Import menu also has **Open tileset file, flattened…**):
+
+- **Flatten** — the old behaviour: unnamed cells are dropped and their datasets lifted into the
+  parent, which gives one flat list for a server mosaic. Groups with metadata are still kept.
+- **Then group datasets by** scene / project / provider / year — runs the same helper as the tree's
+  **Group by…** on every imported group (on the root only, in practice, after a flatten).
+  `world` flattened then grouped by provider gives 11 provider groups.
+
+Relative URIs resolve against the tileset URL (a file import has no URL to resolve them against).
+Children a display mode left out are not in the file, so they cannot come back.
 
 ## Preview: drafts on the tile-server
 

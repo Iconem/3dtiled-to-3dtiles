@@ -9,8 +9,8 @@
  */
 import { ecefToLlh, llhToEcef, sphereOfVolume, transformSphere, unionSphere, type Sphere } from './geo.ts';
 import {
-  counts, createTree, isValidDate, makeGroup, shownChildren, uid,
-  type DatasetNode, type DisplayMode, type GroupNode, type KV, type Tree,
+  counts, createTree, groupChildrenBy, isValidDate, makeGroup, shownChildren, uid,
+  type DatasetNode, type DisplayMode, type GroupBy, type GroupNode, type KV, type Tree,
 } from './tree.ts';
 
 export const BUILDER_VERSION = 1;
@@ -246,17 +246,35 @@ const MODES: DisplayMode[] = ['all', 'latest', 'first'];
 const kvOf = (props: Record<string, unknown>, reserved: string[]): KV[] =>
   Object.entries(props).filter(([k]) => !reserved.includes(k)).map(([key, v]) => ({ key, value: typeof v === 'string' ? v : JSON.stringify(v) }));
 
+/** "cell 13003003 (L7, geodetic)" — the name of a server quadtree cell that has no metadata name. */
+export function cellName(cell: any): string | undefined {
+  if (!cell || cell.key == null) return undefined;
+  const tags = [cell.level != null ? `L${cell.level}` : '', cell.scheme ?? ''].filter(Boolean);
+  return `cell ${cell.key}${tags.length ? ` (${tags.join(', ')})` : ''}`;
+}
+
+export interface ImportOptions {
+  /** Old behaviour: lift the datasets of unnamed server cells into their parent (one flat list). */
+  flatten?: boolean;
+  /** After import, bucket the datasets of every group by this field (see groupChildrenBy). */
+  groupBy?: GroupBy;
+}
+
 /**
  * Rebuild a tree from an aggregate or builder tileset: content tiles become datasets, content-less
- * tiles become groups. Server-made quadtree cells (no metadata, only `extras.cell`) carry no meaning a
- * user chose, so by default their children are lifted into the parent instead of becoming "cell 0312"
- * groups. Children a display mode left out of the export are not in the file and cannot come back —
- * the project JSON is the lossless format.
+ * tiles with children become groups — named from their metadata `name`, else from their quadtree cell
+ * (`extras.cell`), keeping their refine. A chain of groups (a group whose only child is another group)
+ * is collapsed into one; the server already path-compresses its cells, builder files may not. With
+ * `flatten`, unnamed cells are dropped and their children lifted into the parent instead. Children a
+ * display mode left out of the export are not in the file and cannot come back — the project JSON is
+ * the lossless format.
  */
-export function fromTileset(ts: any, baseUrl?: string, { flattenCells = true } = {}): Tree {
+export function fromTileset(ts: any, baseUrl?: string, { flatten = false, groupBy }: ImportOptions = {}): Tree {
   if (!ts?.root) throw new Error('Not a tileset: no root.');
   const tree = createTree(ts.asset?.extras?.builder?.name ?? ts.root.metadata?.properties?.name ?? 'Imported tileset');
   const resolve = (uri: string) => { try { return new URL(uri, baseUrl).toString(); } catch { return uri; } };
+  // Groups whose name was made up (cell key / "Group") rather than chosen: those can be merged away.
+  const madeUp = new Set<string>();
 
   const walk = (t: any, parentXf: number[] | undefined, isRoot: boolean): string[] => {
     const xf = t.transform ? (parentXf ? mat4Multiply(parentXf, t.transform) : t.transform) : parentXf;
@@ -291,19 +309,30 @@ export function fromTileset(ts: any, baseUrl?: string, { flattenCells = true } =
       }
     }
     if (!kids.length) return out;
-    const unnamed = !t.metadata && !isRoot;
-    if (unnamed && flattenCells && !uri) return kids;
+    // No metadata at all: a server quadtree cell (or a plain tileset's inner tile) — nothing a user chose.
+    const plain = !t.metadata;
+    if (flatten && plain && !isRoot && !uri) return kids;
+    const only = !out.length && kids.length === 1 ? tree.nodes[kids[0]] : null;
+    // A chain: this unnamed tile adds nothing over its single child group, which stands in for it.
+    if (only?.kind === 'group' && plain && !isRoot) return kids;
     const date = str('date');
     const mode = str('mode') as DisplayMode | undefined;
-    const g: GroupNode = makeGroup(str('name') ?? (t.extras?.cell ? `cell ${t.extras.cell.key}` : 'Group'), {
+    let children = [...out, ...kids];
+    if (only?.kind === 'group' && madeUp.has(only.id)) {
+      // A group with metadata (or the root) over a plain single child: adopt the grandchildren.
+      children = only.children;
+      delete tree.nodes[only.id];
+    }
+    const g: GroupNode = makeGroup(str('name') ?? cellName(t.extras?.cell) ?? 'Group', {
       refine: t.refine === 'REPLACE' ? 'REPLACE' : 'ADD',
       mode: mode && MODES.includes(mode) ? mode : 'all',
       kv: kvOf(props, GROUP_PROPS),
-      children: [...out, ...kids],
+      children,
       ...clean({ notes: str('notes') }),
       ...(date && isValidDate(date) ? { date } : {}),
     });
     tree.nodes[g.id] = g;
+    if (plain) madeUp.add(g.id);
     return [g.id];
   };
 
@@ -317,7 +346,10 @@ export function fromTileset(ts: any, baseUrl?: string, { flattenCells = true } =
   } else {
     tree.nodes[tree.rootId] = { ...root, children: top };
   }
-  return tree;
+  if (!groupBy) return tree;
+  let grouped = tree;
+  for (const id of Object.keys(tree.nodes)) if (tree.nodes[id].kind === 'group') grouped = groupChildrenBy(grouped, id, groupBy);
+  return grouped;
 }
 
 // ── project files ────────────────────────────────────────────────────────────────────────────────

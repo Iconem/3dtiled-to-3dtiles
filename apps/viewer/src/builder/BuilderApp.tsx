@@ -4,7 +4,9 @@
  * viewer through a server-side draft.
  *
  * Query params: `?import=<index.json or /aggregate tileset URL>` preloads the library with that
- * selection; `?tileset=<tileset.json URL>` imports an existing aggregate/builder tileset as the tree.
+ * selection; `?tileset=<tileset.json URL>` imports an existing aggregate/builder tileset as the tree —
+ * hierarchically (one group per cell / group tile), or as one flat list with `&flatten=1`; add
+ * `&groupby=scene|project|provider|year` to bucket each group's datasets after the import.
  */
 import { useEffect, useRef, useState } from 'react';
 import {
@@ -14,9 +16,10 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { ToggleGroup, ToggleGroupItem } from '@/components/ui/toggle-group';
+import { Checkbox } from '@/components/ui/checkbox';
 import * as tree from './tree';
-import { counts, createTree, leaves, updateNode, type Row } from './tree';
-import { fromProject, fromTileset, toManifest, toProject, toTileset } from './export';
+import { counts, createTree, GROUP_BYS, leaves, updateNode, type GroupBy, type Row } from './tree';
+import { fromProject, fromTileset, toManifest, toProject, toTileset, type ImportOptions } from './export';
 import { download, postDraft, slug } from './api';
 import { useBuilder } from './store';
 import { Menu } from './Menu';
@@ -27,18 +30,20 @@ import Inspector from './Inspector';
 const params = new URLSearchParams(location.search);
 const IMPORT_URL = params.get('import');
 const TILESET_URL = params.get('tileset');
+const asGroupBy = (v: string | null | undefined) => (GROUP_BYS as string[]).includes(v ?? '') ? (v as GroupBy) : undefined;
+const URL_IMPORT_OPTS: ImportOptions = { flatten: /^(1|true)$/.test(params.get('flatten') ?? ''), groupBy: asGroupBy(params.get('groupby')) };
 
 type Renderer = 'cesium' | '3dtrjs';
 
-async function importTilesetUrl(url: string) {
+async function importTilesetUrl(url: string, opts: ImportOptions = {}) {
   const st = useBuilder.getState();
   st.setStatus(`Importing ${url} …`);
   const r = await fetch(url);
   if (!r.ok) throw new Error(`HTTP ${r.status}`);
-  const t = fromTileset(await r.json(), url);
+  const t = fromTileset(await r.json(), url, opts);
   st.loadDocument(t);
   const c = counts(t);
-  st.setStatus(`Imported ${c.datasets} datasets in ${c.groups - 1} groups from ${url}.`);
+  st.setStatus(`Imported ${c.datasets} datasets in ${c.groups - 1} groups${opts.flatten ? ' (flattened)' : ''}${opts.groupBy ? `, grouped by ${opts.groupBy}` : ''} from ${url}.`);
 }
 
 /** The viewer URL that loads a tileset on start (see TopBar's `?load=` handling). */
@@ -59,7 +64,7 @@ async function makePreview(renderer: Renderer): Promise<string> {
   return viewerUrl(url, renderer);
 }
 
-function readFile(file: File) {
+function readFile(file: File, opts: ImportOptions = {}) {
   const st = useBuilder.getState();
   file.text().then((text) => {
     const j = JSON.parse(text);
@@ -68,9 +73,9 @@ function readFile(file: File) {
       st.loadDocument(p.tree, (p.customRows ?? []) as Row[]);
       st.setStatus(`Opened project “${p.tree.nodes[p.tree.rootId].name}”.`);
     } else if (j?.root) {
-      const t = fromTileset(j);
+      const t = fromTileset(j, undefined, opts);
       st.loadDocument(t);
-      st.setStatus(`Imported ${counts(t).datasets} datasets from ${file.name} (relative URIs could not be resolved without its URL).`);
+      st.setStatus(`Imported ${counts(t).datasets} datasets in ${counts(t).groups - 1} groups${opts.flatten ? ' (flattened)' : ''} from ${file.name} (relative URIs could not be resolved without its URL).`);
     } else throw new Error('neither a builder project nor a tileset.json');
   }).catch((e) => st.setStatus(`Could not open ${file.name}: ${e.message}`));
 }
@@ -84,6 +89,8 @@ export default function BuilderApp() {
   const [busy, setBusy] = useState(false);
   const [urlDialog, setUrlDialog] = useState(false);
   const fileRef = useRef<HTMLInputElement>(null);
+  // Options for the next file picked: the menu has a hierarchical and a flattened entry.
+  const fileOpts = useRef<ImportOptions>({});
   const c = counts(t);
   const root = t.nodes[t.rootId];
 
@@ -93,7 +100,7 @@ export default function BuilderApp() {
 
   // `?tileset=` once on load.
   useEffect(() => {
-    if (TILESET_URL) importTilesetUrl(TILESET_URL).catch((e) => useBuilder.getState().setStatus(`Import failed: ${e.message}`));
+    if (TILESET_URL) importTilesetUrl(TILESET_URL, URL_IMPORT_OPTS).catch((e) => useBuilder.getState().setStatus(`Import failed: ${e.message}`));
   }, []);
 
   // Undo/redo everywhere except inside text fields, which keep their own native undo.
@@ -185,8 +192,9 @@ export default function BuilderApp() {
             items={[
               { label: 'New project', icon: <FilePlus />, onSelect: () => { useBuilder.getState().loadDocument(createTree()); useBuilder.getState().setStatus('New project — Ctrl+Z brings the previous one back.'); } },
               { separator: true },
-              { label: 'Open project or tileset file…', icon: <FileJson />, onSelect: () => fileRef.current?.click() },
-              { label: 'Import tileset.json from URL…', icon: <Link />, onSelect: () => setUrlDialog(true) },
+              { label: 'Open project or tileset file…', icon: <FileJson />, onSelect: () => { fileOpts.current = {}; fileRef.current?.click(); }, testId: 'import-file' },
+              { label: 'Open tileset file, flattened…', icon: <FileJson />, onSelect: () => { fileOpts.current = { flatten: true }; fileRef.current?.click(); }, testId: 'import-file-flat' },
+              { label: 'Import tileset.json from URL…', icon: <Link />, onSelect: () => setUrlDialog(true), testId: 'import-url' },
             ]}
           />
           <Menu
@@ -216,7 +224,7 @@ export default function BuilderApp() {
           </div>
         </div>
         <input ref={fileRef} type="file" accept=".json,application/json" className="hidden"
-          onChange={(e) => { const f = e.target.files?.[0]; if (f) readFile(f); e.target.value = ''; }} />
+          onChange={(e) => { const f = e.target.files?.[0]; if (f) readFile(f, fileOpts.current); e.target.value = ''; }} />
       </header>
 
       <main className="grid min-h-0 grid-cols-[minmax(280px,340px)_minmax(0,1fr)_minmax(280px,340px)]">
@@ -238,9 +246,11 @@ function UrlDialog({ open, onOpenChange }: { open: boolean; onOpenChange: (v: bo
   const [url, setUrl] = useState('');
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
+  const [flatten, setFlatten] = useState(false);
+  const [groupBy, setGroupBy] = useState<GroupBy | 'none'>('none');
   async function go() {
     setBusy(true); setError('');
-    try { await importTilesetUrl(url.trim()); onOpenChange(false); }
+    try { await importTilesetUrl(url.trim(), { flatten, groupBy: groupBy === 'none' ? undefined : groupBy }); onOpenChange(false); }
     catch (e) { setError((e as Error).message); }
     finally { setBusy(false); }
   }
@@ -250,16 +260,29 @@ function UrlDialog({ open, onOpenChange }: { open: boolean; onOpenChange: (v: bo
         <DialogHeader>
           <DialogTitle>Import a tileset.json</DialogTitle>
           <DialogDescription>
-            An /aggregate mosaic, a builder export or a draft. Tiles with content become datasets; groups keep their
-            metadata; the server's unnamed quadtree cells are flattened. Replaces the current tree (Ctrl+Z to undo).
+            An /aggregate mosaic, a builder export or a draft. Tiles with content become datasets; every tile with
+            children becomes a group (named from its metadata, or from its quadtree cell), keeping the hierarchy.
+            Replaces the current tree (Ctrl+Z to undo).
           </DialogDescription>
         </DialogHeader>
         <Input value={url} onChange={(e) => setUrl(e.target.value)} onKeyDown={(e) => { if (e.key === 'Enter') go(); }}
-          placeholder="http://localhost:3001/aggregate/tileset.json?set=angkor" className="font-mono text-xs" autoFocus />
+          placeholder="http://localhost:3001/aggregate/tileset.json?set=angkor" className="font-mono text-xs" autoFocus data-testid="import-url-input" />
+        <label className="flex items-center gap-2 text-sm">
+          <Checkbox checked={flatten} onCheckedChange={(v) => setFlatten(v === true)} data-testid="import-flatten" />
+          Flatten — drop unnamed cells, one list of datasets
+        </label>
+        <div className="flex items-center gap-2 text-sm">
+          <span>Then group datasets by</span>
+          <ToggleGroup type="single" size="sm" value={groupBy} onValueChange={(v) => v && setGroupBy(v as GroupBy | 'none')}>
+            {(['none', ...GROUP_BYS] as const).map((b) => (
+              <ToggleGroupItem key={b} value={b} className="h-7 px-2 text-xs" data-testid={`import-group-by-${b}`}>{b}</ToggleGroupItem>
+            ))}
+          </ToggleGroup>
+        </div>
         {error && <p className="text-xs text-destructive">{error}</p>}
         <div className="flex justify-end gap-2">
           <Button variant="outline" onClick={() => onOpenChange(false)}>Cancel</Button>
-          <Button onClick={go} disabled={!url.trim() || busy}>{busy && <Loader2 className="animate-spin" />}Import</Button>
+          <Button onClick={go} disabled={!url.trim() || busy} data-testid="import-url-go">{busy && <Loader2 className="animate-spin" />}Import</Button>
         </div>
       </DialogContent>
     </Dialog>

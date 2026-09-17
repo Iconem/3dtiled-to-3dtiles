@@ -63,6 +63,14 @@ share-link manifest (`.local/aggregate-sets/iconem.json`). Vite serves that file
 only** and returns `403` to anyone else, because it is a list of bearer-credential URLs and the dev
 server binds every network interface.
 
+The list is filled in after that fetch. lil-gui's `controller.options(list)` does not update a
+dropdown in place — it destroys the controller and returns a new one, appended at the end of the
+panel and without the old `onChange` — so the lab swaps in the returned controller, re-attaches the
+handler and moves it back to the top. (Before that fix, picking an Iconem entry did nothing.) For
+headless checks, `window.LAB` exposes `url`, `mode`, `tiles`, `rootLoaded`, `visibleTiles`,
+`visiblePoints` and `errors`; in `potree` mode the URL lives in the plugin, so `LAB.tiles.rootURL` is
+`null` and `LAB.url` is the one to read.
+
 ## Running the viewer on 3DTilesRendererJS master
 
 To try unreleased renderer work in the **whole** viewer, not just this page, build the renderer from
