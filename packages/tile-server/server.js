@@ -20,6 +20,17 @@
  * Run:  PORT=3001 node packages/tile-server/server.js   (npm run serve:tiles | serve:live)
  */
 import http from 'node:http';
+import { readFileSync } from 'node:fs';
+
+// Machine-local secrets (API keys for proxied providers, e.g. VEXCEL_API_KEY) live in the gitignored
+// .local/tile-server.env as KEY=value lines. Real environment variables win.
+try {
+  const envFile = readFileSync(new URL('../../.local/tile-server.env', import.meta.url), 'utf8');
+  for (const line of envFile.split(/\r?\n/)) {
+    const m = /^\s*([A-Z0-9_]+)\s*=\s*(.*?)\s*$/.exec(line);
+    if (m && process.env[m[1]] == null) process.env[m[1]] = m[2];
+  }
+} catch { /* no local env file */ }
 
 // This server's job is to proxy/transcode arbitrary PUBLIC open-data tilesets, and many government /
 // research hosts (e.g. data.geopf.fr) serve valid data behind expired or misconfigured TLS certs that

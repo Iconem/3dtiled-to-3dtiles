@@ -22,6 +22,8 @@ import { readdir, readFile } from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createHash, randomUUID } from 'node:crypto';
+import { datasetGroundSamples, offsetFromSamples } from '../core/dataset-ground.js';
+import { sampleTerrain, TERRAINS } from '../core/terrain.js';
 import { llhToEcef, ecefToLlh } from '../core/index.js';
 
 const CORS = { 'Access-Control-Allow-Origin': '*', 'Access-Control-Allow-Headers': '*' };
@@ -318,8 +320,27 @@ function boxAround(spheres, centreSphere) {
   return [...c, ...E.map((v) => v * half[0]), ...N.map((v) => v * half[1]), ...U.map((v) => v * half[2])];
 }
 
-/** The volumes `&bv=` can emit for groups. Leaves always keep their own root's sphere. */
-const BV_MODES = ['sphere', 'region', 'cell', 'box'];
+/**
+ * The volumes `&bv=` can emit for groups; `cell` is the default — the group IS its quadtree cell.
+ * Leaves always keep their own root's sphere, and each dataset keeps its own volumes below that.
+ */
+const BV_MODES = ['cell', 'sphere', 'region', 'box'];
+const DEFAULT_BV = 'cell';
+
+/**
+ * &snap=<terrain> — put each dataset on the ground, separately. The offset comes from the dataset's
+ * own top geometry (core/dataset-ground.js: 8×8 bins, 10th-percentile heights) against open terrain
+ * (core/terrain.js), and is applied as the leaf tile's `transform`: a translation along the local up,
+ * which chains into the external tileset below it. The leaf's bounding sphere stays as it is — it is
+ * expressed in the leaf's own (translated) frame. Cached per dataset like the child roots.
+ */
+const snapOffset = ttlCache(async (key) => {
+  const { url, terrain } = JSON.parse(key);
+  const samples = await datasetGroundSamples(url);
+  if (!samples) return null;
+  const heights = await Promise.all(samples.map((s) => sampleTerrain(terrain, s.lon, s.lat)));
+  return offsetFromSamples(samples, heights);
+});
 
 function unionRegion(a, b) {
   if (!a) return b;
@@ -442,7 +463,7 @@ const DATASET_SCHEMA = {
   },
 };
 
-export async function buildAggregate(urls, { nest = 'auto', ttlMs = DEFAULT_TTL_MS, bv = 'sphere', labels = {} } = {}) {
+export async function buildAggregate(urls, { nest = 'auto', ttlMs = DEFAULT_TTL_MS, bv = DEFAULT_BV, labels = {}, snap = null } = {}) {
   // Timings are part of the output because they are the whole cost story of a mosaic: fetching every
   // child root dominates a cold build by orders of magnitude, while the tree itself takes milliseconds.
   const t0 = performance.now();
@@ -479,6 +500,22 @@ export async function buildAggregate(urls, { nest = 'auto', ttlMs = DEFAULT_TTL_
     err.status = 422;
     err.detail = { failed, unplaced };
     throw err;
+  }
+
+  if (snap) {
+    const offsets = await pooledSettled(children, (c) => snapOffset(JSON.stringify({ url: c.content.uri, terrain: snap }), ttlMs));
+    children.forEach((c, i) => {
+      const r = offsets[i].status === 'fulfilled' ? offsets[i].value : null;
+      if (!r) { c.extras = { ...(c.extras || {}), snap: { terrain: snap, dz: null } }; return; }
+      const [x, y, z] = c.boundingVolume.sphere;
+      const n = Math.hypot(x, y, z);
+      const [lon, lat] = ecefToLlh(x, y, z);
+      const lo = lon * Math.PI / 180, la = lat * Math.PI / 180;
+      const up = n ? [Math.cos(la) * Math.cos(lo), Math.cos(la) * Math.sin(lo), Math.sin(la)] : [0, 0, 0];
+      const dz = +r.dz.toFixed(2);
+      c.transform = [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, up[0] * dz, up[1] * dz, up[2] * dz, 1];
+      c.extras = { ...(c.extras || {}), snap: { terrain: snap, dz, bins: r.used, spread: +r.spread.toFixed(1) } };
+    });
   }
 
   const want = parseNest(nest);
@@ -641,11 +678,11 @@ export const DEMO_SETS = {
   },
   /** Everything at once — the "one endpoint, heterogeneous sources, whole planet" pitch. */
   world: {
-    label: 'Open data + Angkor + Aerometrex — 45 tilesets across four continents',
+    label: 'Open data + Angkor + Aerometrex + Vexcel — every public dataset, five continents',
     urls: [...OPEN_DATA.map((d) => d.url), ...ANGKOR_SITES.map((s) => `${ANGKOR_BASE}/${s}/tileset.json`)],
     entries: [...OPEN_DATA, ...ANGKOR_SITES.map((s) => ({ id: s, label: angkorLabel(s), url: `${ANGKOR_BASE}/${s}/tileset.json`, ...ICONEM }))],
     // Aerometrex's US city previews come from the committed manifest (proxied, with its attribution)
-    include: ['aerometrex'],
+    include: ['aerometrex', 'vexcel'],
   },
 };
 
@@ -655,8 +692,8 @@ export const DEMO_SETS = {
  * single tile — and a 3D Tiles client re-requests the root more than once per session.
  */
 const aggregateCached = ttlCache(async (key) => {
-  const { urls, nest, ttlMs, bv, labels } = JSON.parse(key);
-  return buildAggregate(urls, { nest, ttlMs, bv, labels });
+  const { urls, nest, ttlMs, bv, labels, snap } = JSON.parse(key);
+  return buildAggregate(urls, { nest, ttlMs, bv, labels, snap });
 });
 
 // ── local sets ───────────────────────────────────────────────────────────────────────────────────
@@ -684,6 +721,8 @@ async function readSetsDir(dir, local) {
   for (const f of files) {
     try {
       const m = JSON.parse(await readFile(path.join(dir, f), 'utf8'));
+      // a set that needs a secret (VEXCEL_API_KEY …) only exists where that secret is configured
+      if (m.requiresEnv && !process.env[m.requiresEnv]) continue;
       if (Array.isArray(m.entries)) sets[f.replace(/\.json$/, '')] = { label: m.label ?? f, entries: m.entries, manifest: true, local,
         provider: m.provider ?? null, attribution: m.attribution ?? null };
     } catch (e) { console.warn(`[aggregate] ignoring unreadable set ${f}: ${e.message}`); }
@@ -898,7 +937,7 @@ export async function handleAggregate(req, res, u) {
     provider: it.provider, attribution: it.attribution,
   }]));
 
-  const key = JSON.stringify({ urls, nest, ttlMs, bv, labels });
+  const key = JSON.stringify({ urls, nest, ttlMs, bv, labels, snap: sel.snap });
   let ts;
   try {
     ts = await aggregateCached(key, ttlMs);
@@ -917,10 +956,11 @@ export async function handleAggregate(req, res, u) {
     // exactly what the renderer sees.
     const byUrl = new Map(items.map((it) => [it.url, it]));
     const datasets = [];
-    (function walk(t) {
+    (function walk(t, depth = 0) {
       if (t.content?.uri) {
         const [x, y, z, r] = t.boundingVolume.sphere;
-        const [lon, lat, height] = ecefToLlh(x, y, z);
+        const [lon, lat, h0] = ecefToLlh(x, y, z);
+        const height = h0 + (t.extras?.snap?.dz ?? 0);          // where the dataset IS once snapped
         const it = byUrl.get(t.content.uri) || {};
         datasets.push({
           id: it.id ?? idOf(t.content.uri),
@@ -930,11 +970,14 @@ export async function handleAggregate(req, res, u) {
           group: it.group ?? null, date: it.date ?? null, ...(it.licence ? { licence: it.licence } : {}),
           // who the data comes from — the library/picker filter on it, and viewers show `attribution`
           provider: it.provider ?? null, set: it.set ?? null, ...(it.attribution ? { attribution: it.attribution } : {}),
+          // where the dataset's external root sits in the mosaic: its quadtree cell, and its depth
+          ...(t.extras?.cell ? { cell: t.extras.cell } : {}), depth,
+          ...(t.extras?.snap ? { snap: t.extras.snap } : {}),
           format: it.fmt || '3dtiles', url: t.content.uri,
           lon: +lon.toFixed(6), lat: +lat.toFixed(6), height: +height.toFixed(1), radius: +r.toFixed(1),
         });
       }
-      for (const c of t.children || []) walk(c);
+      for (const c of t.children || []) walk(c, depth + 1);
     })(ts.root);
     res.writeHead(200, { 'Content-Type': 'application/json', ...CORS });
     res.end(JSON.stringify({
@@ -1089,9 +1132,11 @@ function selectChildren(req, u, sets) {
   // what you want while iterating on a dataset that is actively being re-tiled.
   const ttlParam = u.searchParams.get('ttl');
   const ttlMs = ttlParam == null ? DEFAULT_TTL_MS : Math.max(0, Number(ttlParam) || 0) * 1000;
-  const bv = BV_MODES.includes(u.searchParams.get('bv')) ? u.searchParams.get('bv') : 'sphere';
+  const bv = BV_MODES.includes(u.searchParams.get('bv')) ? u.searchParams.get('bv') : DEFAULT_BV;
+  const snapParam = u.searchParams.get('snap');
+  const snap = !snapParam || snapParam === '0' ? null : TERRAINS[snapParam] ? snapParam : 'mapterhorn-ellipsoid';
   const latest = ['1', 'true'].includes(u.searchParams.get('latest') ?? '');
-  return { items, nest, ttlMs, bv, latest };
+  return { items, nest, ttlMs, bv, latest, snap };
 }
 
 /** Internals exposed for scripts/debug-aggregate-nesting.mjs. */

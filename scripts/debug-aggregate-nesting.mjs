@@ -58,13 +58,21 @@ await new Promise((r) => server.listen(0, '127.0.0.1', r));
 const base = `http://127.0.0.1:${server.address().port}`;
 const urls = DATASETS.map(([n]) => `${base}/${n}.json`);
 
+/** Size of a group volume, whatever its kind (the default is now a quadtree-cell region). */
+function volumeLabel(bv) {
+  if (bv.sphere) return `r=${Math.round(bv.sphere[3] / 1000)}km`;
+  if (bv.region) return `cell ${((bv.region[2] - bv.region[0]) * 180 / Math.PI).toFixed(3)}°×${((bv.region[3] - bv.region[1]) * 180 / Math.PI).toFixed(3)}°`;
+  if (bv.box) return `box ${Math.round(Math.hypot(...bv.box.slice(3, 6)) / 1000)}km`;
+  return '?';
+}
+
 /** Walk the produced tileset, returning [{ depth, path, label }] in reading order. */
 function outline(tile, depth = 0, out = []) {
   const cell = tile.extras?.cell;
   const label = tile.content
     ? `• ${decodeURIComponent(tile.content.uri).split('/').pop().replace('.json', '')}`
         + (cell ? `   [${cell.scheme} key=${cell.key} morton=${cell.morton}]` : '')
-    : `[group ${cell ? `key=${cell.key} L${cell.level}` : ''} r=${Math.round(tile.boundingVolume.sphere[3] / 1000)}km ge=${Math.round(tile.geometricError)}]`;
+    : `[group ${cell ? `key=${cell.key} L${cell.level}` : ''} ${volumeLabel(tile.boundingVolume)} ge=${Math.round(tile.geometricError)}]`;
   out.push({ depth, label });
   for (const c of tile.children || []) outline(c, depth + 1, out);
   return out;
@@ -106,6 +114,7 @@ for (const nest of ['flat', 'mercator', 'geodetic']) {
   for (const { depth, label } of outline(ts.root)) console.log('   ' + '  '.repeat(depth) + label);
 
   console.log(`  checks:`);
+  if (nest !== 'flat') check('default group volume is the quadtree cell', ts.asset.extras.nesting.bv === 'cell' && !!ts.root.children.find((c) => c.children)?.boundingVolume.region);
   check('geometric error decreases on refine', geMonotonic(ts.root) === null, geMonotonic(ts.root) || '');
 
   if (nest === 'flat') {

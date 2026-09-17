@@ -136,13 +136,34 @@ export function crsDefinition(crs) {
   return crs;                                   // EPSG:4326 / 3857 — proj4 knows them already
 }
 
+/**
+ * Root transform placing content that is local to `origin` (source-CRS coordinates minus origin) on
+ * the globe.
+ *
+ * A projected CRS's x/y axes are NOT east/north: they are rotated by the grid convergence (up to ~3°
+ * at a UTM zone edge, more in Lambert grids far from the central meridian) and scaled by the point
+ * scale factor (0.9996 on a UTM central meridian, up to ~1.001 at its edges). So instead of a plain
+ * ENU frame, the x and y columns are the ECEF images of the source's own unit vectors at the origin —
+ * a "1 m trihedron" measured with proj4 by central differences over ±50 m — and z is the ellipsoid
+ * normal (heights are heights). For a geographic source CRS (lon/lat degrees) the plain ENU frame is
+ * kept, since its axes are not metric.
+ */
 export function georefFromCrs(origin, crs, tag = 'geo') {
   if (!crs) return null;
   crs = unwrapCompoundWkt(crsDefinition(crs));
   try {
-    const [lon, lat, h] = proj4(crs, 'WGS84').forward(origin);
-    const e = llhToEcef(lon, lat, h ?? origin[2]);
-    return enuMatrix(lon, lat, e[0], e[1], e[2]);
+    const P = proj4(crs, 'WGS84');
+    const [lon, lat, h] = P.forward(origin);
+    const z = h ?? origin[2];
+    const e = llhToEcef(lon, lat, z);
+    const enu = enuMatrix(lon, lat, e[0], e[1], e[2]);
+    if (Math.abs(origin[0]) <= 360 && Math.abs(origin[1]) <= 90) return enu;     // geographic source CRS
+    const D = 50;
+    const at = (dx, dy) => { const [lo, la] = P.forward([origin[0] + dx, origin[1] + dy, z]); return llhToEcef(lo, la, z); };
+    const colX = at(D, 0).map((v, i) => (v - at(-D, 0)[i]) / (2 * D));
+    const colY = at(0, D).map((v, i) => (v - at(0, -D)[i]) / (2 * D));
+    if (![...colX, ...colY].every(Number.isFinite)) return enu;
+    return [colX[0], colX[1], colX[2], 0, colY[0], colY[1], colY[2], 0, enu[8], enu[9], enu[10], 0, e[0], e[1], e[2], 1];
   } catch (e) { console.warn(`[${tag}] georef failed:`, e.message); return null; }
 }
 

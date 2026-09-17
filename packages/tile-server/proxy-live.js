@@ -26,6 +26,30 @@
  */
 import { CORS, sendErr } from '../core/index.js';
 
+/**
+ * Hosts whose API key is added HERE, from the server's environment, on the way out — the rewritten
+ * child URIs sent to the browser never carry it (and any key a response echoes is stripped), so a
+ * key-protected provider can sit in a public mosaic without leaking its key.
+ */
+const HOST_KEYS = {
+  'api.vexcelgroup.com': { param: 'api_key', env: 'VEXCEL_API_KEY' },
+};
+function withKey(url) {
+  const u = new URL(url);
+  const k = HOST_KEYS[u.hostname];
+  const v = k && process.env[k.env];
+  if (v && !u.searchParams.has(k.param)) u.searchParams.set(k.param, v);
+  return u.href;
+}
+function withoutKey(url) {
+  try {
+    const u = new URL(url);
+    const k = HOST_KEYS[u.hostname];
+    if (k) u.searchParams.delete(k.param);
+    return u.href;
+  } catch { return url; }
+}
+
 const isAbsUri = (u) => /^https?:\/\//i.test(u);
 function resolveUri(uri, srcUrl) {
   if (isAbsUri(uri)) return uri;
@@ -42,7 +66,7 @@ function rewriteTree(node, srcUrl) {
   if (content && typeof content === 'object') {
     const uri = content.uri ?? content.url;
     if (typeof uri === 'string' && !/\{level\}|\{x\}|\{y\}|\{z\}/.test(uri)) {
-      const abs = resolveUri(uri, srcUrl);
+      const abs = withoutKey(resolveUri(uri, srcUrl));
       const rewritten = `/proxy?url=${encodeURIComponent(abs)}`;
       if ('uri' in content) content.uri = rewritten; else content.url = rewritten;
     }
@@ -52,12 +76,12 @@ function rewriteTree(node, srcUrl) {
 
 export async function handleProxy(req, res, u) {
   if (u.pathname !== '/proxy') return false;
-  const url = u.searchParams.get('url');
+  const url = u.searchParams.get('url') && withoutKey(u.searchParams.get('url'));
   if (!url) { sendErr(res, 400, 'missing ?url=<source URL>'); return true; }
   if (!/^https?:\/\//i.test(url)) { sendErr(res, 400, 'url must be absolute http(s)'); return true; }
 
   try {
-    const upstream = await fetch(url);
+    const upstream = await fetch(withKey(url));
     const contentType = upstream.headers.get('content-type') || 'application/octet-stream';
     const buf = Buffer.from(await upstream.arrayBuffer());
 
