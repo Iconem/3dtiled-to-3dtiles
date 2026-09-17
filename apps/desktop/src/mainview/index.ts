@@ -230,18 +230,25 @@ $('save').addEventListener('click', () => {
 
 // ── export to a folder ──────────────────────────────────────────────────────────────────────────
 //
-// Two ways to fill a folder, both run BY THE SERVER (POST /export, packages/tile-server/export-live.js):
+// Two ways to fill a folder:
 //   crawl   — download the tileset URL above as served: any source (raw via /stream or /convert,
 //             remote 3D Tiles, mosaics), implicit tilings expanded or kept.
 //   convert — the per-format offline converter (packages/convert) on the raw source: faster for the
 //             formats it covers, with their own options.
-// The server rather than a CLI child because it is already running with every adapter loaded, it can
-// report progress and be cancelled, and the job survives switching tabs. The same command is shown
-// for the CLI, for scripts and CI.
+// And two places to run it ("Run in"):
+//   server  — POST /export on the tile-server (packages/tile-server/export-live.js), the default: it is
+//             already running with every adapter loaded, reports structured progress, the job survives
+//             switching tabs, and it serves the result back for the preview buttons.
+//   cli     — the main process spawns exactly the command shown under "Equivalent CLI" (runCli RPC,
+//             src/bun/cli-runner.ts): an isolated process whose crash or OOM can't take the server
+//             down; progress is parsed from its output. A convert does not need the server at all (a crawl
+//             still reads the tileset URL, which the server serves).
 const exportDirEl = $<HTMLInputElement>('export-dir');
 const exportBar = $<HTMLElement>('export-bar');
 const methodEl = $<HTMLSelectElement>('export-method');
+const runnerEl = $<HTMLSelectElement>('export-runner');
 let exportJob: string | null = null;
+let cliJob: string | null = null;
 let exportPreview = '';
 
 function exportSay(msg: string, kind: 'ok' | 'err' | 'info' = 'info') {
@@ -272,21 +279,42 @@ function exportRequest() {
   };
 }
 
-/** The CLI command doing the same thing (from the repo root; `3dtiled` once the package is linked). */
-function exportCli(r = exportRequest()): string {
+type ExportRequest = ReturnType<typeof exportRequest>;
+
+/**
+ * The CLI doing the same thing, as argv arrays (after `node`, from the repo root): what the card
+ * displays AND what "Run in: CLI subprocess" executes, so the two cannot drift. `then` is the pack
+ * step for the offline converter, whose default path has no `--pack`.
+ */
+function exportCliArgs(r: ExportRequest = exportRequest()): { args: string[]; then?: string[] } {
   const out = r.outDir || '<empty folder>';
   if (r.method === 'crawl') {
-    return [`node packages/convert/cli.js export ${q(r.url || '<tileset url>')} ${q(out)}`,
-      r.maxDepth != null ? `--max-depth ${r.maxDepth}` : '', r.keepImplicit ? '--keep-implicit' : '',
-      r.pack.length ? `--pack ${r.pack.join(',')}` : ''].filter(Boolean).join(' ');
+    const args = ['packages/convert/cli.js', 'export', r.url || '<tileset url>', out];
+    if (r.maxDepth != null) args.push('--max-depth', String(r.maxDepth));
+    if (r.keepImplicit) args.push('--keep-implicit');
+    if (r.pack.length) args.push('--pack', r.pack.join(','));
+    return { args };
   }
   const o = r.options as Record<string, unknown>;
-  const cmd = [`node packages/convert/cli.js ${q(r.src || '<source>')} ${q(out)}`,
-    r.format ? `--format ${r.format}` : '', o['tiling'] ? `--tiling ${o['tiling']}` : '',
-    o['scale'] != null ? `--scale ${o['scale']}` : '', o['geScale'] != null ? `--ge-scale ${o['geScale']}` : '',
-    o['geLayer'] != null ? `--ge-layer ${o['geLayer']}` : '', o['centroidsOnly'] ? '--centroids-only' : ''].filter(Boolean).join(' ');
+  const args = ['packages/convert/cli.js', r.src || '<source>', out];
+  if (r.format) args.push('--format', r.format);
+  if (o['tiling']) args.push('--tiling', String(o['tiling']));
+  for (const [key, fl] of [['scale', '--scale'], ['geScale', '--ge-scale'], ['geLayer', '--ge-layer']] as const) {
+    if (o[key] != null) args.push(fl, String(o[key]));
+  }
+  if (o['centroidsOnly']) args.push('--centroids-only');
+  if (!r.pack.length) return { args };
   const name = out.split(/[\\/]/).filter(Boolean).pop() || 'tileset';
-  return r.pack.length ? `${cmd}\n# then (writes both .3tz and .3dtiles):\nnode scripts/pack-3dtiles.mjs ${q(out)} ${q(`${out}/${name}`)}` : cmd;
+  return { args, then: ['scripts/pack-3dtiles.mjs', out, `${out}/${name}`] };
+}
+
+/** Shell-ish rendering for display/copy: plain tokens bare, anything else (paths, URLs) quoted. */
+const shellLine = (args: string[]) => ['node', ...args].map((a) => (/^[\w.,/=-]+$/.test(a) ? a : q(a))).join(' ');
+
+/** The CLI command doing the same thing (from the repo root; `3dtiled` once the package is linked). */
+function exportCli(r: ExportRequest = exportRequest()): string {
+  const { args, then } = exportCliArgs(r);
+  return then ? `${shellLine(args)}\n# then (writes both .3tz and .3dtiles):\n${shellLine(then)}` : shellLine(args);
 }
 
 /** The demo viewer, told to load a tileset on start (its `?load=` parameter). */
@@ -302,6 +330,7 @@ function refreshExport() {
   $('export-convert-opts').hidden = !convert;
   $<HTMLInputElement>('export-depth').disabled = convert;
   $('export-cli').textContent = exportCli();
+  if (runnerEl.value === 'cli' && !pickerAvailable()) runnerEl.value = 'server';
   const live = viewerLink(buildUrl(), assetType());
   const a = $<HTMLAnchorElement>('export-live');
   a.href = live || '#';
@@ -316,6 +345,12 @@ const docsBase = docsUrl.replace(/\/$/, '');
 $<HTMLAnchorElement>('export-doc').href = docsBase ? `${docsBase}/guide/desktop-app#export-to-a-folder` : '#';
 $<HTMLAnchorElement>('export-cli-doc').href = docsBase ? `${docsBase}/guide/cli-usage#export-a-tileset-to-a-folder` : '#';
 $<HTMLAnchorElement>('export-mw').href = base ? `${base}/` : '#';
+// The CLI runner lives in the main process; a plain browser (verification bundle) has no host.
+if (!pickerAvailable()) {
+  (runnerEl.querySelector('option[value="cli"]') as HTMLOptionElement).disabled = true;
+  runnerEl.title = 'CLI subprocess needs the desktop app';
+  $('export-runner-na').hidden = false;
+}
 refreshExport();
 
 $('export-cli-copy').addEventListener('click', async () => {
@@ -335,6 +370,9 @@ $('export-start').addEventListener('click', async () => {
   if (!r.outDir) return exportSay('Pick an empty output folder.', 'err');
   if (r.maxDepth != null && !(r.maxDepth >= 0)) return exportSay('Max depth must be a number of levels.', 'err');
   $('export-done').hidden = true;
+  if (runnerEl.value === 'cli') return startCliExport(r);
+  $('export-log-wrap').hidden = true;
+  $('export-preview').hidden = $('export-viewer').hidden = false;
   try {
     const resp = await fetch(`${base}/export`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(r) });
     const j = await resp.json().catch(() => ({}));
@@ -342,17 +380,86 @@ $('export-start').addEventListener('click', async () => {
     exportJob = j.id;
     $('export-progress').hidden = false;
     exportBar.classList.add('indeterminate');
-    ($('export-start') as HTMLButtonElement).disabled = true;
     // the offline converters run in-process and can't be interrupted part-way
-    ($('export-cancel') as HTMLButtonElement).disabled = r.method === 'convert';
+    setExportRunning(true, r.method !== 'convert');
     exportSay(r.method === 'convert' ? 'Converting…' : 'Reading the tileset tree…');
     pollExport();
   } catch (e) { exportSay(`Export request failed: ${e}`, 'err'); }
 });
 
 $('export-cancel').addEventListener('click', async () => {
+  if (cliJob) { await pickerRpc?.request.cancelCli({ id: cliJob }).catch(() => false); return; }
   if (exportJob) await fetch(`${base}/export/${exportJob}`, { method: 'DELETE' }).catch(() => {});
 });
+
+// ── Run in: CLI subprocess ────────────────────────────────────────────────────────────────────────
+const exportLog = $<HTMLElement>('export-log');
+
+function setExportRunning(running: boolean, cancellable: boolean) {
+  ($('export-start') as HTMLButtonElement).disabled = running;
+  ($('export-cancel') as HTMLButtonElement).disabled = !(running && cancellable);
+  runnerEl.disabled = running;
+}
+
+async function startCliExport(r: ExportRequest) {
+  if (!pickerAvailable()) return exportSay('CLI subprocess needs the desktop app — use Run in: tile-server here.', 'err');
+  const { args, then } = exportCliArgs(r);
+  try {
+    const { id } = await pickerRpc!.request.runCli(then ? { args, then } : { args });
+    cliJob = id;
+  } catch (e) { return exportSay(`Could not start the CLI: ${e instanceof Error ? e.message : e}`, 'err'); }
+  // The preview buttons need the server's job URL; a CLI export is a plain folder on disk.
+  exportPreview = '';
+  $('export-preview').hidden = $('export-viewer').hidden = true;
+  exportLog.textContent = '';
+  $('export-log-wrap').hidden = false;
+  $('export-progress').hidden = false;
+  exportBar.style.width = '0%';
+  exportBar.classList.add('indeterminate');
+  setExportRunning(true, true);   // a subprocess can always be killed, convert included
+  exportSay('Starting node…');
+  pollCli();
+}
+
+async function pollCli() {
+  const id = cliJob;
+  if (!id || !pickerRpc) return;
+  let s: Awaited<ReturnType<typeof pickerRpc.request.cliStatus>>;
+  try { s = await pickerRpc.request.cliStatus({ id }); }
+  catch { setTimeout(pollCli, 1000); return; }
+  if (!s) { cliJob = null; setExportRunning(false, false); return exportSay('The CLI job is gone (was the app restarted?).', 'err'); }
+  // Show the tail; keep following it only if the user hasn't scrolled up.
+  const follow = exportLog.scrollHeight - exportLog.scrollTop - exportLog.clientHeight < 24;
+  exportLog.textContent = s.tail.join('\n');
+  if (follow) exportLog.scrollTop = exportLog.scrollHeight;
+  const out = s.tail.filter((l) => !l.startsWith('[desktop]') && !l.startsWith('$ '));
+  const last = out[out.length - 1]?.trim() ?? '';
+  // "downloading: 3 tilesets · 14/315 files · 1.8 MB" → a real bar once the total is known
+  const m = /^(\w[\w ]*): .*?(\d+)\/(\d+) files/.exec(last);
+  if (m && m[1] === 'downloading') {
+    exportBar.classList.remove('indeterminate');
+    exportBar.style.width = `${Math.round((100 * Number(m[2])) / Math.max(1, Number(m[3])))}%`;
+  }
+  const secs = (((s.endedAt ?? Date.now()) - s.startedAt) / 1000).toFixed(s.endedAt ? 1 : 0);
+  if (s.state === 'running') {
+    exportSay(`${secs} s — ${last || 'running…'}`);
+    setTimeout(pollCli, 500);
+    return;
+  }
+  cliJob = null;
+  setExportRunning(false, false);
+  exportBar.classList.remove('indeterminate');
+  exportBar.style.width = '100%';
+  if (s.state === 'done') {
+    $('export-done').hidden = false;
+    exportSay(`Done in ${secs} s — ${last}`, 'ok');
+  } else if (s.state === 'cancelled') {
+    exportSay(`Cancelled after ${secs} s — the folder holds a partial copy.`, 'err');
+  } else {
+    exportSay(`CLI failed (exit code ${s.exitCode ?? '?'})${last ? ` — ${last}` : ''}. See the output below.`, 'err');
+    ($('export-log-wrap') as HTMLDetailsElement).open = true;
+  }
+}
 
 const PHASES: Record<string, string> = {
   crawling: 'Crawling', downloading: 'Downloading', converting: 'Converting',
@@ -385,8 +492,7 @@ async function pollExport() {
     return;
   }
   exportJob = null;
-  ($('export-start') as HTMLButtonElement).disabled = false;
-  ($('export-cancel') as HTMLButtonElement).disabled = true;
+  setExportRunning(false, false);
   if (j.state === 'done') {
     exportPreview = j.preview ? `${base}${j.preview}` : '';
     $('export-done').hidden = false;

@@ -121,12 +121,31 @@ every level), and press **Export**.
 - **Links.** Export and CLI docs, the middleware's home page, *Open the live tileset in the demo
   viewer*, and after an export *Open copy in demo viewer*. The last two use the viewer's
   `?load=<url>` start parameter.
-- **Server or CLI?** The server. It is already running with every adapter loaded, it reports progress
-  and can cancel a crawl, the job survives switching tabs, and the app needs no shell or second Node
-  process. The CLI runs the same code for scripts and CI, hence the command shown.
-- **Where the work runs.** The tile-server does the work (`POST /export`, polled with
-  `GET /export/{id}`), not the view. It already has every adapter, and a crawl of thousands of tiles
-  should survive switching tabs. **Cancel** stops it and leaves a partial copy.
+- **Run in: tile-server or CLI subprocess.** The card lets you pick where the export runs. The view
+  never does the work itself.
+  - **tile-server** (default): `POST /export`, polled with `GET /export/{id}`. The server is already
+    running with every adapter loaded. It reports structured progress (tiles found and written,
+    bytes), the job survives switching tabs, and the server serves the result back for *Preview
+    exported copy* and *Open copy in demo viewer*. **Cancel** stops a crawl and leaves a partial copy.
+    An offline convert runs inside the server and can't be stopped part-way.
+  - **CLI subprocess**: the app's main process runs exactly the *Equivalent CLI* command
+    (`node packages/convert/cli.js …` from the repo root). A convert that asked for packing is followed
+    by `node scripts/pack-3dtiles.mjs`. The command is passed as an argument list, never through a
+    shell. The main process only accepts those two scripts, and refuses `serve` and the `--`
+    converter passthrough. The export runs in a separate process, so a crash or a memory blow-up in
+    a huge conversion can't take the tile-server down. The code is the same as the server's. The
+    status line is the CLI's last output line (its `\r` progress redraws are collapsed), and a
+    collapsible panel shows the last 200 lines. **Cancel** kills the process in both methods, and
+    on Windows the whole process tree (`taskkill /T`). The preview buttons aren't offered, because
+    the server has no job for this folder; *Open folder* still works.
+  - **Which is better today?** Use the **tile-server** for everyday exports: you get richer
+    progress, the preview links, and no second Node process. Use the **CLI subprocess** for very
+    large conversions, or when you want the export isolated from the server you're using. With the
+    offline converter it doesn't need the server at all, so it keeps going if the server is
+    restarted. A crawl still downloads the tileset URL that the server serves, so a crawl still
+    depends on the server.
+  - The CLI option needs the desktop host. When the view is opened in a plain browser, it's
+    disabled with a note.
 - **What gets written.** It works on the URL, not the source format, so every input the Build tab
   accepts is exported the same way: a local or remote raw dataset through `/stream` or `/convert`, as
   well as mosaics and proxied hosts.

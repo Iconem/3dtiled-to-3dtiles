@@ -23,6 +23,7 @@
  */
 import { BrowserWindow, Utils, defineElectrobunRPC } from "electrobun/main";
 import type { DesktopRPC } from "../shared/rpc-schema";
+import { createCliRunner, defaultSpawn } from "./cli-runner";
 
 const TILE_PORTS = [3001, 3031, 3032, 3033];
 const STATIC_PORTS = [3041, 3042, 3043];
@@ -175,6 +176,14 @@ const qs = `?tilePort=${tilePort ?? ""}&staticPort=${staticPort ?? ""}`
 /** Window bounds, and the ceiling we will not grow past. */
 const WIN = { x: 100, y: 40, width: 1120, height: 940, maxWidth: 1600, maxHeight: 1200 };
 
+/**
+ * "Export → Run in: CLI subprocess": the same `packages/convert/cli.js` the card shows, as an isolated
+ * child of THIS process (not of the tile-server), so a crash or memory blow-up in a large conversion
+ * cannot take the middleware down. Only the two allow-listed scripts can be run — see cli-runner.ts.
+ */
+const cli = createCliRunner({ spawn: await defaultSpawn(), cwd: root });
+children.push({ kill: () => cli.killAll() });
+
 const rpc = defineElectrobunRPC<DesktopRPC, "bun">("bun", {
 	handlers: {
 		requests: {
@@ -199,6 +208,10 @@ const rpc = defineElectrobunRPC<DesktopRPC, "bun">("bun", {
 			 * window taller than the screen.
 			 */
 			openFolder: ({ path }) => Utils.openPath(path),
+
+			runCli: ({ args, then }) => ({ id: cli.run(then ? [args, then] : [args]) }),
+			cliStatus: ({ id }) => cli.status(id),
+			cancelCli: ({ id }) => cli.cancel(id),
 
 			fitWindow: ({ cssWidth, cssHeight, viewportWidth, viewportHeight }) => {
 				const sx = viewportWidth > 0 ? WIN.width / viewportWidth : 1;

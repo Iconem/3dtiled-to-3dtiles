@@ -42,6 +42,32 @@ export interface DesktopRPC {
         params: { cssWidth: number; cssHeight: number; viewportWidth: number; viewportHeight: number };
         response: { width: number; height: number };
       };
+      /**
+       * Export → "Run in: CLI subprocess": run `node <args…>` from the repo root (no shell). args[0]
+       * must be `packages/convert/cli.js` or `scripts/pack-3dtiles.mjs` — the main process rejects
+       * anything else. `then` is an optional second step run only if the first exits 0 (convert →
+       * pack). Rejects (throws) on a disallowed command.
+       */
+      runCli: {
+        params: { args: string[]; then?: string[] };
+        response: { id: string };
+      };
+      /** State of a runCli job; `tail` is the last ~200 output lines (`\r` progress redraws collapsed). */
+      cliStatus: {
+        params: { id: string };
+        response: {
+          state: 'running' | 'done' | 'failed' | 'cancelled';
+          exitCode: number | null;
+          tail: string[];
+          startedAt: number;
+          endedAt: number | null;
+        } | null;
+      };
+      /** Kill a running runCli job (and, on Windows, its process tree). False if not running. */
+      cancelCli: {
+        params: { id: string };
+        response: boolean;
+      };
     };
     messages: Record<string, never>;
   }>;

@@ -52,7 +52,7 @@ would only ever be right for one of them.
 
 | tab | what it is |
 |---|---|
-| **Build** | dataset + format + materialization + optional globe placement → paste-ready URL, and **Export to a folder** (a static 3D Tiles copy, written by the server's `POST /export`) |
+| **Build** | dataset + format + materialization + optional globe placement → paste-ready URL, and **Export to a folder** (a static 3D Tiles copy, written by the server's `POST /export` or by a `packages/convert/cli.js` child of the main process — `src/bun/cli-runner.ts`, allow-listed scripts only) |
 | **Library** | saved datasets (`library.ts`), with a cached `/stats` check per row |
 | **Samples** | `catalog.ts` — a real public dataset per source format, one click into Build |
 
