@@ -634,6 +634,8 @@ const OPEN_DATA = [
  */
 const ANGKOR_BASE = 'https://api.iconem.com/s/is52XRiz30fn30HPjbgGe-KrydjSA3r0';
 const ICONEM = { provider: 'Iconem', attribution: '© Iconem' };
+// Geghard's public Potree share link, as the demo presets carry it (lib/formats.ts); wrapped by /stream.
+const GEGHARD = 'https://api.iconem.com/s/rIdPkRfOmEdRtgsoO08TgNt9MSxh-woC/cloud.js';
 const ANGKOR_SITES = [
   'AkYum_231M_d202411_p202412_epsg32648',
   'AngkorThom_SouthGate_817M_d202411_p202412_epsg32648',
@@ -675,6 +677,20 @@ export const DEMO_SETS = {
     label: 'Iconem Angkor — 23 individual site tilesets',
     urls: ANGKOR_SITES.map((s) => `${ANGKOR_BASE}/${s}/tileset.json`),
     entries: ANGKOR_SITES.map((s) => ({ id: s, label: angkorLabel(s), url: `${ANGKOR_BASE}/${s}/tileset.json`, ...ICONEM })),
+  },
+  /** Iconem's PUBLIC datasets — the Angkor sites and Geghard — for deployments without the full manifest. */
+  'iconem-open': {
+    label: 'Iconem public — the 23 Angkor sites + Geghard',
+    urls: [...ANGKOR_SITES.map((s) => `${ANGKOR_BASE}/${s}/tileset.json`), GEGHARD],
+    entries: [...ANGKOR_SITES.map((s) => ({ id: s, label: angkorLabel(s), url: `${ANGKOR_BASE}/${s}/tileset.json`, ...ICONEM })),
+      { id: 'geghard', label: 'Geghard monastery (Potree)', url: GEGHARD, format: 'potree', ...ICONEM }],
+  },
+  /** Every open or evaluation dataset from outside Iconem: the demo app's "Open data" pill. */
+  open: {
+    label: 'Open data — 3D Tiles RESOURCES.md + Aerometrex + flai open LiDAR + Vexcel',
+    urls: OPEN_DATA.map((d) => d.url),
+    entries: OPEN_DATA,
+    include: ['aerometrex', 'flai', 'vexcel'],
   },
   /** Everything at once — the "one endpoint, heterogeneous sources, whole planet" pitch. */
   world: {
@@ -1087,7 +1103,8 @@ function selectChildren(req, u, sets) {
         group: e.sceneId != null ? `scene:${e.sceneId}` : e.scene ? `scene:${e.project ?? ''}/${e.scene}` : null,
         text: [e.url, e.name, e.project, e.scene, e.date, e.provider ?? set.provider].filter(Boolean).join(' ') }))
     : [
-        ...set.entries.map((e) => ({ id: idOf(e.url), url: e.url, fmt: '3dtiles', name: e.label || e.id,
+        // a code-set entry with a `format` is a point cloud: wrapped by /stream like a manifest entry
+        ...set.entries.map((e) => ({ id: idOf(e.url), url: e.format ? childUrlFor(e, origin) : e.url, fmt: e.format || '3dtiles', name: e.label || e.id,
           provider: e.provider ?? null, attribution: e.attribution ?? null, set: setName,
           text: [e.url, e.label, e.provider].filter(Boolean).join(' ') })),
         // code sets may pull in public manifests (the world set includes Aerometrex, through /proxy)

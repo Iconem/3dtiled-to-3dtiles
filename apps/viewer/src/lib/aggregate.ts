@@ -117,6 +117,19 @@ export function withSnap(url: string, terrain: TerrainMode | null): string {
   return withParam(url, 'snap', snapRasterFor(terrain) ?? 'mapterhorn-ellipsoid');
 }
 
+/**
+ * Open ONE dataset of a mosaic on its own, in a new tab: a Potree cloud in the potree lab (raw
+ * `cloud.js`, PotreePlugin), anything else in the 3DTRjs viewer. `url` is the mosaic leaf's content
+ * URL — a `/stream` wrapper for Potree/COPC, whose `url` param is the source.
+ */
+export function externalViewerUrl(d: { url: string; format: string }): { href: string; label: string } {
+  const u = new URL(d.url, location.href);
+  const src = /\/stream\/tileset\.json/.test(u.pathname) ? u.searchParams.get('url') : null;
+  if (d.format === 'potree' && src) return { href: `/potree-lab?url=${encodeURIComponent(src)}`, label: 'open in potree lab' };
+  const type = d.format === '3dtiles' ? 'mesh' : 'pointcloud';
+  return { href: `/?renderer=3dtrjs&load=${encodeURIComponent(d.url)}&type=${type}`, label: 'open in 3DTRjs' };
+}
+
 /** The index shares the mosaic's exact query, so both describe the same selection. */
 export async function fetchAggregateIndex(tilesetUrl: string, signal?: AbortSignal): Promise<AggregateIndex> {
   const r = await fetch(aggregateIndexUrl(tilesetUrl), { signal });

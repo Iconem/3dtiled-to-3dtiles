@@ -27,7 +27,8 @@
  * .local/aggregate-sets/iconem.json, served loopback-only by vite.config.ts.
  */
 import { Scene, WebGLRenderer, PerspectiveCamera, Box3, Sphere } from 'three';
-import { TilesRenderer, EnvironmentControls } from '3d-tiles-renderer';
+import { TilesRenderer, EnvironmentControls, GlobeControls } from '3d-tiles-renderer';
+import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { DebugTilesPlugin, ImplicitTilingPlugin, ReorientationPlugin } from '3d-tiles-renderer/plugins';
 import { GUI } from 'three/addons/libs/lil-gui.module.min.js';
 import { PotreePlugin } from './vendor/potree/PotreePlugin.js';
@@ -60,6 +61,7 @@ const params = {
   edl: (q.get('edl') ?? '0.4') !== '0',
   edlStrength: Number(q.get('edl') ?? 0.4) || 0.4,
   edlRadius: 1.4,
+  controls: ['globe', 'orbit'].includes(q.get('controls')) ? q.get('controls') : 'env',
   debugColorMode: q.get('debug') || 'none',
   displayBoxBounds: q.get('boxes') === '1',
   geSize: q.get('geSize') !== '0',        // stream mode: size points from each tile's geometric error
@@ -81,10 +83,36 @@ const scene = new Scene();
 const camera = new PerspectiveCamera(60, 1, 0.1, 1000);
 camera.position.set(4, 2, 8);
 
-const controls = new EnvironmentControls(scene, camera, renderer.domElement);
-controls.enableDamping = true;
-controls.cameraRadius = 0;
-controls.useFallbackPlane = true;
+/**
+ * Camera controls, switchable: 3DTRjs's EnvironmentControls (the default — a local scene with a
+ * fallback ground plane) and GlobeControls (orbit on the WGS84 ellipsoid: only meaningful for
+ * ECEF-placed content, which the lab recentres, so it is here to compare feel), or three's own
+ * OrbitControls (a fixed target, no pick-to-pivot).
+ */
+let controls = null;
+let radius = 10;                                 // of the loaded dataset's bounding sphere
+function makeControls(kind) {
+  controls?.dispose();
+  if (kind === 'orbit') {
+    controls = new OrbitControls(camera, renderer.domElement);
+    controls.enableDamping = true;
+    controls.target.set(0, 0, 0);
+  } else {
+    controls = kind === 'globe' ? new GlobeControls(scene, camera, renderer.domElement) : new EnvironmentControls(scene, camera, renderer.domElement);
+    controls.enableDamping = true;
+    controls.cameraRadius = 0;
+    if (kind !== 'globe') controls.useFallbackPlane = true;
+    if (kind === 'globe' && tiles) controls.setEllipsoid(controls.ellipsoid, tiles.group);
+  }
+  applyControlsRange();
+}
+function applyControlsRange() {
+  if (!controls) return;
+  controls.minDistance = radius / 50;
+  controls.maxDistance = radius * 20;
+  if (controls.raycaster) controls.raycaster.params.Points.threshold = radius / 200;
+}
+makeControls(params.controls);
 
 let tiles = null, effects = null;
 
@@ -142,6 +170,7 @@ function initTiles() {
   tiles.errorTarget = params.errorTarget;
   tiles.setCamera(camera);
   scene.add(tiles.group);
+  if (params.controls === 'globe') controls.setEllipsoid(controls.ellipsoid, tiles.group);
   LAB.tiles = tiles;                               // devtools / headless inspection
   LAB.url = params.url;                            // potree mode keeps it in the plugin (tiles.rootURL is null)
   LAB.mode = params.mode;
@@ -156,7 +185,7 @@ function initTiles() {
     tiles.getBoundingSphere(sphere);
     sphere.applyMatrix4(tiles.group.matrixWorld);
     tiles.group.position.sub(sphere.center);
-    const radius = sphere.radius || 10;
+    radius = sphere.radius || 10;
     tiles.group.updateMatrixWorld();                 // pick up the recentring before measuring again
     const box = new Box3();                          // only for the fallback plane height below
     tiles.getBoundingBox(box);
@@ -166,10 +195,8 @@ function initTiles() {
     camera.near = radius / 1000;
     camera.far = radius * 100;
     camera.updateProjectionMatrix();
-    controls.minDistance = radius / 50;
-    controls.maxDistance = radius * 20;
-    controls.raycaster.params.Points.threshold = radius / 200;
-    controls.fallbackPlane.constant = -box.min.y;
+    applyControlsRange();
+    if (controls.fallbackPlane) controls.fallbackPlane.constant = -box.min.y;
     LAB.rootLoaded = true;
   });
   tiles.addEventListener('load-error', (e) => LAB.errors.push(`load-error: ${e.error?.message ?? e.error} (${e.url ?? ''})`));
@@ -182,6 +209,7 @@ function syncUrl() {
   if (params.mode !== 'potree') { s.set('geSize', params.geSize ? '1' : '0'); if (!params.geSize) s.set('fixed', String(params.fixedSize)); }
   if (params.debugColorMode !== 'none') s.set('debug', params.debugColorMode);
   if (params.displayBoxBounds) s.set('boxes', '1');
+  if (params.controls !== 'env') s.set('controls', params.controls);
   history.replaceState(null, '', `?${s}`);
 }
 
@@ -216,6 +244,9 @@ let datasetCtl = gui.add(params, 'dataset', Object.keys(datasets)).name('dataset
 const urlCtl = gui.add(params, 'url').name('source url').onFinishChange(initTiles);
 const modeCtl = gui.add(params, 'mode', { 'PotreePlugin (adaptive size)': 'potree', '/stream 3D Tiles + effects': 'stream', 'any 3D Tiles url + effects': 'tileset' })
   .name('load as').onChange(() => { streamFolder.show(params.mode !== 'potree'); scaleCtl.name(params.mode === 'potree' ? 'point scale' : 'size multiplier'); initTiles(); });
+
+gui.add(params, 'controls', { 'EnvironmentControls (3DTRjs)': 'env', 'GlobeControls (3DTRjs)': 'globe', 'OrbitControls (three)': 'orbit' })
+  .name('controls').onChange((v) => { makeControls(v); syncUrl(); });
 
 const tilesFolder = gui.addFolder('tiles');
 tilesFolder.add(params, 'enable').name('update tiles');

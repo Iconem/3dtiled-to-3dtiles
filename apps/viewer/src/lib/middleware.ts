@@ -63,6 +63,8 @@ export interface Preset {
   flyTo?: { lon: number; lat: number; height: number };
   /** Only offer this preset when the tile-server reports this aggregate set (see useAvailableSets). */
   requiresSet?: string;
+  /** Only offer this preset when the tile-server does NOT have this set (a public stand-in for a local one). */
+  unlessSet?: string;
 }
 
 /** Ported from viewer.html's currentPresets() — the asset-pill list for the current mode/format. */
@@ -99,36 +101,14 @@ export function currentPresets(p: MiddlewareParams & { toolName: ToolName; tiles
     // scripts/iconem-share-links.mjs. Mixed and point-cloud variants are typed `pointcloud` so the
     // point-size control reaches their points; meshes are unaffected by it.
     const agg = (q: string) => `${MW}/aggregate/tileset.json?${q}`;
-    // Close enough that site-sized children pass their geometric-error gate and actually load — from
-    // the park-wide altitude nothing is fetched (that is the mosaic working), which reads as "empty".
-    const ANGKOR_THOM = { lon: 103.8590, lat: 13.4412, height: 1_800 };
     return [
-      { id: 'agg-world', label: '🧩 World — open data + Angkor + Aerometrex + Vexcel', type: 'mesh', url: agg('set=world&nest=geodetic') },
-      { id: 'agg-opendata', label: '🧩 Open data — 10 cities', type: 'mesh', url: agg('set=opendata&nest=geodetic'), flyTo: { lon: 4.8, lat: 47.5, height: 1_800_000 } },
-      // Group volumes are the quadtree cells by default (debug tiles show the 2×1 geodetic grid); the
-      // picker's "bounds" control switches to fitted spheres, regions or ENU boxes (see docs: bv=).
-      { id: 'agg-angkor', label: '🧩 Angkor — 23 sites (geodetic cells)', type: 'mesh', url: agg('set=angkor&nest=geodetic'), flyTo: ANGKOR_THOM },
-      { id: 'agg-angkor-sphere', label: '🧩 Angkor — 23 sites (spheres)', type: 'mesh', url: agg('set=angkor&nest=geodetic&bv=sphere'), flyTo: ANGKOR_THOM },
-      { id: 'agg-angkor-region', label: '🧩 Angkor — 23 sites (regions)', type: 'mesh', url: agg('set=angkor&nest=geodetic&bv=region'), flyTo: ANGKOR_THOM },
-      { id: 'agg-angkor-box', label: '🧩 Angkor — 23 sites (boxes)', type: 'mesh', url: agg('set=angkor&nest=geodetic&bv=box'), flyTo: ANGKOR_THOM },
-      { id: 'agg-angkor-merc', label: '🧩 Angkor — 23 sites (mercator)', type: 'mesh', url: agg('set=angkor&nest=mercator'), flyTo: ANGKOR_THOM },
-      { id: 'agg-phnomkulen', label: '🧩 Angkor — only PhnomKulen', type: 'mesh', url: agg('set=angkor&only=PhnomKulen'), flyTo: { lon: 104.0, lat: 13.55, height: 12_000 } },
-      // Committed public sets (packages/tile-server/aggregate-sets/): flai's national open LiDAR as COPC
-      // overviews (CRS passed per entry), and Aerometrex's US city previews through the tileset-aware /proxy.
-      { id: 'agg-flai', label: '🧩 flai open LiDAR — 113 national COPC', type: 'pointcloud', url: agg('set=flai&nest=geodetic'), flyTo: { lon: 10, lat: 54, height: 3_500_000 } },
-      // Vexcel needs VEXCEL_API_KEY on the server (the proxy adds it), so it only shows where that is set.
-      { id: 'agg-vexcel', label: '🧩 Vexcel — 10 Australian cities (proxied)', type: 'mesh', url: agg('set=vexcel&nest=geodetic'), flyTo: { lon: 153.43, lat: -28.0, height: 6_000 }, requiresSet: 'vexcel' },
-      { id: 'agg-aerometrex', label: '🧩 Aerometrex — 12 US cities (proxied)', type: 'mesh', url: agg('set=aerometrex&nest=geodetic'), flyTo: { lon: -73.982, lat: 40.685, height: 7_000 } },
-      // `iconem` is a machine-local set (a gitignored manifest of share links), so these four only
-      // appear where the server actually has it — see TopBar's requiresSet filter.
+      // Two mosaics: everything Iconem (a machine-local manifest of share links, so only where the
+      // server has it — see TopBar's requiresSet filter), and every open or evaluation dataset from
+      // outside Iconem. Sub-selections (Angkor, Mes Aynak, one format …) are the picker's job.
       { id: 'agg-iconem-all', label: '🧩 Iconem — all formats', type: 'pointcloud', url: agg('set=iconem&nest=geodetic'), requiresSet: 'iconem' },
-      { id: 'agg-iconem-3dtiles', label: '🧩 Iconem — 3D Tiles only', type: 'mesh', url: agg('set=iconem&format=3dtiles&nest=geodetic'), requiresSet: 'iconem' },
-      { id: 'agg-iconem-potree', label: '🧩 Iconem — Potree only', type: 'pointcloud', url: agg('set=iconem&format=potree&nest=geodetic'), requiresSet: 'iconem' },
-      // Diachronic sites (Mes Aynak 2010→2022, Mosul 2018→2020…) show their newest capture only.
-      { id: 'agg-iconem-latest', label: '🧩 Iconem — latest captures (Mes Aynak)', type: 'pointcloud', url: agg('set=iconem&nest=geodetic&latest=1'), flyTo: { lon: 69.3080, lat: 34.2698, height: 9_000 }, requiresSet: 'iconem' },
-      // Every Mes Aynak capture, each put on the ground on its own (server-side &snap=).
-      { id: 'agg-iconem-mesaynak', label: '🧩 Iconem — Mes Aynak, all years, snapped', type: 'pointcloud', url: agg('set=iconem&only=MesAynak&snap=1'), flyTo: { lon: 69.3080, lat: 34.2698, height: 5_500 }, requiresSet: 'iconem' },
-      { id: 'agg-iconem-copc', label: '🧩 Iconem — COPC only', type: 'pointcloud', url: agg('set=iconem&format=copc&nest=geodetic'), requiresSet: 'iconem' },
+      // Where the full manifest is absent (a public deployment), Iconem's public datasets stand in.
+      { id: 'agg-iconem-open', label: '🧩 Iconem — public (Angkor + Geghard)', type: 'mesh', url: agg('set=iconem-open&nest=geodetic'), unlessSet: 'iconem' },
+      { id: 'agg-open', label: '🧩 Open data — RESOURCES.md + Aerometrex + flai + Vexcel', type: 'mesh', url: agg('set=open&nest=geodetic') },
     ];
   }
   if (p.selectedFormat === 'bing') {

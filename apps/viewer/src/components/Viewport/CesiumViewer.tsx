@@ -9,6 +9,7 @@ import DatasetTooltip, { MARKER_COLORS, type TooltipChannel } from './DatasetToo
 import { createRasterTerrainProvider, RASTER_TERRAINS, REEARTH_QM_URL, resolveTerrainMode, sampleRasterTerrain, snapRasterFor } from '@/lib/terrarium';
 import { BASEMAPS, type BasemapId } from '@/lib/basemaps';
 import { tileDatasetId, type DatasetStyle } from '@/lib/datasetStyle';
+import { fetchOutlines, outlineColor } from '@/lib/mosaicOutlines';
 import { datasetGroundSamples, offsetFromSamples } from '@/lib/datasetGround';
 import { SNAP_HALF, SNAP_SAMPLES, SNAP_MIN_HITS } from '@/lib/snapToGround';
 
@@ -91,6 +92,9 @@ const CesiumViewer = forwardRef<ViewerHandle, Props>(function CesiumViewer({ vis
   const tooltipRef: TooltipChannel = useRef(null);
   const pendingFlyRef = useRef<{ lon: number; lat: number; height: number } | null>(null);
   const datasetStyleRef = useRef<DatasetStyle | null>(null);
+  // Debug 'cells': the loaded tileset's own declared tiles, as polylines (lib/mosaicOutlines.ts).
+  const outlinesRef = useRef<Cesium.PolylineCollection | null>(null);
+  const outlinesAbortRef = useRef<AbortController | null>(null);
   const pendingLoadRef = useRef<{ url: string; type: AssetType; opts?: { sseOverride?: number | null; skipAutoFrame?: boolean } } | null>(null);
 
   const getViewer = () => viewerRef.current;
@@ -103,6 +107,7 @@ const CesiumViewer = forwardRef<ViewerHandle, Props>(function CesiumViewer({ vis
       v.scene.primitives.remove(currentTilesetRef.current);
       currentTilesetRef.current = null;
     }
+    clearOutlines();
     currentTypeRef.current = type;
     placementBaseRef.current = null;
     store.getState().hideError();
@@ -134,21 +139,11 @@ const CesiumViewer = forwardRef<ViewerHandle, Props>(function CesiumViewer({ vis
           model.show = !(id && st!.hidden.has(id));
           const c = id ? st!.colors?.get(id) : undefined;
           if (c) model.color = cssColor(c);
-          else if (model.color && !store.getState().debugTiles) model.color = undefined;
+          else if (model.color && store.getState().debugMode !== 'tiles') model.color = undefined;
         });
-        if (store.getState().debugTiles) {
-          (tileset as any).debugShowBoundingVolume = true;
-          (tileset as any).debugColorizeTiles = true;
-        }
+        applyDebugMode(store.getState().debugMode, url);
         applyShadingInternal();
-        if (!isSplat && (tileset as any).pointCloudShading) {
-          const pcs = (tileset as any).pointCloudShading;
-          pcs.attenuation = true;
-          pcs.maximumAttenuation = 4;
-          pcs.eyeDomeLighting = true;
-          pcs.eyeDomeLightingStrength = 1.0;
-          pcs.eyeDomeLightingRadius = 1.0;
-        }
+        applyPointShadingInternal();
         const bs = tileset.boundingSphere;
         const distFromEcefOrigin = Cesium.Cartesian3.magnitude(bs.center);
         const isLocalCoords = distFromEcefOrigin < 1e6 && bs.radius < 1e6;
@@ -456,6 +451,54 @@ const CesiumViewer = forwardRef<ViewerHandle, Props>(function CesiumViewer({ vis
     }
   }
 
+  /** Cesium's point-cloud shading from the store: px size / attenuation cap, adaptive sizing, EDL. */
+  function applyPointShadingInternal() {
+    const tileset: any = currentTilesetRef.current;
+    if (!tileset || currentTypeRef.current !== 'pointcloud' || !tileset.pointCloudShading) return;
+    const { pointSize, pointAdaptive, edl, edlStrength } = store.getState();
+    const pcs = tileset.pointCloudShading;
+    pcs.attenuation = pointAdaptive;
+    pcs.maximumAttenuation = pointSize * 2;          // adaptive: the cap; points never grow past it
+    pcs.eyeDomeLighting = edl;
+    pcs.eyeDomeLightingStrength = edlStrength;
+    pcs.eyeDomeLightingRadius = 1.0;
+    // fixed size comes from the style; with attenuation on the style size is the minimum
+    try { tileset.style = new Cesium.Cesium3DTileStyle({ pointSize: pointAdaptive ? 1 : pointSize }); } catch { /* splat/mesh */ }
+  }
+
+  function clearOutlines() {
+    outlinesAbortRef.current?.abort();
+    outlinesAbortRef.current = null;
+    const v = getViewer();
+    if (outlinesRef.current) { v?.scene.primitives.remove(outlinesRef.current); outlinesRef.current = null; }
+  }
+
+  /** 'tiles' = Cesium's own debug view of every loaded tile; 'cells' = the tileset's declared tiles only. */
+  function applyDebugMode(mode: 'off' | 'cells' | 'tiles', url = store.getState().lastLoadUrl) {
+    const v = getViewer();
+    const ts: any = currentTilesetRef.current;
+    if (ts) { ts.debugShowBoundingVolume = mode === 'tiles'; ts.debugColorizeTiles = mode === 'tiles'; }
+    clearOutlines();
+    if (!v || mode !== 'cells' || !url) return;
+    const ac = new AbortController();
+    outlinesAbortRef.current = ac;
+    fetchOutlines(url, ac.signal).then((outlines) => {
+      if (ac.signal.aborted || v.isDestroyed()) return;
+      const pl = new Cesium.PolylineCollection();
+      if (ts) pl.modelMatrix = ts.modelMatrix;
+      for (const o of outlines) {
+        const color = Cesium.Color.fromCssColorString(outlineColor(o));
+        for (const line of o.lines) {
+          pl.add({ positions: Cesium.Cartesian3.unpackArray(line), width: o.leaf ? 1.5 : 2, material: Cesium.Material.fromType('Color', { color }) });
+        }
+      }
+      v.scene.primitives.add(pl);
+      outlinesRef.current = pl;
+      v.scene.requestRender();
+      store.getState().setStatus(`Debug cells: ${outlines.filter((o) => !o.leaf).length} group tiles, ${outlines.filter((o) => o.leaf).length} dataset roots.`);
+    }).catch((e) => { if (!ac.signal.aborted) store.getState().setStatus(`Debug cells: ${e.message}`); });
+  }
+
   function applyZOffsetInternal(dz: number) {
     const tileset = currentTilesetRef.current;
     if (!tileset) { store.getState().setStatus('Load a georeferenced tileset first, then set a Z offset.'); return; }
@@ -464,6 +507,7 @@ const CesiumViewer = forwardRef<ViewerHandle, Props>(function CesiumViewer({ vis
     const t = Cesium.Cartesian3.multiplyByScalar(up, dz, new Cesium.Cartesian3());
     const base = placementBaseRef.current || Cesium.Matrix4.IDENTITY;
     tileset.modelMatrix = Cesium.Matrix4.multiply(Cesium.Matrix4.fromTranslation(t), base, new Cesium.Matrix4());
+    if (outlinesRef.current) outlinesRef.current.modelMatrix = tileset.modelMatrix;
     const gsp = (tileset as any).gaussianSplatPrimitive;
     if (gsp) { gsp._rootTransform = undefined; gsp._dirty = true; }
     store.getState().setStatus(`Vertical Z offset: ${dz} m along local up (georef preserved).`);
@@ -622,12 +666,8 @@ const CesiumViewer = forwardRef<ViewerHandle, Props>(function CesiumViewer({ vis
       if (on) v.camera.switchToOrthographicFrustum();
       else v.camera.switchToPerspectiveFrustum();
     },
-    toggleDebug(on) {
-      if (currentTilesetRef.current) {
-        (currentTilesetRef.current as any).debugShowBoundingVolume = on;
-        (currentTilesetRef.current as any).debugColorizeTiles = on;
-      }
-    },
+    setDebugMode(mode) { applyDebugMode(mode); },
+    applyPointShading() { applyPointShadingInternal(); },
     applyShading() { applyShadingInternal(); },
     setFov(deg) {
       const v = getViewer();

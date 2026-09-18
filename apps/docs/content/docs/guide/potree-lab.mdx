@@ -33,6 +33,16 @@ Iconem 1.8 cloud loads raw (12,343 points on screen; 0 before). It is worth an u
 **COPC therefore always goes through the middleware**, in `stream` mode (a `.copc.laz` URL is
 detected), and the lab's `potree` mode is the raw, middleware-free path for Potree only.
 
+## Controls
+
+A **controls** select switches the camera scheme without reloading (`?controls=`):
+
+| Choice | What it is |
+|---|---|
+| `EnvironmentControls (3DTRjs)` (default) | 3DTRjs's local-scene controls: pivot on the picked point, a fallback ground plane under the data |
+| `GlobeControls (3DTRjs)` | 3DTRjs's globe controls, bound to the loaded tileset's group. The lab recentres content at the origin, so this is for comparing feel, not for real geography |
+| `OrbitControls (three)` | three.js's own orbit around a fixed target (the dataset's centre) — no pick-to-pivot |
+
 ## The load modes
 
 | `mode=` | How the dataset is read | Point sizing |

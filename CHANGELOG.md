@@ -5,6 +5,24 @@ Format loosely follows [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+### Added / Changed — 2026-09-18 (debug cells · point controls · two pills · lab controls · external open)
+- **Debug select** replaces the debug checkbox: **cells + dataset roots** draws the loaded tileset's own
+  declared tiles (a mosaic's quadtree cells by depth, dataset roots in white; `lib/mosaicOutlines.ts`,
+  both renderers); **all tiles** is the renderers' full debug view.
+- **Point-cloud controls** in the sidebar for both renderers: point size, adaptive sizing (Cesium
+  attenuation; 3DTRjs world-space size from the tile's geometric error), and eye-dome lighting +
+  strength on Cesium.
+- **Aggregate pills** are now two: *Iconem — all formats* first, then *Open data* (new `open` set:
+  RESOURCES.md + Aerometrex + flai + Vexcel, 145 datasets). *Iconem — public* (new `iconem-open` set:
+  Angkor + Geghard) stands in where the Iconem manifest is absent. The Angkor / Mes Aynak / per-format
+  pills are gone — the picker does that.
+- **Picker:** the *in view* list opens by default; the colour mode colours markers only; **⧉** opens a
+  dataset alone in a new tab (potree lab for Potree, the 3DTRjs viewer otherwise).
+- **Potree lab:** a **controls** select — EnvironmentControls, GlobeControls or three's OrbitControls
+  (`?controls=`).
+- **3DTRjs:** double-click and fly-to-sphere keep the camera upright (local up, or north when looking
+  straight down) instead of three's default +Y roll.
+
 ### Added / Changed — 2026-09-17c (per-dataset snap · cell default · in-place picker · Vexcel · Esri · Mapterhorn default)
 - **`&snap=`** on `/aggregate` snaps **each dataset separately**. Each leaf gets its own translation
   along the local up, computed server-side from the dataset's own top geometry against Mapterhorn.

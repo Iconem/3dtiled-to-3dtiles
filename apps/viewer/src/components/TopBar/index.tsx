@@ -107,7 +107,8 @@ export default function TopBar({ activeHandleRef }: { activeHandleRef: React.Ref
   const availableSets = useAvailableSets();
   const presets = currentPresets({ ...params, toolName: url.tool, tilesetOp: url.tilesetOp as any })
     // Presets backed by a machine-local aggregate set stay hidden until the server confirms it has it.
-    .filter((p) => !p.requiresSet || availableSets?.has(p.requiresSet));
+    .filter((p) => !p.requiresSet || availableSets?.has(p.requiresSet))
+    .filter((p) => !p.unlessSet || (availableSets != null && !availableSets.has(p.unlessSet)));
   const fmtOfSelected = fmtMeta(url.format);
 
   // Deliberately-grouped pill order (see FORMAT_PILL_ORDER's own comment) — pseudo-formats (3D Tiles,

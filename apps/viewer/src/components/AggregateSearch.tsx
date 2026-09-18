@@ -18,7 +18,7 @@ import { Slider } from '@/components/ui/slider';
 import { useViewerStore } from '@/state/store';
 import type { ViewerHandle } from '@/lib/viewer-handle';
 import {
-  BV_MODES, dateSpan, fetchAggregateIndex, heightForPlace, isAggregateUrl, pickerBaseUrl, readBv, readPicker, readSnap,
+  BV_MODES, dateSpan, externalViewerUrl, fetchAggregateIndex, heightForPlace, isAggregateUrl, pickerBaseUrl, readBv, readPicker, readSnap,
   searchDatasets, searchPlaces, withBv, withPicker, withSnap, type AggregateIndex, type BvMode, type DatasetMarker,
   type PickerState, type Place,
 } from '@/lib/aggregate';
@@ -72,7 +72,7 @@ export default function AggregateSearch({ activeHandleRef, renderer }: {
   const [places, setPlaces] = useState<Place[]>([]);
   const [open, setOpen] = useState(false);
   const [cursor, setCursor] = useState(0);
-  const [panel, setPanel] = useState(false);
+  const [panel, setPanel] = useState(true);
   const [inView, setInView] = useState<string[]>([]);
   const [years, setYears] = useState<number[] | null>(null);
   const [colorMode, setColorMode] = useState<ColorMode>('format');
@@ -139,14 +139,14 @@ export default function AggregateSearch({ activeHandleRef, renderer }: {
     return () => { activeHandleRef.current?.setDatasetMarkers?.(null); };
   }, [markers, showMarkers, active, renderer, activeHandleRef]);
 
-  // Hide / tint the datasets themselves, in place. `undefined` = the current index is still on its way.
+  // Hide the datasets themselves, in place. `undefined` = the current index is still on its way.
+  // The colour mode is for the markers only; the data keeps its own colours.
   const style = useMemo((): DatasetStyle | null | undefined => {
     if (!full) return null;
     if (filtered && !current) return undefined;
     const hidden = new Set(full.datasets.filter((d) => !activeIds.has(d.id)).map((d) => d.id));
-    const tint = colorMode === 'format' ? null : colors;
-    return hidden.size || tint ? { hidden, colors: tint } : null;
-  }, [full, current, filtered, activeIds, colorMode, colors]);
+    return hidden.size ? { hidden, colors: null } : null;
+  }, [full, current, filtered, activeIds]);
   useEffect(() => {
     if (style !== undefined) activeHandleRef.current?.setDatasetStyle?.(active ? style : null);
   }, [style, active, renderer, activeHandleRef]);
@@ -447,7 +447,7 @@ export default function AggregateSearch({ activeHandleRef, renderer }: {
             <span className="flex items-center gap-1">
               <span className="text-muted-foreground">colour</span>
               <Segmented value={colorMode} options={['format', 'provider', 'dataset'] as const} onChange={setColorMode}
-                title="Colour markers — and, for provider / dataset, the data itself — by format, provider or dataset" />
+                title="Colour the markers by format, provider or dataset" />
             </span>
             <span className="flex items-center gap-1">
               <span className="text-muted-foreground">bounds</span>
@@ -510,6 +510,8 @@ export default function AggregateSearch({ activeHandleRef, renderer }: {
                       <span className="shrink-0 text-muted-foreground">{d.date ? d.date.replace(/-\d\d(?=\/|$)/g, '').replace('/', '→') : '—'}</span>
                       <button type="button" className="shrink-0 text-muted-foreground hover:text-foreground" title="fly to"
                         onClick={(e) => { e.preventDefault(); pick({ kind: 'dataset', d }); }}>↗</button>
+                      <a className="shrink-0 text-muted-foreground hover:text-foreground" title={`${externalViewerUrl(d).label} (new tab)`}
+                        href={externalViewerUrl(d).href} target="_blank" rel="noopener" onClick={(e) => e.stopPropagation()}>⧉</a>
                     </label>
                   );
                 })}

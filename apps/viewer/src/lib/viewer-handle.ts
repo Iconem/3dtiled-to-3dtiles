@@ -22,7 +22,10 @@ export interface ViewerHandle {
   setMaxSSE(v: number | null): void;
   toggleAssetVisible(show: boolean): void;
   setOrtho(on: boolean): void;
-  toggleDebug(on: boolean): void;
+  /** 'cells': outlines of the tileset's own declared tiles; 'tiles': the renderer's full debug view. */
+  setDebugMode(mode: 'off' | 'cells' | 'tiles'): void;
+  /** Re-apply the store's point-cloud shading (size, adaptive sizing, EDL) to the loaded tileset. */
+  applyPointShading(): void;
   applyShading(shadeless: boolean, brightness: number): void;
   setFov(deg: number): void;
   flyToLocalFrame(lon: number, lat: number, alt: number, range: number): void;

@@ -52,7 +52,9 @@ interface ViewerStore {
   maxSSE: number | null; // null = per-type default
   assetVisible: boolean;
   ortho: boolean;
-  debugTiles: boolean;
+  // 'cells' draws the loaded tileset's OWN tiles (a mosaic's quadtree cells and dataset roots);
+  // 'tiles' is the renderer's own debug view of every tile it holds (lib/mosaicOutlines.ts).
+  debugMode: 'off' | 'cells' | 'tiles';
   shadeless: boolean;
   brightness: number;
   fov: number;
@@ -61,7 +63,15 @@ interface ViewerStore {
   setMaxSSE: (v: number | null) => void;
   setAssetVisible: (v: boolean) => void;
   setOrtho: (v: boolean) => void;
-  setDebugTiles: (v: boolean) => void;
+  setDebugMode: (v: ViewerStore['debugMode']) => void;
+  // Point clouds (both renderers): px size; adaptive = size from the tile's geometric error / point
+  // spacing (Cesium: attenuation); eye-dome lighting is Cesium-only in the main viewer.
+  pointAdaptive: boolean;
+  edl: boolean;
+  edlStrength: number;
+  setPointAdaptive: (v: boolean) => void;
+  setEdl: (v: boolean) => void;
+  setEdlStrength: (v: number) => void;
   setShadeless: (v: boolean) => void;
   setBrightness: (v: number) => void;
   setFov: (v: number) => void;
@@ -152,7 +162,10 @@ export const useViewerStore = create<ViewerStore>((set, get) => ({
   maxSSE: null,
   assetVisible: true,
   ortho: false,
-  debugTiles: false,
+  debugMode: 'off',
+  pointAdaptive: true,
+  edl: true,
+  edlStrength: 1,
   shadeless: false,
   brightness: 1.6,
   fov: 60,
@@ -161,7 +174,10 @@ export const useViewerStore = create<ViewerStore>((set, get) => ({
   setMaxSSE: (v) => set({ maxSSE: v }),
   setAssetVisible: (v) => set({ assetVisible: v }),
   setOrtho: (v) => set({ ortho: v }),
-  setDebugTiles: (v) => set({ debugTiles: v }),
+  setDebugMode: (v) => set({ debugMode: v }),
+  setPointAdaptive: (v) => set({ pointAdaptive: v }),
+  setEdl: (v) => set({ edl: v }),
+  setEdlStrength: (v) => set({ edlStrength: v }),
   setShadeless: (v) => set({ shadeless: v }),
   setBrightness: (v) => set({ brightness: v }),
   setFov: (v) => set({ fov: v }),

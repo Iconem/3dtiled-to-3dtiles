@@ -71,7 +71,7 @@ scene.add(tiles.group);
 
 `viewer.html` consolidates all controls into a right **sidebar** (Renderer · Basemap · Tileset &
 LoD · Navigation · Local frame · Ion · Snippet), including a **Max SSE (px)** input that drives
-CesiumJS `maximumScreenSpaceError` and 3DTRJS `errorTarget`, and a **🪲 Debug tiles** toggle that
+CesiumJS `maximumScreenSpaceError` and 3DTRJS `errorTarget`, and a **Debug** select (see below) that
 draws bounding volumes coloured by octree depth in both renderers. The preset bar includes the
 **◈ GSplat 1/2** reference splat tilesets from the
 [3DTilesRendererJS-3DGS-Plugin](https://github.com/WilliamLiu-1997/3DTilesRendererJS-3DGS-Plugin)
@@ -259,12 +259,12 @@ design log for what each adapter does.
 ### Aggregate 🧩
 
 `/aggregate` mosaics: one 3D Tiles endpoint over many datasets (see
-[Meta-tilesets](/docs/guide/meta-tilesets)). Presets: the committed `world` / `opendata` / `angkor`
-sets (Angkor in both nestings, plus a PhnomKulen-only filter), and the machine-local Iconem set in five
-variants: all formats, 3D Tiles only, Potree only, COPC only, and latest captures (flies to Mes Aynak).
-The Iconem pills only appear where the server reports that set, i.e. where
-`.local/aggregate-sets/iconem.json` exists. Mixed and point-cloud variants are typed `pointcloud` so
-the point-size slider reaches their points.
+[Meta-tilesets](/docs/guide/meta-tilesets)). Two pills: **Iconem — all formats** (every dataset of the
+machine-local manifest, 692 of them, only where `.local/aggregate-sets/iconem.json` exists) and
+**Open data** (the `open` set: the RESOURCES.md open data, Aerometrex, flai's national LiDAR and
+Vexcel — 145 datasets). Where the Iconem manifest is absent, **Iconem — public** (the 23 Angkor sites
+and Geghard) stands in for it. Sub-selections — Angkor only, Mes Aynak, one format, latest captures —
+are the picker's job, and every one of them is a URL (`&only=`, `&format=`, `&latest=1` …).
 
 A loaded mosaic gets a search box, hover cards on its markers and a dataset picker (show/hide, latest
 only, dates, formats) in both renderers; see
@@ -336,6 +336,34 @@ and re-framed the whole tileset over the fly-to. It now runs only on a real swit
 pitched 45°, so it looked `height` m north of the point. It now looks **at** the point from `height`
 m up, 45° down, as 3DTRjs does. A builder preview of 660 datasets now opens on its first dataset.
 </Callout>
+
+### Debug: cells, or every tile
+
+The **Debug** select has two views:
+
+| Mode | What is drawn | How |
+|---|---|---|
+| **Cells + dataset roots** | the loaded tileset's **own** tiles — those declared in its `tileset.json`, external references not followed. On a mosaic: its quadtree cells, coloured by depth, and the roots of the datasets it references, in white. | `src/lib/mosaicOutlines.ts` reads the tileset JSON and turns each bounding volume (region, box or sphere, through the tile's transform chain) into ECEF polylines; Cesium draws them as a `PolylineCollection` on the tileset's model matrix, 3DTRjs as `LineSegments` under the TilesRenderer group. |
+| **All tiles (bounds + depth)** | every tile the renderer currently holds, externals included | Cesium's `debugShowBoundingVolume` + `debugColorizeTiles`; 3DTRjs's `DebugTilesPlugin` |
+
+The first one is the skeleton of a mosaic — Angkor: 18 group cells, 23 dataset roots — where the
+second draws thousands of volumes once the datasets stream in. On a plain tileset, "cells" shows its
+declared tree without its external children.
+
+### Point clouds
+
+For `pointcloud` presets, the Tileset & LOD section exposes, in both renderers:
+
+| Control | Cesium | 3DTRjs |
+|---|---|---|
+| **Point size (px)** | the style's `pointSize`; with adaptive sizing, the attenuation cap (`maximumAttenuation = 2 × size`) | `PointsMaterial.size` |
+| **Adaptive point size** | `pointCloudShading.attenuation`: size from the tile's geometric error | `sizeAttenuation` with a world-space size of *geometric error × px size / 2* — the tile's point spacing for Potree/COPC-derived tiles, so coarse tiles close their gaps (what the potree lab's *size from tile GE* does) |
+| **Eye-dome lighting**, strength | `pointCloudShading.eyeDomeLighting` | not in the main viewer — the potree lab has it, through `PointCloudEffectsPlugin` |
+
+There is no `useHQ` in either renderer: Potree's high-quality splatting (a depth pass, then a
+depth-weighted blend of the points) exists in neither Cesium's `PointCloudShading` nor 3DTRjs. Cesium's
+attenuation + EDL is the closest it offers; 3DTRjs's `PointCloudEffectsPlugin` (round / sphere point
+shapes, EDL, adaptive size per point from the active octree nodes) is the lab's.
 
 ### Terrain and snap to ground
 

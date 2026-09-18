@@ -30,6 +30,7 @@ import { useViewerStore } from '@/state/store';
 import { RASTER_TERRAINS, REEARTH_QM_URL, resolveTerrainMode, sampleRasterTerrain, snapRasterFor, type RasterTerrainId } from '@/lib/terrarium';
 import { BASEMAPS, type BasemapId } from '@/lib/basemaps';
 import { tileDatasetId, type DatasetStyle } from '@/lib/datasetStyle';
+import { fetchOutlines, outlineColor, type TileOutline } from '@/lib/mosaicOutlines';
 import { datasetGroundSamples, offsetFromSamples } from '@/lib/datasetGround';
 import { ImplicitAddRefineFixPlugin } from '@/lib/implicitAddFix';
 import { SNAP_HALF, SNAP_SAMPLES, SNAP_MIN_HITS } from '@/lib/snapToGround';
@@ -440,6 +441,41 @@ function styleDatasetModel(scene: THREE.Object3D, tile: any, st: DatasetStyle | 
   });
 }
 
+/**
+ * Debug 'cells': the loaded tileset's own declared tiles (lib/mosaicOutlines.ts) as line segments,
+ * parented to the TilesRenderer group so they follow its placement. Never raycast (double-click and
+ * the controls' pivot pick must not land on a debug line).
+ */
+function MosaicOutlines({ url, tilesRef }: { url: string; tilesRef: React.MutableRefObject<TilesRendererImpl | null> }) {
+  const invalidate = useThree((s) => s.invalidate);
+  const [outlines, setOutlines] = useState<TileOutline[] | null>(null);
+  useEffect(() => {
+    const ac = new AbortController();
+    setOutlines(null);
+    fetchOutlines(url, ac.signal).then((o) => { if (!ac.signal.aborted) setOutlines(o); }).catch(() => {});
+    return () => ac.abort();
+  }, [url]);
+  useEffect(() => {
+    const group = tilesRef.current?.group;
+    if (!outlines || !group) return;
+    const objs: THREE.LineSegments[] = [];
+    for (const o of outlines) {
+      const pos: number[] = [];
+      for (const line of o.lines) for (let i = 0; i + 5 < line.length; i += 3) pos.push(line[i], line[i + 1], line[i + 2], line[i + 3], line[i + 4], line[i + 5]);
+      const g = new THREE.BufferGeometry();
+      g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
+      const l = new THREE.LineSegments(g, new THREE.LineBasicMaterial({ color: outlineColor(o), depthTest: false, transparent: true, opacity: o.leaf ? 0.9 : 0.7 }));
+      l.raycast = () => {};
+      l.renderOrder = 10;
+      group.add(l);
+      objs.push(l);
+    }
+    invalidate();
+    return () => { for (const l of objs) { group.remove(l); l.geometry.dispose(); (l.material as THREE.Material).dispose(); } invalidate(); };
+  }, [outlines, tilesRef, invalidate]);
+  return null;
+}
+
 const Scene = forwardRef<ViewerHandle, { loadArgs: LoadArgs; tooltip: TooltipChannel }>(function Scene({ loadArgs, tooltip }, ref) {
   const tilesRef = useRef<TilesRendererImpl | null>(null);
   // Individually-selected (not `const {...} = useThree()`, which subscribes to the ENTIRE R3F root
@@ -501,7 +537,8 @@ const Scene = forwardRef<ViewerHandle, { loadArgs: LoadArgs; tooltip: TooltipCha
 
   const controlMode = useViewerStore((s) => s.controlMode);
   const ortho = useViewerStore((s) => s.ortho);
-  const debugTiles = useViewerStore((s) => s.debugTiles);
+  const debugMode = useViewerStore((s) => s.debugMode);
+  const pointAdaptive = useViewerStore((s) => s.pointAdaptive);
   const fov = useViewerStore((s) => s.fov);
   const maxSSE = useViewerStore((s) => s.maxSSE);
   const assetVisible = useViewerStore((s) => s.assetVisible);
@@ -733,6 +770,18 @@ const Scene = forwardRef<ViewerHandle, { loadArgs: LoadArgs; tooltip: TooltipCha
     if (cameraTweenRef.current != null) cancelAnimationFrame(cameraTweenRef.current);
     const fromPos = camera.position.clone();
     const fromLookAt = controlsRef.current?.target?.clone() ?? camera.position.clone().add(camera.getWorldDirection(new THREE.Vector3()));
+    // lookAt() orients the roll from camera.up, which three defaults to ECEF +Y — an arbitrary
+    // heading on the ground (it read as "facing west"). Use the local up at the target; when the view
+    // is nearly vertical (up ∥ view direction, where lookAt degenerates), north instead.
+    const E = WGS84_ELLIPSOID;
+    const up = E.getPositionToNormal(toLookAt, new THREE.Vector3());
+    const view = toLookAt.clone().sub(toPos).normalize();
+    if (Math.abs(view.dot(up)) > 0.95) {
+      const c: any = {};
+      E.getPositionToCartographic(toLookAt, c);
+      up.set(-Math.sin(c.lat) * Math.cos(c.lon), -Math.sin(c.lat) * Math.sin(c.lon), Math.cos(c.lat));
+    }
+    if (toLookAt.length() > 1e6) camera.up.copy(up);   // georeferenced content only; local scenes keep +Y
     const t0 = performance.now();
     const step = () => {
       const t = Math.min(1, (performance.now() - t0) / durationMs);
@@ -867,6 +916,21 @@ const Scene = forwardRef<ViewerHandle, { loadArgs: LoadArgs; tooltip: TooltipCha
   // TilesRendererR3F itself last remounted, not the slider's current value.
   const pointSizeRef = useRef(pointSize);
   pointSizeRef.current = pointSize;
+  const pointAdaptiveRef = useRef(pointAdaptive);
+  pointAdaptiveRef.current = pointAdaptive;
+  /**
+   * Point size for one tile. Fixed: `pointSize` px. Adaptive: a world-space size from the tile's
+   * geometric error — for a Potree/COPC-derived tile that is its point spacing — so coarse tiles
+   * close their gaps and fine tiles stay sharp (what the potree lab's "size from tile GE" does, and
+   * Cesium's attenuation approximates). Half the px size acts as the multiplier.
+   */
+  const applyPointSize = (o: any, tile: any) => {
+    if (!o.isPoints || !o.material) return;
+    const adaptive = pointAdaptiveRef.current && Number.isFinite(tile?.geometricError) && tile.geometricError > 0;
+    o.material.sizeAttenuation = adaptive;
+    o.material.size = adaptive ? tile.geometricError * pointSizeRef.current * 0.5 : pointSizeRef.current;
+    o.material.needsUpdate = true;
+  };
 
   // Point size was only ever (re)applied by the rAF-throttled effect below, which fires on slider drag
   // or on the INITIAL loadArgs change — but tiles for a large point cloud keep streaming in well after
@@ -876,16 +940,15 @@ const Scene = forwardRef<ViewerHandle, { loadArgs: LoadArgs; tooltip: TooltipCha
   const onLoadContentModel = useCallback((e: any) => {
     buildBoundsTrees(e.scene);
     styleDatasetModel(e.scene, e.tile, datasetStyleRef.current);
-    if (isPoints) {
-      e.scene.traverse((o: any) => { if (o.isPoints && o.material) o.material.size = pointSizeRef.current; });
-    }
+    if (isPoints) e.scene.traverse((o: any) => applyPointSize(o, e.tile));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isPoints]);
 
   // Canvas runs frameloop="demand" (see below) — controls/TilesRenderer/CameraTransition all invalidate()
   // themselves on their own 'change'/'needs-update' events, but a bare controls/plugin remount (switching
   // globe/orbit/env, toggling debug tiles, changing basemap or LOD target) has nothing queued yet, so it'd
   // otherwise sit frozen until the next interaction.
-  useEffect(() => { invalidate(); }, [controlMode, debugTiles, basemap, terrainMode, errorTarget, invalidate]);
+  useEffect(() => { invalidate(); }, [controlMode, debugMode, basemap, terrainMode, errorTarget, invalidate]);
 
   // rAF-throttled: the point-size slider's onValueChange fires on every drag tick (dozens of times a
   // second), and traversing the WHOLE tiles group to restyle every Points mesh is not free for a large
@@ -901,13 +964,12 @@ const Scene = forwardRef<ViewerHandle, { loadArgs: LoadArgs; tooltip: TooltipCha
       pointSizeRaf.current = null;
       const tiles = tilesRef.current;
       if (!tiles) return;
-      tiles.group.traverse((o: any) => {
-        if (o.isPoints && o.material) o.material.size = pointSize;
-      });
+      tiles.forEachLoadedModel((sc: THREE.Object3D, tile: any) => sc.traverse((o: any) => applyPointSize(o, tile)));
       invalidate();
     });
     return () => { if (pointSizeRaf.current != null) cancelAnimationFrame(pointSizeRaf.current); };
-  }, [pointSize, loadArgs, isPoints, invalidate]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [pointSize, pointAdaptive, loadArgs, isPoints, invalidate]);
 
   useImperativeHandle(ref, (): ViewerHandle => ({
     load() { /* handled via loadArgs prop from the outer component (URL change remounts TilesRenderer) */ },
@@ -916,7 +978,8 @@ const Scene = forwardRef<ViewerHandle, { loadArgs: LoadArgs; tooltip: TooltipCha
     setMaxSSE(v) { store.getState().setMaxSSE(v); },
     toggleAssetVisible(show) { store.getState().setAssetVisible(show); },
     setOrtho(on) { store.getState().setOrtho(on); },
-    toggleDebug(on) { store.getState().setDebugTiles(on); },
+    setDebugMode(mode) { store.getState().setDebugMode(mode); },
+    applyPointShading() { store.getState().setPointAdaptive(store.getState().pointAdaptive); /* the effect above re-applies */ },
     applyShading() { /* shadeless/brightness is a Cesium-only CustomShader path; splats+meshes here use plain materials */ },
     setFov(deg) { store.getState().setFov(deg); },
     flyToLocalFrame(lon, lat, alt) {
@@ -1271,7 +1334,8 @@ const Scene = forwardRef<ViewerHandle, { loadArgs: LoadArgs; tooltip: TooltipCha
           <TilesPlugin plugin={ImplicitAddRefineFixPlugin as any} />
           <TilesPlugin plugin={GLTFExtensionsPlugin as any} args={{ dracoLoader, ktxLoader } as any} />
           {isSplat && <TilesPlugin plugin={GaussianSplatPlugin as any} args={{ renderer: gl, scene } as any} />}
-          {debugTiles && <TilesPlugin plugin={DebugTilesPlugin as any} displayBoxBounds colorMode={7} />}
+          {debugMode === 'tiles' && <TilesPlugin plugin={DebugTilesPlugin as any} displayBoxBounds colorMode={7} />}
+          {debugMode === 'cells' && <MosaicOutlines url={loadArgs.url} tilesRef={tilesRef} />}
           {controlMode === 'globe' && <GlobeControls ref={controlsRef} scene={pickScene ?? undefined} enableDamping dampingFactor={0.05} minDistance={1} />}
           {controlMode === 'env' && <EnvironmentControls ref={controlsRef} scene={pickScene ?? undefined} enableDamping dampingFactor={0.05} minDistance={1} />}
         </TilesRendererR3F>
@@ -1352,7 +1416,8 @@ const ThreeDTRjsViewer = forwardRef<ViewerHandle, Props>(function ThreeDTRjsView
     setMaxSSE: (...a) => sceneRef.current?.setMaxSSE(...a),
     toggleAssetVisible: (...a) => sceneRef.current?.toggleAssetVisible(...a),
     setOrtho: (...a) => sceneRef.current?.setOrtho(...a),
-    toggleDebug: (...a) => sceneRef.current?.toggleDebug(...a),
+    setDebugMode: (...a) => sceneRef.current?.setDebugMode(...a),
+    applyPointShading: () => sceneRef.current?.applyPointShading(),
     applyShading: (...a) => sceneRef.current?.applyShading(...a),
     setFov: (...a) => sceneRef.current?.setFov(...a),
     flyToLocalFrame: (...a) => sceneRef.current?.flyToLocalFrame(...a),
