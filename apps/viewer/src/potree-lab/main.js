@@ -26,7 +26,7 @@
  * Dataset list = built-in public samples + (dev server only) the Iconem share-link manifest at
  * .local/aggregate-sets/iconem.json, served loopback-only by vite.config.ts.
  */
-import { Scene, WebGLRenderer, PerspectiveCamera, Box3, Sphere } from 'three';
+import { Scene, WebGLRenderer, PerspectiveCamera, Box3, Sphere, Vector2, Raycaster } from 'three';
 import { TilesRenderer, EnvironmentControls, GlobeControls } from '3d-tiles-renderer';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { DebugTilesPlugin, ImplicitTilingPlugin, ReorientationPlugin } from '3d-tiles-renderer/plugins';
@@ -62,6 +62,12 @@ const params = {
   edlStrength: Number(q.get('edl') ?? 0.4) || 0.4,
   edlRadius: 1.4,
   controls: ['globe', 'orbit'].includes(q.get('controls')) ? q.get('controls') : 'env',
+  // inertia half-life in seconds (3DTRjs controls: dampingFactor IS that time constant); 0 = none
+  damping: Number(q.get('damping') ?? 0.05),
+  // loading: parallel downloads per origin / parses per frame, and the tile cache in MB
+  maxDownloads: Number(q.get('dl') ?? 25),
+  maxParse: Number(q.get('parse') ?? 5),
+  cacheMB: Number(q.get('cache') ?? 400),
   debugColorMode: q.get('debug') || 'none',
   displayBoxBounds: q.get('boxes') === '1',
   geSize: q.get('geSize') !== '0',        // stream mode: size points from each tile's geometric error
@@ -95,17 +101,49 @@ function makeControls(kind) {
   controls?.dispose();
   if (kind === 'orbit') {
     controls = new OrbitControls(camera, renderer.domElement);
-    controls.enableDamping = true;
     controls.target.set(0, 0, 0);
   } else {
     controls = kind === 'globe' ? new GlobeControls(scene, camera, renderer.domElement) : new EnvironmentControls(scene, camera, renderer.domElement);
-    controls.enableDamping = true;
     controls.cameraRadius = 0;
     if (kind !== 'globe') controls.useFallbackPlane = true;
     if (kind === 'globe' && tiles) controls.setEllipsoid(controls.ellipsoid, tiles.group);
   }
   applyControlsRange();
+  applyDamping();
 }
+/**
+ * 3DTRjs controls damp with factor = 2^(−dt / dampingFactor), so dampingFactor is a half-life in
+ * seconds (their default 0.15 s glides long after the pointer stops). three's OrbitControls damp
+ * per frame with velocity *= (1 − dampingFactor); map the same half-life onto it at 60 fps.
+ */
+function applyDamping() {
+  if (!controls) return;
+  const t = params.damping;
+  controls.enableDamping = t > 0;
+  controls.dampingFactor = controls.isOrbitControls ? Math.min(1, 1 - Math.pow(2, -1 / 60 / Math.max(t, 1e-3))) : t;
+}
+/** Double-click: pivot on the picked point and move halfway to it — every control scheme. */
+renderer.domElement.addEventListener('dblclick', (e) => {
+  if (!tiles) return;
+  const r = renderer.domElement.getBoundingClientRect();
+  const ndc = new Vector2(((e.clientX - r.left) / r.width) * 2 - 1, -((e.clientY - r.top) / r.height) * 2 + 1);
+  const ray = new Raycaster();
+  ray.params.Points.threshold = radius / 200;
+  ray.setFromCamera(ndc, camera);
+  const hit = ray.intersectObject(tiles.group, true)[0];
+  if (!hit) return;
+  const from = camera.position.clone(), to = camera.position.clone().lerp(hit.point, 0.5);
+  const t0 = performance.now();
+  const step = () => {
+    const k = Math.min(1, (performance.now() - t0) / 350);
+    const ease = k < 0.5 ? 2 * k * k : 1 - Math.pow(-2 * k + 2, 2) / 2;
+    camera.position.lerpVectors(from, to, ease);
+    if (controls.target) controls.target.copy(hit.point);           // OrbitControls
+    camera.lookAt(hit.point);
+    if (k < 1) requestAnimationFrame(step);
+  };
+  step();
+});
 function applyControlsRange() {
   if (!controls) return;
   controls.minDistance = radius / 50;
@@ -168,6 +206,7 @@ function initTiles() {
   }
   tiles.registerPlugin(new DebugTilesPlugin({ displayBoxBounds: params.displayBoxBounds }));
   tiles.errorTarget = params.errorTarget;
+  applyLoading();
   tiles.setCamera(camera);
   scene.add(tiles.group);
   if (params.controls === 'globe') controls.setEllipsoid(controls.ellipsoid, tiles.group);
@@ -203,13 +242,31 @@ function initTiles() {
   syncUrl();
 }
 
+/**
+ * How fast tiles arrive. The queues are shared defaults (25 downloads per origin, 5 parses per
+ * frame): what feels slow in motion is usually the PARSE budget — each tile's points are decoded on
+ * the main thread, so a frame that parses 5 big tiles stalls. The cache keeps parsed tiles around
+ * when the camera comes back.
+ */
+function applyLoading() {
+  if (!tiles) return;
+  tiles.downloadQueue.maxJobsPerOrigin = params.maxDownloads;
+  tiles.parseQueue.maxJobs = params.maxParse;
+  tiles.lruCache.maxBytesSize = params.cacheMB * 1024 * 1024;
+  tiles.lruCache.minBytesSize = Math.min(tiles.lruCache.minBytesSize, tiles.lruCache.maxBytesSize);
+}
+
 function syncUrl() {
   const s = new URLSearchParams({ url: params.url, mode: params.mode, shape: params.pointShape,
-    edl: params.edl ? String(params.edlStrength) : '0', scale: String(params.pointScale) });
+    edl: params.edl ? String(params.edlStrength) : '0', scale: String(params.pointScale), error: String(params.errorTarget) });
   if (params.mode !== 'potree') { s.set('geSize', params.geSize ? '1' : '0'); if (!params.geSize) s.set('fixed', String(params.fixedSize)); }
   if (params.debugColorMode !== 'none') s.set('debug', params.debugColorMode);
   if (params.displayBoxBounds) s.set('boxes', '1');
   if (params.controls !== 'env') s.set('controls', params.controls);
+  if (params.damping !== 0.05) s.set('damping', String(params.damping));
+  if (params.maxDownloads !== 25) s.set('dl', String(params.maxDownloads));
+  if (params.maxParse !== 5) s.set('parse', String(params.maxParse));
+  if (params.cacheMB !== 400) s.set('cache', String(params.cacheMB));
   history.replaceState(null, '', `?${s}`);
 }
 
@@ -247,10 +304,14 @@ const modeCtl = gui.add(params, 'mode', { 'PotreePlugin (adaptive size)': 'potre
 
 gui.add(params, 'controls', { 'EnvironmentControls (3DTRjs)': 'env', 'GlobeControls (3DTRjs)': 'globe', 'OrbitControls (three)': 'orbit' })
   .name('controls').onChange((v) => { makeControls(v); syncUrl(); });
+gui.add(params, 'damping', 0, 0.5, 0.01).name('inertia (s)').onChange(() => { applyDamping(); syncUrl(); });
 
 const tilesFolder = gui.addFolder('tiles');
 tilesFolder.add(params, 'enable').name('update tiles');
-tilesFolder.add(params, 'errorTarget', 0.5, 16, 0.1).name('error target').onChange((v) => { tiles.errorTarget = v; });
+tilesFolder.add(params, 'errorTarget', 0.5, 16, 0.1).name('error target').onChange((v) => { tiles.errorTarget = v; syncUrl(); });
+tilesFolder.add(params, 'maxDownloads', 1, 64, 1).name('parallel downloads').onChange(() => { applyLoading(); syncUrl(); });
+tilesFolder.add(params, 'maxParse', 1, 32, 1).name('parses / frame').onChange(() => { applyLoading(); syncUrl(); });
+tilesFolder.add(params, 'cacheMB', 50, 2000, 50).name('tile cache (MB)').onChange(() => { applyLoading(); syncUrl(); });
 
 const points = gui.addFolder('points');
 const scaleCtl = points.add(params, 'pointScale', 0.1, 4, 0.05).name(params.mode === 'potree' ? 'point scale' : 'size multiplier').onChange((v) => {
@@ -301,7 +362,7 @@ function updateHud() {
   LAB.visibleTiles = vis;
   LAB.visiblePoints = pts;
   hud.textContent = `${params.mode === 'potree' ? 'PotreePlugin · adaptive size' : `${params.mode === 'tileset' ? '3D Tiles url' : '/stream 3D Tiles'} · ${params.geSize ? 'size from tile GE' : 'fixed size'}`}`
-    + ` · ${vis} tiles · ${pts.toLocaleString('en-US')} points`
+    + ` · ${vis} tiles · ${pts.toLocaleString('en-US')} points · ${tiles.downloadQueue.currJobs ?? 0}↓ ${tiles.parseQueue.currJobs ?? 0}⚙ · cache ${(tiles.lruCache.cachedBytes / 1048576).toFixed(0)} MB`
     + (hud.dataset.iconem ? ` · ${hud.dataset.iconem} Iconem datasets listed` : '')
     + (LAB.errors.length ? ` · ${LAB.errors.length} error(s)` : '');
 }

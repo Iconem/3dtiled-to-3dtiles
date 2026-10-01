@@ -39,10 +39,10 @@ export default function TilesetLodSection({ activeHandleRef }: { activeHandleRef
             </SelectContent>
           </Select>
         </div>
-        {s.currentType === 'pointcloud' && (
+        {s.currentType !== 'splat' && (
           <>
             <div className="flex items-center justify-between">
-              <Label className="text-xs" title="Fixed size in pixels; with adaptive sizing, the cap">Point size (px)</Label>
+              <Label className="text-xs" title="Point clouds (any tileset that holds points, a mixed mosaic included). Fixed size in pixels; with adaptive sizing, the minimum, and 2× it the cap.">Point size (px)</Label>
               <div className="flex w-32 items-center gap-2">
                 <Slider min={0.5} max={10} step={0.5} value={[s.pointSize]} onValueChange={([v]) => { s.setPointSize(v); h()?.setPointSize?.(v); h()?.applyPointShading(); }} />
                 <span className="w-8 text-right text-xs text-muted-foreground">{s.pointSize}</span>

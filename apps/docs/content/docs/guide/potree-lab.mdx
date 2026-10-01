@@ -41,7 +41,27 @@ A **controls** select switches the camera scheme without reloading (`?controls=`
 |---|---|
 | `EnvironmentControls (3DTRjs)` (default) | 3DTRjs's local-scene controls: pivot on the picked point, a fallback ground plane under the data |
 | `GlobeControls (3DTRjs)` | 3DTRjs's globe controls, bound to the loaded tileset's group. The lab recentres content at the origin, so this is for comparing feel, not for real geography |
-| `OrbitControls (three)` | three.js's own orbit around a fixed target (the dataset's centre) — no pick-to-pivot |
+| `OrbitControls (three)` | three.js's own orbit around a fixed target (the dataset's centre) |
+
+**Double-click** pivots on the picked point and moves halfway to it, with every scheme. **inertia (s)**
+is the damping half-life — 3DTRjs's `dampingFactor` is literally that time constant (their default
+0.15 s glides long after the pointer stops; the lab uses 0.05 s), and the same half-life is mapped onto
+OrbitControls' per-frame factor.
+
+## Loading speed
+
+Three knobs in the *tiles* folder, all in the URL (`dl`, `parse`, `cache`):
+
+| Knob | Default | What it does |
+|---|---|---|
+| parallel downloads | 25 per origin | `downloadQueue.maxJobsPerOrigin` |
+| parses / frame | 5 | `parseQueue.maxJobs` — each tile's points are decoded on the main thread, so this is the frame-time budget; what feels sluggish during camera motion is usually parsing, not bandwidth |
+| tile cache (MB) | 400 | `lruCache.maxBytesSize`: parsed tiles kept for when the camera comes back |
+
+The HUD shows the live queues (`N↓ M⚙`) and the cache size. The visible point count there is what
+is actually drawn: with `error target` 2 on a city-scale Potree it is typically 1–3 M points, and the
+budget, not the target, is what the lab lacks compared with Potree's own viewer (which stops at a point
+budget rather than a screen-space error).
 
 ## The load modes
 

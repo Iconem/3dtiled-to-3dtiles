@@ -678,9 +678,12 @@ export const DEMO_SETS = {
     urls: ANGKOR_SITES.map((s) => `${ANGKOR_BASE}/${s}/tileset.json`),
     entries: ANGKOR_SITES.map((s) => ({ id: s, label: angkorLabel(s), url: `${ANGKOR_BASE}/${s}/tileset.json`, ...ICONEM })),
   },
-  /** Iconem's PUBLIC datasets — the Angkor sites and Geghard — for deployments without the full manifest. */
+  /**
+   * Iconem's DEMO datasets — the Angkor sites and Geghard, shared by Iconem for these demos (not open
+   * data: © Iconem) — for deployments without the full manifest.
+   */
   'iconem-open': {
-    label: 'Iconem public — the 23 Angkor sites + Geghard',
+    label: 'Iconem demo — the 23 Angkor sites + Geghard (© Iconem, shared for demos)',
     urls: [...ANGKOR_SITES.map((s) => `${ANGKOR_BASE}/${s}/tileset.json`), GEGHARD],
     entries: [...ANGKOR_SITES.map((s) => ({ id: s, label: angkorLabel(s), url: `${ANGKOR_BASE}/${s}/tileset.json`, ...ICONEM })),
       { id: 'geghard', label: 'Geghard monastery (Potree)', url: GEGHARD, format: 'potree', ...ICONEM }],

@@ -114,7 +114,9 @@ const CesiumViewer = forwardRef<ViewerHandle, Props>(function CesiumViewer({ vis
     store.getState().setStatus(`Loading…\n${url}`);
     const isSplat = type === 'splat';
     const isMesh = type === 'mesh';
-    const defaultSSE = isSplat ? 0.5 : isMesh ? 16 : 4;
+    // 2 px for point clouds: at 4 px a Potree root (6.8 m spacing at Carcassonne) only refines below
+    // ~1 km, which reads as "it does not load" — points are sparse where a mesh would still look whole.
+    const defaultSSE = isSplat ? 0.5 : isMesh ? 16 : 2;
     const sse = opts?.sseOverride ?? store.getState().maxSSE ?? defaultSSE;
     const loadOpts: any = isSplat
       ? { maximumScreenSpaceError: sse, skipLevelOfDetail: false, cacheBytes: 512 * 1024 * 1024 }
@@ -454,16 +456,18 @@ const CesiumViewer = forwardRef<ViewerHandle, Props>(function CesiumViewer({ vis
   /** Cesium's point-cloud shading from the store: px size / attenuation cap, adaptive sizing, EDL. */
   function applyPointShadingInternal() {
     const tileset: any = currentTilesetRef.current;
-    if (!tileset || currentTypeRef.current !== 'pointcloud' || !tileset.pointCloudShading) return;
+    if (!tileset || currentTypeRef.current === 'splat' || !tileset.pointCloudShading) return;
     const { pointSize, pointAdaptive, edl, edlStrength } = store.getState();
     const pcs = tileset.pointCloudShading;
     pcs.attenuation = pointAdaptive;
     pcs.maximumAttenuation = pointSize * 2;          // adaptive: the cap; points never grow past it
+    pcs.geometricErrorScale = 1;
     pcs.eyeDomeLighting = edl;
     pcs.eyeDomeLightingStrength = edlStrength;
     pcs.eyeDomeLightingRadius = 1.0;
     // fixed size comes from the style; with attenuation on the style size is the minimum
-    try { tileset.style = new Cesium.Cesium3DTileStyle({ pointSize: pointAdaptive ? 1 : pointSize }); } catch { /* splat/mesh */ }
+    // the style size is the fixed size, and with attenuation on the floor under the attenuated one
+    try { tileset.style = new Cesium.Cesium3DTileStyle({ pointSize }); } catch { /* splat/mesh */ }
   }
 
   function clearOutlines() {

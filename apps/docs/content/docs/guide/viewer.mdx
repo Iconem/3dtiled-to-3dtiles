@@ -262,8 +262,8 @@ design log for what each adapter does.
 [Meta-tilesets](/docs/guide/meta-tilesets)). Two pills: **Iconem — all formats** (every dataset of the
 machine-local manifest, 692 of them, only where `.local/aggregate-sets/iconem.json` exists) and
 **Open data** (the `open` set: the RESOURCES.md open data, Aerometrex, flai's national LiDAR and
-Vexcel — 145 datasets). Where the Iconem manifest is absent, **Iconem — public** (the 23 Angkor sites
-and Geghard) stands in for it. Sub-selections — Angkor only, Mes Aynak, one format, latest captures —
+Vexcel — 145 datasets). Where the Iconem manifest is absent, **Iconem — demo** (the 23 Angkor sites
+and Geghard — shared by Iconem for these demos, © Iconem, not open data) stands in for it. Sub-selections — Angkor only, Mes Aynak, one format, latest captures —
 are the picker's job, and every one of them is a URL (`&only=`, `&format=`, `&latest=1` …).
 
 A loaded mosaic gets a search box, hover cards on its markers and a dataset picker (show/hide, latest
@@ -352,7 +352,8 @@ declared tree without its external children.
 
 ### Point clouds
 
-For `pointcloud` presets, the Tileset & LOD section exposes, in both renderers:
+The Tileset & LOD section exposes, in both renderers, for any tileset that holds points (a mixed
+mosaic included — *Open data* is typed `mesh` but carries 113 COPC clouds):
 
 | Control | Cesium | 3DTRjs |
 |---|---|---|

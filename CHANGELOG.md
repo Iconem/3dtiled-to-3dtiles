@@ -5,6 +5,16 @@ Format loosely follows [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+### Changed — 2026-10-01 (lab controls feel · loading knobs · point controls on mixed mosaics)
+- **Potree lab:** inertia slider (0.05 s default instead of 3DTRjs's 0.15 s), double-click to pivot
+  and zoom with every control scheme, and loading knobs (parallel downloads, parses per frame, tile
+  cache) with live queue/cache readouts in the HUD.
+- **Point controls** apply to any tileset holding points, whatever the preset's type (the *Open data*
+  mosaic is `mesh` but holds 113 COPC clouds); Cesium's style size is now the floor under attenuation.
+- **Point clouds default to 2 px SSE** (was 4) in both renderers: a Potree root's spacing otherwise
+  only refined below ~1 km.
+- `iconem-open` is labelled **demo** (© Iconem, shared for demos), not public.
+
 ### Added / Changed — 2026-09-18 (debug cells · point controls · two pills · lab controls · external open)
 - **Debug select** replaces the debug checkbox: **cells + dataset roots** draws the loaded tileset's own
   declared tiles (a mosaic's quadtree cells by depth, dataset roots in white; `lib/mosaicOutlines.ts`,

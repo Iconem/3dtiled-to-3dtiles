@@ -908,7 +908,7 @@ const Scene = forwardRef<ViewerHandle, { loadArgs: LoadArgs; tooltip: TooltipCha
 
   const isSplat = loadArgs?.type === 'splat';
   const isPoints = loadArgs?.type === 'pointcloud';
-  const defaultSSE = isSplat ? 0.5 : loadArgs?.type === 'mesh' ? 16 : 4;
+  const defaultSSE = isSplat ? 0.5 : loadArgs?.type === 'mesh' ? 16 : 2;   // see CesiumViewer: 2 px for points
   const errorTarget = loadArgs?.sseOverride ?? maxSSE ?? defaultSSE;
 
   // Read fresh in onLoadContentModel below (called from 3d-tiles-renderer's own event, not a React
@@ -940,9 +940,9 @@ const Scene = forwardRef<ViewerHandle, { loadArgs: LoadArgs; tooltip: TooltipCha
   const onLoadContentModel = useCallback((e: any) => {
     buildBoundsTrees(e.scene);
     styleDatasetModel(e.scene, e.tile, datasetStyleRef.current);
-    if (isPoints) e.scene.traverse((o: any) => applyPointSize(o, e.tile));
+    e.scene.traverse((o: any) => applyPointSize(o, e.tile));       // any points, whatever the preset's type
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [isPoints]);
+  }, []);
 
   // Canvas runs frameloop="demand" (see below) — controls/TilesRenderer/CameraTransition all invalidate()
   // themselves on their own 'change'/'needs-update' events, but a bare controls/plugin remount (switching
@@ -958,7 +958,7 @@ const Scene = forwardRef<ViewerHandle, { loadArgs: LoadArgs; tooltip: TooltipCha
   // number of rapid pointSize changes into at most one traversal per animation frame.
   const pointSizeRaf = useRef<number | null>(null);
   useEffect(() => {
-    if (!isPoints) return;
+    if (isSplat) return;
     if (pointSizeRaf.current != null) cancelAnimationFrame(pointSizeRaf.current);
     pointSizeRaf.current = requestAnimationFrame(() => {
       pointSizeRaf.current = null;
@@ -969,7 +969,7 @@ const Scene = forwardRef<ViewerHandle, { loadArgs: LoadArgs; tooltip: TooltipCha
     });
     return () => { if (pointSizeRaf.current != null) cancelAnimationFrame(pointSizeRaf.current); };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [pointSize, pointAdaptive, loadArgs, isPoints, invalidate]);
+  }, [pointSize, pointAdaptive, loadArgs, isSplat, invalidate]);
 
   useImperativeHandle(ref, (): ViewerHandle => ({
     load() { /* handled via loadArgs prop from the outer component (URL change remounts TilesRenderer) */ },
