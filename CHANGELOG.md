@@ -5,6 +5,16 @@ Format loosely follows [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+### Added — 2026-10-01 (open data sources)
+- Three new committed sets, all in the *Open data* mosaic: `cities` (swisstopo, 3D BAG, PDOK, PLATEAU
+  Japan, Helsinki, 12 more CRAIG meshes), `esri-3d` (nine Living Atlas integrated meshes as 3D Tiles,
+  two I3S layers) and `openheritage3d` (ten Potree 2.0 heritage scans, licences per entry).
+- Looked at and NOT added, with why (docs: Meta-tilesets): OpenTopography (per-dataset Potree viewers
+  are per-job and gone; only four sample EPTs persist, and the server reads no EPT), Cesium ion (no
+  public search API; Google/OSM/Bing assets need a token per request), Google/Bing 3D (global
+  tilesets would draw over everything — they stay terrain choices), city-model ledgers (awesome-citygml,
+  TU Delft 3D open cities STAC: CityGML/CityJSON downloads, no streamable tilesets).
+
 ### Changed — 2026-10-01 (lab controls feel · loading knobs · point controls on mixed mosaics)
 - **Potree lab:** inertia slider (0.05 s default instead of 3DTRjs's 0.15 s), double-click to pivot
   and zoom with every control scheme, and loading knobs (parallel downloads, parses per frame, tile

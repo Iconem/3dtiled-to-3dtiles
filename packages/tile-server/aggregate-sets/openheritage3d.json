@@ -1,0 +1,119 @@
+{
+  "label": "Open Heritage 3D — terrestrial LiDAR of heritage sites (Potree 2.0, via /stream)",
+  "provider": "Open Heritage 3D",
+  "attribution": "© CyArk / Open Heritage 3D and partners",
+  "source": "https://openheritage3d.org — each project's viewer config.js names its metadata.json under pointcloud.ucsd.edu/archive_temp/oh3d_store/oh3d-vis/datasets/<doi>/potree/",
+  "note": "Licences are per dataset (CC BY or CC BY-NC-SA 4.0, chosen by the contributor): carried on each entry. The host sends no CORS on GET; Potree is streamed by the server so that does not matter. The scans are in LOCAL frames (metadata.json has no projection), so each entry carries an approximate site lon/lat/alt that /stream's &lon=&lat= placement applies; expect the cloud near, not on, the monument until a proper georeference is known.",
+  "entries": [
+    {
+      "format": "potree",
+      "name": "Pompeii",
+      "project": "Open Heritage 3D",
+      "scene": "Pompeii, Italy",
+      "licence": "CC BY-NC-SA 4.0 — https://doi.org/10.26301/88jt-yz94",
+      "url": "https://pointcloud.ucsd.edu/archive_temp/oh3d_store/oh3d-vis/datasets/88jt-yz94/potree/88jt-yz94_lidar_terrestrial/metadata.json",
+      "lon": 14.4854,
+      "lat": 40.7497,
+      "alt": 30
+    },
+    {
+      "format": "potree",
+      "name": "Loka Hteik Pan temple",
+      "project": "Open Heritage 3D",
+      "scene": "Bagan, Myanmar",
+      "licence": "see https://doi.org/10.26301/05r8-we91",
+      "url": "https://pointcloud.ucsd.edu/archive_temp/oh3d_store/oh3d-vis/datasets/05r8-we91/potree/05r8-we91_lidar_terrestrial/metadata.json",
+      "lon": 94.86,
+      "lat": 21.17,
+      "alt": 60
+    },
+    {
+      "format": "potree",
+      "name": "Chichén Itzá",
+      "project": "Open Heritage 3D",
+      "scene": "Chichén Itzá, Mexico",
+      "licence": "see https://doi.org/10.26301/2atk-cq42",
+      "url": "https://pointcloud.ucsd.edu/archive_temp/oh3d_store/oh3d-vis/datasets/2atk-cq42/potree/2atk-cq42_lidar_terrestrial/metadata.json",
+      "lon": -88.5678,
+      "lat": 20.6843,
+      "alt": 30
+    },
+    {
+      "format": "potree",
+      "name": "Maeshowe",
+      "project": "Open Heritage 3D",
+      "scene": "Orkney, Scotland",
+      "licence": "see https://doi.org/10.26301/0qce-vj74",
+      "url": "https://pointcloud.ucsd.edu/archive_temp/oh3d_store/oh3d-vis/datasets/0qce-vj74/potree/0qce-vj74_lidar_terrestrial/metadata.json",
+      "lon": -3.1881,
+      "lat": 58.9983,
+      "alt": 20
+    },
+    {
+      "format": "potree",
+      "name": "Florence Baptistery — exterior",
+      "project": "Open Heritage 3D",
+      "scene": "Florence, Italy",
+      "licence": "see https://doi.org/10.26301/0x6p-vk89",
+      "url": "https://pointcloud.ucsd.edu/archive_temp/oh3d_store/oh3d-vis/datasets/0x6p-vk89/potree/0x6p-vk89_lidar_terrestrial/exterior/metadata.json",
+      "lon": 11.2548,
+      "lat": 43.7731,
+      "alt": 50
+    },
+    {
+      "format": "potree",
+      "name": "Florence Baptistery — interior",
+      "project": "Open Heritage 3D",
+      "scene": "Florence, Italy",
+      "licence": "see https://doi.org/10.26301/0x6p-vk89",
+      "url": "https://pointcloud.ucsd.edu/archive_temp/oh3d_store/oh3d-vis/datasets/0x6p-vk89/potree/0x6p-vk89_lidar_terrestrial/interior/metadata.json",
+      "lon": 11.2548,
+      "lat": 43.7731,
+      "alt": 50
+    },
+    {
+      "format": "potree",
+      "name": "Manzanar National Historic Site",
+      "project": "Open Heritage 3D",
+      "scene": "California, USA",
+      "licence": "see https://doi.org/10.26301/36b2-mp38",
+      "url": "https://pointcloud.ucsd.edu/archive_temp/oh3d_store/oh3d-vis/datasets/36b2-mp38/potree/36b2-mp38_lidar_terrestrial/metadata.json",
+      "lon": -118.1517,
+      "lat": 36.7283,
+      "alt": 1200
+    },
+    {
+      "format": "potree",
+      "name": "Fort York",
+      "project": "Open Heritage 3D",
+      "scene": "Toronto, Canada",
+      "licence": "see https://doi.org/10.26301/2pys-t414",
+      "url": "https://pointcloud.ucsd.edu/archive_temp/oh3d_store/oh3d-vis/datasets/2pys-t414/potree/2pys-t414_lidar_terrestrial/metadata.json",
+      "lon": -79.4027,
+      "lat": 43.6377,
+      "alt": 80
+    },
+    {
+      "format": "potree",
+      "name": "Shukhov Tower",
+      "project": "Open Heritage 3D",
+      "scene": "Moscow, Russia",
+      "licence": "see https://doi.org/10.26301/0skp-z245",
+      "url": "https://pointcloud.ucsd.edu/archive_temp/oh3d_store/oh3d-vis/datasets/0skp-z245/potree/0skp-z245_lidar_terrestrial/metadata.json",
+      "lon": 37.6117,
+      "lat": 55.7177,
+      "alt": 150
+    },
+    {
+      "format": "potree",
+      "name": "Santa Cruz Mission",
+      "project": "Open Heritage 3D",
+      "scene": "California, USA",
+      "licence": "see https://doi.org/10.26301/07af-c325",
+      "url": "https://pointcloud.ucsd.edu/archive_temp/oh3d_store/oh3d-vis/datasets/07af-c325/potree/07af-c325_lidar_terrestrial/metadata.json",
+      "lon": -122.0272,
+      "lat": 36.9775,
+      "alt": 20
+    }
+  ]
+}

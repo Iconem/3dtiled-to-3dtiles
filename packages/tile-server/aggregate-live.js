@@ -690,10 +690,10 @@ export const DEMO_SETS = {
   },
   /** Every open or evaluation dataset from outside Iconem: the demo app's "Open data" pill. */
   open: {
-    label: 'Open data — 3D Tiles RESOURCES.md + Aerometrex + flai open LiDAR + Vexcel',
+    label: 'Open data — RESOURCES.md + national/city 3D Tiles + Esri meshes + Open Heritage 3D + Aerometrex + flai + Vexcel',
     urls: OPEN_DATA.map((d) => d.url),
     entries: OPEN_DATA,
-    include: ['aerometrex', 'flai', 'vexcel'],
+    include: ['cities', 'esri-3d', 'openheritage3d', 'aerometrex', 'flai', 'vexcel'],
   },
   /** Everything at once — the "one endpoint, heterogeneous sources, whole planet" pitch. */
   world: {
@@ -765,8 +765,12 @@ function childUrlFor(entry, origin) {
   // content.uri to come back through itself — so the whole tree, not just the root, becomes readable.
   if (fmt === '3dtiles') return entry.proxy ? `${origin}/proxy?url=${encodeURIComponent(entry.url)}` : entry.url;
   // `crs`: for point clouds whose file declares none (flai's COPC overviews).
+  // `lon`/`lat` (+ `alt`, `heading`): placement for clouds in a LOCAL frame (Open Heritage 3D's TLS
+  // scans) — /stream's own &lon=&lat= placement, which a real georeference always overrides.
+  const place = Number.isFinite(entry.lon) && Number.isFinite(entry.lat)
+    ? `&lon=${entry.lon}&lat=${entry.lat}` + (entry.alt != null ? `&alt=${entry.alt}` : '') + (entry.heading != null ? `&heading=${entry.heading}` : '') : '';
   return `${origin}/stream/tileset.json?format=${encodeURIComponent(fmt)}&url=${encodeURIComponent(entry.url)}&cache=none`
-    + (entry.crs ? `&crs=${encodeURIComponent(entry.crs)}` : '');
+    + (entry.crs ? `&crs=${encodeURIComponent(entry.crs)}` : '') + place;
 }
 
 /** Source format of an ad-hoc ?url= child: this server's /stream URLs say so; anything else is 3D Tiles. */
