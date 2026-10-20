@@ -5,6 +5,14 @@ Format loosely follows [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+### Noted — 2026-10-20 (spec direction)
+- glTF#1809 (Draco point compression) closed as superseded by `KHR_meshopt_compression`; Cesium's
+  benchmark puts meshopt point GLBs at 1.01 GiB vs 1.19 GiB for `.pnts`+Draco on 313 M points, same
+  load time. Confirms `/stream?transform=meshopt`; follow-ups in docs *TODO → Spec direction*.
+- 3D Tiles 2.0 will be a set of glTF 2.1 extensions (3d-tiles#803, CesiumGS/glTF `3d-tiles-2.0`
+  branch); `3DTILES_georeference` covers local → ECEF via a tangent plane, which is what the
+  `&lon/&lat/&alt/&heading` placement already computes.
+
 ### Added — 2026-10-01 (open data sources)
 - Three new committed sets, all in the *Open data* mosaic: `cities` (swisstopo, 3D BAG, PDOK, PLATEAU
   Japan, Helsinki, 12 more CRAIG meshes), `esri-3d` (nine Living Atlas integrated meshes as 3D Tiles,
