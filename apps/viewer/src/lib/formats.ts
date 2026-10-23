@@ -109,7 +109,6 @@ export const FORMATS: FormatMeta[] = [
     // "Vol Total" is Potree's own "Sorvilier" Swiss survey (courtesy sigeom sa) — same dataset, kept
     // this preset's existing label since it's just an id/display name, not a claim about the place.
     { id: 'voltotal', label: 'Vol Total', src: 'https://raw.githubusercontent.com/potree/potree/develop/pointclouds/vol_total/cloud.js', out: 'output/potree/vol_total' },
-    { id: 'geghard', label: 'Geghard (iconem) ⬀', src: 'https://api.iconem.com/s/rIdPkRfOmEdRtgsoO08TgNt9MSxh-woC/cloud.js' },
   ] },
   { fmt: 'sog', icon: '⬢', label: 'SOG', type: 'splat', octree: false, stream: true, assets: [
     // Real sources: PlayCanvas's own SOG example assets (code.playcanvas.com) — see README's SOG

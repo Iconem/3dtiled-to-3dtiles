@@ -652,68 +652,17 @@ const OPEN_DATA = [
   { id: 'minato', provider: "Project PLATEAU", attribution: "© MLIT Japan, Project PLATEAU", label: 'Tokyo Minato-ku LOD4 — PLATEAU (JP)', url: 'https://assets.cms.plateau.reearth.io/assets/99/e2a800-7d75-4d11-94e1-bef604c39d01/13103_minato-ku_pref_2023_citygml_1_op_bldg_3dtiles_13103_minato-ku_lod4/tileset.json' },
 ];
 
-/**
- * Iconem's Angkor campaign as 23 INDIVIDUAL tilesets rather than its hand-authored merged root.
- *
- * This is the interesting case for nesting, because the sites are not uniformly spread: 19 of them
- * sit inside the Angkor park (a few km apart) while the four PhnomKulen sites are ~30 km north-east.
- * A grouping derived only from bounding spheres should discover that split on its own.
- */
-const ANGKOR_BASE = 'https://api.iconem.com/s/is52XRiz30fn30HPjbgGe-KrydjSA3r0';
-const ICONEM = { provider: 'Iconem', attribution: '© Iconem' };
-// Geghard's public Potree share link, as the demo presets carry it (lib/formats.ts); wrapped by /stream.
-const GEGHARD = 'https://api.iconem.com/s/rIdPkRfOmEdRtgsoO08TgNt9MSxh-woC/cloud.js';
-const ANGKOR_SITES = [
-  'AkYum_231M_d202411_p202412_epsg32648',
-  'AngkorThom_SouthGate_817M_d202411_p202412_epsg32648',
-  'AngkorTom_Baphuon_SleepingBuddha_342M_d202408_p202410_epsg32648',
-  'Angkor_BakseiChamkrong', 'Angkor_BanteayThom', 'Angkor_PrasatKravan', 'Angkor_PrasatPrehko',
-  'Bayon_2400M_d202203_p202209_epsg32648',
-  'ElephantTerrace_1451M_d202411_p202412_epsg32648',
-  'Mebon2',
-  'NeakPean_168M_d202412_p202412_epsg32648',
-  'Phimeanakas_218M_d202408_p202410_epsg32648',
-  'PhnomBakeng_1726M_d202408_p202410_epsg32648',
-  'PhnomKulen_01-2_KrorBeiKrab_456M_d202411_p202412_epsg32648',
-  'PhnomKulen_02-1_OuThmorDab_280M_d202411_p202412_epsg32648',
-  'PhnomKulen_02-2_NaekTa_184M_d202411_p202412_epsg32648',
-  'PhnomKulen_02-3_OuPhaOng_213M_d202411_p202412_epsg32648',
-  'PrasatPreimonti_271M_202001',
-  'Prasat_Batchum_174M',
-  'PreahKhan_Master2_2018-05-28_21h17_31_798',
-  'ShausreBibol_complet_DronePercheSol_2018-05-29_23h37_49_523',
-  'TaProhm_4128M_d202408_p202410_epsg32648',
-  'TonleSnguot_221M_d202412_p202412_epsg32648',
-];
-
-/**
- * "PhnomKulen_02-1_OuThmorDab_280M_d202411_p202412_epsg32648" → "PhnomKulen 02-1 OuThmorDab".
- * Search needs the distinguishing part: the first token alone named four different sites "PhnomKulen".
- */
-function angkorLabel(s) {
-  return s.replace(/_\d+M(_.*)?$/, '').replace(/_(complet|Master\d*).*$/, '').replace(/^Angkor_/, '').replace(/_/g, ' ');
-}
+// Iconem's own demo sets (`angkor`: the 23 Angkor sites as individual tilesets; `iconem-open`: those
+// plus Geghard) are NOT here: their URLs are Iconem share links, which stay out of the repository.
+// They live as machine-local manifests in .local/aggregate-sets/ (angkor.json, iconem-open.json),
+// same shape as the iconem.json that scripts/iconem-share-links.mjs writes, and appear only where
+// those files exist. Everything committed below is open or evaluation data from outside Iconem.
 
 export const DEMO_SETS = {
   opendata: {
     label: '3D Tiles RESOURCES.md open data — 10 datasets, 4 continents',
     urls: OPEN_DATA.map((d) => d.url),
     entries: OPEN_DATA,
-  },
-  angkor: {
-    label: 'Iconem Angkor — 23 individual site tilesets',
-    urls: ANGKOR_SITES.map((s) => `${ANGKOR_BASE}/${s}/tileset.json`),
-    entries: ANGKOR_SITES.map((s) => ({ id: s, label: angkorLabel(s), url: `${ANGKOR_BASE}/${s}/tileset.json`, ...ICONEM })),
-  },
-  /**
-   * Iconem's DEMO datasets — the Angkor sites and Geghard, shared by Iconem for these demos (not open
-   * data: © Iconem) — for deployments without the full manifest.
-   */
-  'iconem-open': {
-    label: 'Iconem demo — the 23 Angkor sites + Geghard (© Iconem, shared for demos)',
-    urls: [...ANGKOR_SITES.map((s) => `${ANGKOR_BASE}/${s}/tileset.json`), GEGHARD],
-    entries: [...ANGKOR_SITES.map((s) => ({ id: s, label: angkorLabel(s), url: `${ANGKOR_BASE}/${s}/tileset.json`, ...ICONEM })),
-      { id: 'geghard', label: 'Geghard monastery (Potree)', url: GEGHARD, format: 'potree', ...ICONEM }],
   },
   /** Every open or evaluation dataset from outside Iconem: the demo app's "Open data" pill. */
   open: {
@@ -722,13 +671,13 @@ export const DEMO_SETS = {
     entries: OPEN_DATA,
     include: ['cities', 'esri-3d', 'openheritage3d', 'aerometrex', 'flai', 'vexcel'],
   },
-  /** Everything at once — the "one endpoint, heterogeneous sources, whole planet" pitch. */
+  /** Everything committed at once — the "one endpoint, heterogeneous sources, whole planet" pitch. */
   world: {
-    label: 'Open data + Angkor + Aerometrex + Vexcel — every public dataset, five continents',
-    urls: [...OPEN_DATA.map((d) => d.url), ...ANGKOR_SITES.map((s) => `${ANGKOR_BASE}/${s}/tileset.json`)],
-    entries: [...OPEN_DATA, ...ANGKOR_SITES.map((s) => ({ id: s, label: angkorLabel(s), url: `${ANGKOR_BASE}/${s}/tileset.json`, ...ICONEM }))],
+    label: 'Open data + national/city 3D Tiles + Esri meshes + Aerometrex + Vexcel — every committed dataset',
+    urls: OPEN_DATA.map((d) => d.url),
+    entries: OPEN_DATA,
     // Aerometrex's US city previews come from the committed manifest (proxied, with its attribution)
-    include: ['aerometrex', 'vexcel'],
+    include: ['cities', 'esri-3d', 'aerometrex', 'vexcel'],
   },
 };
 

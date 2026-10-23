@@ -44,7 +44,6 @@ export const CATALOG: SampleGroup[] = [
       { id: 'lion2', label: 'Lion 2.0', format: 'potree', origin: 'potree.org', src: 'https://potree.org/pointclouds/lion/metadata.json' },
       { id: 'takanawa', label: 'Lion Takanawa 1.x', format: 'potree', origin: 'github.com/potree', src: 'https://raw.githubusercontent.com/potree/potree/develop/pointclouds/lion_takanawa/cloud.js' },
       { id: 'voltotal', label: 'Vol Total (Sorvilier)', format: 'potree', origin: 'github.com/potree', src: 'https://raw.githubusercontent.com/potree/potree/develop/pointclouds/vol_total/cloud.js' },
-      { id: 'geghard', label: 'Geghard monastery', format: 'potree', origin: 'Iconem', src: 'https://api.iconem.com/s/rIdPkRfOmEdRtgsoO08TgNt9MSxh-woC/cloud.js' },
     ],
   },
   {

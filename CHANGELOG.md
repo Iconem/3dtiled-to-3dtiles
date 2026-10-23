@@ -5,6 +5,15 @@ Format loosely follows [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+### Changed — 2026-10-23 (no Iconem share links in the repository)
+- The `angkor` and `iconem-open` aggregate sets moved out of code into machine-local manifests
+  (`.local/aggregate-sets/angkor.json`, `iconem-open.json`, gitignored). They appear only where those
+  files exist; the *Iconem — demo* pill now requires its set.
+- `world` is every committed dataset: `opendata` + `cities` + `esri-3d` + Aerometrex + Vexcel.
+- Geghard is gone from the Potree presets, the desktop catalogue, the potree lab and the vanilla
+  viewer; the lab's aggregate example is now Open Heritage 3D, the Potree debug script defaults to
+  Lion Takanawa. The Angkor entries in the hierarchy explorer became the `open` set.
+
 ### Added — 2026-10-23 (native Potree leaves in mosaics)
 - **`/aggregate?native=1`:** each Potree leaf also carries its source in
   `content.extensions.ICONEM_content_source` (`format`, `version`, `encoding`, `uri`, and a

@@ -39,11 +39,10 @@ interface Item {
  * because comparing a hand-built city mesh against a streamed point cloud is the actual use case.
  */
 const DIRECT_PRESETS = [
-  { key: 'agg:world', label: '★ /aggregate?set=world — 33 tilesets, 4 continents', url: `${MW}/aggregate/tileset.json?set=world&nest=geodetic` },
+  { key: 'agg:world', label: '★ /aggregate?set=world — every committed dataset', url: `${MW}/aggregate/tileset.json?set=world&nest=geodetic` },
   { key: 'agg:opendata', label: '★ /aggregate?set=opendata — 10 open datasets', url: `${MW}/aggregate/tileset.json?set=opendata&nest=geodetic` },
-  { key: 'agg:angkor', label: '★ /aggregate?set=angkor — 23 Iconem Angkor sites', url: `${MW}/aggregate/tileset.json?set=angkor&nest=geodetic` },
-  { key: 'agg:angkor-merc', label: '★ same, nest=mercator (compare the seams)', url: `${MW}/aggregate/tileset.json?set=angkor&nest=mercator` },
-  { key: 'angkor:merged', label: '◆ Angkor merged — Iconem hand-authored root', url: 'https://api.iconem.com/s/is52XRiz30fn30HPjbgGe-KrydjSA3r0/81a079e7-920a-41da-9572-66eba2557b9a.json' },
+  { key: 'agg:open', label: '★ /aggregate?set=open — all open data', url: `${MW}/aggregate/tileset.json?set=open&nest=geodetic` },
+  { key: 'agg:open-merc', label: '★ same, nest=mercator (compare the seams)', url: `${MW}/aggregate/tileset.json?set=open&nest=mercator` },
 ];
 
 /** Middleware presets, derived from the viewer's own format table so they cannot drift apart. */

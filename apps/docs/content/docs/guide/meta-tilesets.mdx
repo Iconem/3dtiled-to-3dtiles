@@ -97,18 +97,20 @@ be *seen* rather than described. `GET /aggregate/demo.json` lists what each set 
 | `set=` | What |
 |---|---|
 | `opendata` | The ten open datasets from 3D Tiles' own [RESOURCES.md](https://github.com/CesiumGS/3d-tiles/blob/main/RESOURCES.md#open-data) — Strasbourg, Clermont-Ferrand, Saint-Étienne, Lille, Planet's Angkor Wat SkySat, Utrecht, Soest, Aarhus, AGI HQ, Tokyo Minato-ku. Four continents, and all three bounding-volume kinds (`region`, `box`, `sphere`). |
-| `angkor` | Iconem's Angkor campaign as **23 individual site tilesets** rather than its hand-authored merged root. |
+| `angkor` | *Local, Iconem only.* Iconem's Angkor campaign as **23 individual site tilesets** rather than its hand-authored merged root. |
 | `open` | **Every open or evaluation dataset from outside Iconem**: `opendata` + `cities` + `esri-3d` + `openheritage3d` + `aerometrex` + `flai` + `vexcel`. The demo app's *Open data* pill. |
 | `cities` | **Open city and national 3D Tiles** published by their agencies: swisstopo swissBUILDINGS3D / swissTLM3D (all Switzerland), 3D BAG LoD2.2 and PDOK 3D Basisvoorziening (all the Netherlands), PLATEAU all-buildings LOD1 (all Japan — its [datacatalog API](https://api.plateauview.mlit.go.jp/datacatalog/plateau-datasets) lists 1 065 building tilesets in 306 cities), Helsinki's 2024 photomesh, 12 more CRAIG photomeshes. Direct references, CORS open. |
 | `esri-3d` | Esri Living Atlas **integrated meshes as 3D Tiles** (Utrecht, Zürich, Vienna, Munich, Stuttgart, Boston, Jena, Linz, Cambridge MA) and Frankfurt's buildings as an I3S scene layer through `/stream?format=i3s` (Girona's ICGC mesh is a legacy I3S layer without node pages, which the reader does not support). Public items, but each carries its owner's terms (Wingtra, AVT, Hexagon …) — showcase data rather than open data. ArcGIS Online search `typeKeywords:"IntegratedMesh"` lists ~10 900 such public services. |
 | `openheritage3d` | [Open Heritage 3D](https://openheritage3d.org) terrestrial LiDAR of heritage sites (Pompeii, Chichén Itzá, Florence Baptistery, Maeshowe …) as **Potree 2.0** (BROTLI), streamed. Licences per dataset (CC BY / CC BY-NC-SA 4.0), carried on each entry. No catalog API: the entries come from each project's viewer `config.js`. The scans are in **local frames** (no projection in `metadata.json`), so each entry carries an approximate site `lon`/`lat`/`alt` that `/stream`'s placement applies — manifest entries can now carry `lon`, `lat`, `alt`, `heading` for any local-frame cloud. |
-| `iconem-open` | Iconem's demo datasets: the 23 Angkor sites and Geghard (Potree) — shared for these demos, © Iconem, not open data. The *Iconem — demo* pill where the full manifest is absent. |
-| `world` | Everything public at once — **55 tilesets**: the open data, the Angkor sites, the 12 Aerometrex cities and the 10 Vexcel cities (both through `/proxy`, credited). Without `VEXCEL_API_KEY` on the server it is the first 45. |
+| `iconem-open` | *Local, Iconem only.* Iconem's demo datasets: the 23 Angkor sites and Geghard (Potree), © Iconem, not open data. The *Iconem — demo* pill where the full manifest is absent. |
+| `world` | Every committed dataset at once: `opendata` + `cities` + `esri-3d` + the 12 Aerometrex cities and the 10 Vexcel cities (both through `/proxy`, credited). Without `VEXCEL_API_KEY` on the server, Vexcel is left out. |
 | `flai` | [flai open LiDAR](https://github.com/flai-ai/open-lidar-data): **113 national LiDAR campaigns** (Estonia, UK, Finland, Belgium, Poland, Spain, Denmark, France, Germany, the Netherlands, NOAA …) as one COPC overview each, streamed through `/stream`. |
 | `vexcel` | Vexcel's **10 Australian 3D city collections** (Gold Coast, Canberra, Sydney and its Opera House prototypes, Perth, Brisbane, Melbourne, Adelaide). Key-protected, see [below](#key-protected-providers-vexcel). |
 | `aerometrex` | Aerometrex's **12 US city reality meshes** (Brooklyn, Hudson Yards, Denver, Las Vegas, LA, San Diego, Miami Beach, San Francisco, Tampa …), served through the tileset-aware `/proxy` because their host sends no CORS. These are sales previews, not declared open data. |
 
-`opendata`, `angkor` and `world` are defined in code. `flai` and `aerometrex` are committed manifests
+`opendata`, `open` and `world` are defined in code. `angkor` and `iconem-open` use Iconem share links,
+which are kept out of the repository: they are machine-local manifests in `.local/aggregate-sets/`
+(`angkor.json`, `iconem-open.json`) and exist only where those files do. `flai` and `aerometrex` are committed manifests
 in `packages/tile-server/aggregate-sets/`, in the same shape as local sets, and any public manifest
 dropped there becomes a set. `flai.json` is generated from the flai README by
 `node scripts/flai-open-lidar-set.mjs --check`.
@@ -126,7 +128,7 @@ http://localhost:3001/aggregate/tileset.json?set=world&nest=geodetic
 ```
 
 `?set=` composes with `?url=`, so you can drop your own dataset into a demo mosaic without retyping
-the other 33.
+the rest of the set.
 
 ### Testing every address
 
@@ -137,10 +139,10 @@ are relative to it (the demo app's URL field needs the absolute form).
 | Relative path | What it shows |
 |---|---|
 | `/aggregate/demo.json` | index of available sets (local sets: names and counts only) |
-| `/aggregate/tileset.json?set=world&nest=geodetic` | 33 tilesets, four continents |
+| `/aggregate/tileset.json?set=world&nest=geodetic` | every committed dataset, five continents |
 | `/aggregate/tileset.json?set=opendata&nest=geodetic` | the 10 RESOURCES.md datasets |
-| `/aggregate/tileset.json?set=angkor&nest=geodetic` | 23 Angkor sites (`nest=mercator` to compare seams) |
-| `/aggregate/tileset.json?set=angkor&only=PhnomKulen` | 4 sites, name filter |
+| `/aggregate/tileset.json?set=angkor&nest=geodetic` | 23 Angkor sites, **local** (`nest=mercator` to compare seams) |
+| `/aggregate/tileset.json?set=angkor&only=PhnomKulen` | 4 sites, name filter, **local** |
 | `/aggregate/tileset.json?set=iconem&nest=geodetic` | every Iconem share link (a **local** set, see below) |
 | `/aggregate/tileset.json?set=iconem&format=3dtiles` | only its 3D Tiles datasets |
 | `/aggregate/tileset.json?set=iconem&format=potree` | only Potree |
@@ -247,6 +249,8 @@ that set in `/aggregate/demo.json`, instead of being shown everywhere and failin
 
 ### What the Angkor set demonstrates
 
+*`angkor` is a local Iconem set (see above); the measurements below were taken where it exists.*
+
 This is the interesting one, because the sites are **not** uniformly spread: 19 sit inside the Angkor
 park a few km apart, while four PhnomKulen sites are ~30 km north-east. Nothing tells the aggregator
 that — it sees 23 bounding spheres. It finds the split anyway:
@@ -272,7 +276,7 @@ The innermost Angkor group — Bayon, Baphuon, Phimeanakas — is archaeological
 are the monuments *inside Angkor Thom's walls*. That grouping came from bounding spheres alone.
 
 Measured on the real endpoints: 23/23 children, **root fanout 23 → 2**, depth 8 (geodetic) or 7
-(mercator). The `world` set: 33/33, fanout 2, depth 12.
+(mercator). The `world` set as it then was (the open data plus Angkor, 33 tilesets): 33/33, fanout 2, depth 12.
 
 Comparing `set=angkor` against the hand-authored merged root in the
 [hierarchy explorer](/docs/guide/hierarchy-explorer) shows the point directly — same 23 datasets,
@@ -451,6 +455,7 @@ Overlapping captures are the motivating case. A site re-scanned yearly gives N t
 stacked.
 
 ```
+# on a machine with the local angkor set
 …/aggregate/tileset.json?set=angkor&only=PhnomKulen        → 4 of 23
 …/aggregate/tileset.json?set=angkor&exclude=PhnomKulen     → 19 of 23
 …/aggregate/tileset.json?set=angkor&only=Bayon&only=TaProhm → 2 of 23

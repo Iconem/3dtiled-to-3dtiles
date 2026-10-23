@@ -7,7 +7,7 @@
 import { potreeTileset, potreeSubtree, potreeTile } from '../packages/tile-server/potree-live.js';
 import { loadPotree1 } from '../packages/potree-to-3dtiles/src/potree1.js';
 
-const URL_ = process.argv[2] || 'https://api.iconem.com/s/rIdPkRfOmEdRtgsoO08TgNt9MSxh-woC/cloud.js';
+const URL_ = process.argv[2] || 'https://raw.githubusercontent.com/potree/potree/develop/pointclouds/lion_takanawa/cloud.js';
 const SUBTREE_LEVELS = 3;
 const MAX_LEVEL = Number(process.argv[3] || 15);
 

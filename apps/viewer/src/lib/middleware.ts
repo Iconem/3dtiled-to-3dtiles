@@ -106,8 +106,9 @@ export function currentPresets(p: MiddlewareParams & { toolName: ToolName; tiles
       // server has it — see TopBar's requiresSet filter), and every open or evaluation dataset from
       // outside Iconem. Sub-selections (Angkor, Mes Aynak, one format …) are the picker's job.
       { id: 'agg-iconem-all', label: '🧩 Iconem — all formats', type: 'pointcloud', url: agg('set=iconem&nest=geodetic'), requiresSet: 'iconem' },
-      // Where the full manifest is absent (a public deployment), Iconem's demo datasets stand in.
-      { id: 'agg-iconem-open', label: '🧩 Iconem — demo (Angkor + Geghard)', type: 'mesh', url: agg('set=iconem-open&nest=geodetic'), unlessSet: 'iconem' },
+      // Iconem's demo set (Angkor + Geghard) is also a machine-local manifest: shown only where the
+      // server has it and the full manifest is absent.
+      { id: 'agg-iconem-open', label: '🧩 Iconem — demo (Angkor + Geghard)', type: 'mesh', url: agg('set=iconem-open&nest=geodetic'), unlessSet: 'iconem', requiresSet: 'iconem-open' },
       { id: 'agg-open', label: '🧩 Open data — RESOURCES.md + Aerometrex + flai + Vexcel', type: 'mesh', url: agg('set=open&nest=geodetic') },
     ];
   }

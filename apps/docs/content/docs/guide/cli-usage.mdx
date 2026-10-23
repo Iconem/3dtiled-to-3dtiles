@@ -47,7 +47,7 @@ a self-contained static folder with relative uris and implicit tilings expanded 
 ```sh
 node packages/convert/cli.js export <tileset-url> <outDir> [--max-depth N] [--keep-implicit] [--pack 3tz,3dtiles] [--overwrite]
 # e.g. a mosaic, through a running server:
-node packages/convert/cli.js export "http://localhost:3001/aggregate/tileset.json?set=angkor" out/angkor
+node packages/convert/cli.js export "http://localhost:3001/aggregate/tileset.json?set=opendata" out/opendata
 ```
 
 For a raw local dataset, either `convert` it, or `3dtiled serve` it and export the printed URL. `--keep-implicit`

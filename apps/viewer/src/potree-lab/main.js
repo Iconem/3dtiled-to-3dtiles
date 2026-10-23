@@ -41,9 +41,8 @@ const BUILTIN = {
   'sample · Lion Takanawa': `${POTREE_REPO}lion_takanawa/cloud.js`,
   'sample · Lion (normals)': `${POTREE_REPO}lion_takanawa_normals/cloud.js`,
   'sample · Vol Total': `${POTREE_REPO}vol_total/cloud.js`,
-  'Iconem · Geghard monastery': 'https://api.iconem.com/s/rIdPkRfOmEdRtgsoO08TgNt9MSxh-woC/cloud.js',
   'flai COPC · Belgium Namur (EPSG:3812)': 'https://open-lidar-data.s3.eu-central-1.amazonaws.com/data/BE/SPW/NAMUR_2021-2022/overview/overview.copc.laz#crs=EPSG:3812',
-  'aggregate · Angkor PhnomKulen (3D Tiles)': `${MW}/aggregate/tileset.json?set=angkor&only=PhnomKulen`,
+  'aggregate · Open Heritage 3D (Potree 2.0 via /stream)': `${MW}/aggregate/tileset.json?set=openheritage3d`,
 };
 // Presets that only make sense in one mode switch to it when picked.
 const MODE_OF = (u) => (/\/aggregate\/|tileset\.json/.test(u) ? 'tileset' : null);

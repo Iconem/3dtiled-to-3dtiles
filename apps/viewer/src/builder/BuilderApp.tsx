@@ -266,7 +266,7 @@ function UrlDialog({ open, onOpenChange }: { open: boolean; onOpenChange: (v: bo
           </DialogDescription>
         </DialogHeader>
         <Input value={url} onChange={(e) => setUrl(e.target.value)} onKeyDown={(e) => { if (e.key === 'Enter') go(); }}
-          placeholder="http://localhost:3001/aggregate/tileset.json?set=angkor" className="font-mono text-xs" autoFocus data-testid="import-url-input" />
+          placeholder="http://localhost:3001/aggregate/tileset.json?set=opendata" className="font-mono text-xs" autoFocus data-testid="import-url-input" />
         <label className="flex items-center gap-2 text-sm">
           <Checkbox checked={flatten} onCheckedChange={(v) => setFlatten(v === true)} data-testid="import-flatten" />
           Flatten — drop unnamed cells, one list of datasets
