@@ -162,6 +162,42 @@ export function useAvailableSets(): Set<string> | null {
   return sets;
 }
 
+// ── your own manifest, uploaded from a file ──────────────────────────────────────────────────────
+//
+// The same JSON as a server's `.local/aggregate-sets/<name>.json` ({ label, entries: [{ url, format,
+// name? … }] }), POSTed to /aggregate/set: the server keeps it in memory and answers with a set name
+// (a hash of the manifest) every /aggregate param works with. The file is also kept in localStorage
+// under that name, so a link to the mosaic survives a server restart: restoreUploadedSet re-sends it.
+const UPLOAD_KEY = (set: string) => `3dtiled:manifest:${set}`;
+
+export interface UploadedSet { set: string; label: string; count: number; url: string; pointsOnly: boolean }
+
+async function postManifest(text: string): Promise<{ set: string; label: string; count: number; url: string }> {
+  const r = await fetch(`${MW}/aggregate/set`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: text });
+  if (!r.ok) throw new Error((await r.text()).slice(0, 300) || `HTTP ${r.status}`);
+  return r.json();
+}
+
+export async function uploadManifest(file: File): Promise<UploadedSet> {
+  const text = await file.text();
+  let m: any;
+  try { m = JSON.parse(text); } catch (e) { throw new Error(`${file.name} is not JSON: ${(e as Error).message}`); }
+  const entries: any[] = Array.isArray(m) ? m : m?.entries ?? [];
+  const res = await postManifest(text);
+  try { localStorage.setItem(UPLOAD_KEY(res.set), text); }
+  catch { /* over quota: the mosaic still works, it just won't survive a server restart */ }
+  return { ...res, pointsOnly: entries.length > 0 && entries.every((e) => e?.format === 'potree' || e?.format === 'copc') };
+}
+
+/** Re-send the stored manifest a mosaic URL refers to (a no-op for any other URL). */
+export async function restoreUploadedSet(tilesetUrl: string): Promise<void> {
+  let set: string | null = null;
+  try { set = new URL(tilesetUrl, location.href).searchParams.get('set'); } catch { return; }
+  if (!set?.startsWith('upload-')) return;
+  const text = localStorage.getItem(UPLOAD_KEY(set));
+  if (text) await postManifest(text).catch((e) => console.warn('[manifest] could not re-send', set, e));
+}
+
 // ── dataset search ─────────────────────────────────────────────────────────────────────────────
 
 /** Lowercase, accents stripped — "Quéribus" must match "queribus". */

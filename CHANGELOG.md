@@ -5,6 +5,15 @@ Format loosely follows [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+### Added — 2026-10-23 (upload your own set manifest)
+- **`POST /aggregate/set`** takes a local-set manifest (`{ label, entries: [{ url, format, name? … }] }`)
+  and answers with `set=upload-<hash>`, usable with every `/aggregate` parameter. In memory, 24 h
+  after last use, at most 20 × 10 MB; never listed in `demo.json`. The name hashes the entries, so
+  the same file always gives the same URL.
+- **Viewer: 📂 manifest** button next to *builder*: pick a `.json` from your disk, it is uploaded and
+  loaded as a mosaic. The page URL gets `?load=<mosaic>` and the file stays in localStorage, so a
+  reload after a server restart re-sends it first.
+
 ### Changed — 2026-10-23 (no Iconem share links in the repository)
 - The `angkor` and `iconem-open` aggregate sets moved out of code into machine-local manifests
   (`.local/aggregate-sets/angkor.json`, `iconem-open.json`, gitignored). They appear only where those

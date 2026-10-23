@@ -412,6 +412,28 @@ manifest needs no restart:
 share URL is an opaque token, so `only=_d2024` could never match `/s/<token>/cloud.js` alone.
 `/aggregate/demo.json` lists local sets by name and count only, never their URLs.
 
+### Uploading your own manifest
+
+A deployment has none of your local files, so the same manifest can also be **uploaded**. In the
+viewer, **📂 manifest** (next to *builder*) takes a local `.json` in the shape above, sends it to the
+tile-server and loads the mosaic; every picker, filter and `native` setting then works as for a
+server set. Directly:
+
+```bash
+curl -X POST --data-binary @.local/aggregate-sets/iconem.json https://<server>/aggregate/set
+# → { "set": "upload-9a03e7bc…", "count": 692, "url": "https://<server>/aggregate/tileset.json?set=upload-9a03e7bc…&nest=geodetic" }
+```
+
+- **Kept in memory, 24 h after last use.** A restart clears it, like builder drafts. Up to 20
+  manifests of 10 MB each; the oldest goes first.
+- **The set name is a hash of the entries.** Re-sending the same file gives the same URL. The viewer
+  also keeps the file in the browser's localStorage and puts `?load=<mosaic URL>` in the page URL, so
+  reopening that page after a server restart re-sends the manifest before loading. On another
+  browser, the link works only while the server still holds the upload.
+- **Never listed.** Uploads do not appear in `/aggregate/demo.json` or in "unknown set" errors, and
+  without the file the hash cannot be guessed. Anyone given the mosaic URL can still read the share
+  links inside it, as with any mosaic.
+
 ### Generating the manifest: `scripts/iconem-share-links.mjs`
 
 Enumerates every project → scene → Potree / 3D Tiles (and optionally COPC) asset on the Iconem
