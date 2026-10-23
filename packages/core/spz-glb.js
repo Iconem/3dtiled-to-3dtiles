@@ -77,7 +77,7 @@ export async function buildSplatTileGlb(arrays, count, bounds, centroidsOnly = f
       colors[i*4+2] = rgb ? rgb[i*3+2] : 1;
       colors[i*4+3] = alphas ? alphas[i] : 1;
     }
-    return buildPointsGlb(positions, colors, count, { swizzle: false });
+    return buildPointsGlb(positions, colors, count, { swizzle: false, srgb: false });   // inputs are already linear
   }
   return buildSpzGlb(await buildSpzBuffer(positions, alphas, rgb, scales, rotations, count), count, bounds);
 }

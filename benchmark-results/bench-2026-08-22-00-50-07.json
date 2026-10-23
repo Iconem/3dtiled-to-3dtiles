@@ -1,0 +1,63 @@
+{
+  "meta": {
+    "date": "2026-08-22T00:50:07.946Z",
+    "node": "v22.22.3",
+    "cpu": "12th Gen Intel(R) Core(TM) i7-12800H",
+    "cores": 20,
+    "platform": "win32"
+  },
+  "results": [
+    {
+      "id": "potree1-lion-takanawa",
+      "format": "potree",
+      "unit": "points",
+      "points": 272768,
+      "sourceMB": 4.9,
+      "downloadS": 27.5,
+      "convertS": 0.75,
+      "outputTiles": 296,
+      "outputMB": 7.8,
+      "throughputMptsS": 0.36,
+      "srcMBs": 6.6
+    },
+    {
+      "id": "potree2-lion",
+      "format": "potree",
+      "unit": "points",
+      "points": 3954696,
+      "sourceMB": 44.2,
+      "downloadS": 4.1,
+      "convertS": 3.92,
+      "outputTiles": 1741,
+      "outputMB": 111.9,
+      "throughputMptsS": 1.01,
+      "srcMBs": 11.3
+    },
+    {
+      "id": "sog-skatepark",
+      "format": "sog",
+      "unit": "splats",
+      "points": null,
+      "sourceMB": 174.4,
+      "downloadS": 41,
+      "convertS": 21.14,
+      "outputTiles": 2055,
+      "outputMB": 165.8,
+      "throughputMptsS": null,
+      "srcMBs": 8.3
+    },
+    {
+      "id": "rad-tastier-500k",
+      "format": "rad",
+      "unit": "splats",
+      "points": 500000,
+      "sourceMB": 12.2,
+      "downloadS": 1.5,
+      "convertS": 0.53,
+      "outputTiles": 12,
+      "outputMB": 9.9,
+      "throughputMptsS": 0.94,
+      "srcMBs": 23.1
+    }
+  ]
+}

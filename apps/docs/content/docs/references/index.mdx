@@ -66,7 +66,31 @@ writeup (Spark 2.0 LoD system, PackedSplats/ExtSplats byte layouts, geometric er
 
 **3DTilesRendererJS Gaussian-splat ecosystem (WilliamLiu-1997)** — closest reference implementations to this repo's RAD path; studied to improve tiling:
 - [3DTilesRendererJS-3DGS-Plugin](https://github.com/WilliamLiu-1997/3DTilesRendererJS-3DGS-Plugin) — the `3d-tiles-rendererjs-3dgs-plugin` this viewer uses to render splats in 3DTRJS (parses `KHR_gaussian_splatting` + `_spz_2`, renders via SparkJS, one shared Spark renderer per scene/renderer, camera-relative rebasing, `sparkRendererOptions`, WebXR-aware). Its `data/gaussianSplat1` & `gaussianSplat2` are wired into this viewer's preset bar (**◈ GSplat 1/2**). Note its rendering tip: keep the globe in the **opaque** pass so it doesn't object-sort against transparent splats at the horizon.
-- [3DGS-PLY-3DTiles-Converter](https://github.com/WilliamLiu-1997/3DGS-PLY-3DTiles-Converter) — PLY→3D Tiles converter (kd-tree tiling, AABB bounds, SPZ v3 + quantized SH). Its [`src/tiling/geometric-error.js`](https://github.com/WilliamLiu-1997/3DGS-PLY-3DTiles-Converter/blob/main/src/tiling/geometric-error.js) is the model our **uniform-per-depth geometric error** mirrors: `GE(depth) = leafReference × (1/samplingRate)^(maxDepth−depth)`, anchored to a deepest-leaf "sparsity + extent" estimate, all siblings at a level sharing one error. Each tileset also emits a `build_summary.json` exposing the full GE-by-depth and sampling schedule — handy for cross-checking. ([Issue #24](https://github.com/WilliamLiu-1997/3DGS-PLY-3DTiles-Converter/issues/24): auto-depth can overload the root node on >8M-splat scenes — a tree-balancing concern worth noting for very large RAD inputs.)
+- **3DGS-PLY-3DTiles-Converter** — PLY→3D Tiles converter (kd-tree tiling, AABB bounds, SPZ v3 + quantized SH). Its `src/tiling/geometric-error.js` is the model our **uniform-per-depth geometric error** mirrors: `GE(depth) = leafReference × (1/samplingRate)^(maxDepth−depth)`, anchored to a deepest-leaf "sparsity + extent" estimate, all siblings at a level sharing one error. Each tileset also emits a `build_summary.json` exposing the full GE-by-depth and sampling schedule — handy for cross-checking. (Its issue #24 noted that auto-depth can overload the root node on >8M-splat scenes — a tree-balancing concern worth noting for very large RAD inputs.)
+
+  <Callout type="warn">
+  **Went closed source.** `github.com/WilliamLiu-1997/3DGS-PLY-3DTiles-Converter` was public earlier
+  in 2026 and no longer resolves — the converter has been taken closed source, so the references above
+  are left unlinked as dead links. Asked directly on the companion site's tracker
+  ([3DGS-PLY-3DTiles-Converter-Website#1](https://github.com/WilliamLiu-1997/3DGS-PLY-3DTiles-Converter-Website/issues/1#issuecomment-5621578818)):
+  *"The WilliamLiu-1997/3DGS-PLY-3DTiles-Converter link do not resolve, is it a private repo or do you
+  intend to make it open-source?"* — no response. The hosted converter *website* stays up as a service,
+  and the 3DGS plugin / 3DTiles-Inspector repos remain open.
+
+  This matters here because that converter is our **cross-validation reference** for the
+  geometric-error model described above — which is why the algorithm is now written out in this page
+  rather than linked: the source is no longer citable.
+
+  **The package is still on npm**, though — build *and* source, as of **v0.6.5 (2026-08-31)**:
+  [`3dgs-ply-3dtiles-converter`](https://www.npmjs.com/package/3dgs-ply-3dtiles-converter). So you can
+  still build tilesets directly from PLY, and still read the geometric-error implementation, even
+  though the GitHub repo is gone:
+
+  ```sh
+  npx 3dgs-ply-3dtiles-converter@0.6.5 --help
+  npm pack 3dgs-ply-3dtiles-converter@0.6.5   # tarball ships the sources
+  ```
+  </Callout>
 - [3DTiles-Inspector](https://github.com/WilliamLiu-1997/3DTiles-Inspector) — standalone web inspector for 3D Tiles / Gaussian-splat tilesets (root-transform edit, geometric-error & layer-multiplier scaling `1/16x–16x`, splat crop regions, `build_summary.json` round-trip). A good complement to this repo's `viewer.html` 🪲 Debug-tiles overlay.
 
   **The inspector is pre-installed** in `tools-inspector/` — run via npm scripts (no global install needed):
@@ -82,6 +106,13 @@ writeup (Spark 2.0 LoD system, PackedSplats/ExtSplats byte layouts, geometric er
   npx --prefix tools-inspector 3dtiles-inspector sample-data/output/rad/coit-3dtiles-from-rad
   ```
   Each command starts a localhost HTTP server and opens the inspector in your default browser. Its `Geometric Error` / `Layer Multiplier` sliders are the runtime analogue of this converter's uniform-per-depth error model — handy for confirming LoD behaviour without re-tiling.
+
+  Its **root-transform editor** is also the closest prior art to a placement gizmo for this repo's
+  `&lon=&lat=&alt=&heading=&scale=` params: same interaction, different output — the inspector edits a
+  tileset in place, whereas the middleware wants the transform to end up as a *stateless URL* anyone
+  can paste into Cesium for Unreal. That is written up as a
+  [future-work item](/docs/guide/todo-future-work#rendering--viewer), including the two traps
+  (composing on top of each adapter's up-axis flip, and origin-vs-centre anchoring).
 
 **Splatter (splatter.app, Jakub Červený)** — a hosted Gaussian-splat viewer/host (tested against a
 103M-splat scene). Its `splatter-three` library's actual source lives in

@@ -1,0 +1,89 @@
+{
+  "label": "Esri Living Atlas integrated meshes published as 3D Tiles — city photomeshes (public items; check each item's terms)",
+  "provider": "Esri",
+  "attribution": "© Esri and the item's data owner",
+  "source": "https://tiles.arcgis.com/tiles/z2tnIkrLQ2BRzr6P/arcgis/rest/services?f=json — ArcGIS Online search typeKeywords:\"IntegratedMesh\" lists ~10 900 public services",
+  "note": "Public-access ArcGIS Online items served as 3D Tiles (gzipped tileset.json, CORS). They are Esri showcase items, not declared open data: the owner's licence is on each item (Wingtra, AVT, Hexagon …). Demo-only items (New York, Marseille) are left out. I3S SceneServer entries go through /stream?format=i3s. Girona (ICGC) is a legacy I3S layer without node pages, which the I3S reader does not support.",
+  "entries": [
+    {
+      "format": "3dtiles",
+      "name": "Utrecht integrated mesh",
+      "project": "Esri Living Atlas",
+      "scene": "Utrecht",
+      "attribution": "© Kavel10 / Esri Nederland",
+      "url": "https://tiles.arcgis.com/tiles/V6ZHFr6zdgNZuVG0/arcgis/rest/services/Utrecht_3D_Tiles_Integrated_Mesh/3DTilesServer/tileset.json"
+    },
+    {
+      "format": "3dtiles",
+      "name": "Zürich integrated mesh",
+      "project": "Esri Living Atlas",
+      "scene": "Zürich",
+      "attribution": "© Wingtra / Esri",
+      "url": "https://tiles.arcgis.com/tiles/z2tnIkrLQ2BRzr6P/arcgis/rest/services/Zurich_Integrated_Mesh_3D_Tiles/3DTilesServer/tileset.json"
+    },
+    {
+      "format": "3dtiles",
+      "name": "Vienna integrated mesh",
+      "project": "Esri Living Atlas",
+      "scene": "Vienna",
+      "attribution": "© AVT-ZT GmbH / Esri",
+      "url": "https://tiles.arcgis.com/tiles/z2tnIkrLQ2BRzr6P/arcgis/rest/services/Vienna__Integrated_Mesh_3D_Tiles_WGS84/3DTilesServer/tileset.json"
+    },
+    {
+      "format": "3dtiles",
+      "name": "Munich integrated mesh",
+      "project": "Esri Living Atlas",
+      "scene": "Munich",
+      "attribution": "© Hexagon / Esri",
+      "url": "https://tiles.arcgis.com/tiles/z2tnIkrLQ2BRzr6P/arcgis/rest/services/Munich__Integrated_Mesh_3D_Tiles_WGS84/3DTilesServer/tileset.json"
+    },
+    {
+      "format": "3dtiles",
+      "name": "Stuttgart integrated mesh",
+      "project": "Esri Living Atlas",
+      "scene": "Stuttgart",
+      "attribution": "© Esri and the data owner",
+      "url": "https://tiles.arcgis.com/tiles/z2tnIkrLQ2BRzr6P/arcgis/rest/services/Stuttgart__Integrated_Mesh_3D_Tiles_WGS84/3DTilesServer/tileset.json"
+    },
+    {
+      "format": "3dtiles",
+      "name": "Boston integrated mesh",
+      "project": "Esri Living Atlas",
+      "scene": "Boston",
+      "attribution": "© Esri and the data owner",
+      "url": "https://tiles.arcgis.com/tiles/z2tnIkrLQ2BRzr6P/arcgis/rest/services/Boston__Integrated_Mesh_3D_Tiles_WGS84/3DTilesServer/tileset.json"
+    },
+    {
+      "format": "3dtiles",
+      "name": "Jena integrated mesh",
+      "project": "Esri Living Atlas",
+      "scene": "Jena",
+      "attribution": "© Esri and the data owner",
+      "url": "https://tiles.arcgis.com/tiles/z2tnIkrLQ2BRzr6P/arcgis/rest/services/Jena__Integrated_Mesh_3DTiles_WGS84/3DTilesServer/tileset.json"
+    },
+    {
+      "format": "3dtiles",
+      "name": "Linz integrated mesh",
+      "project": "Esri Living Atlas",
+      "scene": "Linz",
+      "attribution": "© Esri and the data owner",
+      "url": "https://tiles.arcgis.com/tiles/z2tnIkrLQ2BRzr6P/arcgis/rest/services/Linz__Integrated_Mesh_3DTiles_WGS84/3DTilesServer/tileset.json"
+    },
+    {
+      "format": "3dtiles",
+      "name": "Cambridge MA integrated mesh",
+      "project": "Esri Living Atlas",
+      "scene": "Cambridge, MA",
+      "attribution": "© Esri and the data owner",
+      "url": "https://tiles.arcgis.com/tiles/z2tnIkrLQ2BRzr6P/arcgis/rest/services/Cambridge_Massachusetts__Integrated_Mesh_3DTiles_WGS84/3DTilesServer/tileset.json"
+    },
+    {
+      "format": "i3s",
+      "name": "Frankfurt buildings 2021 (I3S)",
+      "project": "Esri Living Atlas",
+      "scene": "Frankfurt",
+      "attribution": "© Aerowest GmbH / Esri",
+      "url": "https://tiles.arcgis.com/tiles/cFEFS0EWrhfDeVw9/arcgis/rest/services/Buildings_Frankfurt_2021/SceneServer"
+    }
+  ]
+}

@@ -5,6 +5,7 @@
     "dependencies",
     "candidate-source-formats",
     "sample-data",
+    "benchmarks",
     "design-log",
     "appendix-schema-diagrams"
   ]

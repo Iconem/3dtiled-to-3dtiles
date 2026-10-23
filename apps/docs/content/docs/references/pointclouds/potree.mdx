@@ -33,8 +33,62 @@ numPoints` (BFS within a chunk of `hierarchyStepSize` levels; the deepest level 
 childMask bit `c` set ⇒ child `c` exists. File path: `octreeDir/r/<name[1..] chunked by stepSize>/<name>.<bin|laz>`.
 Node files are `.bin` (raw), `.las`, or `.laz` (`pointAttributes:"LAZ"`).
 
+**1.8 variant**: same layout as 1.7, but `pointAttributes` is an array of **objects**
+(`{ name, size, elements, elementSize, type, description }`) instead of names. Read the byte size
+from the object's `size`. This repo's decoder once read `byteSize` — a field 1.8 does not have — so
+every attribute size was `undefined`, the point stride `NaN`, and every 1.8 node decoded to zero
+points: the root tile answered 404 and roughly half of Iconem's Potree datasets streamed as an empty
+bounding volume. A 60-dataset sweep went from 27/60 to 60/60 with the fix.
+
 **1.4 variant**: inline `hierarchy:[[name,numPoints],…]` in cloud.js (no `.hrc`, no `hierarchyStepSize`),
 flat `data/<name>.<bin|laz>`.
+
+### `.hrc` chunks are a tree of *files*, and the boundary nodes are the only way down
+
+This is the single subtlety that a streaming implementation gets wrong, so it is worth stating
+plainly: **Potree 1.x does not ship one hierarchy file.** It ships a *tree of `.hrc` chunks*, each
+covering `hierarchyStepSize` levels (`5` for most datasets). A chunk is a BFS blob rooted at one node,
+and reading it yields two different kinds of thing:
+
+- the **interior nodes** of that chunk — everything from the chunk root down to `stepSize − 1`; and
+- the **boundary nodes** — the nodes sitting at the chunk's bottom edge, which are precisely the
+  roots of the *next generation of `.hrc` files*.
+
+The boundary nodes are load-bearing. They are the only edge connecting one chunk to the next, so the
+hierarchy is reachable **only** by: read chunk → collect its boundary nodes → fetch the chunk rooted
+at each boundary node → repeat. Drop the boundary list and everything below that chunk becomes
+invisible — with no error, because a missing `.hrc` child and a genuinely absent subtree look
+identical.
+
+<Callout type="warn">
+**The truncation bug this repo hit (fixed).** The live adapter (`potree-live.js`) loads chunks
+lazily and guarded re-entry with a `loadedChunks` set — but the guard returned an empty list:
+
+```js
+if (loadedChunks.has(cr)) return Promise.resolve([]);   // ← the bug
+```
+
+That conflates *"already loaded"* with *"has nothing to give you"*. It is harmless on the first walk
+and fatal on every later one, because a **lazy** adapter walks the tree more than once — once per
+subtree request the client makes.
+
+The failure runs like this. Serving the root subtree loads chunk `r` with a shallow depth target.
+Later the client asks for the level-3 subtree; that walk also starts at `r`, gets `[]` back, and so
+never learns `r`'s boundary nodes — which means it never reaches the level-5 chunk generation, or
+anything beyond it. Every availability bit past that point stays `0`, and a 3D Tiles client that
+reads "not available" simply **stops refining**.
+
+Net effect on Geghard (`hierarchyStepSize: 5`): the tileset silently capped at **level 4**
+(`stepSize − 1`) against a real depth of **11**. No exception, no 404, no warning — just a point
+cloud that stops getting denser as you zoom. The fix is to **cache each chunk's boundary list** on
+first load so a re-entrant walk traverses *through* an already-loaded chunk instead of dying at it.
+Verified live against the Iconem host: max depth 4 → **11**.
+
+The general lesson for any lazily-walked chunked hierarchy: a memo guarding re-entry must return
+*what the chunk contained*, never a sentinel empty. Repro: `scripts/debug-potree-depth.mjs`;
+the shape of the truncation is visible at a glance in `/hierarchy` as a radial tree whose rings
+stop dead at one level.
+</Callout>
 
 ## Potree **2.0** (metadata.json + hierarchy.bin + octree.bin)
 - `metadata.json`: `attributes[{name,type,size,numElements}]`, `scale[3]`, `offset[3]`, `boundingBox`,

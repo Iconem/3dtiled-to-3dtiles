@@ -76,6 +76,12 @@ harmonization below targets the *live* path.
 > premature unification would risk. It's noted here as the natural endgame, to be taken per-format only
 > when there's a concrete reason.
 
+> **The generic push now exists, as a crawl rather than a `bake(driver)`.** `/export` (and
+> `3dtiled export`) *pulls* a served tileset, whatever its source, and writes every JSON and tile to a
+> folder, expanding implicit tilings on the way. That gives every live adapter an offline output with
+> no per-format code, at the cost of one HTTP round trip per tile. The dedicated offline converters
+> remain the faster path for the formats they cover.
+
 > **Harmonization plan, endpoint rework, and phasing** — the design discussion for *how* the live path
 > got harmonized (the `FormatDriver` sketch, the shared `core/` services, the endpoint consolidation,
 > and the chosen Phases 1–3 rollout) has moved into the

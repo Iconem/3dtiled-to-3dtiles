@@ -11,6 +11,7 @@
 
 import proj4 from 'proj4';
 import fs    from 'fs/promises';
+import { georefFromCrs } from '../../core/geo.js';
 
 const DEG     = Math.PI / 180;
 const WGS84_A = 6378137.0;
@@ -114,5 +115,8 @@ export async function buildEcefTransform(copc, filename, origin) {
 
   const [cx, cy, cz] = llhToEcef(lon, lat, h ?? origin[2]);
   console.log(`[georef] lon=${lon.toFixed(6)} lat=${lat.toFixed(6)} → ECEF [${cx.toFixed(0)},${cy.toFixed(0)},${cz.toFixed(0)}]`);
-  return { transform: enuMatrix(lon, lat, cx, cy, cz), hasGeoref: true };
+  // The shared placement (grid convergence + scale factor, see core/geo.js), so that a prebuilt COPC
+  // and the live /stream one land in exactly the same place.
+  const transform = georefFromCrs(origin, wkt, 'copc-offline') ?? enuMatrix(lon, lat, cx, cy, cz);
+  return { transform, hasGeoref: true };
 }

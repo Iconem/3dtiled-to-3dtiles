@@ -130,3 +130,53 @@ Coordinate system: Left-Up-Front (LUF) in SPZ PackOptions/UnpackOptions for glTF
 
 - SPZ format: https://github.com/nianticlabs/spz
 - PR: https://github.com/KhronosGroup/glTF/pull/2531
+
+---
+
+## Compression extension: KHR_gaussian_splatting_compression_lgsc
+
+> Source: https://github.com/KhronosGroup/glTF/pull/2551
+> Status: **Open PR** (opened 2026-01-16, not merged) — author `ibouazizi`
+
+A **second, sibling** compression child extension to `KHR_gaussian_splatting`, carrying a payload
+compressed with Qualcomm's **L-GSC** (*Lite 3D Gaussian Splat Codec*) v1.0. It sits at the same level
+in the lineage as `_spz_2` above — same base extension, different codec — so the base's attribute
+semantics and covariance/SH math are unchanged; only the compressed blob differs.
+
+The extension was first proposed as `KHR_gaussian_splatting_lgsc` and **renamed** during review to
+`KHR_gaussian_splatting_compression_lgsc`, a maintainer noting: *"The pattern we've been using for
+compression extensions is `KHR_gaussian_splatting_compression_lgsc`."* That rename is the useful
+signal here — Khronos is treating splat compression as an open set of interchangeable child
+extensions under one base, rather than blessing SPZ as the only codec.
+
+<Callout type="warn">
+The PR currently carries only a README; it does **not** yet spell out the JSON nesting, the
+`bufferView` property, or required fields. By the naming pattern it is expected to nest inside
+`KHR_gaussian_splatting.extensions` exactly like `_spz_2` does, but **do not treat that as
+specified** until the PR lands. No conformance target exists yet, and no renderer in this repo's
+stack (CesiumJS, 3DTRJS + SparkJS) decodes L-GSC today.
+</Callout>
+
+### The codec itself — `qualcomm/lite-3Dgsplat-codec`
+
+| | |
+|---|---|
+| Author | Qualcomm Technologies, Inc. and/or its subsidiaries |
+| License | Apache-2.0 |
+| Deliverable | C++ library (compress/decompress API) + CMake build, Windows & Linux, with a sample |
+| Input format | "INRIA format" — i.e. the original 3DGS PLY layout |
+| Coded data | geometry (positions, rotations, scales, opacities) + appearance (diffuse RGB, SH) |
+| SH support | up to order 3 (15 coefficients per channel) |
+| Entropy coding | *"By default, the geometry and attributes are coded using zlib"* |
+| Levels | 3 compression levels (0 = minimal … 2 = maximum) |
+
+Note what this implies relative to SPZ: L-GSC as published is a **zlib-backed** container over
+linearized geometry/appearance arrays with a level knob, not a fixed-bit-layout quantization scheme
+like SPZ v2's 24-bit positions / 3-byte rotations. The repo publishes **no benchmark numbers** — no
+compression ratios, no quality or decode-speed comparison against SPZ, SOG, or raw PLY — so any
+size/quality claim about L-GSC vs `_spz_2` would have to be measured locally before being repeated.
+
+### Resources
+
+- L-GSC reference codec: https://github.com/qualcomm/lite-3Dgsplat-codec
+- glTF extension PR: https://github.com/KhronosGroup/glTF/pull/2551

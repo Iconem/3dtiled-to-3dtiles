@@ -15,6 +15,7 @@
 import { buildPointsGlb, coordsToKey, keyToCoords, buildSubtreeBuffer, georefFromCrs, buildImplicitTileset, parallelMap, defaultConcurrency, progressStart, progressTick, progressDone, memoizeAsync } from '../core/index.js';
 import { preparePotree2Schema, parsePotree2Hierarchy, parsePotree2Chunk, decodePotree2Node } from '../potree-to-3dtiles/src/potree2.js';
 import { loadPotree1 } from '../potree-to-3dtiles/src/potree1.js';
+import { withCrsOverride } from './copc-live.js';
 
 const SUBTREE_LEVELS = 3;
 // Spatial octree (level,x,y,z) of a node from its box vs root box (exact ints — robust to Potree's
@@ -94,12 +95,19 @@ const getCtx = memoizeAsync(async (url) => {
       // mark `loadedChunks` AFTER the chunk's nodes land in src.nodes. (The old code marked loaded
       // *before* awaiting, so a concurrent request would skip the chunk and index empty availability →
       // implicit refinement stalled until something else warmed the cache.) Returns the chunk boundaries.
+      // Boundaries are CACHED per chunk (chunkBoundaries): an already-loaded chunk must still hand its
+      // boundary children back so a LATER, deeper walk can traverse THROUGH it. (Returning [] for
+      // loaded chunks — the old behavior — killed the BFS at every re-visited chunk root: the root
+      // subtree loads chunk 'r' with a shallow depth target, then the level-3 subtree's walk starts at
+      // 'r', receives no boundaries, and never reaches the level-5 .hrc chunks → availability silently
+      // truncated at level stepSize-1, i.e. "Geghard stops streaming past level 4".)
       const inFlight = new Map();          // chunkName → Promise<boundaries[]>
+      const chunkBoundaries = new Map();   // chunkName → boundary[{name,box}] of the loaded chunk
       const loadOne = (cr) => {
-        if (loadedChunks.has(cr)) return Promise.resolve([]);
+        if (loadedChunks.has(cr)) return Promise.resolve(chunkBoundaries.get(cr) || []);
         if (inFlight.has(cr)) return inFlight.get(cr);
         const p = Promise.resolve(src.loadChunk(cr, src.boxOf(cr)))
-          .then(b => { loadedChunks.add(cr); inFlight.delete(cr); progressTick(url); return b || []; })
+          .then(b => { loadedChunks.add(cr); chunkBoundaries.set(cr, b || []); inFlight.delete(cr); progressTick(url); return b || []; })
           .catch(e => { inFlight.delete(cr); throw e; });
         inFlight.set(cr, p);
         return p;
@@ -133,7 +141,7 @@ const getCtx = memoizeAsync(async (url) => {
       console.log(`[potree-live] (1.x lazy implicit) ${url} → .hrc chunked (stepSize=${stepSize}), georef=${!!ctx.transform}`);
     } else {
       // inline (1.4) layout → whole tiny hierarchy is in cloud.js already; build it eagerly.
-      ctx = finishCtx(src.nodes, src.rootBox, src.crs, src.spacing, name => src.readNode(src.nodes.get(name)));
+      ctx = { ...finishCtx(src.nodes, src.rootBox, src.crs, src.spacing, name => src.readNode(src.nodes.get(name))), src };
       console.log(`[potree-live] (1.4 inline) ${url} → ${src.nodes.size} nodes, georef=${!!ctx.transform}`);
     }
   } else {                                                  // ── Potree 2.0 (lazy) ──
@@ -333,7 +341,26 @@ async function buildTilesetExplicit1x(ctx, urlParam) {
 // Pure builders the /stream dispatcher reuses. Tile token is a Potree name (explicit, "r012") OR a
 // "level-x-y-z" coord (implicit) — potreeTile resolves either.
 export const potreeTileRe = /^([r0-7]+|\d+-\d+-\d+-\d+)$/;
+// What a client needs to read this cloud ITSELF instead of through /stream (the aggregate's
+// `&native=1` leaves, rendered by 3DTRjs's PotreePlugin): the source version and node encoding, so it
+// can tell whether its own loader copes, and `origin` — the point in SOURCE coordinates that tile
+// coordinates are relative to. Native-coords → ECEF is then `root.transform · translate(−origin)`,
+// with any &crs= override and &lon=&lat= placement already folded into root.transform.
+function nativeInfo(ctx) {
+  const origin = ctx.origin.map((v) => +v.toFixed(4));
+  if (ctx.meta) return { format: 'potree', version: String(ctx.meta.version ?? '2.0'), encoding: String(ctx.meta.encoding || 'DEFAULT').toUpperCase(), origin };
+  const pa = ctx.src?.meta?.pointAttributes;
+  // 1.x: a pointAttributes STRING ("LAS"/"LAZ") means each node is a LAS/LAZ file; a list means .bin
+  return { format: 'potree', version: String(ctx.src?.version ?? '1.x'), encoding: typeof pa === 'string' ? pa.toUpperCase() : 'BINARY', origin };
+}
+
 export async function potreeTileset(url, opts = {}) {
+  const ts = await potreeTilesetInner(url, opts);
+  const ctx = await getCtx(url);
+  ts.root.extras = { ...(ts.root.extras || {}), native: nativeInfo(ctx) };
+  return ts;
+}
+async function potreeTilesetInner(url, opts) {
   const ctx = await getCtx(url);
   const eager = opts.hierarchy === 'eager';
   if (eager) progressStart(url, 'Potree hierarchy drain (cache=hierarchy)');   // reported via /progress?key=url
@@ -350,8 +377,8 @@ export async function potreeTileset(url, opts = {}) {
     }
   }
   if (ctx.lazy)   // 1.x .hrc: implicit by default (lazy subtrees); explicit = full materialization (drains every chunk)
-    return opts.tiling === 'explicit' ? buildTilesetExplicit1x(ctx, url) : buildTilesetImplicit(ctx, url);
-  return opts.tiling === 'explicit' ? buildTilesetExplicit(ctx, url) : buildTilesetImplicit(ctx, url);
+    return withCrsOverride(opts.tiling === 'explicit' ? buildTilesetExplicit1x(ctx, url) : buildTilesetImplicit(ctx, url), ctx, opts.crs, 'potree-live');
+  return withCrsOverride(opts.tiling === 'explicit' ? buildTilesetExplicit(ctx, url) : buildTilesetImplicit(ctx, url), ctx, opts.crs, 'potree-live');
 }
 export async function potreeTile(url, token) {
   const ctx = await getCtx(url);
@@ -365,7 +392,9 @@ export async function potreeSubtree(url, key) {
   const ctx = await getCtx(url);
   if (ctx.lazy) {                                // load only the .hrc chunk(s) this subtree block needs
     const { level, x, y, z } = keyToCoords(key);
-    await ctx.ensureBlock(ctx.nameForCoord(level, x, y, z), level, SUBTREE_LEVELS);
+    const rootName = ctx.nameForCoord(level, x, y, z);
+    await ctx.ensureBlock(rootName, level, SUBTREE_LEVELS);
+    if (process.env.POTREE_DEBUG) console.log(`[potree-dbg] subtree ${key} rootName=${rootName} availSet=${ctx.availSet.size} has(key)=${ctx.availSet.has(key)}`);
     return buildSubtreeBuffer(key, ctx.availSet, SUBTREE_LEVELS);
   }
   if (ctx.lazy2) {

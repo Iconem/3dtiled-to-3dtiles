@@ -136,6 +136,44 @@ export function buildSubtreeBuffer(rootKey, avail, subtreeLevels) {
   return Buffer.concat([header, jsonPadded, binaryBuf]);
 }
 
+/**
+ * Parse a 3D Tiles 1.1 binary `.subtree` → availability accessors. The inverse of
+ * buildSubtreeBuffer, but general: handles `{constant}` availability and both internal and
+ * (pre-fetched) external buffers.
+ * @param {Buffer|Uint8Array} buf the .subtree bytes
+ * @returns {{ json: object, tileBit:(i:number)=>0|1, contentBit:(i:number)=>0|1, childBit:(i:number)=>0|1 }}
+ */
+export function parseSubtreeBuffer(buf) {
+  const b = Buffer.isBuffer(buf) ? buf : Buffer.from(buf.buffer || buf, buf.byteOffset || 0, buf.byteLength);
+  if (b.toString('latin1', 0, 4) !== 'subt') throw new Error('not a .subtree (bad magic)');
+  const jsonLen = Number(b.readBigUInt64LE(8));
+  const json = JSON.parse(b.toString('utf8', 24, 24 + jsonLen));
+  const bin = b.subarray(24 + jsonLen);
+  const viewOf = (bv) => bv == null ? null : bin.subarray(bv.byteOffset || 0, (bv.byteOffset || 0) + bv.byteLength);
+  const accessor = (avail) => {
+    if (!avail) return () => 0;
+    if (avail.constant !== undefined) return () => (avail.constant ? 1 : 0);
+    const bytes = viewOf((json.bufferViews || [])[avail.bitstream ?? avail.bufferView]);
+    if (!bytes) return () => 0;
+    return (i) => (bytes[i >> 3] >> (i & 7)) & 1;
+  };
+  const content0 = Array.isArray(json.contentAvailability) ? json.contentAvailability[0] : json.contentAvailability;
+  return { json, tileBit: accessor(json.tileAvailability), contentBit: accessor(content0), childBit: accessor(json.childSubtreeAvailability) };
+}
+
+/** Morton-decode m → {x,y} (quadtree) — BigInt-free, safe to level 15. */
+export function morton2Decode(m) {
+  let x = 0, y = 0;
+  for (let i = 0; i < 15; i++) { x |= ((m >> (2 * i)) & 1) << i; y |= ((m >> (2 * i + 1)) & 1) << i; }
+  return { x, y };
+}
+/** Morton-decode m → {x,y,z} (octree) — BigInt-free, safe to level 10 (30 bits). */
+export function morton3Decode(m) {
+  let x = 0, y = 0, z = 0;
+  for (let i = 0; i < 10; i++) { x |= ((m >> (3 * i)) & 1) << i; y |= ((m >> (3 * i + 1)) & 1) << i; z |= ((m >> (3 * i + 2)) & 1) << i; }
+  return { x, y, z };
+}
+
 /** Subtree root keys for a tree of `maxLevel`: every present node at level % subtreeLevels === 0. */
 export function subtreeRootKeys(avail, maxLevel, subtreeLevels) {
   const roots = new Set(['0-0-0-0']);

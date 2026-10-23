@@ -31,6 +31,8 @@ const urlStateParsers = {
   renderer: parseAsStringEnum<ActiveRenderer>(['cesium', '3dtrjs']).withDefault('cesium'),
   tool: parseAsStringEnum<ToolName>(['implicit-to-explicit', 'upgrade', 'packages']).withDefault('implicit-to-explicit'),
   preset: parseAsString.withDefault(''),
+  // 3DTRjs only: mosaic leaves in their source format (Potree via PotreePlugin) instead of /stream.
+  native: parseAsBoolean.withDefault(false),
 };
 
 /** One hook, one URL sync — everything in the "shareable" slice. */

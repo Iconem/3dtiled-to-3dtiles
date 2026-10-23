@@ -17,15 +17,22 @@
  * each `/bing/fragment` covers a few levels and external-refs deeper fragments — so the tree builds on
  * demand. Tiles/subtrees are fetched from Bing with y→reverseY; no API key needed.
  *
- *   GET /bing/tileset.json[?g=<genid>]
- *   GET /bing/fragment/<face>-<level>-<x>-<y>.json?g=<genid>
+ *   GET /bing/tileset.json[?g=<genid>][&globe=<maxLevel>|off][&basemap=<{z}/{x}/{y} template>]
+ *   GET /bing/fragment/<face>-<level>-<x>-<y>.json?g=<genid>[&globe=…][&basemap=…]
  *   GET /bing/tile/<face>-<level>-<x>-<y>.glb?g=<genid>[&decompress=1]
+ *   GET /bing/globe/<face>-<level>-<x>-<y>.glb?g=<genid>[&basemap=…]
+ *
+ * Bing's mesh only starts at face-local level 12, so everything shallower renders as empty space.
+ * `bing-globe.js` fills those levels with a basemap-draped ellipsoid patch — see there for why, and
+ * note the coverage is web-mercator, so the ±85.05° polar caps are genuinely outside the tiling and
+ * stay empty by construction.
  *
  * User holds the Bing licensing; this is purely the technical format path.
  * Related: s1dny/bing-maps-tile-downloader (https://github.com/s1dny/bing-maps-tile-downloader/) — a
  * downloader for the same Bing `tf=3dv4` tiles (offline grab vs. our live `td1` → 3D Tiles proxy).
  */
 import { decompressGlb, sendJson, sendGlb, sendErr, CORS } from '../core/index.js';
+import { globeTileGlb, resolveBasemap, DEFAULT_GLOBE_MAX_LEVEL } from './bing-globe.js';
 
 const BING_HOST = 't.ssl.ak.tiles.virtualearth.net';
 const DEFAULT_G = '15530';
@@ -102,9 +109,11 @@ const geAt = (rootGE, level) => rootGE / 2 ** level;
 
 // Build a lazy explicit fragment rooted at (face, L, x, y): emit up to LEVELS_PER_FRAGMENT levels of
 // explicit tiles from the subtree availability, external-ref deeper fragments at the cutoff.
-async function buildFragment(faceMeta, L, x, y, g, isRoot) {
+async function buildFragment(faceMeta, L, x, y, g, isRoot, globe = {}) {
   const SL = faceMeta.subtreeLevels;
   const cut = L + LEVELS_PER_FRAGMENT;                   // stop emitting explicit tiles at this level
+  const globeMax = globe.maxLevel ?? DEFAULT_GLOBE_MAX_LEVEL;
+  const globeQS = globe.basemap ? `&basemap=${encodeURIComponent(globe.basemap)}` : '';
   const tileNode = async (level, tx, ty) => {
     const sroot = Math.floor(level / SL) * SL;
     const st = await getSubtree(faceMeta.face, sroot, Math.floor(tx / 2 ** (level - sroot)), Math.floor(ty / 2 ** (level - sroot)), g);
@@ -115,6 +124,14 @@ async function buildFragment(faceMeta, L, x, y, g, isRoot) {
     const region = tileRegion(faceMeta, level, tx, ty);
     const tile = { boundingVolume: { region }, geometricError: geAt(rootGEof(faceMeta), level), refine: 'REPLACE' };
     if (getBit(st.content, tIdx)) tile.content = { uri: `/bing/tile/${faceMeta.face}-${level}-${tx}-${ty}.glb?g=${g}` };
+    // Bing has no mesh above face-local level 12, so without this every zoomed-out view is empty
+    // space. Drape a basemap ellipsoid patch on the tile instead; REPLACE refinement hands over to
+    // real Bing mesh as soon as it exists, and keeps the shell where it never does (oceans). The
+    // shell goes on the tile ITSELF rather than an extra child, so it is genuinely replaced rather
+    // than left co-rendering underneath the mesh forever.
+    else if (globeMax >= 0 && level <= globeMax) {
+      tile.content = { uri: `/bing/globe/${faceMeta.face}-${level}-${tx}-${ty}.glb?g=${g}${globeQS}` };
+    }
     if (level >= cut) {                                  // hand off to a deeper lazy fragment
       tile.children = [{ boundingVolume: { region }, geometricError: geAt(rootGEof(faceMeta), level) * 0.5, refine: 'REPLACE',
                          content: { uri: `/bing/fragment/${faceMeta.face}-${level}-${tx}-${ty}.json?g=${g}` } }];
@@ -136,19 +153,41 @@ async function buildFragment(faceMeta, L, x, y, g, isRoot) {
 const rootGEof = (faceMeta) => faceMeta._rootGE;
 
 /** Root tileset: 4 faces, each an external-ref to its root fragment (lazy). */
-export async function bingTileset(g = DEFAULT_G) {
+export async function bingTileset(g = DEFAULT_G, globe = {}) {
   const m = await getManifest(g);
+  const globeQS = (globe.maxLevel != null ? `&globe=${globe.maxLevel}` : '')
+                + (globe.basemap ? `&basemap=${encodeURIComponent(globe.basemap)}` : '');
   const children = m.faces.map(f => {
     f._rootGE = m.rootGE / 2;                            // face GE (half the world root)
     return { boundingVolume: { region: f.region }, geometricError: f._rootGE, refine: 'REPLACE',
-             content: { uri: `/bing/fragment/${f.face}-0-0-0.json?g=${g}` } };
+             content: { uri: `/bing/fragment/${f.face}-0-0-0.json?g=${g}${globeQS}` } };
   });
   const region = [-Math.PI, -invMerc(Math.PI), Math.PI, invMerc(Math.PI), -500, 9000];   // whole web-mercator world
   // NB: Bing tile GLBs are standard glTF **Y-up** with the ECEF placement in the node matrix — Cesium's
   // default Y-up→Z-up correctly lands them on the globe, so leave gltfUpAxis at its default (do NOT set Z).
-  return { asset: { version: '1.1' }, geometricError: m.rootGE,
+  const globeOn = (globe.maxLevel ?? DEFAULT_GLOBE_MAX_LEVEL) >= 0;
+  return { asset: { version: '1.1',
+                    // 3D Tiles clients surface asset.copyright — which is how the basemap raster's
+                    // required attribution travels with the tileset instead of living in a viewer.
+                    // Resolved from the REQUESTED basemap, so &basemap=osm credits OSM, not Bing.
+                    ...(globeOn ? { copyright: resolveBasemap(globe.basemap).attribution } : {}) },
+           geometricError: m.rootGE,
            root: { boundingVolume: { region }, geometricError: m.rootGE, refine: 'REPLACE', children },
            extensionsUsed: ['3DTILES_content_gltf'] };
+}
+
+/**
+ * Globe-shell knobs, shared by /bing/tileset.json and /bing/fragment/*.
+ *   &globe=off      disable the shell entirely (raw Bing mesh, empty at low zoom)
+ *   &globe=<level>  deepest face-local level that gets a shell (default DEFAULT_GLOBE_MAX_LEVEL)
+ *   &basemap=<tmpl> raster URL template with {z}/{x}/{y}
+ */
+function globeOpts(u) {
+  const raw = u.searchParams.get('globe');
+  let maxLevel;
+  if (raw === 'off' || raw === 'false') maxLevel = -1;
+  else if (raw != null && Number.isFinite(Number(raw))) maxLevel = Number(raw);
+  return { maxLevel, basemap: u.searchParams.get('basemap') || undefined };
 }
 
 /** Try to handle a /bing/* request. Returns true iff it owned the response. */
@@ -157,7 +196,8 @@ export async function handleBing(req, res, u) {
   const g = u.searchParams.get('g') || DEFAULT_G;
   const decompress = u.searchParams.get('decompress') === '1' || u.searchParams.get('decompress') === 'true';
   try {
-    if (u.pathname === '/bing/tileset.json') { sendJson(res, await bingTileset(g)); return true; }
+    const globe = globeOpts(u);
+    if (u.pathname === '/bing/tileset.json') { sendJson(res, await bingTileset(g, globe)); return true; }
 
     const frag = u.pathname.match(/^\/bing\/fragment\/(\d+)-(\d+)-(\d+)-(\d+)\.json$/);
     if (frag) {
@@ -166,9 +206,21 @@ export async function handleBing(req, res, u) {
       const fm = m.faces.find(f => f.face === face);
       if (!fm) { sendErr(res, 404, 'no such face'); return true; }
       fm._rootGE = m.rootGE / 2;
-      const ts = await buildFragment(fm, L, x, y, g, L === 0);
+      const ts = await buildFragment(fm, L, x, y, g, L === 0, globe);
       if (!ts) { sendErr(res, 404, 'empty fragment'); return true; }
       sendJson(res, ts); return true;
+    }
+
+    // Low-zoom globe shell (see bing-globe.js). Same (face, level, x, y) addressing as Bing tiles, so
+    // the region is computed by the very same tileRegion() the mesh tiles use — no second tiling math.
+    const globeTile = u.pathname.match(/^\/bing\/globe\/(\d+)-(\d+)-(\d+)-(\d+)\.glb$/);
+    if (globeTile) {
+      const [, face, level, x, y] = globeTile.map(Number);
+      const m = await getManifest(g);
+      const fm = m.faces.find(f => f.face === face);
+      if (!fm) { sendErr(res, 404, 'no such face'); return true; }
+      const glb = await globeTileGlb(tileRegion(fm, level, x, y), level, globe.basemap);
+      sendGlb(res, glb); return true;
     }
 
     const tile = u.pathname.match(/^\/bing\/tile\/(\d+)-(\d+)-(\d+)-(\d+)\.glb$/);

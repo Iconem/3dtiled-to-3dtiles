@@ -1,0 +1,58 @@
+---
+title: "Benchmarks"
+description: "Reproducible conversion benchmark over the repo's own converters, and how it relates to the fastest-tiler ambition."
+---
+
+## Why this exists
+
+The [TODO / Future work](/docs/guide/todo-future-work) fastest-tiler research note flagged that **no
+neutral benchmark existed** — not against PotreeConverter 2.0 / untwine, and not even run-over-run
+against ourselves. This page is the first step: a pinned, reproducible harness measuring **our own
+converters on fixed public datasets**, so any performance change (e.g. wiring the `WorkerPool`
+multicore tier, or the WebP-instead-of-pngjs decode swap) has a before/after number.
+
+## Running it
+
+```sh
+node scripts/benchmark-converters.mjs            # all datasets
+node scripts/benchmark-converters.mjs --only potree,rad
+```
+
+Sources are mirrored once into `.bench-cache/` (download time reported separately and cached across
+runs), then the **offline `convert()`** is timed cold per run. Results print as a markdown table and
+are appended as dated JSON under `benchmark-results/`.
+
+## First results (2026-08-22)
+
+Machine: 12th Gen Intel Core i7-12800H × 20 threads · Node v22.22.3 · Windows 11.
+
+| Dataset | Format | Source MB | Convert s | Output files | Output MB | Throughput |
+|---|---|--:|--:|--:|--:|--:|
+| potree1-lion-takanawa | potree | 4.9 | 0.75 | 296 | 7.8 | 0.36 M points/s |
+| potree2-lion | potree | 44.2 | 3.92 | 1741 | 111.9 | 1.01 M points/s |
+| sog-skatepark | sog | 174.4 | 21.14 | 2055 | 165.8 | 8.3 MB/s |
+| rad-tastier-500k | rad | 12.2 | 0.53 | 12 | 9.9 | 0.94 M splats/s |
+
+Reading the numbers:
+
+- **~1 M points/s (Potree 2.0)** on a single core (the `WorkerPool` tier isn't wired — see
+  [Performance](/docs/guide/architecture-generic)) vs PotreeConverter 2.0's published **~9 M points/s**
+  *for a different job*: it builds an octree from raw unordered points; our converter *transcodes an
+  existing octree*. The honest comparison for the fastest-tiler ambition is our future raw-input
+  tiler vs PotreeConverter/untwine — this table is the regression baseline for the transcode path.
+- **SOG is decode-bound** (WebP → DataTable via WASM, then SPZ re-encode): 8.3 MB/s of source. This is
+  the path with the most multicore headroom.
+- **RAD is nearly free** (0.53 s for 500 k splats) — column decode + SPZ encode, no image codecs.
+
+## External tilers (context, not apples-to-apples)
+
+| Tool | Job | Their reported speed |
+|---|---|---|
+| [PotreeConverter 2.0](https://github.com/potree/PotreeConverter) | raw points → Potree octree | ~9 M pts/s uniform / ~6 M pts/s blue-noise (published paper) |
+| [untwine](https://github.com/hobuinc/untwine) | raw points → COPC | 2–5× faster than `pdal translate` past 500 M pts (own claim) |
+| [MIERUNE point-tiler](https://github.com/MIERUNE/point-tiler) | LAS/LAZ/CSV → 3D Tiles 1.1 | Rust/Rayon; no published numbers — worth measuring |
+
+None of those transcode *already-tiled* formats (this repo's job today), and none of their numbers are
+third-party-verified — see the TODO doc's research note. When the raw-input tiler direction is scoped,
+these become the targets and this harness grows a raw-input track (same datasets as their READMEs use,
+e.g. Autzen / CA13).

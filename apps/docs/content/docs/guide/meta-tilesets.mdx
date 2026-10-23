@@ -1,0 +1,838 @@
+---
+title: "Meta-tilesets: mosaicking N datasets into one endpoint (/aggregate)"
+description: "MosaicJSON/STAC-style aggregation over N tilesets, with spatial auto-nesting in either a web-mercator or a geodetic quadtree — and why Morton order is not a projection."
+---
+
+`/aggregate` answers one question: *"can I give a client a single URL that serves **all** our
+datasets?"* — 10 Angkor scans, San Pietro, Sacré-Cœur, a Geghard point cloud, in one tileset.
+
+It works because 3D Tiles supports this natively: a tile's `content.uri` may itself be another
+`tileset.json`. So the endpoint fetches each child's root, derives a bounding sphere and geometric
+error from it, and emits a parent whose children external-reference the child URLs.
+
+```
+GET /aggregate/tileset.json?url=<u1>&url=<u2>&…        # repeated form
+GET /aggregate/tileset.json?urls=<u1>,<u2>,…           # comma form (each URL-encoded)
+GET /aggregate/tileset.json?set=opendata|angkor|world|flai|aerometrex|vexcel|…  # a named set (below)
+    [&nest=auto|mercator|geodetic|flat]  [&bv=cell|sphere|region|box]  [&snap=0|1|<terrain>]  [&ttl=<seconds>]
+    [&format=…] [&only=…] [&exclude=…] [&hide=<id>] [&latest=1] [&from=…] [&to=…]
+GET /aggregate/index.json?<same query>                 # one row per dataset, for UIs
+```
+
+## How a mosaic is built, step by step
+
+Every request runs the same pipeline. Nothing below opens a dataset's *content*: only each child's
+`tileset.json` is read, and a client later streams the tiles directly from each source.
+
+1. **Select.** `?set=` / `?url=` / `?urls=` give the candidate children. `&format=`, `&only=`,
+   `&exclude=`, `&hide=`, `&from=`/`&to=` filter them, and `&latest=1` drops superseded captures.
+   Each child is one URL with, when known, an id, a name, a project, a scene, a date, a format and a
+   licence. Sources that are not 3D Tiles are wrapped first: Potree and COPC through this server's
+   `/stream` (with `&crs=` when the file declares none), and non-CORS 3D Tiles hosts through the
+   tileset-aware `/proxy`.
+2. **Read each child's root.** Each child `tileset.json` is fetched, 16 at a time and cached for a
+   day (60 s for failures). Its root `boundingVolume` gives one **bounding sphere in ECEF**:
+   - `box` and `sphere` are multiplied by the root `transform`;
+   - `region` is already ECEF by definition.
+
+   Its size gives the child's geometric error ([below](#how-a-childs-geometric-error-is-chosen)). A
+   child whose sphere centre is near the Earth's core has no georeference, so it is set aside as
+   *unplaced*.
+3. **Group.** The spheres are arranged into a hierarchy, in one of three ways:
+   - **`flat`**: the root lists every child directly.
+   - **`mercator` quadtree**: web-mercator / Bing-quadkey cells, 2ᴸ × 2ᴸ per level.
+   - **`geodetic` quadtree**: lon/lat cells on a 2 × 1 root, the subdivision a 3D Tiles implicit
+     `QUADTREE` on a `region` performs.
+
+   In both quadtrees each dataset goes to the deepest cell at least 4× its radius (at most level
+   16). Its cell's base-4 path, the same digits as a Bing quadkey, is a key into a trie. The trie is
+   path-compressed, so only branching cells become group tiles, and every group records its cell in
+   `extras.cell` (key, level, Morton index). `nest=auto` is flat below 8 children and `geodetic`
+   otherwise.
+4. **Bound the groups.** A group's volume is either:
+   - the minimal **sphere** enclosing its children's spheres (default); or
+   - with `&bv=region`, the union of its children's lon/lat/height **regions**
+     ([below](#region-bounding-volumes-bvregion)).
+
+   Its geometric error is 2× the largest child's, so errors strictly decrease on refine and a distant
+   group is never opened. The root takes the tighter of the union sphere and an **Earth-centred**
+   sphere, or a region with `bv=region`.
+5. **Emit.** The output is an explicit 3D Tiles 1.1 tileset:
+   - every dataset is a leaf with `refine: "ADD"` whose `content.uri` is the child tileset (an
+     external reference);
+   - each leaf carries **tile metadata** (class `dataset`: `id`, `name`, `project`, `scene`,
+     `date`, `format`, `licence`), so any 1.1 client can tell which dataset a tile is;
+   - `asset.extras` records the nesting (depth, groups, root fanout), `failed` and `unplaced`
+     children, and build timings (`build`).
+
+   The whole mosaic is cached, keyed by the selection. `index.json` flattens the same cached tree.
+
+**Why an explicit tree and not implicit tiling, and why no octree.** Implicit tiling allows one
+content per available cell, while a cell here often holds several datasets, and most cells are
+empty. So the tree would need extra levels anyway, and its subtree bitstreams would be almost all
+zeros. The cells are still the implicit quadtree's cells, which is what `extras.cell` records. There
+is no height (octree) split, because every dataset sits on the Earth's surface. A 2 × 1 lon/lat/height
+octree would put nearly everything into its lowest height cells and separate nothing. The vertical
+extent lives in the volumes instead: sphere radius, or `minH`/`maxH` with `bv=region`.
+
+**What it costs, measured.** Almost all of a cold build is fetching child roots; the tree itself
+takes milliseconds.
+
+| Mosaic | Children | Cold build (fetch roots) | Tree | Warm, other scheme | Cached mosaic |
+|---|---|---|---|---|---|
+| `set=iconem` (Potree through `/stream`, 3D Tiles, COPC) | 692 | 10.8 s | 16 ms | 257 ms end to end (0 fetched) | 187 ms end to end |
+| `set=flai` (113 national COPC overviews through `/stream`) | 113 | 4.2 s | 2.4 ms | | |
+| `set=aerometrex` (through `/proxy`) | 12 | 1.8 s | 4.4 ms | | |
+| synthetic, loopback (`debug-aggregate-nesting.mjs`) | 500 | ~0.3 s | ~5 ms | | |
+
+The cached-mosaic time is mostly serialising and transferring the JSON. Every build reports its
+own numbers in `asset.extras.build` (`childRoots`, `childRootsFetched`, `fetchMs`, `treeMs`), and
+`index.json` repeats them.
+
+## Try it — the demo sets
+
+`?set=` expands server-side to a curated list of real, public, key-less tilesets, so the endpoint can
+be *seen* rather than described. `GET /aggregate/demo.json` lists what each set contains.
+
+| `set=` | What |
+|---|---|
+| `opendata` | The ten open datasets from 3D Tiles' own [RESOURCES.md](https://github.com/CesiumGS/3d-tiles/blob/main/RESOURCES.md#open-data) — Strasbourg, Clermont-Ferrand, Saint-Étienne, Lille, Planet's Angkor Wat SkySat, Utrecht, Soest, Aarhus, AGI HQ, Tokyo Minato-ku. Four continents, and all three bounding-volume kinds (`region`, `box`, `sphere`). |
+| `angkor` | *Local, Iconem only.* Iconem's Angkor campaign as **23 individual site tilesets** rather than its hand-authored merged root. |
+| `open` | **Every open or evaluation dataset from outside Iconem**: `opendata` + `cities` + `esri-3d` + `openheritage3d` + `aerometrex` + `flai` + `vexcel`. The demo app's *Open data* pill. |
+| `cities` | **Open city and national 3D Tiles** published by their agencies: swisstopo swissBUILDINGS3D / swissTLM3D (all Switzerland), 3D BAG LoD2.2 and PDOK 3D Basisvoorziening (all the Netherlands), PLATEAU all-buildings LOD1 (all Japan — its [datacatalog API](https://api.plateauview.mlit.go.jp/datacatalog/plateau-datasets) lists 1 065 building tilesets in 306 cities), Helsinki's 2024 photomesh, 12 more CRAIG photomeshes. Direct references, CORS open. |
+| `esri-3d` | Esri Living Atlas **integrated meshes as 3D Tiles** (Utrecht, Zürich, Vienna, Munich, Stuttgart, Boston, Jena, Linz, Cambridge MA) and Frankfurt's buildings as an I3S scene layer through `/stream?format=i3s` (Girona's ICGC mesh is a legacy I3S layer without node pages, which the reader does not support). Public items, but each carries its owner's terms (Wingtra, AVT, Hexagon …) — showcase data rather than open data. ArcGIS Online search `typeKeywords:"IntegratedMesh"` lists ~10 900 such public services. |
+| `openheritage3d` | [Open Heritage 3D](https://openheritage3d.org) terrestrial LiDAR of heritage sites (Pompeii, Chichén Itzá, Florence Baptistery, Maeshowe …) as **Potree 2.0** (BROTLI), streamed. Licences per dataset (CC BY / CC BY-NC-SA 4.0), carried on each entry. No catalog API: the entries come from each project's viewer `config.js`. The scans are in **local frames** (no projection in `metadata.json`), so each entry carries an approximate site `lon`/`lat`/`alt` that `/stream`'s placement applies — manifest entries can now carry `lon`, `lat`, `alt`, `heading` for any local-frame cloud. |
+| `iconem-open` | *Local, Iconem only.* Iconem's demo datasets: the 23 Angkor sites and Geghard (Potree), © Iconem, not open data. The *Iconem — demo* pill where the full manifest is absent. |
+| `world` | Every committed dataset at once: `opendata` + `cities` + `esri-3d` + the 12 Aerometrex cities and the 10 Vexcel cities (both through `/proxy`, credited). Without `VEXCEL_API_KEY` on the server, Vexcel is left out. |
+| `flai` | [flai open LiDAR](https://github.com/flai-ai/open-lidar-data): **113 national LiDAR campaigns** (Estonia, UK, Finland, Belgium, Poland, Spain, Denmark, France, Germany, the Netherlands, NOAA …) as one COPC overview each, streamed through `/stream`. |
+| `vexcel` | Vexcel's **10 Australian 3D city collections** (Gold Coast, Canberra, Sydney and its Opera House prototypes, Perth, Brisbane, Melbourne, Adelaide). Key-protected, see [below](#key-protected-providers-vexcel). |
+| `aerometrex` | Aerometrex's **12 US city reality meshes** (Brooklyn, Hudson Yards, Denver, Las Vegas, LA, San Diego, Miami Beach, San Francisco, Tampa …), served through the tileset-aware `/proxy` because their host sends no CORS. These are sales previews, not declared open data. |
+
+`opendata`, `open` and `world` are defined in code. `angkor` and `iconem-open` use Iconem share links,
+which are kept out of the repository: they are machine-local manifests in `.local/aggregate-sets/`
+(`angkor.json`, `iconem-open.json`) and exist only where those files do. `flai` and `aerometrex` are committed manifests
+in `packages/tile-server/aggregate-sets/`, in the same shape as local sets, and any public manifest
+dropped there becomes a set. `flai.json` is generated from the flai README by
+`node scripts/flai-open-lidar-set.mjs --check`.
+
+<Callout type="info">
+**flai's COPC files declare no CRS at all** (no WKT VLR), which would leave every one unplaced. The
+catalogue gives each dataset's EPSG code, so each entry carries `crs: "EPSG:<n>"`, which `/aggregate`
+passes to `/stream` as `&crs=`. All 22 codes involved are covered by `core/geo.js`: 15 national grids
+(Lambert 93, OSGB, the Baltic and Polish grids, RD New …) by table, and the UTM families by rule. One dataset, Estonia *ALS 2018 madal*, has outlier points millions of metres
+east, so its COPC cube, and therefore its placement, is wrong at source.
+</Callout>
+
+```
+http://localhost:3001/aggregate/tileset.json?set=world&nest=geodetic
+```
+
+`?set=` composes with `?url=`, so you can drop your own dataset into a demo mosaic without retyping
+the rest of the set.
+
+### Testing every address
+
+Every mosaic is a plain URL, so the same address works in the demo app, in the hierarchy explorer,
+and in any 3D Tiles client. On the dev stack the tile-server is `http://localhost:3001`; paths below
+are relative to it (the demo app's URL field needs the absolute form).
+
+| Relative path | What it shows |
+|---|---|
+| `/aggregate/demo.json` | index of available sets (local sets: names and counts only) |
+| `/aggregate/tileset.json?set=world&nest=geodetic` | every committed dataset, five continents |
+| `/aggregate/tileset.json?set=opendata&nest=geodetic` | the 10 RESOURCES.md datasets |
+| `/aggregate/tileset.json?set=angkor&nest=geodetic` | 23 Angkor sites, **local** (`nest=mercator` to compare seams) |
+| `/aggregate/tileset.json?set=angkor&only=PhnomKulen` | 4 sites, name filter, **local** |
+| `/aggregate/tileset.json?set=iconem&nest=geodetic` | every Iconem share link (a **local** set, see below) |
+| `/aggregate/tileset.json?set=iconem&format=3dtiles` | only its 3D Tiles datasets |
+| `/aggregate/tileset.json?set=iconem&format=potree` | only Potree |
+| `/aggregate/tileset.json?set=iconem&format=copc` | only COPC |
+| `/aggregate/tileset.json?set=iconem&latest=1` | newest capture per site |
+| `/aggregate/tileset.json?set=iconem&nest=geodetic&bv=region` | same tree, region volumes |
+| `/aggregate/tileset.json?set=flai&nest=geodetic` | 113 national LiDAR campaigns |
+| `/aggregate/tileset.json?set=aerometrex` | 12 US cities through `/proxy` |
+| `/stats/tileset.json?url=<encoded aggregate URL>&maxExternal=256` | hierarchy statistics of any of them |
+| `POST /aggregate/draft` → `/aggregate/draft/<id>/tileset.json` (and `index.json`) | a hand-built mosaic from the [Aggregate Builder](/docs/guide/aggregate-builder), kept in memory for 24 h |
+
+Three ways to look at them:
+
+- **Demo app, 🧩 Aggregate pill.** One preset per row above; clicking one loads it and flies to the
+  area (Angkor presets fly to Angkor Thom, close enough for sites to load).
+- **Any URL:** paste the absolute form into the demo app's URL field (with **raw url** off) and press
+  **Load**; **⌗ hierarchy** then opens it in the explorer.
+- **`/hierarchy`** on the viewer: its preset list starts with these mosaics.
+
+### Search, markers and the dataset picker in the demo app
+
+Whenever an `/aggregate` tileset is loaded, the demo app shows a search box over the globe, fed by
+`/aggregate/index.json` — the same query as the tileset, flattened to one row per placed dataset
+(`id`, `name`, `project`, `scene`, `group`, `date`, `format`, `lon`, `lat`, `height`, `radius`), plus
+the `unplaced` and `failed` lists. The two can never disagree about which datasets a URL means: they
+share one selection function and one cached mosaic.
+
+- **Search** matches dataset name, project, scene, format and date as you type — accent-insensitive,
+  every word must match, and **typo-tolerant**: one edit for words of 4–6 letters, two from 7
+  ("mes aynek 2011" → MesAynak_2011, "venezzia"), also inside glued names like `MesAynak`. Exact
+  matches rank first. It also queries the world through [Photon](https://photon.komoot.io) —
+  OpenStreetMap, no key — from three characters. Arrow keys and Enter work; picking a dataset frames
+  its bounding sphere, picking a place frames its extent.
+- **Markers** (both renderers): one fixed-size dot per dataset on the ellipsoid, coloured by format
+  (amber Potree, blue COPC, violet 3D Tiles). **Hovering shows a card** with the dataset, scene,
+  project, format, capture date, size, its quadtree cell and depth in the mosaic, and its snap offset;
+  clicking flies to it. A marker disappears once its dataset
+  spans **more than 10% of the viewport height**, i.e. once the data speaks for itself. Cesium encodes
+  that as a per-point `DistanceDisplayCondition` at `radius / (0.1 · tan(fovy/2))`; 3DTRjs evaluates
+  the same formula in the vertex shader of one `THREE.Points` layer. Neither costs per-frame
+  JavaScript. Hover uses `drillPick`, so a small dataset's marker still answers when a larger,
+  already-loaded dataset covers it (Canal Grande under the Venice airborne scan).
+- **The picker** (`in view N ▾`) lists the datasets that are in the frustum and at least 3% of the
+  viewport tall — the ones rendering or about to — **grouped by platform scene**, each with a
+  checkbox and its capture date. A group's **latest** button hides that site's older dated captures
+  (a diachronic series such as Mes Aynak 2010 → 2022); **all** shows every piece (Venice: the airborne
+  scan plus San Marco, Rialto and the palazzi, all 2021-06, meant to be seen together). Above the
+  list: **format chips** derived from the index with their counts, a global **latest only** switch
+  and a **capture-date range**. Datasets hidden by hand, by date or by *latest only* keep a small grey
+  marker so they can be found and brought back; a **format** that is switched off takes its markers
+  with it.
+- **Marker pills per provider** (Iconem, Aerometrex, Vexcel, CRAIG …) show or hide the *markers* of a
+  provider's datasets, not the datasets.
+- **colour** `format | provider | dataset`: colours the **markers** (and the picker's dots) by format,
+  provider or dataset; the data keeps its own colours. (Both renderers can tint the data in place —
+  `setDatasetStyle`'s `colors` — but the picker no longer asks them to.)
+- **⧉** on a dataset row opens it **on its own, in a new tab**: a Potree cloud in the
+  [potree lab](/docs/guide/potree-lab) (its raw `cloud.js`, `PotreePlugin`), anything else in the
+  3DTRjs viewer (`/?renderer=3dtrjs&load=…`).
+- **bounds** `cell | sphere | region | box` rewrites [`&bv=`](#group-bounding-volumes-bvcell--sphere--region--box)
+  and **snap** `off | ground` rewrites [`&snap=`](#snap-each-dataset-to-the-ground-snap). Both change
+  the tree, so both reload it.
+
+Every picker action rewrites the mosaic URL — `&hide=`, `&latest=1`, `&from=`/`&to=`, `&format=` (see
+[below](#showhide-latest-only-and-dates)) — so the URL is still the whole state, and a filtered view is
+still one shareable 3D Tiles URL. **The renderer does not reload it**, though: it keeps the unfiltered
+mosaic and hides what the new URL excludes in place. Every mosaic leaf carries its dataset `id` in its
+3D Tiles 1.1 tile metadata, and a content tile belongs to the dataset of its nearest ancestor with one:
+- Cesium decides per rendered tile in `tileset.tileVisible`, which fires before the tile updates, by
+  setting the tile model's `show` and `color`;
+- 3DTRjs sets each loaded model's `visible` flag and material colours, on load and when the selection
+  changes (`forEachLoadedModel`).
+
+The *in view* list is open by default.
+
+Which datasets the URL excludes still comes from the server (`index.json` of the filtered URL), so
+*latest only* keeps its geometric rule. A URL that was loaded already filtered is replaced by its
+unfiltered form on the first picker change, once.
+
+**Providers and credits.** Every `index.json` row, and every mosaic leaf's tile metadata, carries a
+`provider` ("Iconem", "Aerometrex", "CRAIG", "IGN (FR)" …) and an `attribution` line. Manifests declare
+them at set level (`provider`, `attribution`) and entries may override them. The demo app lists the
+credits of the datasets on screen under its search box ("Data: © Iconem · © Aerometrex …"), and the
+hover card shows them. The builder filters its library by provider.
+
+<Callout type="info">
+**"Why is a Bing dataset visible over Rome?"** It is not the `/bing` endpoint leaking into the mosaic:
+the Iconem platform itself hosts a 3D Tiles asset named *Bing-Vatican - Cesium-it-62-rome-2020-subarea-vatican-1-48734*
+in its *San Pietro Basilica* scene, so it is one of the 17 Iconem 3D Tiles children. Hide it with the
+picker, or add `&exclude=Bing-Vatican`.
+</Callout>
+
+### Why not a 3DTRjs plugin for the markers
+
+3d-tiles-renderer 0.5 has `MVTAnnotationsPlugin`, `GeoJSONOverlay` / `MVTOverlay` and the
+`ImageOverlayPlugin`. All of them **drape** features onto loaded tile surfaces: they need geometry
+under the feature and they scale with the ground. A "there is data here" marker has to be visible
+precisely where nothing has loaded yet, at a constant pixel size, and MVT would mean serving vector
+tiles for ~700 points. A plain `THREE.Points` layer that follows the tileset group's transform is
+both simpler and correct; GeoJSON overlays would be the right tool for dataset *footprints*, later.
+
+Presets backed by a machine-local set (the Iconem manifest) are only offered when the server reports
+that set in `/aggregate/demo.json`, instead of being shown everywhere and failing with `unknown set`.
+
+### What the Angkor set demonstrates
+
+*`angkor` is a local Iconem set (see above); the measurements below were taken where it exists.*
+
+This is the interesting one, because the sites are **not** uniformly spread: 19 sit inside the Angkor
+park a few km apart, while four PhnomKulen sites are ~30 km north-east. Nothing tells the aggregator
+that — it sees 23 bounding spheres. It finds the split anyway:
+
+```
+[group r=23km]
+  [group r=14km]                 ← the Angkor park, 19 sites
+    …
+    [group r=1km]
+      • ElephantTerrace
+      • AngkorThom_SouthGate
+      [group r<1km]
+        • Bayon
+        [group r<1km]
+          • Baphuon_SleepingBuddha
+          • Phimeanakas
+  [group r=3km]                  ← PhnomKulen, 4 sites, ~30 km away
+    • PhnomKulen_01-2_KrorBeiKrab
+    …
+```
+
+The innermost Angkor group — Bayon, Baphuon, Phimeanakas — is archaeologically correct: those three
+are the monuments *inside Angkor Thom's walls*. That grouping came from bounding spheres alone.
+
+Measured on the real endpoints: 23/23 children, **root fanout 23 → 2**, depth 8 (geodetic) or 7
+(mercator). The `world` set as it then was (the open data plus Angkor, 33 tilesets): 33/33, fanout 2, depth 12.
+
+Comparing `set=angkor` against the hand-authored merged root in the
+[hierarchy explorer](/docs/guide/hierarchy-explorer) shows the point directly — same 23 datasets,
+**root fanout 23 → 8**, at the cost of a few levels of depth.
+
+<Callout type="warn">
+**Why the explorer needs `external refs: 256` for mosaics.** `/stats` and the hierarchy explorer
+follow external tileset references, each one another HTTP round trip, and stop after **64** by
+default so that walking an arbitrary tileset stays bounded. An aggregate consists *only* of external
+references (one per dataset, then each dataset's own), so even the 23-site Angkor mosaic passes 64
+almost at once and reports `truncatedBy: ["external"]`, a partial tree. Raise the cap to 256 or 1024
+in the explorer, or pass `&maxExternal=` to `/stats`, to see a whole mosaic.
+</Callout>
+
+Children can be **any** 3D-Tiles-serving URL — including this server's own `/stream`, `/convert`,
+`/bing` or `/3dtiles-self-contained`. That is the point: one mosaic can mix COPC + Potree + LCC + RAD
++ remote 3D Tiles, and a child with no georeference can be globe-placed first via
+[`/stream`'s placement params](/docs/guide/cli-usage). Unreachable
+children never kill the mosaic — they are skipped and listed in `asset.extras.failed`.
+
+## Flat is fine for 12 datasets and wrong for 500
+
+With a flat root, every dataset is a direct child. The moment the root refines, **all** of them are
+candidates — so at 500 datasets a client standing in Paris still considers Sydney.
+
+`nest` builds an intermediate hierarchy from nothing but each child's root bounding volume — centre
+and radius, which is all we can know without opening the datasets:
+
+```
+[group r=10km]           ← Versailles joins here
+  [group r=3km]          ← Sacré-Cœur joins here
+    [group r=2km]
+      • Eiffel
+      • Louvre
+```
+
+Two mechanisms then do the work, and it is worth being precise about which does what:
+
+- **Culling** handles *rendering* — a group whose bounding sphere misses the frustum is skipped.
+- **Geometric error** is what prevents the *fetch*. A group's GE is 2× its children's, so from orbit
+  a site-sized group subtends a fraction of a pixel and the renderer never traverses into it — which
+  means its children's `tileset.json` files are never requested at all.
+
+Each dataset is placed at the **deepest level whose cell still comfortably contains it** (4× slack),
+so a 200 m scan lands in its own city cell while a country-wide dataset stays shallow and is never
+split across cells. The trie is then path-compressed, so you get continent → country → city only
+where datasets actually diverge, not 16 levels of single-child nodes.
+
+`nest=auto` (the default) nests once there are **8 or more** children; below that a flat root is
+simpler and just as cullable.
+
+## Two schemes, because Morton order is *not* a projection
+
+<Callout type="info">
+**Morton (Z-order) is an addressing scheme** — interleave the bits of a cell's x/y — and it says
+nothing about which space those cells live in. Two different trees both use it, and they are not
+interchangeable.
+</Callout>
+
+| `nest=` | Grid | Matches |
+|---|---|---|
+| `mercator` (aliases `1`, `true`, `webmerc`, `quadtree`) | 2^L × 2^L over the **web-mercator** square, latitude clamped at ±85.05° | Bing/OSM/slippy-map tiles. A **Bing quadkey is exactly the base-4 Morton code** of the cell — so this lines a mosaic's grouping up with the raster basemap and with [`/bing`](/docs/guide/bing-maps-3d)'s own quadkeys. |
+| `geodetic` (aliases `morton`, `implicit`, `cesium`) | 2×1 cells at level 0, **longitude/latitude halved** per level | What **3D Tiles implicit tiling actually does**, and therefore what Cesium walks — its `GeographicTilingScheme`. |
+
+The geodetic case is the one people assume is mercator, and it isn't. The implicit-tiling spec
+subdivides the **root bounding volume in its own coordinate space**: for a `region`, "`x`, `y`, and
+`z` refer to `longitude`, `latitude`, and `height`", and each child extent is a plain arithmetic
+bisection of that range. Tiles *within* a level are then ordered along the Morton Z-curve — that is
+the only place Morton enters. No mercator anywhere.
+
+So: **Cesium's Morton order is not a web-mercator quadtree.** It is a geodetic quadtree indexed with
+Morton codes. Bing's quadkey is a mercator quadtree indexed with the same codes.
+
+Neither grouping is "wrong" — the nesting is a pure BVH either way, and any 3D Tiles client renders
+both identically. They simply cut different seams, so pick the one that matches what you are
+comparing against. Every group and dataset carries an `extras.cell` breadcrumb —
+
+```json
+"extras": { "cell": { "scheme": "geodetic", "key": "132000203123222", "morton": 436368298 } }
+```
+
+— so "why did this dataset end up here" has an answer from the tileset alone, without re-running the
+server.
+
+## Does it hold up at middleware scale?
+
+Yes, with one caveat that had to be fixed rather than assumed. Measured by
+`scripts/debug-aggregate-nesting.mjs` (500 synthetic datasets in 25 clusters, served from loopback):
+
+| | `mercator` | `geodetic` |
+|---|---|---|
+| Root fanout (from 500) | **4** | **2** |
+| Tree depth | 10 | 10 |
+| Group nodes | 359 | 357 |
+| Tree build, children cached | **2.4 ms** | **2.6 ms** |
+| Cold build incl. 500 child fetches | \~156 ms (loopback) | — |
+
+The tree build is negligible; the cost is entirely the N child round-trips. Hence two things:
+
+**Child fetches are pooled at 16.** This is measured, not defensive. Firing all 500 at once with a
+plain `Promise.allSettled` **lost more than half of them** — a mosaic came back with 232 datasets and
+268 bare `fetch failed` entries, still answering `200`, because failed children degrade into
+`asset.extras.failed` by design. It looked fine and was missing half the world, and the survivors
+varied run to run so the tree was not even reproducible. A 16-way pool fixes it outright: the
+children are independent round-trips, so 16 in flight already saturates the link and going wider only
+buys socket exhaustion.
+
+**Mosaics are cached whole, with a day-scale TTL** (`&ttl=`, default `86400` s), keyed on the exact
+child set plus nesting scheme; each child's fetched root is cached the same way. Assembling 500
+children must not happen per request — and a 3D Tiles client re-requests the root more than once per
+session. But a mosaic that can *never* notice a child moved is a stale-data bug waiting to happen,
+which is why the TTL is a day rather than forever. Failures get a much shorter TTL (60 s) so one dead
+host cannot pin a degraded mosaic for a day. `&ttl=0` bypasses the cache **in both directions** — use
+it while a dataset is actively being re-tiled.
+
+## Local sets: mosaicking every Iconem dataset
+
+Demo sets are committed; **local sets** are not. The Iconem set was generated by the script below
+against the production platform: **692 share links** (658 Potree, 17 3D Tiles, 17 COPC) across 139
+projects, of which **660 are placeable** (see [Datasets that cannot be placed](#datasets-that-cannot-be-placed)). Any `.local/aggregate-sets/<name>.json` (gitignored;
+override with `AGGREGATE_SETS_DIR`) becomes `?set=<name>`, re-read on every request so a regenerated
+manifest needs no restart:
+
+```json
+{ "label": "…", "entries": [
+  { "url": "https://api.iconem.com/s/<token>/cloud.js", "format": "potree",  "name": "Geghard" },
+  { "url": "https://api.iconem.com/s/<token>/<id>.json", "format": "3dtiles", "name": "Bayon_d2022" },
+  { "url": "https://api.iconem.com/s/<token>/<id>.copc.laz", "format": "copc", "name": "…" } ] }
+```
+
+`potree` and `copc` entries are wrapped through this server's `/stream` automatically. `only=` /
+`exclude=` match the entry's **name, project and scene** as well as its URL — necessary because a
+share URL is an opaque token, so `only=_d2024` could never match `/s/<token>/cloud.js` alone.
+`/aggregate/demo.json` lists local sets by name and count only, never their URLs.
+
+### Generating the manifest: `scripts/iconem-share-links.mjs`
+
+Enumerates every project → scene → Potree / 3D Tiles (and optionally COPC) asset on the Iconem
+platform, ensures each has **one** live share link named `single-meta-tileset`, and writes the
+manifest above.
+
+```powershell
+$env:ICONEM_EMAIL = "…"; $env:ICONEM_PASSWORD = "…"          # env only — never arguments
+node scripts/iconem-share-links.mjs                            # dry run: lists what it would create
+node scripts/iconem-share-links.mjs --apply                    # create missing links, write manifest
+# → http://localhost:3001/aggregate/tileset.json?set=iconem&nest=geodetic
+```
+
+It was built from the platform's own source (`iconem/Backend`, `iconem/Frontend`) and tested against
+`scripts/mock-iconem-api.mjs`, a mock that enforces the same contract — cookie `jwt`, `X-XSRF-TOKEN`
+on writes, 100-row pages, non-unique share names — so the flow is proven without minting a real link.
+
+- **Dry run by default.** Every share is public to whoever holds the URL.
+- **Idempotent.** The platform does not enforce unique share names and every POST mints a new token,
+  so the script reuses an existing live (non-revoked, unexpired) link of the same name. Running it
+  twice creates nothing the second time.
+- **No API keys exist on this platform** — it authenticates with an account email + password.
+
+<Callout type="warn">
+**COPC is opt-in (`--include-copc`), and for a real reason.** A share on a `las`/COPC asset is scoped
+to the **whole project blob container**, not the one file: the link for a single `.copc.laz` grants
+read + list on *every* blob in that project. Potree and 3D Tiles shares are scoped to their own asset
+container. COPC shares also require an `admin` account — the `las` share routes are absent from the
+expert permission list, so an expert gets `403`.
+</Callout>
+
+## Selecting a subset: `&format=`, `&only=`, `&exclude=`
+
+`&format=potree|copc|3dtiles` (repeatable, or comma-separated) keeps only children of that source
+format ("only the 3D Tiles", "only the point clouds") without maintaining a manifest per variant.
+Local-set entries carry their format; an ad-hoc `?url=` child is typed from this server's own
+`/stream`, `/tiles` or `/convert` `format=` parameter, and treated as 3D Tiles otherwise.
+
+Overlapping captures are the motivating case. A site re-scanned yearly gives N tilesets covering the
+**same ground** — Mes Aynak has one scan per year — and you usually want to see one, not all of them
+stacked.
+
+```
+# on a machine with the local angkor set
+…/aggregate/tileset.json?set=angkor&only=PhnomKulen        → 4 of 23
+…/aggregate/tileset.json?set=angkor&exclude=PhnomKulen     → 19 of 23
+…/aggregate/tileset.json?set=angkor&only=Bayon&only=TaProhm → 2 of 23
+…/aggregate/tileset.json?set=mysite&only=_d2024            → just the 2024 scan
+```
+
+Both are repeatable, case-insensitive **substring** matches against the child URL (`only` is applied
+first, then `exclude`). Substring rather than regex on purpose: these live in query strings that
+people edit by hand. An empty result is a `400` rather than an empty tileset, so a typo'd filter
+fails loudly.
+
+Filtering happens **server-side**, which is the point: the emitted tileset genuinely contains only
+the chosen datasets, so a filtered view is still a plain 3D Tiles endpoint you can paste into Cesium
+for Unreal. The URL *is* the whole state.
+
+<Callout type="info">
+**Overlap is already handled.** Every tile `/aggregate` emits — root, groups and dataset entries —
+uses `refine: "ADD"`, so sibling datasets are drawn *together* rather than one replacing another.
+`REPLACE` still applies *inside* each child tileset, which is what you want: replace between LODs of
+one dataset, add between datasets. Nothing extra is needed for overlapping scans; filtering is about
+not *wanting* to see them at once, not about correctness.
+</Callout>
+
+## Show/hide, latest only and dates
+
+These params compose with the ones above and are what the demo app's picker writes.
+
+| Param | Keeps |
+|---|---|
+| `&hide=<id>[,<id>…]` | everything except these datasets. `id` is the 10-hex-digit hash `index.json` reports, taken from the dataset's **source** URL, so it does not change with the server's origin. |
+| `&latest=1` | among datasets covering the **same ground** at different dates, only the newest. |
+| `&from=YYYY[-MM[-DD]]` `&to=…` | datasets whose capture date overlaps the range. **Undated datasets are kept**, so a timeline never silently empties a half-undated mosaic. |
+
+```
+…/aggregate/tileset.json?set=iconem&latest=1               → 625 of 660 placed
+…/aggregate/tileset.json?set=iconem&from=2020&to=2021      → 356 (dated in range + undated)
+…/aggregate/tileset.json?set=iconem&hide=266212bc81        → without Venice "General Airborne"
+```
+
+**What "same ground" means for `latest=1`.** Names are no guide, so the rule is geometric: centres
+closer than 0.3× the larger radius, and radii within a factor of two. That groups a yearly re-scan
+(Mes Aynak 2010, 2011, 2012, 2015 → 2022; Mosul al-Nuri 2018 → 2020; the INRAP excavation phases),
+while leaving a **detail capture nested inside a wider one** alone. Piazza San Marco inside the Venice
+airborne scan is much smaller, so both stay, and the airborne scan has a hole cut for it anyway.
+A capture is superseded only if it **ended before** the newest one **started**. Mixed precision is
+therefore handled honestly: `2022-05` and `2022-05-19` overlap, so neither replaces the other. It is
+a heuristic: different sensors of one site (a 2022 LiDAR and a 2025 photogrammetry) count as the same
+ground too. Use `&hide=` or the picker's per-site buttons when that is wrong.
+
+**Where dates come from.** The platform's `date` field on each asset when set (128 of 692), otherwise
+Iconem's naming conventions, most specific first, looking at the asset name, then the scene, then the
+project (271 more):
+
+| Pattern | Example | Date |
+|---|---|---|
+| `_dYYYYMM` / `_dYYYY` | `Vatican_…_d202412_p202501_epsg32633` | `2024-12` (`_p…` is the processing date, ignored) |
+| `YYYY-MM` | `Palazzo Ducale - Venezia (2020-06)` | `2020-06` |
+| bare year | `MesAynak_2012` | `2012` |
+
+Years outside 1990–2035 are rejected ("Church of the Assumption, 1783" names a building, not a scan).
+The share-link script writes `date`, `dateSource`, `projectId`, `sceneId` and `assetId` into the
+manifest; re-running it in dry-run mode refreshes them without creating any link.
+
+## Group bounding volumes: `&bv=cell | sphere | region | box`
+
+The nesting is always a quadtree: each group is a cell, and `extras.cell` records its key, level and
+Morton index. **What the renderer sees** as a group's volume (and what *Debug tiles* draws) is a
+separate choice:
+
+| `bv=` | Group volume | Shape on screen |
+|---|---|---|
+| `cell` (**default**) | **the quadtree cell itself** (web-mercator or geodetic 2×1 grid), widened only where a dataset near an edge pokes out, with the children's height range | the actual grid |
+| `sphere` | minimal sphere around the children's spheres | balls |
+| `region` | union of the children's lon/lat/height boxes | lon/lat boxes that **follow the data** |
+| `box` | an oriented box aligned with east/north/up at the group's centre | tight flat boxes |
+
+`cell` is the default because a group *is* its cell: sibling volumes never overlap, the tree reads
+as the grid it is, and a cell is a 3D Tiles `region`, which both Cesium and 3DTRjs support natively
+(3DTRjs handles `sphere`, `box` and `region` alike; the Angkor pills were checked in both). Below a
+leaf, **each dataset keeps its own volumes**: its root and nodes are whatever its own tileset says.
+The demo app's picker switches between the four with its **bounds** control.
+
+So `bv=region` does **not** show the webmerc/geodetic cells, because its regions hug the datasets;
+`bv=cell` does. The root takes the same kind of volume, except that `box` falls back to the
+Earth-centred sphere for a world-spanning mosaic, which has no single "up". Dataset entries always keep
+their own root's sphere. The demo app has an Angkor pill for each mode.
+
+### Where a dataset sits: `cell` and `depth`
+
+Each `index.json` row says where the dataset's external root hangs in the mosaic: `cell`
+(`{scheme, key, morton, level}` of the enclosing quadtree cell) and `depth` (its depth in the tree).
+The Vexcel Gold Coast collection, for example, sits under geodetic cell `1130330` at depth 5. The
+hover card and the picker's tooltips show both, so an Iconem scan can be located within the
+aggregate tileset — and the viewer's **Debug: cells + dataset roots** draws exactly these: the mosaic's
+own cells by depth, and each dataset's root volume in white (see
+[the viewer guide](/docs/guide/viewer#debug-cells-or-every-tile)).
+
+## Snap each dataset to the ground: `&snap=`
+
+`&snap=1` (Mapterhorn on the ellipsoid) or `&snap=<terrain>` (`mapterhorn-ellipsoid`, `mapterhorn`,
+`terrarium`) moves **every dataset separately** onto the terrain. The offset is applied where the
+dataset's root is attached: the leaf tile gets a `transform`, a translation along the local up, which
+chains into the external tileset below it. The leaf's bounding sphere is expressed in that translated
+frame, so it stays as it is. `extras.snap` = `{terrain, dz, bins, spread}` records the result, and
+`index.json` reports it too, with `height` already including `dz`.
+
+The offset is computed server-side by `packages/core/dataset-ground.js`, the same module the viewer's
+single-tileset **⤓ Snap to ground** uses, against `packages/core/terrain.js`. That module decodes
+Terrarium tiles in Node: WebP through the `@jsquash/webp` WASM codec, with no native dependency, and
+PNG through `pngjs`. Results are cached per dataset like the child roots. Mes Aynak's seven captures
+take ~2 s the first time:
+
+| Dataset | dz |
+|---|---|
+| MesAynak_2010 | +3.17 m |
+| MesAynak_2011 | +3.53 m |
+| MesAynak_2012 | +3.61 m |
+| MesAynak_2015 | +6.51 m |
+| MesAynak_2022 | +3.46 m |
+| 2015-10 landscape | +5.82 m |
+| 2015-10 zones_HD | +3.98 m |
+
+**Why per dataset.** Snapping the loaded tileset as a whole — what the viewer button does for a
+single tileset — samples the top content of the *mosaic*, i.e. of whichever datasets its root happens
+to reach. That is why snapping "Mes Aynak multi" did not work. Each capture has its own vertical error,
+so each needs its own offset.
+
+**Why 8 × 8 bins.** The samples are the dataset's top content: a sparse, spatially uniform subsample
+(Potree/COPC root nodes, a mesh's coarsest LOD), typically a few thousand to ~60 000 points. At 8 × 8
+each bin still holds tens to hundreds of points, so its 10th-percentile height is a stable ground
+estimate. 3 × 3 mixes a building with its square in one bin; 16 × 16 (and the earlier 12 × 12) leaves
+many bins with a handful of points, where the percentile is noise. The offset is the 70th percentile
+of *terrain − ground* over the bins, so roofs and canopy do not pull it down.
+
+## Key-protected providers: Vexcel
+
+Vexcel's 3D Cities API needs an `api_key`. A mosaic is a public URL, so the key must never appear in
+it:
+- the `vexcel` manifest lists plain collection URLs (`api.vexcelgroup.com/v2/3d/tileset?collection=…&layer=…`),
+  all with `proxy: true`;
+- `/proxy` adds the key **on the way out**, from the server's `VEXCEL_API_KEY` (per-host table
+  `HOST_KEYS` in `proxy-live.js`);
+- it strips the key from any URL it hands back, including child URIs a response echoes;
+- the server reads machine-local secrets from the gitignored `.local/tile-server.env`
+  (`KEY=value` lines; real environment variables win);
+- a manifest with `requiresEnv` is skipped where that variable is unset, so the set, and its share
+  of `world`, only exist where the key does.
+
+Checked: neither the `world` tileset nor any proxied Vexcel response contains the key.
+
+## Coordinate systems: how sources end up in one mosaic
+
+**What the renderers accept.** A 3D Tiles tileset has exactly one frame: **ECEF, EPSG:4978** (metres,
+Earth-centred, Z to the north pole). Bounding `region`s are the one exception, written in EPSG:4979
+(radians plus ellipsoidal height). Cesium and 3DTRjs both assume exactly this and nothing else. A
+tileset in any other CRS is simply wrong unless a `transform` places it. Content that is not
+georeferenced at all can be placed with a root `transform`; the viewer's Local Frame does this.
+
+**So nothing is reprojected at mosaic time.** Every child already renders in ECEF, because the
+converters in this repo put each source there:
+- Potree and COPC are streamed through `/stream`, which reads the source CRS (WKT or EPSG from the
+  header or the manifest) and writes a **root transform**.
+- An aggregate only references those tilesets, so they compose without any per-point work.
+
+**The root transform is a 1 m trihedron** (`georefFromCrs`, `packages/core/geo.js`):
+- the origin is the source origin through proj4, `srcCrs → EPSG:4979`, then to ECEF;
+- the X and Y columns are the ECEF images of **one metre east and one metre north in the source CRS**,
+  from central differences over ±50 m through proj4;
+- Z is the ellipsoid normal.
+
+Unlike a plain east-north-up frame at the origin, this keeps the projection's **grid convergence**
+(the angle between grid north and true north) and its **scale factor**:
+- at Geghard in its UTM zone the convergence is 0.117°, about 1 m of error at 500 m from the origin;
+- 300 km from a UTM central meridian it is 1.379°.
+
+A geographic source CRS (lon/lat) keeps plain ENU. Per-point reprojection would be exact everywhere.
+The trihedron is exact at the origin and linear away from it: about 500 m out, the change in
+convergence adds up to ~1.5 cm, and treating source heights as a flat axis ignores the Earth's
+curvature (2 cm at 500 m, 20 cm at 1.6 km). That is fine for site-sized data; region-sized sources
+should be tiled so each tile gets its own origin.
+
+Cell bounds are decoded from the path key (`cellBounds`, the inverse of `cellAt`). Writing that
+decoder exposed a bug in the geodetic key: it re-encoded the hemisphere bit and dropped the finest
+longitude bit, so geodetic cells were twice as wide as their key said. The key is fixed, and a test
+now round-trips 2,000 points through `cellAt` → `cellBounds` in both schemes.
+
+**How regions are computed.** A region is `[west, south, east, north, minH, maxH]`.
+
+A ball of radius `r` whose centre is `d` from the Earth's centre spans `asin(r/d)` of arc, plus 1%
+for the gap between geocentric and geodetic latitude. Longitude widens by `1/cos` of the most poleward
+latitude reached. A ball that touches a pole or crosses the antimeridian gets the full longitude
+range, which is loose but never wrong. Dataset entries keep their own sphere, derived from their own
+root. `scripts/debug-aggregate-nesting.mjs` checks that every dataset lies inside all of its
+ancestor volumes (regions, cells and boxes) under both schemes.
+
+```
+…/aggregate/tileset.json?set=iconem&nest=geodetic&bv=region
+```
+
+`region` is a core 3D Tiles 1.0 bounding volume, not something tied to implicit tiling. Cesium and
+3DTRjs both cull and refine on it; the demo app's **Angkor — 23 sites (regions)** pill is the same
+tree as the geodetic pill, so the two can be compared directly.
+
+## Hand-built hierarchies still compose
+
+Auto-nesting derives grouping from geometry alone. If you want a *semantic* hierarchy — by campaign,
+by client, by year — nest the endpoint in itself: a child URL can be another `/aggregate` URL, since
+3D Tiles external references compose to any depth. Auto-nesting and hand-nesting mix freely, so a
+hand-authored "Cambodia" node can have an auto-nested mosaic of 40 Angkor scans underneath it.
+
+## Native Potree leaves: `&native=1` and the 3DTRjs setting
+
+Every leaf of a mosaic is 3D Tiles: Potree and COPC children are wrapped through `/stream`. With
+`&native=1` a Potree leaf **also** says "this dataset is really a Potree 1.8 cloud at this URL", so a
+renderer that reads Potree itself loads it directly, and every other client still gets 3D Tiles.
+In the viewer this is **Native Potree leaves** under *Tileset & LOD*, in 3DTRjs mode (`?native=true`).
+CesiumJS has no Potree reader, so the setting does not exist there.
+
+**Prior art.** [`MAXAR_content_geojson`](https://github.com/CesiumGS/3d-tiles/tree/main/extensions)
+ships GeoJSON as tile content: a 3D Tiles extension for content that is not glTF. This is the same
+pattern one level up, where the "content" is a whole hierarchy instead of one tile payload.
+
+### What the server emits
+
+```json
+{
+  "extensionsUsed": ["ICONEM_content_source"],
+  "root": { "children": [ {
+    "boundingVolume": { "sphere": [ ... ] },
+    "geometricError": 609,
+    "refine": "ADD",
+    "content": {
+      "uri": "http://.../stream/tileset.json?format=potree&url=https%3A%2F%2F.../cloud.js&cache=none",
+      "extensions": {
+        "ICONEM_content_source": {
+          "format": "potree", "version": "1.7", "encoding": "BINARY",
+          "uri": "https://.../cloud.js",
+          "transform": [ 16 numbers, column-major ]
+        }
+      }
+    }
+  } ] }
+}
+```
+
+- `content.uri` stays the `/stream` 3D Tiles wrapper, so CesiumJS, Cesium for Unreal and any spec
+  client render the leaf unchanged. The extension is in `extensionsUsed`, never
+  `extensionsRequired`. That is the difference from `MAXAR_content_geojson`, whose `uri` itself
+  points at non-3D-Tiles content.
+- `transform` maps the cloud's **own** coordinates, which is what `PotreePlugin` draws, to the leaf
+  frame. It is `/stream`'s root transform composed with a shift by the cloud's centre, so the CRS
+  georeference, a `&crs=` override and `&lon=&lat=` placement all carry over.
+- `/stream` reports what this needs in its Potree root's `extras.native`: `version`, `encoding`
+  (`BINARY`, `LAS`, `LAZ` for 1.x, the metadata encoding for 2.0) and `origin`. The aggregate reads it
+  from the child root it already fetches, so `&native=1` costs no extra requests.
+- `format` is open-ended. Only `potree` is emitted today.
+- `ICONEM_` is a placeholder vendor prefix. Publishing the extension would mean registering one.
+
+On the full Iconem manifest, all 628 Potree leaves get the extension: 337 are Potree 1.7 and 291
+are 1.8, all with `.bin` nodes, so every one is readable natively.
+
+### What the viewer does
+
+`lib/nativeLeaves.ts` is a 3DTRjs plugin on the mosaic's renderer:
+
+1. **Claims a leaf** whose extension it can read: Potree 1.x `.bin` (1.8 through the vendored
+   loader patch) or 2.0 DEFAULT. COPC, Brotli and LAS/LAZ-node clouds keep the `/stream` path.
+   The core marks a `.json` content as an external tileset, so the plugin flips the leaf to
+   renderable content. It redirects only the request, not `content.uri`, because dataset ids,
+   hide and tint are derived from that link.
+2. **Mounts a child renderer** when the leaf's placeholder content "loads": a `TilesRenderer` with
+   `PotreePlugin` under a node carrying `transform`. The parent then places the leaf as usual.
+3. **Shares budgets.** The child uses the parent's LRU cache, download queue and parse queue.
+4. **Updates only visible leaves**, each frame after the parent, with the parent's cameras,
+   resolutions and error target. A hidden dataset stops loading. An evicted leaf disposes its child.
+5. **Keeps the viewer's controls working.** Hide applies to the whole cloud. Tint applies to native
+   points as they arrive. The point-size slider drives `PotreePlugin`'s point scale, and its
+   adaptive sizing replaces the viewer's own. Raycasts reach native points, so double-click zoom
+   and the controls' pivot work on them.
+
+### Measured (2026-10-23, `set=iconem&nest=geodetic&format=potree`)
+
+| View | Native | `/stream` |
+|---|---|---|
+| Geghard, 780 m | 5 nodes, 23,074 points | 5 nodes, 23,074 points |
+| Angkor Thom, 6 clouds, default 2 px | 10 nodes, 142,342 points, all in 8 s | 10 nodes, 142,342 points |
+| Same, 0.25 px target | 315 nodes, 3.7 M points after 70 s, still refining | 118 nodes, 1.7 M points, stops at 20 s |
+| Screen-grid raycast, 384 rays | 28 hits | 28 hits |
+
+At equal depth both paths load the same Potree nodes and place them on the same pixels. The native
+points look denser because `PotreePlugin` sizes each point from its node. The 0.25 px row shows a
+`/stream` limitation, not a native one. `/stream`'s implicit Potree tilesets use 3-level subtrees, and
+under 3DTRjs no visible node ever went past level 3, the first child-subtree boundary. The native
+path reached level 4 on the same clouds. That is worth its own investigation.
+
+### Not done yet
+
+- [ ] Find why `/stream` Potree stops refining at the first child-subtree boundary in 3DTRjs.
+- [ ] Native COPC, once 3DTRjs has a COPC loader (roadmap issue 943), and EPT.
+- [ ] Eye-dome lighting on native leaves. `PointCloudEffectsPlugin` supports it per renderer, and
+  one pass over the whole mosaic would need a shared depth target.
+- [ ] Count child-renderer tiles in the status panel (it shows the mosaic's own tiles only).
+- [ ] Drafts (`/aggregate/draft/…`) do not take `&native=1` yet.
+
+## Inspecting the result
+
+`/aggregate` output is a tileset like any other, so
+[`/stats` and the hierarchy explorer](/docs/guide/hierarchy-explorer) walk it directly — including
+following each child external reference — which is the quickest way to confirm a mosaic grouped the
+way you expected.
+
+## Sources that need care before you aggregate them
+
+Three real sources were evaluated for the demo sets and each failed a different check. They are
+documented rather than included, because each failure is a general lesson about aggregation.
+
+**Aerometrex** (e.g. `demo3d.aerometrex.com/USA/US0014_Brooklyn_50mm_Oct_2021/Scene/Cesium_Brooklyn.json`)
+— valid tilesets that fetch fine **server-side** but send **no `Access-Control-Allow-Origin`**, even
+when asked with an `Origin` header (their preflight answers 403). A mosaic child pointing straight at
+that host fails in any browser. **Solved by `/proxy`, which is tileset-aware:**
+- for a JSON response with `asset` and `root`, it rewrites every `content.uri` (`Data/L13_0.b3dm`,
+  nested `tileset.json`s) to an absolute `/proxy?url=…`, so the whole tree comes back through it;
+- it also accepts S3's `application/octet-stream` for a `.json` path;
+- a child with no query string inherits the parent's (Agisoft Cloud's access token).
+
+Brooklyn's 1,003 tiles all stream this way. A manifest entry marks the host with `"proxy": true`.
+Aerometrex's evaluation assets are also on Cesium ion: San Francisco is ion asset **1415196** and
+Denver is **354307**; loading them needs an ion token.
+
+<Callout type="warn">
+**Vexcel needs a secret.** `api.vexcelgroup.com/v2/3d/tileset` answers with a root listing ~10
+Australian collections, but its child URLs drop the `api_key`, and fetching one without the key
+returns **403**. The key is a **credential** — it must never be committed to a demo set in a public
+repo. Pass it per request with `?url=`, or wire it through an environment variable in your own
+deployment.
+</Callout>
+
+**The Iconem STAC catalogue** (`app.iconem.com/api/stac/collections/tiles`) is a valid STAC
+Collection whose `item_assets` declares a 3D Tiles entry point, and `…/api/stac/search?collections=tiles`
+returns items — but **unauthenticated it exposes only a handful**, not the full catalogue. Enumerating
+everything, and minting share links, needs credentials and is deliberately not automated here.
+
+## Datasets that cannot be placed
+
+A dataset in its own local frame (no georeference, no root transform) has its centre at the ECEF
+origin, i.e. inside the Earth. It cannot be mosaicked: its "position" converts to an arbitrary
+lon/lat and its sphere inflates the root past the planet's own radius. Such children are **excluded**
+and listed in `asset.extras.unplaced` (on the Iconem set: 32 of 692). If *every* child is unplaceable
+or unreachable, the endpoint answers **`422`** with both lists and a hint rather than a `500`: place
+them first with `/stream/tileset.json?...&lon=<deg>&lat=<deg>` and they become ordinary children.
+
+## The root bounding sphere
+
+Worldwide mosaics are bounded by an **Earth-centred** sphere whenever that is tighter than the
+greedy pairwise union of the children (whose radius overshot to 9 526 km for the Iconem set — larger
+than the planet). Regional mosaics keep the tight union (Angkor: 23 km). The centre of a sphere that
+encloses sites on several continents therefore sits inside the Earth — like the midpoint of a chord —
+which is expected, not a placement bug. Viewers that decide "centre near the origin = local, unplaced
+content" must also look at the radius: the demo app's 3DTRjs renderer treats a planet-sized sphere
+as global data rather than re-anchoring it to the local frame.
+
+## How a child's geometric error is chosen
+
+The reference tile that points at a child tileset gates **when that tileset is loaded**, so its
+geometric error means "the error of not showing this dataset at all", i.e. its size. It is
+`max(child tileset GE, child root GE, bounding radius)`.
+
+Taking the child's declared value alone broke on real data: Iconem's Angkor site tilesets declare
+`geometricError` of √3 ≈ 1.73 at both tileset and root level for sites about 240 m across. Every group
+above doubles from the value below, so the whole branch only refined within about 100 m of the
+camera, and the mosaic loaded nothing from any sensible viewpoint. Well-formed tilesets (GE already
+at least the radius) are unaffected.
+
+## Limits worth knowing
+
+- Grouping uses each child's **root bounding sphere**. A dataset whose root volume is far larger than
+  its actual content (a loose root box) nests shallower than it deserves.
+- `region` bounding volumes are already ECEF per spec, so the child root transform is deliberately
+  not applied to them; box and sphere volumes are transformed into the parent frame.
+- There is no reprojection or CRS negotiation — every child must already resolve to ECEF.

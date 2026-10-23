@@ -1,0 +1,112 @@
+{
+  "label": "Aerometrex US city previews — 12 reality meshes (via /proxy)",
+  "provider": "Aerometrex",
+  "attribution": "© Aerometrex (aerometrex.com) — sales preview",
+  "source": "Viewer pages linked from https://aerometrex.com/models/ — sales previews, not declared open data",
+  "note": "demo3d.aerometrex.com sends no CORS headers, so every entry is served through this server's tileset-aware /proxy",
+  "entries": [
+    {
+      "format": "3dtiles",
+      "proxy": true,
+      "name": "Brooklyn 5 cm",
+      "project": "Aerometrex",
+      "scene": "New York",
+      "date": "2021-10",
+      "url": "https://demo3d.aerometrex.com/USA/US0014_Brooklyn_50mm_Oct_2021/Scene/Cesium_Brooklyn.json"
+    },
+    {
+      "format": "3dtiles",
+      "proxy": true,
+      "name": "Hudson Yards",
+      "project": "Aerometrex",
+      "scene": "New York",
+      "date": "2021-10",
+      "url": "https://demo3d.aerometrex.com/USA/US0013_Hudson_Yards_Oct_2021/Scene/Cesium_Hudson_Yards.json"
+    },
+    {
+      "format": "3dtiles",
+      "proxy": true,
+      "name": "Manhattan — South Gramercy",
+      "project": "Aerometrex",
+      "scene": "New York",
+      "date": "2021",
+      "url": "https://demo3d.aerometrex.com/USA/US0006_Manhattan_2021/Cesium_Sth_Gramercy/Scene/Cesium_Sth_Gramercy.json"
+    },
+    {
+      "format": "3dtiles",
+      "proxy": true,
+      "name": "Denver 2 cm + street level",
+      "project": "Aerometrex",
+      "scene": "Denver",
+      "date": "2020-08",
+      "url": "https://demo3d.aerometrex.com/USA/US0001_Denver_20mm_and_SL_Combo_Aug2020/Scene/Cesium_Denver_HR_with_SL.json"
+    },
+    {
+      "format": "3dtiles",
+      "proxy": true,
+      "name": "Denver 5 cm",
+      "project": "Aerometrex",
+      "scene": "Denver",
+      "date": "2020-09",
+      "url": "https://demo3d.aerometrex.com/USA/US0001_Denver_50mm_Sept2020/Scene/Cesium_Denver_5cm.json"
+    },
+    {
+      "format": "3dtiles",
+      "proxy": true,
+      "name": "Las Vegas 5 cm",
+      "project": "Aerometrex",
+      "scene": "Las Vegas",
+      "url": "https://demo3d.aerometrex.com/USA/US0012_Las_Vegas/Cesium_5cm_minus_SL_Delivery/Scene/Cesium_5cm_minus_SL_Delivery.json"
+    },
+    {
+      "format": "3dtiles",
+      "proxy": true,
+      "name": "Los Angeles downtown 5 cm",
+      "project": "Aerometrex",
+      "scene": "Los Angeles",
+      "url": "https://demo3d.aerometrex.com/USA/US0007_Los_Angeles_50mm_/Scene/Cesium_LA_Downtown.json"
+    },
+    {
+      "format": "3dtiles",
+      "proxy": true,
+      "name": "San Diego",
+      "project": "Aerometrex",
+      "scene": "San Diego",
+      "date": "2022-03",
+      "url": "https://demo3d.aerometrex.com/USA/US0016_San_Diego_Mar_2022/Scene/Cesium_San_Diego.json"
+    },
+    {
+      "format": "3dtiles",
+      "proxy": true,
+      "name": "Miami Beach",
+      "project": "Aerometrex",
+      "scene": "Miami",
+      "url": "https://demo3d.aerometrex.com/USA/US0004_Miami/Cesium_Miami_Beach/Scene/Cesium_Miami_Beach_Delivery.json"
+    },
+    {
+      "format": "3dtiles",
+      "proxy": true,
+      "name": "San Francisco 2 cm",
+      "project": "Aerometrex",
+      "scene": "San Francisco",
+      "url": "https://demo3d.aerometrex.com/USA/US0005_San_Francisco/San_Francisco_2cm_SL_split/Scene/Cesium_SF_2cm_mSL.json"
+    },
+    {
+      "format": "3dtiles",
+      "proxy": true,
+      "name": "San Francisco 5 cm",
+      "project": "Aerometrex",
+      "scene": "San Francisco",
+      "url": "https://demo3d.aerometrex.com/USA/US0005_San_Francisco/San_Francisco_5cm_Scene/Cesium_SF_5cm.json"
+    },
+    {
+      "format": "3dtiles",
+      "proxy": true,
+      "name": "Tampa 5 cm",
+      "project": "Aerometrex",
+      "scene": "Tampa",
+      "date": "2021-09",
+      "url": "https://demo3d.aerometrex.com/USA/US0011_Tampa_50mm_Sept_2021/Scene/Cesium_Tampa_FL.json"
+    }
+  ]
+}

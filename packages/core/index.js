@@ -4,12 +4,13 @@
  * See ARCHITECTURE.md.
  */
 export { buildSpzBuffer, buildSpzGlb, buildSplatTileGlb, computeBounds } from './spz-glb.js';
-export { buildPointsGlb } from './points-glb.js';
+export { buildPointsGlb, srgbToLinear } from './points-glb.js';
 export { parallelMap, WorkerPool, defaultConcurrency } from './parallel.js';
 export { detectFormat, detectFormatByName } from './detect.js';
 export { keyToCoords, coordsToKey, octreeChildKeys, octreeSubCube, cubeToBox,
-         buildExplicitTree, buildSubtreeBuffer, subtreeRootKeys } from './tiling.js';
-export { DEG, llhToEcef, ecefToLlh, enuFrame, enuMatrix, georefFromCrs, cgcs2000Lon0, lccGeoref, LCC_LOCAL_UPRIGHT } from './geo.js';
+         buildExplicitTree, buildSubtreeBuffer, subtreeRootKeys,
+         parseSubtreeBuffer, morton2Decode, morton3Decode } from './tiling.js';
+export { DEG, llhToEcef, ecefToLlh, enuFrame, enuMatrix, georefFromCrs, crsDefinition, cgcs2000Lon0, lccGeoref, LCC_LOCAL_UPRIGHT, mat4Multiply, placementMatrix, isEcefPlaced, applyPlacement } from './geo.js';
 export { Source } from './source.js';
 export { CORS, sendJson, sendGlb, sendBin, sendErr } from './http.js';
 export { buildImplicitTileset } from './octree.js';

@@ -36,6 +36,11 @@ Roughly in the order we're tackling them, grouped by theme below.
   crop/subsample extract tool.
 - **Performance** — Draco+KTX2 decode speed (WebP instead of pngjs, reused decoder instances, worker
   pool); the `WorkerPool` multicore tier isn't wired yet for any converter.
+- **Spec direction (noted 2026-10-20)** — point-cloud compression: Khronos closed glTF#1809
+  (a Draco point-compression extension) as *superseded by `KHR_meshopt_compression`*, which is what
+  `/stream?transform=meshopt` already emits; 3D Tiles 2.0 is being baselined on **glTF 2.1 as a set
+  of extensions** (3d-tiles#803), including `3DTILES_georeference` for local → ECEF placement.
+  Implications and follow-ups listed in the section below.
 - **Format coverage** — spherical harmonics (view-dependent color) for Gaussian splats: every splat
   converter currently emits DC-only color. Design sketch covers what each format (RAD/LCC/SOG/GeoSplats)
   stores and what the `KHR_gaussian_splatting` output extension already supports — LCC/SOG look like a
@@ -198,6 +203,34 @@ flowchart LR
 ```
 
 ## Rendering / viewer
+
+- [ ] **Interactive transform gizmo → bake the result into `/stream` placement params.**
+  Today's [globe placement](/docs/guide/cli-usage) is
+  *type-the-numbers*: `&lon=&lat=&alt=&heading=&scale=`. That is the right wire format — it lives in
+  the tileset, so every client honours it — but it is a poor authoring experience for the actual task,
+  which is "nudge this scan until it sits on the building".
+
+  The missing half is a **free 6-DoF gizmo** (translate / rotate / scale) in the viewer that writes
+  back to those params, so an interactive session ends with a URL you can paste into Cesium for
+  Unreal rather than viewer-only state. Either `TransformControls` in the vanilla three.js path or
+  `@react-three/drei`'s `<PivotControls>` / `<TransformControls>` in the R3F path would do; both
+  already ship with this repo's dependencies.
+
+  **Prior art to copy from, not reinvent:** WilliamLiu-1997's
+  [3DTiles-Inspector](https://github.com/WilliamLiu-1997/3DTiles-Inspector) (pre-installed here under
+  `tools-inspector/` — see the [references index](/docs/references)) already does root-transform
+  editing plus geometric-error / layer-multiplier scaling on a loaded tileset, and is the closest
+  existing thing to this idea. The difference worth preserving is the **output**: the inspector edits
+  a tileset in place, whereas the point here is to end at a *stateless URL* against the middleware —
+  placement as a request parameter, not a saved file.
+
+  Two design notes for whenever this is picked up:
+  - The gizmo must compose **on top of** the adapter's own up-axis flip (SOG's RX(−90°), RAD's
+    RX(180°), LCC's `[East, −Up, North]`), not replace it, or every format regresses to Y-up/Z-up
+    guessing at the client.
+  - `&lon`/`&lat` place the dataset's **own local origin**. A dataset whose origin is not at its
+    bounding-box centre lands offset by exactly that amount, so a gizmo built on this will want the
+    as-yet-unbuilt `&anchor=center|origin` option to feel predictable.
 
 - [ ] **Feature request draft — expose SparkRenderer LoD options in `3d-tiles-rendererjs-3dgs-plugin`.**
   **Target repo:** https://github.com/WilliamLiu-1997/3D-Tiles-RendererJS-3DGS-Plugin
@@ -392,5 +425,64 @@ flowchart LR
     per-converter cost is likely the extra GLB payload size (degree-3 = 15 extra VEC3-float attributes
     per splat) more than decode complexity. This is a sketch to scope future work, not a commitment to
     a specific implementation order or timeline.
+
+## Spec direction: 3D Tiles 2.0 on glTF 2.1 (noted 2026-10-20)
+
+Two upstream decisions worth tracking because they confirm choices this repo already made and
+point at the next ones.
+
+### Point-cloud compression: meshopt wins, Draco points are closed
+
+[KhronosGroup/glTF#1809](https://github.com/KhronosGroup/glTF/issues/1809#issuecomment-6001866312)
+(a point-cloud Draco extension for glTF) was closed as **superseded by `KHR_meshopt_compression`**
+(the promoted form of `EXT_meshopt_compression`). The Cesium benchmark attached to the closure,
+313.6 M points, position + colour, 0.01 m compression error, 50 Mbps throttled:
+
+| Encoding | Size | Load |
+|---|---|---|
+| LAS 1.2 (format 3) | 12.3 GiB | — |
+| `.pnts` | 4.38 GiB (3.72 gzip) | 33.3 s |
+| `.glb` | 4.68 GiB (3.67 gzip) | — |
+| `.pnts` + `3DTILES_draco_point_compression` | 1.19 GiB (0.85 gzip) | 9.25 s |
+| `.glb` + `EXT_meshopt_compression` | 1.01 GiB (0.86 gzip) | 9.46 s (decoder not yet in a Web Worker) |
+
+So meshopt on `POINTS` is as small as Draco points, decodes as fast, and is the only one of the two
+that survives into glTF 2.1. This is already the repo's position: `core/gltf-compress.js` defaults to
+meshopt for point tiles because Draco skips `POINTS`, and `/stream?transform=meshopt` serves it.
+
+- [ ] **Make meshopt the default on point GLBs** served by `/stream` for COPC/Potree/LAS once the
+  CPU cost per tile is measured against the ~37 % size (encode is per request unless `cache=full`).
+- [ ] **Read `KHR_meshopt_compression`** as well as `EXT_` in `gltf-decompress.js` when glTF-Transform
+  ships the name; the decoder is the same `meshoptimizer` WASM.
+- [ ] Re-verify the 3DTRjs `PotreePlugin` / `PointCloudEffectsPlugin` path and CesiumJS against a
+  meshopt-encoded point tile (both read `EXT_meshopt_compression` today).
+
+### 3D Tiles 2.0 = glTF 2.1 + extensions
+
+Per [CesiumGS/3d-tiles#803](https://github.com/CesiumGS/3d-tiles/issues/803) the plan is to
+**sunset 3D Tiles as a separate spec** and baseline 3D Tiles 2.0 on glTF 2.1, as extensions kept in
+[CesiumGS/glTF, branch `3d-tiles-2.0`](https://github.com/CesiumGS/glTF/tree/3d-tiles-2.0). The
+layering: glTF 2.0 = assets (geometry, materials, textures, metadata); glTF 2.1 = complex scenes
+(bounding-volume hierarchy, external glTF references); 3D Tiles 2.0 extensions = the geospatial part
+(hierarchical LOD, region bounding volume, CRS).
+
+[`3DTILES_georeference`](https://github.com/andreasplesch/glTF/blob/3d-tiles-2.0/extensions/2.1/Vendor/3DTILES_georeference/README.md)
+maps local glTF coordinates to ECEF through a point on the ellipsoid and its **tangential plane**
+(east-north-up at the anchor). Only the figure defines that mapping so far; andreasplesch offered a
+spec-language draft and the maintainers invited the PR.
+
+Why it matters here:
+
+- The `&lon=&lat=&alt=&heading=&scale=` placement `/stream` bakes into the tile `transform` is
+  exactly a `3DTILES_georeference` anchor plus the ENU frame from `core/geo.js` (`enuMatrix`). When
+  the extension stabilises, emit it on the root glTF node instead of, or alongside, the tileset
+  `transform`, so a tile GLB is georeferenced on its own.
+- The planned `&anchor=center|origin` option (transform gizmo item above) is the same question the
+  extension has to answer: which local point sits on the tangent plane.
+- The quadtree meta-tileset and the Potree-only catalogue idea become glTF 2.1 scene graphs with
+  external references, so the aggregate builder should keep its hierarchy format-agnostic.
+- Candidate contribution: the tangent-plane wording (ENU basis from geodetic lat/lon, height along
+  the ellipsoid normal, handedness, and how `heading` composes) is what this repo's adapters already
+  implement in code, so a draft PR against the `3d-tiles-2.0` branch is cheap.
 
 ---

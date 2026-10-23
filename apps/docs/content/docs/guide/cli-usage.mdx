@@ -37,6 +37,25 @@ npm run convert -- <input> <outDir> [--format rad|sog|lcc|copc|potree|i3s] \
 node packages/convert/cli.js sample-data/input/RAD/coit.rad sample-data/output/rad/coit-3dtiles-from-rad
 ```
 
+### Export a tileset to a folder
+
+`convert` turns a *source* into 3D Tiles. `export` materialises any *tileset URL*: a remote 3D Tiles
+tileset, or a `/stream`, `/convert`, `/aggregate` or `/proxy` URL of a running tile-server. The result is
+a self-contained static folder with relative uris and implicit tilings expanded (details in
+[the desktop app's export](/docs/guide/desktop-app#export-to-a-folder), which uses the same code).
+
+```sh
+node packages/convert/cli.js export <tileset-url> <outDir> [--max-depth N] [--keep-implicit] [--pack 3tz,3dtiles] [--overwrite]
+# e.g. a mosaic, through a running server:
+node packages/convert/cli.js export "http://localhost:3001/aggregate/tileset.json?set=opendata" out/opendata
+```
+
+For a raw local dataset, either `convert` it, or `3dtiled serve` it and export the printed URL. `--keep-implicit`
+copies subtrees and templated tiles instead of expanding them; `--pack` also writes `.3tz` / `.3dtiles`
+into the folder. The HTTP form is `POST /export {url, outDir, maxDepth, keepImplicit, pack}` (or
+`{method: "convert", src, format, options, pack}` for the offline converter) on a server started
+with `TILED_ALLOW_EXPORT=1`.
+
 ```js
 // JS/TS API — same detection + dispatch
 import { convert, detectFormat, supportedFormats } from '3dtiles-convert';
@@ -65,6 +84,59 @@ node packages/i3s-to-3dtiles/src/index.js    <extracted-slpk-dir>  sample-data/o
 
 > Output convention: regenerate into **`sample-data/output/<fmt>/…`** (the viewer presets and
 > `tools-inspector` scripts point there).
+
+## Globe placement — attach a local dataset to a real location (`&lon=&lat=`)
+
+Any `/stream`, `/convert`, or `/tiles` `tileset.json` request accepts **placement query params** that
+attach a *local* (non-georeferenced) dataset to a real location on the globe, entirely at the
+**tileset level** — the served `tileset.json` gets a root ENU transform, so **any** 3D Tiles client
+(CesiumJS, **Cesium for Unreal/Unity**, QGIS, 3DTilesRendererJS) streams it in place with no
+viewer-side reorientation:
+
+```
+GET /stream/tileset.json?url=<SRC>&format=<fmt>
+      &lon=<deg>&lat=<deg>            # required pair — activates placement
+      [&alt=<m>]                      # ellipsoidal altitude (default 0)
+      [&heading=<deg>]                # compass heading, clockwise from north, about local Up
+      [&scale=<factor>]               # uniform scale (default 1)
+```
+
+Semantics:
+
+- The placement **composes on top of** the format adapter's own local-upright root transform (SOG's
+  RX(−90°), RAD's RX(180°), LCC's upright flip, …), so each format's Y-up/Z-up convention stays
+  normalized at the tileset level — the same GLB content renders upright in every client.
+- If the source carries its **own real georeference** (COPC/Potree CRS, LCC EPSG, …), the params are
+  **ignored** with a server-side warning — the dataset's own placement wins.
+- On `/convert` the placement is applied to the served JSON only, never baked into the on-disk cache,
+  so one cached conversion can be placed differently per request.
+- `geosplats` keeps its own placement params (`frame`/`yaw`/`alt`) and is excluded.
+
+Example — stream the (local-frame) Lion Takanawa Potree cloud onto the Eiffel Tower forecourt,
+rotated 45°, for Cesium for Unreal:
+
+```
+http://localhost:3001/stream/tileset.json?url=https%3A%2F%2Fraw.githubusercontent.com%2Fpotree%2Fpotree%2Fdevelop%2Fpointclouds%2Flion_takanawa%2Fcloud.js&format=potree&lon=2.2945&lat=48.8584&alt=100&heading=45
+```
+
+## Hierarchy statistics & visualization (`/stats`, `/hierarchy`)
+
+`GET /stats/tileset.json?url=<any tileset.json>[&maxNodes=4000][&maxDepth=32]` walks a tileset's tile
+tree — explicit children, 3D Tiles 1.1 **implicit tiling** (fetching and decoding `.subtree`
+availability), and external-tileset refs — and returns per-level aggregates (tiles, content tiles, GE
+range) plus a bounded node dump. `GET /hierarchy?url=…[&theme=dark|light]` renders it as a
+**cosmograph-style radial depth/breadth graph** (rings = depth, dot = tile, color steps with depth)
+with a per-level breadth chart, KPI tiles, and a per-level table. Works against this server's own
+`/stream`, `/convert`, `/aggregate` output or any remote tileset — a truncated live adapter shows up
+immediately as a ring that stops early (this page would have caught the Potree 1.x `.hrc` depth-
+truncation bug at a glance).
+
+Add `&sample=N` to also download N content tiles (stratified across depth) and report approximate
+triangle/point counts, glTF extensions, texture formats and compression — read from each GLB's JSON
+chunk only, so nothing is Draco/meshopt/SPZ-decoded. To **compare several tilesets side by side**,
+with leaf counts and geometric-error distribution, use the viewer app's React explorer at
+`/hierarchy` — see [Hierarchy explorer](/docs/guide/hierarchy-explorer) for how to read the graphs,
+and [Meta-tilesets](/docs/guide/meta-tilesets) for the `/aggregate` endpoint it inspects.
 
 ## Per-format converters
 

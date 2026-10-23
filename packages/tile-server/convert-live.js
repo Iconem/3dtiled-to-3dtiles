@@ -24,12 +24,17 @@ import crypto from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 import { convert, detectFormat } from '../convert/index.js';
 import { isRemote, mirrorRemote } from '../convert/fetch-source.js';
-import { detectFormatByName } from '../core/index.js';
+import { detectFormatByName, applyPlacement } from '../core/index.js';
 
 const CACHE = path.join(os.tmpdir(), '3dtiles-live-cache');
 const CORS = { 'Access-Control-Allow-Origin': '*', 'Access-Control-Allow-Headers': '*' };
 const exists = async p => !!(await fs.stat(p).catch(() => null));
-const keyFor = (src, fmt, centroids, tiling) => crypto.createHash('sha1').update(`${fmt || ''}|${centroids ? 'c|' : ''}${tiling || ''}|${src}`).digest('hex').slice(0, 16);
+// Bump when the GLB bytes a converter writes change meaning, so a cached conversion is rebuilt
+// instead of silently served forever. v2: point COLOR_0 is now linear (it used to be raw sRGB, which
+// rendered washed out in every spec-following client) — caches from before that must not be reused.
+// v3: Potree 1.8 nodes decode again - v2-era caches of 1.8 datasets hold empty tiles.
+const OUTPUT_VERSION = 'v4';                  // v4: projected-CRS placement includes grid convergence + scale
+const keyFor = (src, fmt, centroids, tiling) => crypto.createHash('sha1').update(`${OUTPUT_VERSION}|${fmt || ''}|${centroids ? 'c|' : ''}${tiling || ''}|${src}`).digest('hex').slice(0, 16);
 
 const MIME = {
   '.json': 'application/json', '.glb': 'model/gltf-binary', '.bin': 'application/octet-stream',
@@ -94,6 +99,10 @@ export async function handleConvert(req, res, u) {
     const outDir = await ensureConverted(src, fmt, key, { centroidsOnly: centroids, tiling });
     const tileset = JSON.parse(await fs.readFile(path.join(outDir, 'tileset.json'), 'utf8'));
     rewriteUris(tileset.root, `/convert/${key}/`);
+    // Same user-directed globe placement as /stream (&lon=&lat=[&alt=][&heading=][&scale=]) — applied
+    // to the served JSON only, never baked into the on-disk cache (so one cached convert can be
+    // placed differently per request).
+    if (fmt !== 'geosplats') applyPlacement(tileset.root, u.searchParams, `convert:${fmt}`);
     res.writeHead(200, { 'Content-Type': 'application/json', ...CORS });
     res.end(JSON.stringify(tileset));
     return true;

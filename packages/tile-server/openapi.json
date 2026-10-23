@@ -4,172 +4,1250 @@
     "title": "3dtiled tile-server",
     "description": "A \"TiTiler for 3D\": live `<format>` → OGC 3D Tiles middleware. CORS-open, no auth, reads public sources only. Every endpoint streams/transcodes on demand — nothing is pre-baked unless you ask for `cache=full` (`/convert`).\n\nSee the [playground](/playground) to try requests interactively, or the [project docs]({{DOCS_URL}}) for the full architecture writeup.",
     "version": "0.1.0",
-    "license": { "name": "MIT" }
+    "license": {
+      "name": "MIT"
+    }
   },
-  "servers": [{ "url": "/", "description": "This server" }],
+  "servers": [
+    {
+      "url": "/",
+      "description": "This server"
+    }
+  ],
   "tags": [
-    { "name": "tiles", "description": "/tiles, /stream, /convert — the materialization continuum: live range-streaming through to a fully preprocessed+cached tileset, over one query-param axis (?cache=)." },
-    { "name": "transforms", "description": "/3dtiles-self-contained, /3dtiles-tools, /gltf — package extraction and per-tile 3D Tiles/glTF transforms." },
-    { "name": "extract", "description": "/extract/{kind} — bounding-box + geometric-error crop/export of a loaded tileset." },
-    { "name": "bing", "description": "/bing — Bing Maps 3D (td1 implicit manifest) → OGC 3D Tiles." },
-    { "name": "misc", "description": "/proxy, /progress — CORS proxy and job-progress polling." }
+    {
+      "name": "tiles",
+      "description": "/tiles, /stream, /convert — the materialization continuum: live range-streaming through to a fully preprocessed+cached tileset, over one query-param axis (?cache=)."
+    },
+    {
+      "name": "transforms",
+      "description": "/3dtiles-self-contained, /3dtiles-tools, /gltf — package extraction and per-tile 3D Tiles/glTF transforms."
+    },
+    {
+      "name": "extract",
+      "description": "/extract/{kind} — bounding-box + geometric-error crop/export of a loaded tileset."
+    },
+    {
+      "name": "bing",
+      "description": "/bing — Bing Maps 3D (td1 implicit manifest) → OGC 3D Tiles."
+    },
+    {
+      "name": "misc",
+      "description": "/proxy, /progress — CORS proxy and job-progress polling."
+    }
   ],
   "paths": {
     "/tiles/tileset.json": {
       "get": {
-        "tags": ["tiles"],
+        "tags": [
+          "tiles"
+        ],
         "summary": "GET /tiles/tileset.json — unified entry, dispatches to /stream or /convert based on ?cache=",
         "description": "One HTTP surface over the whole materialization continuum. `cache=none|hierarchy` dispatches in-process to `/stream` (true range-streaming, per-format adapters); `cache=full` dispatches to `/convert` (preprocess the whole dataset once, then serve static). No redirect — the query string carries straight through.",
         "parameters": [
-          { "name": "url", "in": "query", "required": true, "schema": { "type": "string", "format": "uri" }, "description": "Absolute URL of the source dataset (e.g. a `.copc.laz`, Potree `cloud.js`, SOG manifest, etc.)." },
-          { "name": "format", "in": "query", "schema": { "type": "string", "enum": ["copc", "potree", "sog", "lcc", "rad", "i3s", "threemx", "geosplats"] }, "description": "Source format. Auto-detected from the URL/extension when omitted for most formats." },
-          { "name": "cache", "in": "query", "schema": { "type": "string", "enum": ["none", "hierarchy", "full"], "default": "none" }, "description": "none = fully live, nothing cached. hierarchy = tree cached in RAM, tiles per-request. full = whole dataset converted to disk once, then served static." },
-          { "name": "prefetch", "in": "query", "schema": { "type": "integer", "default": 0 }, "description": "Octree formats (COPC/Potree) only — number of extra LOD levels to eagerly resolve bounds for on tileset.json build." },
-          { "name": "tiling", "in": "query", "schema": { "type": "string", "enum": ["implicit", "explicit"], "default": "implicit" }, "description": "Octree formats only — 3D Tiles 1.1 implicit tiling vs. a fully-materialized explicit tree." }
+          {
+            "name": "url",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uri"
+            },
+            "description": "Absolute URL of the source dataset (e.g. a `.copc.laz`, Potree `cloud.js`, SOG manifest, etc.)."
+          },
+          {
+            "name": "format",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "enum": [
+                "copc",
+                "potree",
+                "sog",
+                "lcc",
+                "rad",
+                "i3s",
+                "threemx",
+                "geosplats"
+              ]
+            },
+            "description": "Source format. Auto-detected from the URL/extension when omitted for most formats."
+          },
+          {
+            "name": "cache",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "enum": [
+                "none",
+                "hierarchy",
+                "full"
+              ],
+              "default": "none"
+            },
+            "description": "none = fully live, nothing cached. hierarchy = tree cached in RAM, tiles per-request. full = whole dataset converted to disk once, then served static."
+          },
+          {
+            "name": "prefetch",
+            "in": "query",
+            "schema": {
+              "type": "integer",
+              "default": 0
+            },
+            "description": "Octree formats (COPC/Potree) only — number of extra LOD levels to eagerly resolve bounds for on tileset.json build."
+          },
+          {
+            "name": "tiling",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "enum": [
+                "implicit",
+                "explicit"
+              ],
+              "default": "implicit"
+            },
+            "description": "Octree formats only — 3D Tiles 1.1 implicit tiling vs. a fully-materialized explicit tree."
+          },
+          {
+            "name": "lon",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "number"
+            },
+            "description": "Globe placement: longitude (deg). With lat, attaches a LOCAL (non-georeferenced) dataset to a real location as a root ENU transform, so any 3D Tiles client (Cesium for Unreal/Unity, QGIS, CesiumJS) streams it in place. Ignored if the source carries its own georeference."
+          },
+          {
+            "name": "lat",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "number"
+            },
+            "description": "Globe placement: latitude (deg). See lon."
+          },
+          {
+            "name": "alt",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "number",
+              "default": 0
+            },
+            "description": "Globe placement: ellipsoidal altitude in meters (with lon/lat)."
+          },
+          {
+            "name": "heading",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "number",
+              "default": 0
+            },
+            "description": "Globe placement: compass heading in degrees, clockwise from north, rotating the dataset about local up (with lon/lat)."
+          },
+          {
+            "name": "scale",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "number",
+              "default": 1
+            },
+            "description": "Globe placement: uniform scale factor (with lon/lat)."
+          }
         ],
         "responses": {
-          "200": { "description": "A 3D Tiles tileset.json", "content": { "application/json": { "schema": { "type": "object" } } } },
-          "400": { "description": "Bad request (unknown cache level, missing url, etc.)" }
+          "200": {
+            "description": "A 3D Tiles tileset.json",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad request (unknown cache level, missing url, etc.)"
+          }
         }
       }
     },
     "/stream/tileset.json": {
       "get": {
-        "tags": ["tiles"],
+        "tags": [
+          "tiles"
+        ],
         "summary": "GET /stream/tileset.json — true online range-streaming (copc/potree/sog/lcc/rad/i3s/threemx/geosplats)",
         "description": "Range-reads the source's own persisted hierarchy (no full decode/convert) to build a tileset.json; individual tiles are converted on demand as the client requests them via `/stream/tile/...` or `/stream/subtrees/...` URIs embedded in the response.",
         "parameters": [
-          { "name": "url", "in": "query", "required": true, "schema": { "type": "string", "format": "uri" } },
-          { "name": "format", "in": "query", "required": true, "schema": { "type": "string", "enum": ["copc", "potree", "sog", "lcc", "rad", "i3s", "threemx", "geosplats"] } },
-          { "name": "cache", "in": "query", "schema": { "type": "string", "enum": ["none", "hierarchy"], "default": "none" } },
-          { "name": "prefetch", "in": "query", "schema": { "type": "integer", "default": 0 } },
-          { "name": "tiling", "in": "query", "schema": { "type": "string", "enum": ["implicit", "explicit"], "default": "implicit" }, "description": "COPC/Potree only." }
+          {
+            "name": "url",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uri"
+            }
+          },
+          {
+            "name": "format",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "copc",
+                "potree",
+                "sog",
+                "lcc",
+                "rad",
+                "i3s",
+                "threemx",
+                "geosplats"
+              ]
+            }
+          },
+          {
+            "name": "cache",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "enum": [
+                "none",
+                "hierarchy"
+              ],
+              "default": "none"
+            }
+          },
+          {
+            "name": "prefetch",
+            "in": "query",
+            "schema": {
+              "type": "integer",
+              "default": 0
+            }
+          },
+          {
+            "name": "tiling",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "enum": [
+                "implicit",
+                "explicit"
+              ],
+              "default": "implicit"
+            },
+            "description": "COPC/Potree only."
+          },
+          {
+            "name": "lon",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "number"
+            },
+            "description": "Globe placement: longitude (deg). With lat, attaches a LOCAL (non-georeferenced) dataset to a real location as a root ENU transform, so any 3D Tiles client (Cesium for Unreal/Unity, QGIS, CesiumJS) streams it in place. Ignored if the source carries its own georeference."
+          },
+          {
+            "name": "lat",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "number"
+            },
+            "description": "Globe placement: latitude (deg). See lon."
+          },
+          {
+            "name": "alt",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "number",
+              "default": 0
+            },
+            "description": "Globe placement: ellipsoidal altitude in meters (with lon/lat)."
+          },
+          {
+            "name": "heading",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "number",
+              "default": 0
+            },
+            "description": "Globe placement: compass heading in degrees, clockwise from north, rotating the dataset about local up (with lon/lat)."
+          },
+          {
+            "name": "scale",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "number",
+              "default": 1
+            },
+            "description": "Globe placement: uniform scale factor (with lon/lat)."
+          }
         ],
-        "responses": { "200": { "description": "A 3D Tiles tileset.json" } }
+        "responses": {
+          "200": {
+            "description": "A 3D Tiles tileset.json"
+          }
+        }
       }
     },
     "/convert/tileset.json": {
       "get": {
-        "tags": ["tiles"],
+        "tags": [
+          "tiles"
+        ],
         "summary": "GET /convert/tileset.json — preprocess + cache the whole dataset once (cache=full), any supported format",
         "description": "Converts the entire source dataset to 3D Tiles on first request and caches the result on disk; subsequent requests are served statically. Works for every format the meta-converter supports, including ones with no streaming adapter.",
         "parameters": [
-          { "name": "url", "in": "query", "required": true, "schema": { "type": "string", "format": "uri" } },
-          { "name": "format", "in": "query", "schema": { "type": "string" }, "description": "Auto-detected from the URL when omitted." },
-          { "name": "centroids", "in": "query", "schema": { "type": "boolean", "default": false }, "description": "Splat formats only — centroids-only (points, no covariance) preview instead of full Gaussian splats." },
-          { "name": "tiling", "in": "query", "schema": { "type": "string", "enum": ["implicit", "explicit"] } }
+          {
+            "name": "url",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uri"
+            }
+          },
+          {
+            "name": "format",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            },
+            "description": "Auto-detected from the URL when omitted."
+          },
+          {
+            "name": "centroids",
+            "in": "query",
+            "schema": {
+              "type": "boolean",
+              "default": false
+            },
+            "description": "Splat formats only — centroids-only (points, no covariance) preview instead of full Gaussian splats."
+          },
+          {
+            "name": "tiling",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "enum": [
+                "implicit",
+                "explicit"
+              ]
+            }
+          },
+          {
+            "name": "lon",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "number"
+            },
+            "description": "Globe placement: longitude (deg). With lat, attaches a LOCAL (non-georeferenced) dataset to a real location as a root ENU transform, so any 3D Tiles client (Cesium for Unreal/Unity, QGIS, CesiumJS) streams it in place. Ignored if the source carries its own georeference."
+          },
+          {
+            "name": "lat",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "number"
+            },
+            "description": "Globe placement: latitude (deg). See lon."
+          },
+          {
+            "name": "alt",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "number",
+              "default": 0
+            },
+            "description": "Globe placement: ellipsoidal altitude in meters (with lon/lat)."
+          },
+          {
+            "name": "heading",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "number",
+              "default": 0
+            },
+            "description": "Globe placement: compass heading in degrees, clockwise from north, rotating the dataset about local up (with lon/lat)."
+          },
+          {
+            "name": "scale",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "number",
+              "default": 1
+            },
+            "description": "Globe placement: uniform scale factor (with lon/lat)."
+          }
         ],
         "responses": {
-          "200": { "description": "A 3D Tiles tileset.json (subsequent requests served from disk cache)" }
+          "200": {
+            "description": "A 3D Tiles tileset.json (subsequent requests served from disk cache)"
+          }
         }
       }
     },
     "/3dtiles-self-contained/{key}": {
       "get": {
-        "tags": ["transforms"],
+        "tags": [
+          "transforms"
+        ],
         "summary": "GET /3dtiles-self-contained/{key} — serve a .3tz / .3dtiles self-contained package",
         "description": "`{key}` is a path within the archive (`tileset.json` for the root, or any tile path the root references) — the FIRST path segment is treated as the archive locator.",
         "parameters": [
-          { "name": "key", "in": "path", "required": true, "schema": { "type": "string" }, "example": "tileset.json" },
-          { "name": "url", "in": "query", "required": true, "schema": { "type": "string" }, "description": "Path or URL to the .3tz/.3dtiles archive." }
+          {
+            "name": "key",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "example": "tileset.json"
+          },
+          {
+            "name": "url",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Path or URL to the .3tz/.3dtiles archive."
+          }
         ],
-        "responses": { "200": { "description": "tileset.json or a tile file extracted from the archive" } }
+        "responses": {
+          "200": {
+            "description": "tileset.json or a tile file extracted from the archive"
+          }
+        }
       }
     },
     "/3dtiles-tools/tileset.json": {
       "get": {
-        "tags": ["transforms"],
+        "tags": [
+          "transforms"
+        ],
         "summary": "GET /3dtiles-tools/tileset.json — 3D Tiles 1.0 → 1.1 transforms",
         "description": "`tool=implicit-to-explicit` reads binary `.subtree` files (OCTREE/QUADTREE) and builds an explicit children tree. `tool=upgrade` reads an existing explicit 1.0 tileset, bumps its version to 1.1, and rewrites content URIs so each b3dm/pnts tile (including nested tileset.json references) is converted to glTF 2.0 on demand — fixing legacy glTF 1.0 b3dm content that most modern renderers can no longer parse natively.",
         "parameters": [
-          { "name": "tool", "in": "query", "required": true, "schema": { "type": "string", "enum": ["implicit-to-explicit", "upgrade"] } },
-          { "name": "url", "in": "query", "schema": { "type": "string", "format": "uri" }, "description": "Remote tileset.json URL (mutually exclusive with dir)." },
-          { "name": "dir", "in": "query", "schema": { "type": "string" }, "description": "Local filesystem path to the tileset directory (mutually exclusive with url)." },
-          { "name": "tilesetFile", "in": "query", "schema": { "type": "string", "default": "tileset.json" }, "description": "upgrade tool only — filename within dir/url to read." }
+          {
+            "name": "tool",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "implicit-to-explicit",
+                "upgrade"
+              ]
+            }
+          },
+          {
+            "name": "url",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "format": "uri"
+            },
+            "description": "Remote tileset.json URL (mutually exclusive with dir)."
+          },
+          {
+            "name": "dir",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            },
+            "description": "Local filesystem path to the tileset directory (mutually exclusive with url)."
+          },
+          {
+            "name": "tilesetFile",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "default": "tileset.json"
+            },
+            "description": "upgrade tool only — filename within dir/url to read."
+          }
         ],
-        "responses": { "200": { "description": "A 3D Tiles 1.1 tileset.json with rewritten content URIs" } }
+        "responses": {
+          "200": {
+            "description": "A 3D Tiles 1.1 tileset.json with rewritten content URIs"
+          }
+        }
       }
     },
     "/gltf/tileset.json": {
       "get": {
-        "tags": ["transforms"],
+        "tags": [
+          "transforms"
+        ],
         "summary": "GET /gltf/tileset.json — per-tile glTF-Transform pipeline over an existing tileset",
         "description": "Proxies an existing tileset.json, rewriting content URIs through /gltf/tile.glb so each glTF/GLB tile is decoded (Draco, meshopt, KTX2 → PNG/JPEG) on the fly — useful for renderers that can't decode one of those encodings natively.",
         "parameters": [
-          { "name": "url", "in": "query", "required": true, "schema": { "type": "string", "format": "uri" } },
-          { "name": "ops", "in": "query", "style": "form", "explode": false, "schema": { "type": "array", "items": { "type": "string", "enum": ["decompress", "draco", "meshopt", "ktx"] }, "default": ["decompress"] }, "description": "Comma-separated combination of ops (`style: form, explode: false` — e.g. `ops=draco,ktx`). `decompress` is shorthand for `draco,meshopt,ktx` together." },
-          { "name": "tex", "in": "query", "schema": { "type": "string", "enum": ["jpg", "png"], "default": "jpg" }, "description": "Output format for decoded KTX2 textures." }
+          {
+            "name": "url",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uri"
+            }
+          },
+          {
+            "name": "ops",
+            "in": "query",
+            "style": "form",
+            "explode": false,
+            "schema": {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "enum": [
+                  "decompress",
+                  "draco",
+                  "meshopt",
+                  "ktx"
+                ]
+              },
+              "default": [
+                "decompress"
+              ]
+            },
+            "description": "Comma-separated combination of ops (`style: form, explode: false` — e.g. `ops=draco,ktx`). `decompress` is shorthand for `draco,meshopt,ktx` together."
+          },
+          {
+            "name": "tex",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "enum": [
+                "jpg",
+                "png"
+              ],
+              "default": "jpg"
+            },
+            "description": "Output format for decoded KTX2 textures."
+          }
         ],
-        "responses": { "200": { "description": "A tileset.json with rewritten content URIs" } }
+        "responses": {
+          "200": {
+            "description": "A tileset.json with rewritten content URIs"
+          }
+        }
       }
     },
     "/gltf/tile.glb": {
       "get": {
-        "tags": ["transforms"],
+        "tags": [
+          "transforms"
+        ],
         "summary": "GET /gltf/tile.glb — decode a single glTF/GLB tile (same ops as /gltf/tileset.json)",
         "description": "The per-tile endpoint /gltf/tileset.json's rewritten content URIs point at — callable directly against any glTF/GLB URL, not just ones reached via a rewritten tileset.",
         "parameters": [
-          { "name": "url", "in": "query", "required": true, "schema": { "type": "string", "format": "uri" } },
-          { "name": "ops", "in": "query", "style": "form", "explode": false, "schema": { "type": "array", "items": { "type": "string", "enum": ["decompress", "draco", "meshopt", "ktx"] }, "default": ["decompress"] }, "description": "Comma-separated combination of ops (`style: form, explode: false` — e.g. `ops=draco,ktx`). `decompress` is shorthand for `draco,meshopt,ktx` together." },
-          { "name": "tex", "in": "query", "schema": { "type": "string", "enum": ["jpg", "png"], "default": "jpg" }, "description": "Output format for decoded KTX2 textures." }
+          {
+            "name": "url",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uri"
+            }
+          },
+          {
+            "name": "ops",
+            "in": "query",
+            "style": "form",
+            "explode": false,
+            "schema": {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "enum": [
+                  "decompress",
+                  "draco",
+                  "meshopt",
+                  "ktx"
+                ]
+              },
+              "default": [
+                "decompress"
+              ]
+            },
+            "description": "Comma-separated combination of ops (`style: form, explode: false` — e.g. `ops=draco,ktx`). `decompress` is shorthand for `draco,meshopt,ktx` together."
+          },
+          {
+            "name": "tex",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "enum": [
+                "jpg",
+                "png"
+              ],
+              "default": "jpg"
+            },
+            "description": "Output format for decoded KTX2 textures."
+          }
         ],
-        "responses": { "200": { "description": "A decoded glTF/GLB" } }
+        "responses": {
+          "200": {
+            "description": "A decoded glTF/GLB"
+          }
+        }
       }
     },
     "/bing/tileset.json": {
       "get": {
-        "tags": ["bing"],
+        "tags": [
+          "bing"
+        ],
         "summary": "GET /bing/tileset.json — Bing Maps 3D → OGC 3D Tiles",
         "description": "Wraps Bing Maps' own td1 implicit-tiling manifest (tf=3dv4 GLB tiles) as a standard OGC 3D Tiles tileset.json.",
         "parameters": [
-          { "name": "g", "in": "query", "schema": { "type": "string" }, "description": "Bing generation/session id. Defaults to a known-good value if omitted." },
-          { "name": "decompress", "in": "query", "schema": { "type": "boolean", "default": false }, "description": "Route tiles through the /gltf decode pipeline (Bing content is often Draco/KTX2-encoded)." }
+          {
+            "name": "g",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            },
+            "description": "Bing generation/session id. Defaults to a known-good value if omitted."
+          },
+          {
+            "name": "decompress",
+            "in": "query",
+            "schema": {
+              "type": "boolean",
+              "default": false
+            },
+            "description": "Route tiles through the /gltf decode pipeline (Bing content is often Draco/KTX2-encoded)."
+          },
+          {
+            "name": "globe",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "default": "11"
+            },
+            "description": "Low-zoom globe shell: deepest face-local level that gets a basemap-draped ellipsoid patch (default 11), or \"off\" to disable. Bing mesh only starts at level 12, so without this every zoomed-out view is empty space."
+          },
+          {
+            "name": "basemap",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            },
+            "description": "Raster URL template with {z}/{x}/{y} for the globe shell. Defaults to OpenStreetMap (token-free); attribution is emitted in the tileset asset.copyright."
+          }
         ],
-        "responses": { "200": { "description": "A 3D Tiles tileset.json" } }
+        "responses": {
+          "200": {
+            "description": "A 3D Tiles tileset.json"
+          }
+        }
       }
     },
     "/extract/{kind}": {
       "get": {
-        "tags": ["extract"],
+        "tags": [
+          "extract"
+        ],
         "summary": "GET /extract/{kind} — bounding-box + geometric-error crop/export of a loaded tileset",
         "description": "Traverses a tileset.json (any format this server can serve), keeping only tiles that intersect the given lon/lat/height bounding box down to a target geometric error, and re-exports the result as the requested output kind.",
         "parameters": [
-          { "name": "kind", "in": "path", "required": true, "schema": { "type": "string", "enum": ["las", "glb", "copc", "tileset", "zip", "splat"] } },
-          { "name": "url", "in": "query", "required": true, "schema": { "type": "string", "format": "uri" }, "description": "The tileset.json to crop (any endpoint on this server, or a third-party 3D Tiles source)." },
-          { "name": "bbox", "in": "query", "required": true, "schema": { "type": "string" }, "example": "-122.42,37.77,-10,-122.41,37.78,50", "description": "west,south,minHeight,east,north,maxHeight — degrees,degrees,meters." },
-          { "name": "maxGE", "in": "query", "schema": { "type": "number", "default": 0 }, "description": "Maximum geometric error to descend to. 0 = finest available." },
-          { "name": "maxDepth", "in": "query", "schema": { "type": "integer", "default": 99 } },
-          { "name": "matrix", "in": "query", "schema": { "type": "string" }, "description": "Optional 16-number column-major modelMatrix override (matches an on-screen Z-offset/local-frame nudge applied in the viewer)." },
-          { "name": "stream", "in": "query", "schema": { "type": "boolean", "default": false }, "description": "las kind only — disk-free two-pass streaming instead of buffering in memory." }
+          {
+            "name": "kind",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "las",
+                "glb",
+                "copc",
+                "tileset",
+                "zip",
+                "splat"
+              ]
+            }
+          },
+          {
+            "name": "url",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uri"
+            },
+            "description": "The tileset.json to crop (any endpoint on this server, or a third-party 3D Tiles source)."
+          },
+          {
+            "name": "bbox",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "example": "-122.42,37.77,-10,-122.41,37.78,50",
+            "description": "west,south,minHeight,east,north,maxHeight — degrees,degrees,meters."
+          },
+          {
+            "name": "maxGE",
+            "in": "query",
+            "schema": {
+              "type": "number",
+              "default": 0
+            },
+            "description": "Maximum geometric error to descend to. 0 = finest available."
+          },
+          {
+            "name": "maxDepth",
+            "in": "query",
+            "schema": {
+              "type": "integer",
+              "default": 99
+            }
+          },
+          {
+            "name": "matrix",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            },
+            "description": "Optional 16-number column-major modelMatrix override (matches an on-screen Z-offset/local-frame nudge applied in the viewer)."
+          },
+          {
+            "name": "stream",
+            "in": "query",
+            "schema": {
+              "type": "boolean",
+              "default": false
+            },
+            "description": "las kind only — disk-free two-pass streaming instead of buffering in memory."
+          }
         ],
         "responses": {
-          "200": { "description": "The requested output file (LAS/LAZ, GLB, COPC, tileset.json, ZIP, or a splat format)" },
-          "400": { "description": "Missing/invalid url, bbox, or kind" }
+          "200": {
+            "description": "The requested output file (LAS/LAZ, GLB, COPC, tileset.json, ZIP, or a splat format)"
+          },
+          "400": {
+            "description": "Missing/invalid url, bbox, or kind"
+          }
         }
       }
     },
     "/proxy": {
       "get": {
-        "tags": ["misc"],
+        "tags": [
+          "misc"
+        ],
         "summary": "GET /proxy — generic CORS-open passthrough for public sources",
         "description": "Fetches an arbitrary public URL server-side and re-serves the bytes with `Access-Control-Allow-Origin: *` — for sources that don't send CORS headers themselves (the common failure mode for hotlinked XYZ basemap tiles fetched via WebGL texture upload, unlike an `<img>` tag which tolerates missing CORS headers).",
         "parameters": [
-          { "name": "url", "in": "query", "required": true, "schema": { "type": "string", "format": "uri" } }
+          {
+            "name": "url",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uri"
+            }
+          }
         ],
-        "responses": { "200": { "description": "The proxied response body, byte-for-byte, with CORS headers added" } }
+        "responses": {
+          "200": {
+            "description": "The proxied response body, byte-for-byte, with CORS headers added"
+          }
+        }
       }
     },
     "/progress": {
       "get": {
-        "tags": ["misc"],
+        "tags": [
+          "misc"
+        ],
         "summary": "GET /progress — poll progress of a server-side cache=hierarchy/full operation",
         "parameters": [
-          { "name": "key", "in": "query", "required": true, "schema": { "type": "string" } }
+          {
+            "name": "key",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
         ],
         "responses": {
           "200": {
             "description": "Progress snapshot",
-            "content": { "application/json": { "schema": { "type": "object", "properties": { "done": { "type": "integer" }, "total": { "type": "integer" }, "finished": { "type": "boolean" } } } } }
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "done": {
+                      "type": "integer"
+                    },
+                    "total": {
+                      "type": "integer"
+                    },
+                    "finished": {
+                      "type": "boolean"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/aggregate/tileset.json": {
+      "get": {
+        "tags": [
+          "aggregate"
+        ],
+        "summary": "Meta-tileset over N child tilesets (MosaicJSON/STAC-style)",
+        "description": "Serves ONE 3D Tiles tileset whose children external-reference each given tileset URL, with per-child bounding spheres derived from each child root (fetched once, cached). Children can be any 3D-Tiles URL, including this server's own /stream, /convert, /bing or /3dtiles-self-contained endpoints - so one endpoint can mosaic COPC + Potree + LCC + RAD + remote 3D Tiles together. A local child can be globe-placed first via /stream's lon/lat placement params. Unreachable children are skipped and listed in asset.extras.failed.",
+        "parameters": [
+          {
+            "name": "set",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "enum": [
+                "opendata",
+                "angkor",
+                "world"
+              ]
+            },
+            "description": "Expand a curated demo set of real, public, key-less tilesets: \"opendata\" = the ten open datasets from 3D Tiles' own RESOURCES.md (four continents, all three boundingVolume kinds); \"angkor\" = Iconem's Angkor campaign as 23 individual site tilesets; \"world\" = both (33). Composes with ?url=. GET /aggregate/demo.json lists their contents."
+          },
+          {
+            "name": "urls",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Comma-separated child tileset.json URLs (each URL-encoded)."
+          },
+          {
+            "name": "url",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Repeated form: one child tileset.json URL per url= param."
+          },
+          {
+            "name": "nest",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "default": "auto",
+              "enum": [
+                "auto",
+                "mercator",
+                "geodetic",
+                "flat"
+              ]
+            },
+            "description": "Spatial auto-nesting, so a renderer culls whole regions instead of considering every dataset. \"auto\" (default) builds a web-mercator quadtree once there are 8 or more children; \"mercator\" (aliases 1/true/webmerc/quadtree) forces it; \"geodetic\" (aliases morton/implicit/cesium) instead subdivides in longitude/latitude the way 3D Tiles implicit tiling does for a region bounding volume (Cesium's GeographicTilingScheme: 2x1 cells at level 0); \"flat\" (aliases 0/false/none) forces a flat root. Note Morton (Z-order) is an ADDRESSING scheme, not a projection - both trees use it, they differ in what space they subdivide. Each dataset is placed at the deepest level whose cell still comfortably contains it (from its root bounding sphere), the trie is path-compressed, and each group node gets 2x its children's geometric error so distant groups are never traversed. Groups and datasets carry extras.cell with the scheme, path key, level and Morton index."
+          },
+          {
+            "name": "ttl",
+            "in": "query",
+            "schema": {
+              "type": "integer",
+              "default": 86400
+            },
+            "description": "Cache lifetime in SECONDS for both the assembled mosaic and each child's fetched root. Defaults to 86400 (one day): assembling N children costs N round-trips, so it must not happen per request, but a mosaic that never re-reads its children cannot notice one moved. ttl=0 bypasses the cache in both directions - use it while a dataset is being re-tiled. Child fetches run through a 16-way pool; unbounded concurrency loses children at scale."
+          },
+          {
+            "name": "only",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            },
+            "description": "Keep only children whose URL contains this case-insensitive substring. Repeatable. Applied BEFORE exclude. Motivating case: a site re-scanned yearly yields N tilesets over the same ground and you usually want one - e.g. only=_d2024. Filtering is server-side, so the result is still a plain 3D Tiles endpoint you can paste anywhere; the URL is the whole state. An empty result is a 400, not an empty tileset."
+          },
+          {
+            "name": "exclude",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            },
+            "description": "Drop children whose URL contains this case-insensitive substring. Repeatable. Applied after only."
+          },
+          {
+            "name": "native",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "enum": ["1", "true"]
+            },
+            "description": "Also describe each Potree leaf in its source format: content.extensions.ICONEM_content_source = { format, version, encoding, uri, transform }, listed in extensionsUsed (never required). content.uri stays the /stream 3D Tiles wrapper, so clients that do not know the extension are unaffected. transform maps the source's own coordinates to the leaf frame. Used by the viewer's 3DTRjs 'Native Potree leaves' setting."
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Meta tileset.json (root ADD-refine, children = external tilesets)"
+          },
+          "400": {
+            "description": "No child URLs given"
+          }
+        }
+      }
+    },
+    "/stats/tileset.json": {
+      "get": {
+        "tags": [
+          "stats"
+        ],
+        "summary": "Hierarchy statistics of any tileset (depth/breadth walk)",
+        "description": "Walks a tileset tile tree - explicit children, 3D Tiles 1.1 implicit tiling (fetching + decoding .subtree availability), and external-tileset refs - returning per-level aggregates (tiles, content tiles, GE range) plus a bounded node dump for graph rendering. Works against this server's own /stream//convert//aggregate output or any remote tileset URL.",
+        "parameters": [
+          {
+            "name": "url",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "tileset.json URL to walk."
+          },
+          {
+            "name": "maxNodes",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "default": 4000,
+              "maximum": 20000
+            },
+            "description": "Node budget - the walk truncates (truncated:true) past it."
+          },
+          {
+            "name": "maxDepth",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "default": 32,
+              "maximum": 48
+            },
+            "description": "Depth cap."
+          },
+          {
+            "name": "sample",
+            "in": "query",
+            "schema": {
+              "type": "integer",
+              "default": 0,
+              "maximum": 64
+            },
+            "description": "Download N content tiles (stratified across depth, leaves and intermediate nodes) and report approximate triangle/point/vertex counts, glTF extensions used, texture MIME types and compression (draco/meshopt/ktx2/spz/lgsc). Only the GLB JSON chunk is parsed - no geometry decode. Off by default: the rest of the walk reads only tileset JSON and subtree buffers."
+          },
+          {
+            "name": "maxExternal",
+            "in": "query",
+            "schema": {
+              "type": "integer",
+              "default": 64
+            },
+            "description": "Cap on external-tileset refs followed during the walk (max 1024). Formats that express LoD as chains of external tilesets - RAD is the extreme case - and /aggregate mosaics, which are made of them, exhaust this long before the node budget. When they do, the response reports truncatedBy: [\"external\"]."
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Per-level aggregates, totals (leafNodes, maxFanout, maxDepth), a bounded node dump, and truncatedBy[] naming which budget stopped the walk (\"nodes\" | \"depth\" | \"external\") alongside the limits actually applied."
+          },
+          "400": {
+            "description": "Missing url"
+          }
+        }
+      }
+    },
+    "/hierarchy": {
+      "get": {
+        "tags": [
+          "stats"
+        ],
+        "summary": "Depth/breadth visualization page (radial tree + per-level chart)",
+        "description": "Self-contained HTML page rendering /stats as a cosmograph-style radial depth/breadth graph, per-level breadth chart, KPI tiles and table. ?url= preloads a tileset; ?theme=dark|light overrides the OS color scheme.",
+        "parameters": [
+          {
+            "name": "url",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            },
+            "description": "tileset.json URL to preload."
+          },
+          {
+            "name": "theme",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "dark",
+                "light"
+              ]
+            },
+            "description": "Force color scheme."
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "HTML page"
+          }
+        }
+      }
+    },
+    "/bing/globe/{key}.glb": {
+      "get": {
+        "tags": [
+          "bing"
+        ],
+        "summary": "GET /bing/globe/<face>-<level>-<x>-<y>.glb — low-zoom globe shell tile",
+        "description": "A basemap-draped ellipsoid patch covering one Bing tile region, synthesized because Bing has no mesh above face-local level 12. Absolute-ECEF positions, no tile transform (a transform would be inherited by the Bing subtree beneath). Referenced automatically by /bing/fragment; rarely fetched directly.",
+        "parameters": [
+          {
+            "name": "key",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "<face>-<level>-<x>-<y>, same addressing as /bing/tile"
+          },
+          {
+            "name": "g",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            },
+            "description": "Bing generation/session id."
+          },
+          {
+            "name": "basemap",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            },
+            "description": "Raster URL template with {z}/{x}/{y} for the globe shell. Defaults to OpenStreetMap (token-free); attribution is emitted in the tileset asset.copyright."
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "A textured GLB ellipsoid patch"
+          }
+        }
+      }
+    },
+    "/aggregate/demo.json": {
+      "get": {
+        "tags": [
+          "aggregate"
+        ],
+        "summary": "List the curated demo sets available to /aggregate?set=",
+        "description": "Machine-readable index of the demo mosaics, so a UI can offer them without hardcoding 33 URLs. Each entry gives a label, a child count, and the child list.",
+        "responses": {
+          "200": {
+            "description": "Map of set name to { label, count, entries }"
+          }
+        }
+      }
+    },
+    "/export": {
+      "get": {
+        "tags": [
+          "misc"
+        ],
+        "summary": "GET /export — is export enabled, and the recent jobs",
+        "description": "Off unless the server was started with `TILED_ALLOW_EXPORT=1` (the desktop app sets it), and loopback clients only: it writes to this machine's disk.",
+        "responses": {
+          "200": {
+            "description": "`{ enabled: true, jobs: [...] }`"
+          },
+          "403": {
+            "description": "Export disabled, or not a loopback client"
+          }
+        }
+      },
+      "post": {
+        "tags": [
+          "misc"
+        ],
+        "summary": "POST /export — materialise a tileset into a local folder",
+        "description": "Crawls any 3D Tiles URL — this server's /stream, /convert, /tiles, /aggregate or /proxy outputs, or a remote tileset — and writes a self-contained static copy: every tileset JSON and content file, uris made relative, implicit tilings expanded to explicit (see `packages/tile-server/export-live.js`). Returns a job id to poll. The folder must be empty.\n\nOff unless the server was started with `TILED_ALLOW_EXPORT=1` (the desktop app sets it), and loopback clients only: it writes to this machine's disk.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "url": {
+                    "type": "string",
+                    "description": "Tileset URL; a server-relative path (\"/stream/tileset.json?…\") means this server"
+                  },
+                  "outDir": {
+                    "type": "string",
+                    "description": "Absolute path of an empty (or new) folder"
+                  },
+                  "maxDepth": {
+                    "type": "integer",
+                    "nullable": true,
+                    "description": "Keep tiles down to this depth (counted across external tilesets); null = everything"
+                  },
+                  "method": {
+                    "type": "string",
+                    "enum": [
+                      "crawl",
+                      "convert"
+                    ],
+                    "default": "crawl",
+                    "description": "crawl = download `url` as served (any source); convert = run the per-format offline converter on `src`"
+                  },
+                  "keepImplicit": {
+                    "type": "boolean",
+                    "description": "crawl: copy .subtree files and templated tiles instead of expanding implicit tilings"
+                  },
+                  "pack": {
+                    "type": "array",
+                    "items": {
+                      "type": "string",
+                      "enum": [
+                        "3tz",
+                        "3dtiles"
+                      ]
+                    },
+                    "description": "also pack the folder into these single-file formats"
+                  },
+                  "src": {
+                    "type": "string",
+                    "description": "convert: local path or URL of the raw source"
+                  },
+                  "format": {
+                    "type": "string",
+                    "description": "convert: source format (auto-detected when omitted)"
+                  },
+                  "options": {
+                    "type": "object",
+                    "description": "convert: {tiling: implicit|explicit, scale, geScale, geLayer, centroidsOnly}"
+                  }
+                },
+                "description": "crawl needs {url, outDir}; convert needs {method: \"convert\", src, outDir}"
+              }
+            }
+          }
+        },
+        "responses": {
+          "202": {
+            "description": "`{ id, status }` — poll `GET /export/{id}`"
+          },
+          "400": {
+            "description": "Bad body or unusable folder"
+          },
+          "403": {
+            "description": "Export disabled, or not a loopback client"
+          },
+          "409": {
+            "description": "Folder not empty"
+          }
+        }
+      }
+    },
+    "/export/{id}": {
+      "parameters": [
+        {
+          "name": "id",
+          "in": "path",
+          "required": true,
+          "schema": {
+            "type": "string"
+          }
+        }
+      ],
+      "get": {
+        "tags": [
+          "misc"
+        ],
+        "summary": "GET /export/{id} — progress or result of an export",
+        "description": "`state` is running | done | failed | cancelled. `progress` counts tilesets, files discovered/written, bytes and failures; `preview` (when done) serves the exported copy back.",
+        "responses": {
+          "200": {
+            "description": "Job status"
+          },
+          "404": {
+            "description": "Unknown job"
+          }
+        }
+      },
+      "delete": {
+        "tags": [
+          "misc"
+        ],
+        "summary": "DELETE /export/{id} — cancel an export",
+        "description": "The folder keeps whatever was written so far.",
+        "responses": {
+          "200": {
+            "description": "Job status"
+          }
+        }
+      }
+    },
+    "/export/{id}/files/{path}": {
+      "get": {
+        "tags": [
+          "misc"
+        ],
+        "summary": "GET /export/{id}/files/{path} — a file of an exported folder",
+        "description": "Serves the exported copy as a static host would, to preview it. Only folders this server exported are served; paths outside them are refused.",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "path",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "example": "tileset.json"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The file"
+          },
+          "403": {
+            "description": "Outside the export folder"
+          },
+          "404": {
+            "description": "No such job or file"
           }
         }
       }

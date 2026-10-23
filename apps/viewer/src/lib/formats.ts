@@ -109,7 +109,6 @@ export const FORMATS: FormatMeta[] = [
     // "Vol Total" is Potree's own "Sorvilier" Swiss survey (courtesy sigeom sa) — same dataset, kept
     // this preset's existing label since it's just an id/display name, not a claim about the place.
     { id: 'voltotal', label: 'Vol Total', src: 'https://raw.githubusercontent.com/potree/potree/develop/pointclouds/vol_total/cloud.js', out: 'output/potree/vol_total' },
-    { id: 'geghard', label: 'Geghard (iconem) ⬀', src: 'https://api.iconem.com/s/rIdPkRfOmEdRtgsoO08TgNt9MSxh-woC/cloud.js' },
   ] },
   { fmt: 'sog', icon: '⬢', label: 'SOG', type: 'splat', octree: false, stream: true, assets: [
     // Real sources: PlayCanvas's own SOG example assets (code.playcanvas.com) — see README's SOG
@@ -186,8 +185,10 @@ export const FORMATS: FormatMeta[] = [
 export interface DirectAsset { id: string; icon: string; label: string; type: AssetType; url: string }
 
 export const DIRECT: DirectAsset[] = [
-  { id: 'wl-splat1', icon: '◈', label: '3DT · GSplat 1 (WL)', type: 'splat', url: 'https://raw.githubusercontent.com/WilliamLiu-1997/3DTilesRendererJS-3DGS-Plugin/main/data/gaussianSplat1/tileset.json' },
-  { id: 'wl-splat2', icon: '◈', label: '3DT · GSplat 2 (WL)', type: 'splat', url: 'https://raw.githubusercontent.com/WilliamLiu-1997/3DTilesRendererJS-3DGS-Plugin/main/data/gaussianSplat2/tileset.json' },
+  // The plugin repo's sample splats were renamed: data/gaussianSplat1|2 (404 since) → Elevator /
+  // SvirnasAlyt. Caught by /stats?sample= returning HTTP 404 for every sampled tile.
+  { id: 'wl-splat1', icon: '◈', label: '3DT · Elevator (WL)', type: 'splat', url: 'https://raw.githubusercontent.com/WilliamLiu-1997/3DTilesRendererJS-3DGS-Plugin/main/data/Elevator-3dtiles/tileset.json' },
+  { id: 'wl-splat2', icon: '◈', label: '3DT · Svirnas Alyt (WL)', type: 'splat', url: 'https://raw.githubusercontent.com/WilliamLiu-1997/3DTilesRendererJS-3DGS-Plugin/main/data/SvirnasAlyt-3dtiles/tileset.json' },
   { id: 'strasbourg', icon: '🏙', label: '3DT · Strasbourg', type: 'mesh', url: 'https://s3.eu-west-2.wasabisys.com/ems-sgct-photomaillage/ODACIT/EMS_PM2022/tileset.json' },
   { id: 'clermont', icon: '🏙', label: '3DT · Clermont', type: 'mesh', url: 'https://3d.craig.fr/datasets/Clermont/3dtiles/tileset.json' },
   { id: 'lille', icon: '🏙', label: '3DT · Lille', type: 'mesh', url: 'https://webimaging.lillemetropole.fr/externe/maillage/2016_mel_10cm/3dtiles/tileset.json' },
@@ -205,6 +206,7 @@ export const PSEUDO_FORMATS: [string, string][] = [
   ['bing', '🗺 Bing 3D'],
   ['threemx', '🏛 3MX'],
   ['geosplats', '✨ GeoSplats'],
+  ['aggregate', '🧩 Aggregate'],
 ];
 
 // The single, deliberately-grouped render order for the format pill row — cuts across the FORMATS
@@ -214,6 +216,7 @@ export const PSEUDO_FORMATS: [string, string][] = [
 //   0: point-cloud octrees (COPC, Potree)
 //   1: splat formats (SOG, LCC, GeoSplats, RAD)
 //   2: tileset-native / mesh formats (3D Tiles, Packages, I3S, 3MX, Bing)
+//   3: meta-tilesets — /aggregate mosaics that mix all of the above
 export const FORMAT_PILL_ORDER: { id: string; group: number }[] = [
   { id: 'copc', group: 0 },
   { id: 'potree', group: 0 },
@@ -226,6 +229,7 @@ export const FORMAT_PILL_ORDER: { id: string; group: number }[] = [
   { id: 'i3s', group: 2 },
   { id: 'threemx', group: 2 },
   { id: 'bing', group: 2 },
+  { id: 'aggregate', group: 3 },
 ];
 
 /** Look up a pill's icon+label whether it's a real FORMATS entry or a PSEUDO_FORMATS one. */

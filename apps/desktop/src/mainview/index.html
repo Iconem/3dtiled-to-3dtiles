@@ -1,0 +1,233 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>3D Tiled — local middleware</title>
+    <link rel="stylesheet" href="index.css">
+</head>
+<body>
+    <div class="container">
+        <header>
+            <h1>3D&nbsp;Tiled <span class="sub">local middleware</span></h1>
+            <div id="status" class="status status-wait">starting the tile-server…</div>
+        </header>
+
+        <p class="lede">
+            Point this at a tiled dataset — on this machine or a public URL — and it serves a live
+            <strong>OGC 3D Tiles</strong> endpoint. Nothing is uploaded: the conversion happens here,
+            on demand. Paste the resulting URL into Cesium&nbsp;for&nbsp;Unreal/Unity, QGIS, or CesiumJS.
+        </p>
+
+        <nav class="tabs" id="tabs">
+            <button class="tab tab-active" data-tab="build">Build</button>
+            <button class="tab" data-tab="library">Library <span class="count" id="lib-count">0</span></button>
+            <button class="tab" data-tab="samples">Samples</button>
+        </nav>
+
+        <!-- ── Build ─────────────────────────────────────────────────────────────────────────── -->
+        <section class="panel" id="panel-build">
+            <div class="card">
+                <label class="field">
+                    <span>Dataset — local path or URL</span>
+                    <div class="urlbar">
+                        <input id="src" type="text" spellcheck="false"
+                               placeholder="C:\data\scan.copc.laz   or   https://…/cloud.js">
+                        <button id="browse-file" class="btn" title="Pick a single-file dataset (.copc.laz, .rad, .lcc, .3tz…)">File…</button>
+                        <button id="browse-dir" class="btn" title="Pick a dataset folder (Potree cloud.js dir, streamed-SOG LOD dir, unpacked 3D Tiles)">Folder…</button>
+                    </div>
+                </label>
+
+                <div class="row">
+                    <label class="field">
+                        <span>Format</span>
+                        <select id="format">
+                            <option value="">auto-detect</option>
+                            <option value="copc">COPC</option>
+                            <option value="potree">Potree</option>
+                            <option value="sog">SOG (streamed)</option>
+                            <option value="lcc">LCC</option>
+                            <option value="rad">RAD</option>
+                            <option value="i3s">I3S</option>
+                            <option value="threemx">3MX</option>
+                            <option value="geosplats">GeoSplats</option>
+                        </select>
+                    </label>
+                    <label class="field">
+                        <span>Materialization</span>
+                        <select id="cache">
+                            <option value="none">cache=none — stream, nothing stored</option>
+                            <option value="hierarchy">cache=hierarchy — index in RAM</option>
+                            <option value="full">cache=full — convert once to disk</option>
+                        </select>
+                    </label>
+                </div>
+
+                <details class="placement">
+                    <summary>Place a local dataset on the globe <span class="hint">(for sources with no georeference)</span></summary>
+                    <div class="row">
+                        <label class="field"><span>Longitude</span><input id="lon" type="text" placeholder="2.2945"></label>
+                        <label class="field"><span>Latitude</span><input id="lat" type="text" placeholder="48.8584"></label>
+                        <label class="field"><span>Altitude&nbsp;m</span><input id="alt" type="text" placeholder="0"></label>
+                        <label class="field"><span>Heading°</span><input id="heading" type="text" placeholder="0"></label>
+                    </div>
+                    <p class="hint">
+                        Applied as a root ENU transform in the tileset itself, so every client gets it —
+                        not just this preview. Sources that carry their own georeference ignore these.
+                    </p>
+                </details>
+            </div>
+
+            <div class="card">
+                <span class="field-label">Tileset URL</span>
+                <div class="urlbar">
+                    <code id="url">—</code>
+                    <button id="copy" class="btn btn-primary">Copy</button>
+                </div>
+                <div class="actions">
+                    <button id="preview" class="btn">Preview in Cesium</button>
+                    <button id="check" class="btn">Test endpoint</button>
+                    <button id="save" class="btn">Save to library</button>
+                    <button id="playground" class="btn btn-ghost">API playground</button>
+                    <button id="hierarchy" class="btn btn-ghost">Hierarchy graph</button>
+                </div>
+                <div id="result" class="result"></div>
+            </div>
+
+            <div class="card" id="export-card">
+                <span class="field-label">Export to a folder <span class="hint">— a finished, static 3D Tiles tree</span></span>
+                <p class="hint">
+                    Writes the dataset above into a folder that any web server, S3 bucket or Cesium for
+                    Unreal can host without this app. The equivalent CLI command is shown below.
+                </p>
+                <div class="row">
+                    <label class="field">
+                        <span>Method</span>
+                        <select id="export-method">
+                            <option value="crawl">Crawl the tileset URL above — any source</option>
+                            <option value="convert">Offline converter — raw source, per format</option>
+                        </select>
+                    </label>
+                    <label class="field">
+                        <span>Max depth <span class="hint">(crawl; blank = all)</span></span>
+                        <input id="export-depth" type="text" placeholder="all levels">
+                    </label>
+                    <label class="field">
+                        <span>Run in</span>
+                        <select id="export-runner">
+                            <option value="server">tile-server (default)</option>
+                            <option value="cli">CLI subprocess</option>
+                        </select>
+                    </label>
+                </div>
+                <p class="hint" id="export-runner-hint">
+                    <strong>tile-server</strong> (default): already running with every adapter loaded,
+                    reports structured progress, keeps going while you switch tabs, and serves the result
+                    back for the preview buttons.
+                    <strong>CLI subprocess</strong>: the exact command below in its own process — a crash
+                    or memory blow-up cannot take the tile-server down; same code, progress parsed from its
+                    output. With the offline converter it does not need the server at all (a crawl still
+                    reads the tileset URL the server serves). Prefer it for very large conversions.
+                    <span id="export-runner-na" hidden>Needs the desktop app — not available in a plain browser.</span>
+                </p>
+                <div class="options" id="export-crawl-opts">
+                    <label class="check" title="Copy the .subtree files and templated tiles as they are, instead of expanding the tree into explicit children. Smaller JSON; needs a client with implicit tiling (CesiumJS, 3DTRjs, Cesium for Unreal).">
+                        <input type="checkbox" id="export-keep-implicit"> keep implicit tiling
+                    </label>
+                </div>
+                <div class="options" id="export-convert-opts" hidden>
+                    <label class="field compact"><span>Tiling</span>
+                        <select id="conv-tiling"><option value="">converter default</option><option value="implicit">implicit</option><option value="explicit">explicit</option></select>
+                    </label>
+                    <label class="field compact"><span>Scale</span><input id="conv-scale" type="text" placeholder="1"></label>
+                    <label class="field compact"><span>GE scale</span><input id="conv-ge-scale" type="text" placeholder="1"></label>
+                    <label class="field compact"><span>GE layer</span><input id="conv-ge-layer" type="text" placeholder="—"></label>
+                    <label class="check" title="Splat formats only: write the splat centres as a point cloud"><input type="checkbox" id="conv-centroids"> splat centroids only</label>
+                </div>
+                <div class="options">
+                    <span class="hint">Also pack as</span>
+                    <label class="check"><input type="checkbox" id="pack-3tz"> .3tz</label>
+                    <label class="check"><input type="checkbox" id="pack-3dtiles"> .3dtiles</label>
+                </div>
+                <div class="urlbar">
+                    <input id="export-dir" type="text" spellcheck="false" placeholder="C:\exports\my-site   (an empty folder)">
+                    <button id="export-browse" class="btn">Folder…</button>
+                </div>
+                <div class="actions">
+                    <button id="export-start" class="btn btn-primary">Export</button>
+                    <button id="export-cancel" class="btn" disabled>Cancel</button>
+                </div>
+                <div class="progress" id="export-progress" hidden><div class="progress-bar" id="export-bar"></div></div>
+                <div id="export-status" class="result"></div>
+                <details class="log" id="export-log-wrap" hidden>
+                    <summary>CLI output <span class="hint">(last 200 lines)</span></summary>
+                    <pre id="export-log" class="log-pre"></pre>
+                </details>
+                <div class="actions" id="export-done" hidden>
+                    <button id="export-open" class="btn">Open folder</button>
+                    <button id="export-preview" class="btn">Preview exported copy</button>
+                    <button id="export-viewer" class="btn">Open copy in demo viewer</button>
+                    <button id="export-copy" class="btn btn-ghost">Copy folder path</button>
+                </div>
+                <span class="field-label" style="margin-top:14px">Equivalent CLI <span class="hint">(from the repo root)</span></span>
+                <div class="urlbar">
+                    <code id="export-cli" class="cli">—</code>
+                    <button id="export-cli-copy" class="btn">Copy</button>
+                </div>
+                <div class="links">
+                    <a id="export-doc" href="#" target="_blank" rel="noreferrer">Export docs</a>
+                    <a id="export-cli-doc" href="#" target="_blank" rel="noreferrer">CLI docs</a>
+                    <a id="export-mw" href="#" target="_blank" rel="noreferrer">Middleware home</a>
+                    <a id="export-live" href="#" target="_blank" rel="noreferrer">Open the live tileset in the demo viewer</a>
+                </div>
+            </div>
+        </section>
+
+        <!-- ── Library ───────────────────────────────────────────────────────────────────────── -->
+        <section class="panel panel-hidden" id="panel-library">
+            <div class="card">
+                <div class="card-head">
+                    <span class="field-label" style="margin:0">Tracked tilesets</span>
+                    <div class="card-head-actions">
+                        <button id="lib-refresh" class="btn btn-ghost">Refresh stats</button>
+                        <button id="lib-export" class="btn btn-ghost">Export</button>
+                        <button id="lib-import" class="btn btn-ghost">Import</button>
+                    </div>
+                </div>
+                <p class="hint">
+                    Local paths and remote URLs you want to keep around. Stored in this app only —
+                    not shared with the CLI or the web viewer.
+                </p>
+                <div id="lib-list" class="list"></div>
+                <textarea id="lib-io" class="io" spellcheck="false" placeholder="Paste exported JSON here, then press Import again."></textarea>
+            </div>
+        </section>
+
+        <!-- ── Samples ───────────────────────────────────────────────────────────────────────── -->
+        <section class="panel panel-hidden" id="panel-samples">
+            <div class="card">
+                <span class="field-label">Every format this middleware reads</span>
+                <p class="hint">
+                    Real, publicly-hosted datasets — one click loads one into <em>Build</em> with the
+                    right format already selected. Third-party sources are credited; none of this data
+                    is ours unless it says Iconem.
+                </p>
+                <div id="sample-list" class="groups"></div>
+            </div>
+        </section>
+
+        <footer>
+            <span id="ports">—</span>
+            <span class="spacer"></span>
+            <a id="link-viewer" href="#" target="_blank" rel="noreferrer">Web viewer</a>
+            <a id="link-explorer" href="#" target="_blank" rel="noreferrer">Hierarchy explorer</a>
+            <a id="link-docs" href="#" target="_blank" rel="noreferrer">Docs</a>
+            <a id="link-plugins" href="#" target="_blank" rel="noreferrer">Cesium for Unreal</a>
+            <a id="link-repo" href="#" target="_blank" rel="noreferrer">Source</a>
+        </footer>
+    </div>
+    <!-- Required: the Electrobun builder emits views/mainview/index.js from the configured view
+         entrypoint but does NOT inject a tag for it, so without this the view ships dead HTML. -->
+    <script type="module" src="index.js"></script>
+</body>
+</html>

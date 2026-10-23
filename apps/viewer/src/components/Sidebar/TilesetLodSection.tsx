@@ -9,7 +9,7 @@ import type { ViewerHandle } from '@/lib/viewer-handle';
 import { SidebarSection } from './SidebarSection';
 
 export default function TilesetLodSection({ activeHandleRef }: { activeHandleRef: React.RefObject<ViewerHandle | null> }) {
-  const [url] = useUrlState();
+  const [url, setUrl] = useUrlState();
   const s = useViewerStore();
   const h = () => activeHandleRef.current;
 
@@ -28,10 +28,49 @@ export default function TilesetLodSection({ activeHandleRef }: { activeHandleRef
           <Checkbox checked={s.ortho} onCheckedChange={(v) => { s.setOrtho(!!v); h()?.setOrtho(!!v); }} />
           Orthographic camera
         </Label>
-        <Label className="text-xs" title="Draw tile bounding volumes, colour by depth">
-          <Checkbox checked={s.debugTiles} onCheckedChange={(v) => { s.setDebugTiles(!!v); h()?.toggleDebug(!!v); }} />
-          Debug tiles (bounds + depth)
-        </Label>
+        <div className="flex items-center justify-between">
+          <Label className="text-xs" title="cells: the loaded tileset's own tiles — a mosaic's quadtree cells (colour by depth) and its dataset roots (white). tiles: every tile the renderer holds, bounds + depth colour.">Debug</Label>
+          <Select value={s.debugMode} onValueChange={(v) => { s.setDebugMode(v as any); h()?.setDebugMode(v as any); }}>
+            <SelectTrigger size="sm"><SelectValue /></SelectTrigger>
+            <SelectContent>
+              <SelectItem value="off">Off</SelectItem>
+              <SelectItem value="cells">Cells + dataset roots</SelectItem>
+              <SelectItem value="tiles">All tiles (bounds + depth)</SelectItem>
+            </SelectContent>
+          </Select>
+        </div>
+        {s.currentType !== 'splat' && (
+          <>
+            <div className="flex items-center justify-between">
+              <Label className="text-xs" title="Point clouds (any tileset that holds points, a mixed mosaic included). Fixed size in pixels; with adaptive sizing, the minimum, and 2× it the cap.">Point size (px)</Label>
+              <div className="flex w-32 items-center gap-2">
+                <Slider min={0.5} max={10} step={0.5} value={[s.pointSize]} onValueChange={([v]) => { s.setPointSize(v); h()?.setPointSize?.(v); h()?.applyPointShading(); }} />
+                <span className="w-8 text-right text-xs text-muted-foreground">{s.pointSize}</span>
+              </div>
+            </div>
+            <Label className="text-xs" title="Size each point from its tile's point spacing (geometric error), so coarse tiles close the gaps and fine tiles stay sharp. Cesium: pointCloudShading.attenuation; 3DTRjs: world-space size = spacing × the px size / 2.">
+              <Checkbox checked={s.pointAdaptive} onCheckedChange={(v) => { s.setPointAdaptive(!!v); h()?.applyPointShading(); }} />
+              Adaptive point size
+            </Label>
+            {url.renderer === 'cesium' && (
+              <>
+                <Label className="text-xs" title="Eye-dome lighting (Cesium pointCloudShading). 3DTRjs has it in the potree lab only.">
+                  <Checkbox checked={s.edl} onCheckedChange={(v) => { s.setEdl(!!v); h()?.applyPointShading(); }} />
+                  Eye-dome lighting
+                </Label>
+                {s.edl && (
+                  <div className="flex items-center justify-between">
+                    <Label className="text-xs">EDL strength</Label>
+                    <div className="flex w-32 items-center gap-2">
+                      <Slider min={0.1} max={3} step={0.1} value={[s.edlStrength]} onValueChange={([v]) => { s.setEdlStrength(v); h()?.applyPointShading(); }} />
+                      <span className="w-8 text-right text-xs text-muted-foreground">{s.edlStrength}</span>
+                    </div>
+                  </div>
+                )}
+              </>
+            )}
+          </>
+        )}
         {url.renderer === 'cesium' && (
           <>
             <Label className="text-xs" title="Unlit rendering — avoids dark results on baked-lighting photogrammetry">
@@ -63,13 +102,10 @@ export default function TilesetLodSection({ activeHandleRef }: { activeHandleRef
                 </SelectContent>
               </Select>
             </div>
-            <div className="flex items-center justify-between">
-              <Label className="text-xs">Point size (px)</Label>
-              <div className="flex w-32 items-center gap-2">
-                <Slider min={0.5} max={10} step={0.5} value={[s.pointSize]} onValueChange={([v]) => { s.setPointSize(v); h()?.setPointSize?.(v); }} />
-                <span className="w-8 text-right text-xs text-muted-foreground">{s.pointSize}</span>
-              </div>
-            </div>
+            <Label className="text-xs" title="Mosaics only. Each Potree dataset in an /aggregate mosaic is read directly by 3DTRjs's PotreePlugin (adaptive point size, Potree's own octree) instead of through /stream's 3D Tiles. The mosaic still carries the /stream link, so CesiumJS and other clients are unaffected. Potree 1.x .bin and 2.0 DEFAULT only; COPC, Brotli and LAS/LAZ-node clouds stay on /stream.">
+              <Checkbox checked={url.native} onCheckedChange={(v) => setUrl({ native: !!v })} />
+              Native Potree leaves
+            </Label>
           </>
         )}
     </SidebarSection>

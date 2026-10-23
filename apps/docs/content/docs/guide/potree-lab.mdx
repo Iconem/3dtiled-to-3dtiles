@@ -1,0 +1,174 @@
+---
+title: "Potree lab: point-cloud rendering test bench"
+description: "Test point-cloud datasets one at a time with 3DTilesRendererJS's new PotreePlugin (adaptive point size, eye-dome lighting) and compare against this repo's /stream 3D Tiles output."
+---
+
+`/potree-lab` on the viewer app (`http://localhost:3000/potree-lab`) loads **one** Potree dataset at a
+time with the point-rendering controls 3DTilesRendererJS added in
+[#1742](https://github.com/NASA-AMMOS/3DTilesRendererJS/pull/1742) (merged 2026-09-10). The upstream
+example has no URL parameter — its datasets are hard-coded — so this page exists to point the same
+renderer at *our* datasets.
+
+Open it from the demo app with **✺ potree lab** in the top bar. A raw `cloud.js` / `.copc.laz` in the
+URL field opens as itself; a loaded point-cloud tileset (a `/stream` or `/aggregate` URL) opens in
+`tileset` mode.
+
+## What 3DTRjs's own loader reads (master, `70847eb`)
+
+| Source | `PotreePlugin` (raw, in the browser) | Through our `/stream` (3D Tiles) |
+|---|---|---|
+| Potree 1.7 `cloud.js` (attribute **names**) | ✅ | ✅ |
+| Potree 1.8 `cloud.js` (attribute **objects**) | ❌ upstream: `Cannot read properties of undefined (reading 'size')`. ✅ **with our local patch** | ✅ |
+| Potree 1.x with LAS/LAZ node files | ❌ (always fetches `.bin`) | ✅ |
+| Potree 2.0 `metadata.json`, DEFAULT encoding | ✅ | ✅ |
+| Potree 2.0, BROTLI encoding | ❌ (`encoding` is never checked) | ✅ |
+| COPC / LAS / LAZ / EPT | ❌ no loader in 3DTRjs (COPC is an open item of roadmap [#943](https://github.com/NASA-AMMOS/3DTilesRendererJS/issues/943)) | ✅ COPC |
+
+**Potree 1.8 is most of our data.** 38 of 40 sampled Iconem clouds are 1.8. The version is decided
+by file name only (`metadata.json` → v2, anything else → v1) and v1 attributes are looked up by name,
+which is the same bug our own decoder had. The vendored `PotreeLoader.js` carries one local patch,
+`v1Attributes()`, that accepts 1.8's objects (their `size`, or `elements × elementSize`). With it an
+Iconem 1.8 cloud loads raw (12,343 points on screen; 0 before). It is worth an upstream PR.
+
+**COPC therefore always goes through the middleware**, in `stream` mode (a `.copc.laz` URL is
+detected), and the lab's `potree` mode is the raw, middleware-free path for Potree only.
+
+## Controls
+
+A **controls** select switches the camera scheme without reloading (`?controls=`):
+
+| Choice | What it is |
+|---|---|
+| `EnvironmentControls (3DTRjs)` (default) | 3DTRjs's local-scene controls: pivot on the picked point, a fallback ground plane under the data |
+| `GlobeControls (3DTRjs)` | 3DTRjs's globe controls, bound to the loaded tileset's group. The lab recentres content at the origin, so this is for comparing feel, not for real geography |
+| `OrbitControls (three)` | three.js's own orbit around a fixed target (the dataset's centre) |
+
+**Double-click** pivots on the picked point and moves halfway to it, with every scheme. **inertia (s)**
+is the damping half-life — 3DTRjs's `dampingFactor` is literally that time constant (their default
+0.15 s glides long after the pointer stops; the lab uses 0.05 s), and the same half-life is mapped onto
+OrbitControls' per-frame factor.
+
+## Loading speed
+
+Three knobs in the *tiles* folder, all in the URL (`dl`, `parse`, `cache`):
+
+| Knob | Default | What it does |
+|---|---|---|
+| parallel downloads | 25 per origin | `downloadQueue.maxJobsPerOrigin` |
+| parses / frame | 5 | `parseQueue.maxJobs` — each tile's points are decoded on the main thread, so this is the frame-time budget; what feels sluggish during camera motion is usually parsing, not bandwidth |
+| tile cache (MB) | 400 | `lruCache.maxBytesSize`: parsed tiles kept for when the camera comes back |
+
+The HUD shows the live queues (`N↓ M⚙`) and the cache size. The visible point count there is what
+is actually drawn: with `error target` 2 on a city-scale Potree it is typically 1–3 M points, and the
+budget, not the target, is what the lab lacks compared with Potree's own viewer (which stops at a point
+budget rather than a screen-space error).
+
+## The load modes
+
+| `mode=` | How the dataset is read | Point sizing |
+|---|---|---|
+| `potree` | `PotreePlugin` reads `cloud.js` directly in the browser | **Adaptive, per point**: each point is sized by the deepest *active* octree node containing it, resolved in the vertex shader from a texture of the active node hierarchy |
+| `stream` | This repo's `/stream` turns the same `cloud.js`, or a `.copc.laz`, into 3D Tiles (POINTS GLB), rendered through `PointCloudEffectsPlugin` | Per **tile**: fixed, or derived from the tile's geometric error (toggle) |
+| `tileset` | **Any** 3D Tiles URL as is: typically an `/aggregate` mosaic of point clouds, kept regional with `&only=` | same as `stream` |
+
+A COPC that declares no CRS takes one in the URL fragment: `…/overview.copc.laz#crs=EPSG:3812`, which
+becomes `/stream`'s `&crs=`. The dataset list includes a flai COPC (Namur) and an aggregate, and for
+example this shows Mes Aynak's newest capture with eye-dome lighting:
+
+```
+/potree-lab?mode=tileset&edl=0.6&url=http://localhost:3001/aggregate/tileset.json?set=iconem%26only=MesAynak_20%26latest=1
+```
+
+Both modes share the effects: point shape (`square`/`round`/`sphere`), minimum pixel size, eye-dome
+lighting (strength, radius) and debug colouring by node / depth / tile.
+
+Everything is in the query string, so any view is a shareable link:
+
+```
+/potree-lab?url=<cloud.js>&mode=potree|stream&shape=round&edl=0.4&scale=1&geSize=1
+```
+
+The dataset picker lists public samples plus — **dev server only** — every Potree entry of the Iconem
+share-link manifest (`.local/aggregate-sets/iconem.json`). Vite serves that file to **loopback clients
+only** and returns `403` to anyone else, because it is a list of bearer-credential URLs and the dev
+server binds every network interface.
+
+The list is filled in after that fetch. lil-gui's `controller.options(list)` does not update a
+dropdown in place — it destroys the controller and returns a new one, appended at the end of the
+panel and without the old `onChange` — so the lab swaps in the returned controller, re-attaches the
+handler and moves it back to the top. (Before that fix, picking an Iconem entry did nothing.) For
+headless checks, `window.LAB` exposes `url`, `mode`, `tiles`, `rootLoaded`, `visibleTiles`,
+`visiblePoints` and `errors`; in `potree` mode the URL lives in the plugin, so `LAB.tiles.rootURL` is
+`null` and `LAB.url` is the one to read.
+
+## Running the viewer on 3DTilesRendererJS master
+
+To try unreleased renderer work in the **whole** viewer, not just this page, build the renderer from
+source. The lockfile stays on 0.5.2:
+
+```sh
+node scripts/build-3dtr-master.mjs            # clone/update .local/3DTilesRendererJS, npm ci, build
+cd apps/viewer && npm run dev:3dtr-master      # the viewer, aliased onto that build
+```
+
+`vite.3dtr-master.config.mts` aliases every `3d-tiles-renderer` entry point to the build and dedupes
+`three` / `react` / `@react-three/fiber`, because the clone has its own copies and two `three`
+instances break everything. On Windows, upstream's library build externalises its own `C:\…`
+aliases and emits a 253-byte `index.js`; the script builds through a wrapper config that fixes the
+`external` test without touching upstream files.
+
+Why it breaks: its library config makes every module external unless the import starts with `.`, `/`
+or `\`. Its own `packageAliases` are `path.resolve()`d, which on Windows gives `C:\…`, a string
+that starts with none of those. So every internal module was treated as an external package and
+`build/index.js` came out as 253 bytes of re-exports with mangled paths such as
+`"C:Usersjonathan…"`. The wrapper (`.local/3dtr-vite.lib-config.win.mjs`, written by the script) only
+replaces `external` with a test that also accepts absolute paths and `3d-tiles-renderer/…`
+self-imports. Verified at `70847eb`: implicit `/stream` Potree
+loads in the main viewer, and this lab renders a 149,695-point Mes Aynak aggregate with EDL. Once a
+release ships the work, bump the dependency and delete `.local/3DTilesRendererJS`.
+
+## Why the plugins are vendored
+
+`PotreePlugin` and `PointCloudEffectsPlugin` are on 3DTilesRendererJS `master` only — `0.5.2`, the
+latest npm release, predates them. They are copied verbatim, pinned to the upstream commit, under
+`apps/viewer/src/potree-lab/vendor/` (Apache-2.0, license included). Everything they need from the
+renderer (`loadRootTileset`, `setTileActive`, `invokeOnePlugin`, `processNodeQueue`, …) already exists
+in `0.5.2`, which the viewer now uses. Delete the copy once a release ships them.
+
+## What comparing the two modes showed
+
+<Callout type="warn">
+**Our point clouds were rendering washed out everywhere — fixed.** glTF defines `COLOR_0` as
+**linear**, but every point writer here (live COPC/Potree, offline COPC/Potree/LAS, `.pnts` upgrade)
+copied display-encoded sRGB straight in. Side by side on Geghard, `potree` mode showed the site's
+greens and browns while `stream` mode showed the same points pale and whitish. Colours are now
+linearised on write (a 16-bit lookup table, so no `pow()` in the tile hot path); splat centroids,
+which are already linear, opt out. Conversions cached to disk before the fix are ignored — the
+`/convert` cache key now carries an output version.
+</Callout>
+
+**Per-tile sizing is not enough — per-point sizing is what makes Potree look right.** `/stream` point
+tilesets refine **additively**, so every ancestor tile stays on screen with its coarser, sparser
+points. Sizing points from their *own* tile's geometric error makes those ancestors draw large blobs
+under the fine detail. Potree avoids exactly this by sizing each point from the *deepest active node
+covering its position*.
+
+That is also the answer to "can the density be passed down to plain 3D Tiles endpoints?": **yes, but
+it has to be the per-point scheme**, not a per-tile size:
+
+- For implicit-octree tilesets (our `/stream` COPC and Potree), a tile's `(level, x, y, z)` is exactly
+  a Potree octree key, and its geometric error is the point spacing — so the same active-node texture
+  can be built without any Potree metadata.
+- That needs a small plugin of our own (active tiles → node texture → `PointCloudMaterial`'s
+  `uActiveNodes` / `uNodeSize` / `uNodeMinOffset`); `PointCloudMaterial` already supports it, it just
+  has no generic driver yet. Not built.
+
+## Limits
+
+- **Potree 1.x (`cloud.js`) is the tested path.** The plugin also reads 2.0 (`metadata.json`); the
+  Iconem platform only produces 1.x today.
+- Splat rendering cannot be judged in headless verification: Spark splats render as a dark blob under
+  software GL on **both** `0.4.28` and `0.5.2`, so the renderer upgrade is neutral there but splat
+  quality is unverified until checked on a real GPU.
+- `stream` mode recentres georeferenced tilesets with `ReorientationPlugin`, and frames on a bounding
+  **sphere** — a box around a rotated ECEF box is inflated and framed sites several times too far away.

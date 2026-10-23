@@ -1,5 +1,8 @@
 {
   "rewrites": [
-    { "source": "/vanilla-viewer", "destination": "/vanilla-viewer.html" }
+    { "source": "/vanilla-viewer", "destination": "/vanilla-viewer.html" },
+    { "source": "/hierarchy", "destination": "/hierarchy.html" },
+    { "source": "/potree-lab", "destination": "/potree-lab.html" },
+    { "source": "/builder", "destination": "/builder.html" }
   ]
 }

@@ -69,12 +69,45 @@ export default defineConfig({
       },
     },
     {
+      // DEV ONLY: serve machine-local aggregate manifests (.local/aggregate-sets/*.json) to the Potree
+      // lab's dataset picker. Those manifests hold Iconem share links, which are bearer credentials —
+      // and this dev server binds every interface (`host: true`) — so only loopback clients get them,
+      // and `configureServer` means none of this exists in a production build.
+      name: 'local-sets-loopback-only',
+      configureServer(server) {
+        server.middlewares.use(async (req, res, next) => {
+          const url = req.url || '';
+          if (!url.startsWith('/local-sets/')) return next();
+          const addr = req.socket.remoteAddress || '';
+          if (!['127.0.0.1', '::1', '::ffff:127.0.0.1'].includes(addr)) {
+            res.statusCode = 403;
+            return res.end('local sets are only served to loopback clients');
+          }
+          const name = path.basename(decodeURIComponent(url.split('?')[0]));
+          if (!/^[\w.-]+\.json$/.test(name)) return next();
+          const filePath = path.join(repoRoot, '.local', 'aggregate-sets', name);
+          try { await stat(filePath); } catch { res.statusCode = 404; return res.end('no such local set'); }
+          res.setHeader('Content-Type', 'application/json');
+          res.setHeader('Cache-Control', 'no-store');
+          createReadStream(filePath).pipe(res);
+        });
+      },
+    },
+    {
       // Extension-less `/vanilla-viewer` (matching the plain `/docs` link's style) instead of forcing
       // `/vanilla-viewer.html` — `serve.json`'s `rewrites` covers the same alias for the production build.
       name: 'vanilla-viewer-alias',
       configureServer(server) {
         server.middlewares.use((req, res, next) => {
           if (req.url === '/vanilla-viewer') req.url = '/vanilla-viewer.html';
+          // Same extension-less alias for the hierarchy explorer (public/serve.json mirrors both
+          // rewrites for the production static server).
+          if (req.url === '/hierarchy') req.url = '/hierarchy.html';
+          if (req.url?.startsWith('/potree-lab') && !req.url.startsWith('/potree-lab.html')) {
+            req.url = '/potree-lab.html' + req.url.slice('/potree-lab'.length);
+          }
+          // The Aggregate Builder takes query params (?import=, ?tileset=), so keep them on the rewrite.
+          if (/^\/builder(\?|$)/.test(req.url ?? '')) req.url = '/builder.html' + req.url!.slice('/builder'.length);
           next();
         });
       },
@@ -86,6 +119,11 @@ export default defineConfig({
     // `dev:app` script). Also folds in the legacy standalone page (`/vanilla-viewer`, was the
     // root-level vite.config.mjs on :3000).
     port: 3000,
+    // Fail loudly if 3000 is taken instead of auto-hopping onto the NEXT port — vite's default
+    // increment lands it on 3001 and silently steals the tile-server's port, which then crashes with
+    // EADDRINUSE and takes the whole `pnpm dev` stack down in a confusing way (observed live when an
+    // unrelated dev server held 3000). Override with `--port <n> --strictPort` when 3000 is busy.
+    strictPort: true,
     // Bind all interfaces (Vite defaults to localhost-only) so this is reachable from other devices
     // on the LAN at http://<this machine's LAN IP>:3000/ — the tile-server middleware already listens
     // on all interfaces by default (plain `.listen(PORT)`, no host arg), and formats.ts's MW/SDATA
@@ -115,6 +153,16 @@ export default defineConfig({
       input: {
         main: fileURLToPath(new URL('./index.html', import.meta.url)),
         'vanilla-viewer': fileURLToPath(new URL('./vanilla-viewer.html', import.meta.url)),
+        // The hierarchy explorer is its own entry, not a route in the main app: it only needs
+        // /stats + d3-hierarchy, and folding it into index.html would make every visit download
+        // Cesium, three and SparkJS to draw a graph.
+        hierarchy: fileURLToPath(new URL('./hierarchy.html', import.meta.url)),
+        // Point-cloud rendering test bench (PotreePlugin + PointCloudEffectsPlugin); own entry so the
+        // main app doesn't carry the vendored, not-yet-released 3DTRjs plugins.
+        'potree-lab': fileURLToPath(new URL('./potree-lab.html', import.meta.url)),
+        // Hand-assembled mosaics (tree editor + export); own entry for the same reason as hierarchy:
+        // it needs React and shadcn, not Cesium or three.
+        builder: fileURLToPath(new URL('./builder.html', import.meta.url)),
       },
     },
   },

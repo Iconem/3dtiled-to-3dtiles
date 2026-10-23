@@ -5,6 +5,555 @@ Format loosely follows [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+### Changed — 2026-10-23 (no Iconem share links in the repository)
+- The `angkor` and `iconem-open` aggregate sets moved out of code into machine-local manifests
+  (`.local/aggregate-sets/angkor.json`, `iconem-open.json`, gitignored). They appear only where those
+  files exist; the *Iconem — demo* pill now requires its set.
+- `world` is every committed dataset: `opendata` + `cities` + `esri-3d` + Aerometrex + Vexcel.
+- Geghard is gone from the Potree presets, the desktop catalogue, the potree lab and the vanilla
+  viewer; the lab's aggregate example is now Open Heritage 3D, the Potree debug script defaults to
+  Lion Takanawa. The Angkor entries in the hierarchy explorer became the `open` set.
+
+### Added — 2026-10-23 (native Potree leaves in mosaics)
+- **`/aggregate?native=1`:** each Potree leaf also carries its source in
+  `content.extensions.ICONEM_content_source` (`format`, `version`, `encoding`, `uri`, and a
+  `transform` from the cloud's own coordinates to the leaf frame), listed in `extensionsUsed` only.
+  `content.uri` is still the `/stream` 3D Tiles wrapper, so Cesium and other clients are unaffected.
+  On the full Iconem manifest all 628 Potree leaves qualify (337 × 1.7, 291 × 1.8, all `.bin`).
+- **`/stream` Potree roots report `extras.native`** (version, encoding, origin), which the aggregate
+  reads from the child root it already fetches.
+- **Viewer, 3DTRjs mode: *Native Potree leaves*** (`?native=true`). A plugin
+  (`lib/nativeLeaves.ts`) mounts a `PotreePlugin` child renderer per visible Potree leaf, sharing
+  the mosaic's cache and queues. Hide, tint, point size and raycast picking work on native points.
+- **Measured:** identical nodes, points and placement to `/stream` at normal error targets
+  (Geghard, six Angkor Thom clouds). At 0.25 px, native kept refining to 3.7 M points while `/stream`
+  stopped at 1.7 M: under 3DTRjs, `/stream` Potree never passed level 3, its first child-subtree
+  boundary. That is a separate `/stream` bug, logged in docs *Meta-tilesets*.
+
+### Noted — 2026-10-20 (spec direction)
+- glTF#1809 (Draco point compression) closed as superseded by `KHR_meshopt_compression`; Cesium's
+  benchmark puts meshopt point GLBs at 1.01 GiB vs 1.19 GiB for `.pnts`+Draco on 313 M points, same
+  load time. Confirms `/stream?transform=meshopt`; follow-ups in docs *TODO → Spec direction*.
+- 3D Tiles 2.0 will be a set of glTF 2.1 extensions (3d-tiles#803, CesiumGS/glTF `3d-tiles-2.0`
+  branch); `3DTILES_georeference` covers local → ECEF via a tangent plane, which is what the
+  `&lon/&lat/&alt/&heading` placement already computes.
+
+### Added — 2026-10-01 (open data sources)
+- Three new committed sets, all in the *Open data* mosaic: `cities` (swisstopo, 3D BAG, PDOK, PLATEAU
+  Japan, Helsinki, 12 more CRAIG meshes), `esri-3d` (nine Living Atlas integrated meshes as 3D Tiles,
+  two I3S layers) and `openheritage3d` (ten Potree 2.0 heritage scans, licences per entry).
+- Looked at and NOT added, with why (docs: Meta-tilesets): OpenTopography (per-dataset Potree viewers
+  are per-job and gone; only four sample EPTs persist, and the server reads no EPT), Cesium ion (no
+  public search API; Google/OSM/Bing assets need a token per request), Google/Bing 3D (global
+  tilesets would draw over everything — they stay terrain choices), city-model ledgers (awesome-citygml,
+  TU Delft 3D open cities STAC: CityGML/CityJSON downloads, no streamable tilesets).
+
+### Changed — 2026-10-01 (lab controls feel · loading knobs · point controls on mixed mosaics)
+- **Potree lab:** inertia slider (0.05 s default instead of 3DTRjs's 0.15 s), double-click to pivot
+  and zoom with every control scheme, and loading knobs (parallel downloads, parses per frame, tile
+  cache) with live queue/cache readouts in the HUD.
+- **Point controls** apply to any tileset holding points, whatever the preset's type (the *Open data*
+  mosaic is `mesh` but holds 113 COPC clouds); Cesium's style size is now the floor under attenuation.
+- **Point clouds default to 2 px SSE** (was 4) in both renderers: a Potree root's spacing otherwise
+  only refined below ~1 km.
+- `iconem-open` is labelled **demo** (© Iconem, shared for demos), not public.
+
+### Added / Changed — 2026-09-18 (debug cells · point controls · two pills · lab controls · external open)
+- **Debug select** replaces the debug checkbox: **cells + dataset roots** draws the loaded tileset's own
+  declared tiles (a mosaic's quadtree cells by depth, dataset roots in white; `lib/mosaicOutlines.ts`,
+  both renderers); **all tiles** is the renderers' full debug view.
+- **Point-cloud controls** in the sidebar for both renderers: point size, adaptive sizing (Cesium
+  attenuation; 3DTRjs world-space size from the tile's geometric error), and eye-dome lighting +
+  strength on Cesium.
+- **Aggregate pills** are now two: *Iconem — all formats* first, then *Open data* (new `open` set:
+  RESOURCES.md + Aerometrex + flai + Vexcel, 145 datasets). *Iconem — public* (new `iconem-open` set:
+  Angkor + Geghard) stands in where the Iconem manifest is absent. The Angkor / Mes Aynak / per-format
+  pills are gone — the picker does that.
+- **Picker:** the *in view* list opens by default; the colour mode colours markers only; **⧉** opens a
+  dataset alone in a new tab (potree lab for Potree, the 3DTRjs viewer otherwise).
+- **Potree lab:** a **controls** select — EnvironmentControls, GlobeControls or three's OrbitControls
+  (`?controls=`).
+- **3DTRjs:** double-click and fly-to-sphere keep the camera upright (local up, or north when looking
+  straight down) instead of three's default +Y roll.
+
+### Added / Changed — 2026-09-17c (per-dataset snap · cell default · in-place picker · Vexcel · Esri · Mapterhorn default)
+- **`&snap=`** on `/aggregate` snaps **each dataset separately**. Each leaf gets its own translation
+  along the local up, computed server-side from the dataset's own top geometry against Mapterhorn.
+  - New modules: `packages/core/dataset-ground.js` (shared with the viewer) and
+    `packages/core/terrain.js` (Terrarium in Node, WebP via WASM).
+  - Mes Aynak's seven captures: +3.2 to +6.5 m. The viewer's snap button now uses this on mosaics;
+    snapping the mosaic as one tileset was why "Mes Aynak multi" did not snap.
+  - Ground bins are now **8 × 8** (were 12 × 12).
+- **`bv=cell` is the default.** Group tiles are their quadtree cells. `index.json` rows now carry
+  `cell` and `depth`; the hover card and picker show where each dataset's root sits.
+- **Picker changes no longer reload the mosaic.** The renderers keep the unfiltered tileset and hide
+  datasets in place by their tile-metadata `id`.
+  - Cesium: `tileVisible` sets `model.show` and `model.color`.
+  - 3DTRjs: `scene.visible` and the materials.
+  - Rapid clicks no longer lose changes while the index loads.
+- **Picker controls:**
+  - **colour** `format | provider | dataset` colours the markers and the data (one colour per Mes
+    Aynak capture);
+  - **provider pills** show or hide markers;
+  - **bounds** and **snap** are segmented controls;
+  - switching a format off removes its markers instead of greying them.
+- **Vexcel:**
+  - 10 Australian collections in a `vexcel` set and in `world` (55 datasets);
+  - `/proxy` injects `VEXCEL_API_KEY` server-side and strips it from every URL it returns;
+  - the server reads machine-local secrets from the gitignored `.local/tile-server.env`;
+  - `requiresEnv` hides the set where the key is missing.
+- **CRS placement:** `georefFromCrs` builds a **1 m trihedron** through proj4 instead of a plain
+  ENU frame, keeping grid convergence and scale. The COPC offline converter uses it too.
+- **Viewer defaults:**
+  - **Esri World Imagery + labels** basemap in both renderers;
+  - terrain **Mapterhorn (auto)**: quantized mesh in Cesium, Terrarium in 3DTRjs;
+  - Re:Earth's z0 ellipsoid tile returns HTTP 500, so it is substituted;
+  - 3DTRjs fly-to is north-up.
+- **Aggregate Builder:** importing a tileset keeps its hierarchy (Angkor: 18 groups, 23 datasets,
+  depth 8), with Flatten / group-by options.
+- **Potree lab:** choosing a dataset in the select actually loads it (lil-gui `options()` dropped
+  the change handler).
+- **Desktop:** exports run either in the tile-server or as a CLI subprocess (allow-listed scripts,
+  cancel, output tail, chained pack step).
+
+### Added / Fixed — 2026-09-17b (terrain · snap · bounds · export options · providers · 3DTRjs findings)
+- **Terrain:**
+  - Added Mapterhorn in three forms: Re:Earth **quantized mesh (ellipsoidal)**, Re:Earth Terrarium
+    (ellipsoidal) and mapterhorn.com Terrarium (sea level), next to the AWS Terrain Tiles, in both
+    renderers.
+  - Cesium's raster provider now falls back to the nearest available ancestor tile.
+  - The docs explain the datum: 3D Tiles are ellipsoidal, and sea-level DEMs are off by the geoid
+    undulation.
+- **Snap to ground reads the dataset's own geometry.** It decodes the root content (glb/b3dm/pnts),
+  bins it 12 × 12 and takes each bin's 10th-percentile height as the ground; the Z offset is the 70th
+  percentile of terrain − ground. Both renderers now agree exactly: Geghard −53.5 m on Mapterhorn
+  ellipsoid, 88/88 bins, i.e. the dataset floats ~55 m high. Picking remains as the fallback for
+  compressed content.
+- **`&bv=cell` and `&bv=box`:** groups bounded by their actual quadtree cells (geodetic 2×1 or
+  web-mercator, widened only where a dataset pokes out), or by ENU-oriented boxes. Angkor pills for
+  both.
+  - **Fixed:** the geodetic cell key re-encoded the hemisphere bit and dropped the finest longitude
+    bit, so cells were twice as wide as their key said.
+  - Nesting tests now cover cell and box containment, plus a 2,000-point `cellAt` → `cellBounds`
+    round trip.
+- **Providers and attribution** on every dataset:
+  - carried in index rows and tile metadata, and set in manifests and code sets;
+  - the viewer shows "Data: …" credits for what is on screen;
+  - the `world` set now includes the 12 Aerometrex cities (45 datasets), credited.
+- **Aggregate Builder:**
+  - several sources at once, with provider/set/format chips and a tag filter;
+  - provider metadata end to end;
+  - windowed tree;
+  - tested on all 692 Iconem datasets (660 rows in ~100 ms; export of 660 datasets in 2–6 ms).
+- **Export:**
+  - `keepImplicit` (copies subtrees and templated tiles);
+  - `method: "convert"` (the per-format offline converter, with its options);
+  - `pack: ["3tz", "3dtiles"]` via the new `packages/convert/pack.js`;
+  - CLI `--keep-implicit --pack`;
+  - the desktop card gains method/option controls, a live "equivalent CLI" block, and links to the
+    docs, the middleware home and the demo viewer (`?load=`).
+- **Fixed: fly-tos lost at start-up in both renderers.**
+  - Cesium dropped a fly-to issued before the viewer existed.
+  - `App`'s renderer-switch reload also ran on mount and re-framed the whole tileset.
+  - Cesium's preset fly-to now **looks at** its point (it used to look `height` m north of it).
+- **Found: 3DTRjs `PotreePlugin` fails on every Potree 1.8 cloud** (attribute objects; 95% of
+  Iconem's clouds). The lab's vendored loader carries a local patch. COPC and BROTLI Potree 2.0 are
+  unsupported upstream, so COPC keeps going through `/stream`.
+- **Upstream research, the ADD skip:**
+  - It is a 3DTRjs **v0.5.1 regression** (#1673).
+  - CesiumJS avoids it (`meetsScreenSpaceErrorEarly` returns early for implicit/tileset-content
+    parents).
+  - It is not reported yet. Draft issue:
+
+    > **Traversal: implicit ADD tilesets render nothing at distance — the ADD-parent error skip
+    > applies to SUBTREELoader's content child (regression in 0.5.1).** Load an implicit tileset with
+    > `refine: "ADD"` (e.g. a point cloud) and move back until the root's SSE ≤ `errorTarget`: nothing
+    > renders. `markUsedTiles` (traverseFunctions.js, #1673) skips a child when
+    > `error × parent.geometricError / child.geometricError ≤ errorTarget`, and
+    > `SUBTREELoader.expandSubtree` moves the root content into a clone with the *same* geometric
+    > error under an unrenderable parent, so the ratio is 1. Suggested fix, as CesiumJS does: apply
+    > the skip only when the parent has renderable content.
+
+### Added — 2026-09-17 (export to folder · aggregate builder)
+- **Added: export any tileset to a local folder.** `POST /export` on the tile-server, `3dtiled export`
+  on the CLI, and an *Export to a folder* card in the desktop app. It crawls the URL, so `/stream`,
+  `/convert`, `/tiles`, `/aggregate`, `/proxy` and remote 3D Tiles all work.
+  - The output is a static, self-contained tree: relative uris, implicit tilings expanded (depth-capped
+    via the new `implicit-to-explicit` `maxLevels`), sharded tile folders, and failures listed in
+    `export-report.json` after retries.
+  - `GET /export/{id}/files/…` previews the copy.
+  - Writing to disk needs `TILED_ALLOW_EXPORT=1`, which the desktop app sets, and answers loopback
+    clients only.
+  - Verified: Geghard via the desktop UI (48 files in 5.3 s), Geghard and Brooklyn via the CLI (both
+    copies render from a static server), and a proxied Aerometrex mosaic over HTTP. The Electrobun
+    build succeeds.
+- **Added: Aggregate Builder (`/builder`, 🧱 in the viewer's top bar)**, pure React + shadcn with no new
+  dependencies.
+  - Layout: a library of datasets (server sets, or any URL; fuzzy search), a drag-and-drop tree with
+    groups, and an inspector for name, date, notes, custom metadata, refine, and display mode
+    (`all` / `latest` / `first`).
+  - Undo/redo, autosave, and project import/export.
+  - Exports a 3D Tiles 1.1 `tileset.json` (sphere unions, GE doubling, tile metadata) or an aggregate set
+    manifest.
+  - **Preview in viewer** posts an in-memory draft (`POST /aggregate/draft`, 50 drafts, 24 h) and opens
+    it through the viewer's new `?load=<url>&fly=<lon,lat,height>` start parameters.
+  - Drafts also get `index.json` and the picker's filters. 62 self-checks cover the tree operations and
+    export.
+
+### Added / Fixed — 2026-09-16d (open sets · proxy · terrain · snap · 3DTRjs implicit fix)
+- **Added: `set=flai`**: 113 national open-LiDAR campaigns from flai-ai/open-lidar-data as COPC
+  overviews; all place and none fail. They are generated from the flai README by
+  `scripts/flai-open-lidar-set.mjs`.
+- **Added: `set=aerometrex`**: 12 US city meshes through `/proxy`. Committed public manifests now
+  live in `packages/tile-server/aggregate-sets/`; entries may carry `proxy`, `crs`, `licence` and ISO
+  date intervals.
+- **Corrected: the "missing tileset-aware proxy" was never missing.** `/proxy` already rewrites child
+  URIs; Brooklyn's 1,003 tiles stream through it. The docs said otherwise and are fixed.
+- **Added: `/stream …&crs=EPSG:<n>`** for COPC/Potree files that declare no CRS. `core/geo.js` gains
+  definitions for 15 national grids plus UTM rules (`crsDefinition`).
+- **Added: dataset names in the 3D Tiles output.** Aggregate leaves carry 3D Tiles 1.1 tile
+  metadata (class `dataset`).
+- **Added: build timings in `asset.extras.build`** (`childRootsFetched`, `fetchMs`, `treeMs`).
+  Iconem: a cold build fetches 692 roots in 10.8 s and builds the tree in 16 ms; a warm rebuild in
+  another scheme takes 257 ms end to end.
+- **Added: an *Angkor — 23 sites (regions)* preset** (`bv=region`); it renders in both Cesium and
+  3DTRjs.
+- **Docs:** a step-by-step account of how a mosaic is built, and why the output is an explicit
+  quadtree with no height split.
+- **Fixed: 3DTRjs showed nothing for implicit point clouds at normal distances.** This is an upstream
+  traversal bug (the ADD-parent skip ignores unrenderable parents); `ImplicitAddRefineFixPlugin` works
+  around it.
+- **Fixed: 3DTRjs preset fly-tos were lost about half the time**: `flyToCity` reached the in-Canvas
+  scene before it mounted. Such calls are now queued until the scene exists.
+- **Added: Terrarium terrain** (open AWS tiles) in both renderers. Cesium gets it through a custom
+  heightmap provider.
+- **Added: ⤓ Snap to ground** in both renderers: 9 × 9 top-surface vs terrain samples, 80th
+  percentile, two passes. On Geghard the renderers agree within 5 m.
+- **Added: ✺ potree lab button** in the top bar. The lab gains a `tileset` mode (any URL, e.g. an
+  aggregate), COPC input and `#crs=`.
+- **Added: `scripts/build-3dtr-master.mjs` + `npm run dev:3dtr-master`**: the whole viewer on a
+  from-source 3DTilesRendererJS build, with a Windows fix for upstream's library build. Verified at
+  `70847eb`.
+- `window.tiles3dtr` exposes the 3DTRjs renderer for inspection, like Cesium's `window.viewer`.
+- The repo now pushes to both `jo-chemla/3dtiled-to-3dtiles` and `iconem/3dtiled-to-3dtiles`
+  (`origin` has two push URLs).
+
+### Added / Fixed — 2026-09-16c (aggregate picker · dates · regions · 3DTRjs markers)
+- **Added: a dataset picker** for loaded mosaics. It lists what is on screen, grouped by platform
+  scene, with per-dataset checkboxes and capture dates. Per-site **latest** and **all** buttons cover
+  diachronic series (Mes Aynak) and multi-part sites (Venice). It also has format chips derived from
+  the index, a global *latest only* switch and a capture-date range. Every action is a URL param, so
+  the view stays one shareable tileset.
+- **Added: `/aggregate` params `&hide=<id>`, `&latest=1`, `&from=` / `&to=`, `&bv=region`.** Each
+  dataset has a stable `id`. `latest` keeps the newest capture among datasets on the same ground
+  (geometric test, mixed date precision handled); on the Iconem set it keeps 625 of 660. `bv=region`
+  bounds quadtree groups with lon/lat/height regions, verified to enclose every descendant.
+- **Added: capture dates.** The share-link script records the platform `date`, or parses Iconem names
+  (`_dYYYYMM`, `YYYY-MM`, bare years within 1990–2035; the `_p` processing date is ignored), along
+  with project, scene and asset ids: 399 of 692 datasets are dated. `index.json` returns `id`, `group`
+  and `date`.
+- **Added: hover cards on markers** (name, scene, project, format, date, size) instead of the native
+  canvas tooltip. Cesium hover now uses `drillPick`, so markers under already-loaded data still
+  respond.
+- **Added: markers in 3DTRjs**: one `THREE.Points` layer with the 10%-of-viewport hand-off in the
+  vertex shader, screen-space hover/click and a fly-to. The 3DTRjs overlay plugins drape onto
+  surfaces, so they don't fit this.
+- **Added: typo-tolerant dataset search** ("mes aynek 2011", "venezzia"), and an *Iconem — latest
+  captures* preset that flies to Mes Aynak.
+- **Fixed: 3DTRjs flung worldwide mosaics off the globe.** Their Earth-centred root sphere looked like
+  local, unplaced content, so the viewer re-anchored it to the local frame. Planet-sized spheres are
+  now treated as global.
+
+### Added / Fixed — 2026-09-16b (Potree 1.8 · aggregate search + markers)
+- **Fixed: every Potree 1.8 dataset rendered nothing.** 1.8's `pointAttributes` are objects with a
+  `size` field; the decoder read `byteSize`, so the point stride was `NaN` and every node decoded to
+  zero points — the root tile 404'd ("no such node") and only the bounding sphere showed (e.g.
+  Quéribus). Sweep of 60 Iconem Potree datasets: 27/60 → **60/60** (all 33 1.8 ones fixed). Affects
+  both `/stream` and the offline converter. Unknown attribute sizes now throw instead of silently
+  producing empty tiles.
+- **Added: `/aggregate/index.json`** — one row per placed dataset (name, project, scene, format,
+  lon/lat/height, radius) plus unplaced/failed, sharing the tileset's selection and cached mosaic.
+- **Added: search box + dataset markers in the demo app** for any loaded mosaic: accent-insensitive
+  dataset search plus OSM place search (Photon), and fixed-size format-coloured markers on the
+  ellipsoid that hide once a dataset spans >10% of the viewport (per-point
+  `DistanceDisplayCondition`); hover names, click flies. Cesium only for markers.
+- **Changed: worldwide mosaics get an Earth-centred root sphere** when it is tighter than the greedy
+  union (Iconem: 9 526 → 6 401 km).
+- **Changed: Iconem pills only appear when the server has the set**, replacing the "(local)" suffix;
+  Angkor demo entries carry distinct names ("PhnomKulen 02-1 OuThmorDab" instead of four
+  "PhnomKulen").
+
+### Added / Fixed — 2026-09-16 (Iconem share links · point colours · Potree lab · 0.5.2 · aggregate pill)
+- **Ran the share-link script against production:** 692 `single-meta-tileset` links created (658
+  Potree, 17 3D Tiles, 17 COPC) across 139 projects, 0 failures; a second run reused all 692 and
+  created none. Every sampled link is public with CORS; COPC links answer range requests (`206 LASF`).
+  `?set=iconem` mosaics them: 692 children, 0 failed.
+- **Confirmed the COPC container finding empirically, not just from source.** In one project, COPC
+  share A's token reads COPC file B (`206 LASF`), because a `las` share's container is the project.
+  Blob names are UUIDs and nginx drops client query strings (no listing), which limits practical
+  exposure, but a COPC link is still not scoped to its own file.
+- **Fixed: every point cloud rendered washed out.** glTF `COLOR_0` is linear; all point writers wrote
+  raw sRGB. Found by rendering Geghard through 3DTRjs's `PotreePlugin` (correct colours) and through
+  `/stream` (pale) side by side. Colours are now linearised on write via a 16-bit table in the core
+  writer, the offline COPC writer, and the `.pnts` upgrader (which also moves to normalized uint16 so
+  linear shadows don't band). Splat centroids, already linear, opt out. 11 unit checks. `/convert`
+  cache keys gain an output version so pre-fix conversions are rebuilt instead of served forever.
+- **Fixed: the Angkor mosaic loaded nothing.** Iconem's site tilesets declare geometric error √3 for
+  ~240 m sites; the reference tile copied it and every group doubled from there, so nothing refined
+  beyond ~100 m. The reference tile's error is now `max(tileset GE, root GE, bounding radius)`.
+  Verified in the demo app: sites load at Angkor Thom from 1.8 km.
+- **Fixed: datasets without a georeference polluted mosaics.** Their centre is the Earth's core, so
+  they landed in arbitrary cells and inflated the root past the planet's radius. Now excluded and
+  listed in `asset.extras.unplaced` (32 of 692 on the Iconem set). An aggregate with nothing placeable
+  answers `422` with the lists and a placement hint instead of `500`.
+- **Added: `/aggregate&format=potree|copc|3dtiles`**: per-format variants of one mosaic (Iconem: 660
+  all, 17 3D Tiles, 628 Potree, 15 COPC).
+- **Added: 🧩 Aggregate pill in the demo app**: world / open data / Angkor (both nestings, PhnomKulen
+  filter) and the four Iconem variants; Angkor presets fly close enough for sites to load.
+- **Changed: viewer on `3d-tiles-renderer` 0.5.2** (was 0.4.28). Typecheck, build and point-cloud
+  rendering verified. Splat rendering is identical on both versions under headless GL (A/B tested by
+  reverting to 0.4.28), so the upgrade is neutral there, but splats remain unverified on a real GPU.
+- **Added: `/potree-lab`**: one dataset at a time with 3DTRjs's unreleased `PotreePlugin` and
+  `PointCloudEffectsPlugin` (vendored at a pinned commit, Apache-2.0): adaptive point size, shapes,
+  eye-dome lighting, debug colours, plus a `stream` mode rendering our `/stream` output through the
+  same effects for comparison. Iconem datasets are listed from the local manifest, served to loopback
+  clients only. Finding: per-tile point sizing from geometric error is not enough for additive
+  tilesets (ancestors draw blobs), so passing density down to plain 3D Tiles needs Potree's per-point
+  active-node scheme, which our implicit `(level,x,y,z)` keys could drive (not built).
+- **Added: `cdp-screenshot.mjs --print-eval`**, used for every headless check above.
+
+### Added / Fixed — 2026-09-12 (aggregate demo sets · truncation reasons · native file picker · packaging)
+- **Added: `/aggregate?set=opendata|angkor|world`** — curated demo mosaics of real, public, key-less
+  tilesets, defined server-side so the viewer, docs and desktop app share one list instead of three
+  copies drifting apart. `GET /aggregate/demo.json` indexes them; `?set=` composes with `?url=`.
+  `opendata` is the ten datasets from 3D Tiles' own `RESOURCES.md` (four continents, and all three
+  `boundingVolume` kinds — `region`, `box`, `sphere`); `angkor` is Iconem's campaign as **23
+  individual site tilesets**; `world` is both. All 33 probed before being added; 33/33 reachable.
+- **The Angkor set is the partitioning proof.** The sites are not uniformly spread — 19 inside the
+  Angkor park, four at PhnomKulen ~30 km north-east — and nothing tells the aggregator that; it sees
+  23 bounding spheres. It splits them at the root anyway, and the innermost Angkor group it forms is
+  Bayon + Baphuon + Phimeanakas, i.e. exactly the monuments **inside Angkor Thom's walls**. Root
+  fanout 23 → 2, depth 8 geodetic / 7 mercator. Against the hand-authored merged root in the
+  explorer: same 23 datasets, **max fanout 23 → 8**, costing 3 levels of depth.
+- **Fixed: `/stats` said “truncated” without saying why.** Three budgets can stop a walk and the fix
+  differs for each, so the response now carries `truncatedBy: ["nodes"|"depth"|"external"]` plus the
+  `limits` actually applied, and `&maxExternal=` is tunable (was a hidden constant of 64). This was
+  not cosmetic: **RAD Coit reported 2 296 nodes under a 20 000-node budget** and the reason was
+  invisible — it had exhausted external-tileset refs at 64, not nodes. `/aggregate` mosaics hit the
+  same cap, being made of external refs.
+- **Answered with data, not guesses: the small tile counts are mostly real.** LCC Big Mirror → 3
+  tiles, `truncatedBy: []`, `maxFanout: 1`. RAD Tastier → 11 tiles is a genuinely small 500 k-splat
+  scene. Only RAD Coit was misleading, per the item above.
+  **Correction (same day):** an earlier version of this entry explained Big Mirror as *"LCC is not an
+  octree, so the adapter emits a LoD chain"*. That is wrong. LCC **is** hierarchical — `index.bin`
+  packs each **Unit** as a grid cell, and the adapter emits *root → one child per Unit → a REPLACE
+  LoD chain per Unit*, so root fan-out is the Unit count. Big Mirror is a **single-Unit** capture.
+  Guan Temple (11.4 M splats) through the same adapter: **155 nodes, fan-out 41, depth 4**.
+- **Added: explorer depth cap, external cap, Reload all, and demo presets.** The depth cap doubles as
+  a display control — capping at level 8 keeps a deep tileset's top structure legible instead of
+  burying it under 4 000 leaves. Options apply to newly added tilesets and **Reload all** re-walks
+  the rest, rather than auto-refiring N remote walks on every dropdown change.
+- **Added: a `⌗ hierarchy` button in the viewer top bar** that forwards the currently-loaded tileset.
+  It sends the *resolved* URL, not the input field: in `raw url` mode the field holds a bare dataset
+  (`…/cloud.js`), which `/stats` cannot walk — only the wrapped middleware URL can be.
+- **Fixed: two explorer labels.** `?set=` mosaics showed `aggregate ×?` (nothing to count, since the
+  set expands server-side) and a UUID filename showed raw; both now resolve to something readable.
+- **Added: a native file picker in the desktop app** — File… / Folder… over RPC to the main process.
+  It must be the main process: a webview `<input type=file>` yields a sandboxed `File` with no real
+  path, and the middleware needs a filesystem path. Two buttons because tree formats are a folder and
+  single-file formats are a file, and one Windows dialog cannot offer both. Construction is guarded
+  so the same bundle still renders outside an Electrobun host (the buttons hide).
+- **Packaging now works, and the blocker was upstream.** Electrobun **2.0.1 (current stable) cannot
+  package on Windows**: it pins cottontail 0.5.0, whose windows-x64 release ships `cottontail.exe`
+  but not the `cottontail-core` its own build step copies → `CopySourceMissing`. Pinned
+  `2.0.2-beta.20` (cottontail 0.7.0-canary.2), and verified **both `dev` and `build`** on it —
+  producing `3D Tiled-Setup.exe`, a 20 MB installer zip and an update bundle. Also: the build must
+  run from **PowerShell, not MSYS**, where `tar` reads `C:\…` as a remote host.
+  Signing is configured but **off by default and unverified** — no certificate in this repo.
+- **Fixed: a HiDPI regression I had introduced.** Widening the desktop container from 720 px to
+  1000 px re-broke the documented Windows clipping — on a 1120 px window at 150 % scaling the right
+  column, including the new Browse buttons, was simply never on screen. A plain-browser preview
+  cannot reveal this (no DPI mismatch); only running the real app did. Reverted, with the constraint
+  written into the CSS so it does not get "improved" again.
+
+### Added / Fixed — 2026-09-11c (geodetic nesting · hierarchy explorer · desktop library · Potree write-up)
+- **Added: `/aggregate&nest=geodetic`, and the distinction it exists to make.** "Morton order" and
+  "web-mercator quadtree" are not the same thing: Morton (Z-order) is an *addressing* scheme —
+  interleave a cell's x/y bits — and says nothing about the projection. Bing's quadkey is the base-4
+  Morton code of a **web-mercator** cell; 3D Tiles implicit tiling (and therefore Cesium) subdivides
+  the **root bounding volume in its own coordinate space** — for a `region`, "`x`, `y`, and `z` refer
+  to `longitude`, `latitude`, and `height`", bisected arithmetically — i.e. a **geodetic** quadtree
+  (Cesium's `GeographicTilingScheme`, 2×1 cells at level 0) merely *indexed* with Morton codes. So
+  Cesium's Morton order is **not** a mercator quadtree. Both schemes are now offered (`mercator`
+  stays the `auto` default; `geodetic`/`morton`/`implicit`/`cesium` selects the other), and every
+  group and dataset carries an `extras.cell` breadcrumb (`scheme`, path `key`, `level`, `morton`) so
+  "why is this grouped here" is answerable from the tileset alone.
+- **Fixed: `/aggregate` silently lost more than half its children at scale.** Firing all children at
+  once with a plain `Promise.allSettled` is fine for 12 and broken for 500: a 500-dataset mosaic came
+  back with **232 datasets and 268 bare `fetch failed` entries** — still answering `200`, because
+  failed children degrade into `asset.extras.failed` by design. It looked fine and was missing half
+  the world, and the survivors varied run to run, so the tree was not even reproducible. Child
+  fetches now run through a **16-way pool**: 500/500, identical tree cold and warm.
+- **Fixed: flat `/aggregate` roots violated the decrease-on-refine rule.** The flat root took
+  `max(child GE)`, tying it to its largest child so both became selectable at the same SSE. Now ×2,
+  matching what the nested path always did. Caught by the new test's monotonicity assertion.
+- **Added: mosaic caching with a day-scale TTL** (`&ttl=`, default 86 400 s), keyed on the exact child
+  set plus scheme; each child's fetched root is cached the same way, failures at 60 s so one dead host
+  cannot pin a degraded mosaic for a day. `&ttl=0` bypasses the cache **in both directions** (an
+  earlier pass skipped only the write, which still served stale data — the one thing the flag exists
+  to prevent). Measured at 500 datasets: cold build ~156 ms (loopback, dominated by the N
+  round-trips), tree build **2.4 ms**, root fanout **4**, depth 10.
+- **Added: `scripts/debug-aggregate-nesting.mjs`** — 19 assertions over synthetic children served from
+  a throwaway localhost server, so it is reproducible and host-independent: flat/mercator/geodetic
+  shapes, Paris-groups-apart-from-Rome, country-scale-stays-shallow, GE monotonicity, cache-state
+  independence, and the 500-dataset scale run. It found both bugs above.
+- **Added: a React/shadcn hierarchy explorer** (`apps/viewer/hierarchy.html`, served at `/hierarchy`)
+  over `/stats` — the multi-tileset counterpart to the server's own single-tileset page. Top-down
+  tidy trees (`d3-hierarchy`) plus **overlaid** per-level charts for breadth, leaves and
+  geometric-error distribution, a comparison table, and content-sample panels. Layout comes from d3,
+  drawing does not: links are concatenated into one `<path>` and nodes batched **one path per depth
+  level**, so a 4 000-node tree is ~20 DOM elements and several fit on screen at once. Hue identifies
+  the tileset across every chart; lightness encodes depth. It is a **separate Vite entry**, not a
+  route in the main app — confirmed by the build, which emits a 25 kB `hierarchy` chunk with no
+  Cesium/three/Spark. Truncated walks are badged "hit node budget" so a budget cap never reads as a
+  shallow tileset.
+- **Added: desktop app — Library and Samples tabs.** Library tracks datasets as *source + options*
+  (not a built URL, so entries stay re-editable), with a cached `/stats` check per row; budget-capped
+  walks render as `≥N … (node budget reached)` in amber rather than as fact. Refresh is **sequential
+  by design** — it fans out to arbitrary third-party hosts, the same unbounded-concurrency trap
+  `/aggregate` just fixed. Samples ships a real public dataset per format (COPC, Potree, SOG, LCC,
+  RAD, I3S) with origins credited. Row icons are generated **format glyphs, not thumbnails** — a real
+  preview would mean a hidden Cesium view per row. Docs/viewer links resolve local-first: env var →
+  reachable localhost → public deployment.
+- **Docs: the Potree 1.x `.hrc` truncation bug is now written up in the format reference**, not only
+  the changelog — chunk trees, why **boundary nodes** are the only edge between chunk generations, and
+  why a re-entry guard that returns an empty list truncates a *lazy* walk at `stepSize − 1` with no
+  error at all (Geghard: level 4 against a real depth of 11). New pages: **Meta-tilesets**
+  (`/aggregate`) and **Hierarchy explorer** (`/stats`).
+- **Docs: transform-gizmo future work.** A free 6-DoF gizmo that bakes back into the
+  `&lon/&lat/&alt/&heading/&scale` params, with WilliamLiu's **3DTiles-Inspector** credited as the
+  closest prior art (same interaction; the difference worth keeping is ending at a *stateless URL*
+  rather than an edited tileset), plus the two traps: composing on top of each adapter's up-axis flip,
+  and origin-vs-centre anchoring.
+
+### Added / Fixed — 2026-09-11b (aggregate spatial nesting · stats content sampling · Bing raster basemap)
+- **Added: `/aggregate` spatial auto-nesting** (`&nest=auto`, on from 8 children). A flat root is fine
+  for a dozen datasets and wrong for 500: every child sat directly under the root, so the moment the
+  root refined, all 500 child `tileset.json` were candidates. Nesting builds a **web-mercator
+  quadtree** from nothing but each child's root bounding sphere — the only thing knowable without
+  opening the datasets — the same idea as 3D Tiles implicit tiling and Bing's quadkeys. Each dataset
+  is placed at the **deepest level whose cell still comfortably contains it** (4× slack), so a 200 m
+  scan lands in its city cell while a country-wide dataset stays shallow and is never split; the trie
+  is then path-compressed, giving continent → country → city only where datasets actually diverge.
+  Culling does the work at render time, but the **geometric error is what stops the fetch**: a group's
+  GE is 2× its children's (also satisfying the spec's monotonic-decrease rule), so from a world view a
+  site-sized group subtends a fraction of a pixel and is never traversed. Verified with 28 datasets
+  worldwide — root fanout 28 → 4, depth 8, 20 groups, Paris nesting as Eiffel+Louvre (r≈2 km) →
+  Sacré-Cœur (3 km) → Versailles (10 km), GE strictly monotonic. `&nest=0` restores the flat root.
+- **Added: `/stats` content sampling** (`&sample=N`) plus `leafNodes`, per-level `leaves`, and
+  `maxFanout`. The sampler picks N content tiles **stratified across depth** (leaves *and* intermediate
+  nodes) and parses **only the GLB JSON chunk** — primitive counts, extensions, texture MIME types and
+  compression are all declared there, so no Draco/meshopt/SPZ decode is needed. Off by default; the
+  rest of the walk still reads nothing but tileset JSON and subtree buffers. Verified across content
+  types: Potree → points, no triangles; Bing → 512 triangles / 1536 vertices / JPEG, exactly the globe
+  shell's 16×16×2 grid; WL Elevator → ~24.7 k splats/tile with `KHR_gaussian_splatting` +
+  `_compression_spz_2` + `KHR_materials_unlit` + `EXT_splat_opacity`.
+- **Changed: the Bing globe shell now defaults to Bing's own raster tiles.** Low zoom was never a gap
+  in `tf=3dv4` — it is a different product: Bing Maps itself draws imagery-on-terrain there and only
+  switches to photogrammetry around z13. Those raster tiles are keyless, quadkey-addressed, and on the
+  **same host** as the mesh, so the shell now matches what it hands over to. `&basemap=osm` and any
+  `{z}/{x}/{y}` / `{q}` template remain available; attribution resolves from the *requested* basemap.
+- **Fixed: two dead viewer splat presets.** The 3DGS-plugin repo renamed its samples
+  (`data/gaussianSplat1|2` → `Elevator-3dtiles` / `SvirnasAlyt-3dtiles`); both preset URLs had been
+  404ing. Found by the new `/stats?sample=` reporting HTTP 404 for every sampled tile.
+
+### Added / Fixed — 2026-09-11 (Bing low-zoom globe · desktop app · L-GSC docs · branch consolidation)
+- **Added: `apps/desktop`, an Electrobun companion app** that runs the tile-server **on-device** and
+  turns a dataset (local path or URL) into a paste-ready 3D Tiles endpoint — the "companion app"
+  roadmap item, previously reshaped into `3dtiled serve`. Framework choice was constrained: Tauri
+  needs a Rust + MSVC toolchain this machine lacks, Electron would add a ~200 MB dependency to a
+  monorepo whose CI runs `pnpm install` on every build, and Vercel's Native SDK compiles to Zig with
+  **no webview and no JS runtime**, so it cannot host the existing web UI at all. Electrobun is
+  webview-based with official Windows 11 / macOS 14 / Ubuntu 24.04 support. `apps/desktop` is
+  **excluded from the pnpm workspace** so `--frozen-lockfile` installs stay untouched. An
+  already-running 3dtiled server is *adopted* rather than duplicated; the Cesium preview is served by
+  the existing `scripts/static-server.mjs` so it is a plain `http://` page.
+- **Added: Bing Maps 3D low-zoom globe shell** (`bing-globe.js`). Bing's `tf=3dv4` mesh does not exist
+  above face-local **level 12** — measured, not assumed, with the new
+  `scripts/debug-bing-coverage.mjs` (levels 0–11 return 0-byte bodies; level 12 returns a 155 KB GLB
+  over London). Twelve empty levels means every zoomed-out view of `/bing/tileset.json` was blank.
+  Tiles with no Bing mesh at/above `&globe` (default 11) now carry a basemap-draped ellipsoid patch;
+  because a Bing face-local `(level,x,y)` **is** the global mercator tile at `(level+1)`, the raster
+  lookup is 1:1 — no resampling, no reprojection. `REPLACE` refinement hands over to real mesh where
+  it exists and keeps the shell where it never does (oceans), so there is no hole at the transition.
+  Deliberately **no tile `transform`** (a transform is inherited by the Bing subtree, whose GLBs bake
+  their own ECEF into the glTF node matrix) — absolute ECEF swizzled `(X, Z, −Y)` instead, so
+  Cesium's glTF→Z-up `RX(+90°)` restores it. Basemap is a URL template (`&basemap=`,
+  `BING_GLOBE_BASEMAP`, default OpenStreetMap, attribution emitted in `asset.copyright`);
+  `&globe=off` restores the previous behaviour. Verified in stock CesiumJS with Cesium's *own* globe
+  hidden, so all visible geometry came from the tileset.
+- **Fixed: `scripts/cesium-harness.html` readiness loop** — `Cartographic.fromCartesian` returns
+  `undefined` for a degenerate centre, which a whole-globe tileset genuinely has; the unhandled throw
+  killed the loop so `window.READY` never flipped and screenshots timed out despite rendering fine.
+- **Added: `KHR_gaussian_splatting_compression_lgsc`** (Qualcomm **L-GSC** v1.0) documented alongside
+  `_spz_2`. The rename during review (`..._lgsc` → `..._compression_lgsc`) confirms Khronos treats
+  splat compression as an open set of interchangeable children under one base, SPZ being first rather
+  than only. The PR is open and README-only, so the JSON nesting/`bufferView` are explicitly *not*
+  asserted here, and the codec publishes no benchmark numbers.
+- **Changed: WilliamLiu's `3DGS-PLY-3DTiles-Converter` went closed source** — the repo no longer
+  resolves; dead links unlinked and the geometric-error model it inspired is now written out in-page,
+  since the source is no longer citable.
+- **Fixed: README claimed no public deployment.** Docs/viewer/middleware are live via the GHCR images
+  behind Traefik. Domains appear only in the README — served artifacts still build every link from
+  `DOCS_URL`/`VIEWER_URL`/`REPO_URL`, so the no-committed-domains policy holds where it matters.
+  `docs-pages.yml` is now `workflow_dispatch`-only: Pages is not the canonical deployment and is not
+  enabled on the repo, so its push trigger failed every run.
+- **Repo hygiene:** `main` fast-forwarded to `origin/main`; `t3code/feature-roadmap-exploration`
+  merged with main (the `openapi.json` overlap auto-resolved — the roadmap branch expanded `paths`
+  while `809f5f4` touched only `info.description`) and pushed as a tracked remote branch. Five local
+  branches plus the remote `stream-cache` were deleted after verifying each held **zero** commits not
+  already reachable from `origin/main`.
+
+### Added / Fixed — 2026-08-22 (roadmap batch: potree depth fix · globe placement · Pages docs · /aggregate · /stats+/hierarchy · bench · `serve` CLI)
+- **Fixed: Potree 1.x live streaming truncated at hierarchy-chunk depth** (`potree-live.js`). An
+  already-loaded `.hrc` chunk returned empty boundaries from `loadOne`, so any subtree walk re-entering
+  a loaded chunk root (the level-3 subtree walking through chunk `r` after the root subtree loaded it
+  shallowly) never reached the next chunk generation — availability silently stopped at level
+  `stepSize−1`. Geghard (302 M pts, stepSize 5) refined to level 4 only; real depth 11+. Boundaries are
+  now cached per chunk so later, deeper walks traverse THROUGH loaded chunks. Verified live with a
+  client-style subtree BFS (`scripts/debug-potree-depth.mjs`): availability through level 11, deep
+  tiles decode, Potree 2.0 unaffected.
+- **Added: tileset-level globe placement** — `&lon=&lat=[&alt=][&heading=][&scale=]` on `/stream`,
+  `/convert` and `/tiles` `tileset.json` attaches a LOCAL dataset to a real location as a root ENU
+  transform composed ON TOP of each adapter's local-upright flip (SOG RX(−90°), RAD RX(180°), LCC
+  upright), so up-axis normalization + placement live in the tileset itself and any client (Cesium for
+  Unreal/Unity, QGIS, CesiumJS) streams it in place. Own-georef sources win (params ignored + warning).
+  `core/geo.js`: `mat4Multiply`, `placementMatrix`, `isEcefPlaced`, `applyPlacement`. Verified in stock
+  CesiumJS (`scripts/cesium-harness.html`): lion_takanawa upright at the Eiffel Tower, Cesium's own
+  computed lon/lat matching the params.
+- **Added: docs static export + GitHub Pages deploy** — `DOCS_STATIC_EXPORT=1` flips `apps/docs` to
+  `output:'export'` (repo-name basePath, trailingSlash); search becomes fumadocs' static Orama index
+  (works identically in dev); `.github/workflows/docs-pages.yml` deploys on push to main (one-time
+  repo setup: Settings → Pages → Source: GitHub Actions).
+- **Added: `/aggregate` meta-tileset endpoint** (MosaicJSON/STAC-style) — one tileset whose children
+  external-reference N given tileset URLs, bounding spheres derived from each child root
+  (box/sphere/region × transform), failures skipped into `asset.extras.failed`. Verified: Geghard +
+  placed lion + Marseille in one endpoint, rendered on two continents from the same URL in stock Cesium.
+- **Added: `/stats` hierarchy walker + `/hierarchy` visualization** — walks explicit trees, 3D Tiles 1.1
+  implicit tiling (`.subtree` decode via new `core` `parseSubtreeBuffer`), and external refs; renders a
+  cosmograph-style radial depth/breadth graph + per-level chart/table (light+dark, validated ordinal
+  ramp). Doubles as a live-adapter diagnostic — the pre-fix Geghard truncation reads as a ring that
+  stops at level 4.
+- **Added: reproducible converter benchmark** (`scripts/benchmark-converters.mjs` +
+  docs `guide/planning/benchmarks`) — first numbers: potree2 lion 1.01 M pts/s, RAD 0.94 M splats/s,
+  SOG 8.3 MB/s (single-core; the WorkerPool tier remains unwired headroom).
+- **Added: `3dtiled serve` subcommand** — starts the tile-server and prints the ready-to-paste
+  3D Tiles URL (localhost + LAN) for a given dataset, `/stream` vs `/convert` auto-picked, with
+  `--lon/--lat/--alt/--heading` placement flags — the local-first "point Cesium for Unreal at it"
+  one-liner (covers most of the Tauri-companion idea's value).
+- Verification tooling committed under `scripts/`: stock-Cesium harness, CDP screenshot driver
+  (real readiness waits, no puppeteer), Pages-emulating static server.
+
 ### Fixed — 2026-07-07 (`main`: 3DTRJS wrong up-orientation on repeat Auto-zoom)
 - **Root cause**: `frameToTileset` (`apps/viewer/src/components/Viewport/ThreeDTRjsViewer.tsx`) decides
   whether a tileset needs the synthetic ENU anchor (for non-georeferenced local content, e.g. Potree

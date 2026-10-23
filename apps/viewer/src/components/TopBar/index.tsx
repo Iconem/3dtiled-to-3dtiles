@@ -8,6 +8,20 @@ import { PSEUDO_FORMATS, FORMAT_PILL_ORDER, pillMeta, fmtMeta, canCentroids, MW 
 import { buildMiddlewareUrl, currentPresets, type MiddlewareParams, type Preset } from '@/lib/middleware';
 import type { ViewerHandle } from '@/lib/viewer-handle';
 import { cn } from '@/lib/utils';
+import { aggregateIndexUrl, isAggregateUrl, useAvailableSets } from '@/lib/aggregate';
+
+// `?load=<tileset URL>[&type=mesh|pointcloud|splat]` — load an arbitrary tileset on start instead of a
+// preset (the Aggregate Builder's "Preview in viewer" uses it for drafts). Read once: the URL itself is
+// deliberately not part of the nuqs state (see urlState.ts), and this param is left untouched there.
+const START = new URLSearchParams(location.search);
+const START_LOAD = START.get('load');
+const START_TYPE = (['mesh', 'pointcloud', 'splat'] as const).find((t) => t === START.get('type')) ?? 'mesh';
+// `&fly=<lon>,<lat>,<height>` — where to look instead of auto-framing the whole tileset (a mosaic's
+// root is often continent-sized, and from there no site is close enough to load).
+const START_FLY = (() => {
+  const [lon, lat, height] = (START.get('fly') ?? '').split(',').map(Number);
+  return [lon, lat, height].every(Number.isFinite) ? { lon, lat, height } : undefined;
+})();
 
 const MODE_PILLS: [string, string][] = [
   ['stream', '⚡ Live streaming'],
@@ -90,7 +104,11 @@ export default function TopBar({ activeHandleRef }: { activeHandleRef: React.Ref
     tilingMode: url.tiling,
   };
 
-  const presets = currentPresets({ ...params, toolName: url.tool, tilesetOp: url.tilesetOp as any });
+  const availableSets = useAvailableSets();
+  const presets = currentPresets({ ...params, toolName: url.tool, tilesetOp: url.tilesetOp as any })
+    // Presets backed by a machine-local aggregate set stay hidden until the server confirms it has it.
+    .filter((p) => !p.requiresSet || availableSets?.has(p.requiresSet))
+    .filter((p) => !p.unlessSet || (availableSets != null && !availableSets.has(p.unlessSet)));
   const fmtOfSelected = fmtMeta(url.format);
 
   // Deliberately-grouped pill order (see FORMAT_PILL_ORDER's own comment) — pseudo-formats (3D Tiles,
@@ -163,7 +181,17 @@ export default function TopBar({ activeHandleRef }: { activeHandleRef: React.Ref
   // updated the URL state but never re-triggered `doLoad`, so the viewport kept showing the stale tree.
   // `prefetch` is deliberately excluded — it's a free-typed number input, and reloading on every
   // keystroke would be jarring; its value is just read fresh the next time something else reloads.
+  // The startup `?load=` wins only for the mode/format/… the page opened with: keyed on those deps
+  // rather than a run-once flag, because StrictMode runs this effect twice on mount.
+  const depsKey = [url.mode, url.format, url.tool, url.tilesetOp, url.cache, url.tiling, url.centroids, url.transform].join('|');
+  const startKey = useRef(depsKey);
   useEffect(() => {
+    if (START_LOAD && depsKey === startKey.current) {
+      store.getState().setRawUrlMode(false);
+      store.getState().setUrlField(START_LOAD);
+      doLoad(START_LOAD, START_TYPE, START_FLY);
+      return;
+    }
     const wanted = url.preset && presets.find((p) => p.id === url.preset && p.url);
     const target = wanted || presets.find((p) => p.url);
     if (target) selectPreset(target);
@@ -280,6 +308,56 @@ export default function TopBar({ activeHandleRef }: { activeHandleRef: React.Ref
           className="min-w-[240px] flex-1 font-mono text-xs"
         />
         <Button size="sm" onClick={handleLoadClick}>Load</Button>
+        <Button
+          size="sm"
+          variant="outline"
+          className="h-7 px-2 text-xs"
+          // The RESOLVED tileset URL, not the input field: in `raw url` mode the field holds the bare
+          // dataset (…/cloud.js), which /stats cannot walk — only the wrapped middleware URL can be.
+          // Falls back to the field so the button still works before anything has been loaded.
+          onClick={() => {
+            const target = useViewerStore.getState().lastLoadUrl || urlField.trim();
+            if (!target) return;
+            window.open(`/hierarchy?url=${encodeURIComponent(target)}`, '_blank', 'noopener');
+          }}
+          title="Open this tileset's depth/breadth hierarchy graph in a new tab"
+        >
+          ⌗ hierarchy
+        </Button>
+        <Button
+          size="sm"
+          variant="outline"
+          className="h-7 px-2 text-xs"
+          // Point clouds open in the lab with 3DTRjs master's point effects (shape, EDL, adaptive size):
+          // a raw cloud.js / .copc.laz as itself, anything already 3D Tiles (a /stream or /aggregate URL)
+          // in "any 3D Tiles url" mode. Other assets open the lab on its default sample.
+          onClick={() => {
+            const st = useViewerStore.getState();
+            const field = urlField.trim();
+            const raw = /(cloud\.js|metadata\.json|\.copc\.laz)(\?|#|$)/i.test(field) ? field : '';
+            const q = raw ? `?url=${encodeURIComponent(raw)}`
+              : st.currentType === 'pointcloud' && st.lastLoadUrl ? `?mode=tileset&url=${encodeURIComponent(st.lastLoadUrl)}` : '';
+            window.open(`/potree-lab${q}`, '_blank', 'noopener');
+          }}
+          title="Open the Potree lab (3DTRjs master point-cloud effects: shape, eye-dome lighting, adaptive size) in a new tab"
+        >
+          ✺ potree lab
+        </Button>
+        <Button
+          size="sm"
+          variant="outline"
+          className="h-7 px-2 text-xs"
+          // With an /aggregate mosaic (or a builder draft) loaded, its selection seeds the builder's library.
+          onClick={() => {
+            const last = useViewerStore.getState().lastLoadUrl;
+            const q = isAggregateUrl(last) ? `?import=${encodeURIComponent(aggregateIndexUrl(last))}` : '';
+            window.open(`/builder${q}`, '_blank', 'noopener');
+          }}
+          title="Open the Aggregate Builder: assemble your own mosaic of datasets by hand (tree, groups, metadata, export)"
+          data-testid="open-builder"
+        >
+          🧱 builder
+        </Button>
       </div>
     </header>
   );

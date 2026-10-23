@@ -53,14 +53,117 @@ function unwrapCompoundWkt(crs) {
   return crs.slice(start);
 }
 
+/** Column-major 4×4 multiply: (a·b) v = a (b v). Both flat 16-arrays in glTF/3D-Tiles layout. */
+export function mat4Multiply(a, b) {
+  const r = new Array(16).fill(0);
+  for (let c = 0; c < 4; c++) for (let row = 0; row < 4; row++)
+    for (let k = 0; k < 4; k++) r[c*4 + row] += a[k*4 + row] * b[c*4 + k];
+  return r;
+}
+
+/**
+ * User-directed globe placement for a LOCAL (non-georeferenced) tileset: ENU frame at (lon°, lat°,
+ * alt m) with an optional compass `heading` (degrees CLOCKWISE from north, rotating the dataset about
+ * local Up) and uniform `scale`. Returns the column-major root `transform`. Compose it ON TOP of a
+ * tileset's existing local-upright flip (mat4Multiply(placement, flip)) — the flip maps content →
+ * upright Z-up local, this maps upright local → ECEF.
+ */
+export function placementMatrix(lon, lat, alt = 0, heading = 0, scale = 1) {
+  const e = llhToEcef(lon, lat, alt);
+  let m = enuMatrix(lon, lat, e[0], e[1], e[2]);
+  if (heading) {                                   // compass CW → math-positive CCW about +Z (Up)
+    const h = -heading * DEG, c = Math.cos(h), s = Math.sin(h);
+    m = mat4Multiply(m, [c,s,0,0, -s,c,0,0, 0,0,1,0, 0,0,0,1]);
+  }
+  if (scale !== 1) m = mat4Multiply(m, [scale,0,0,0, 0,scale,0,0, 0,0,scale,0, 0,0,0,1]);
+  return m;
+}
+
+/** True iff a root `transform` already places content at ECEF scale (translation ≫ any local frame). */
+export const isEcefPlaced = (t) => !!t && Math.hypot(t[12], t[13], t[14]) > 1e6;
+
+/**
+ * Apply the user-directed placement query params (&lon=&lat=[&alt=][&heading=][&scale=]) to a tileset
+ * root. Composes placementMatrix ON TOP of any existing local-upright root transform (each format's
+ * own up-axis flip stays baked in), and refuses to override a source's own real georeference (its ECEF
+ * placement wins — pass no lon/lat to keep it). Returns true iff a placement was applied.
+ */
+export function applyPlacement(root, sp, tag = 'place') {
+  if (!sp.has('lon') || !sp.has('lat')) return false;
+  const lon = Number(sp.get('lon')), lat = Number(sp.get('lat'));
+  if (!Number.isFinite(lon) || !Number.isFinite(lat)) return false;
+  if (isEcefPlaced(root.transform)) { console.warn(`[${tag}] source is already georeferenced — ignoring &lon/&lat placement`); return false; }
+  const place = placementMatrix(lon, lat, Number(sp.get('alt') || 0), Number(sp.get('heading') || 0), Number(sp.get('scale') || 1));
+  root.transform = root.transform ? mat4Multiply(place, root.transform) : place;
+  return true;
+}
+
 /** Georeference a local origin via a proj4-parsable CRS/WKT → ENU→ECEF transform, or null. */
+// proj4 only knows EPSG:4326/3857 by itself. These are the projected CRSs the national open-LiDAR
+// catalogues use (flai-ai/open-lidar-data declares one per dataset, and its COPC files carry NO CRS
+// VLR at all), taken from epsg.io. OSGB36 (27700) uses the 7-parameter Helmert instead of the OSTN15
+// grid proj4js cannot load: metres-level, plenty for placing a dataset on a globe.
+const EPSG_DEFS = {
+  2056: '+proj=somerc +lat_0=46.9524055555556 +lon_0=7.43958333333333 +k_0=1 +x_0=2600000 +y_0=1200000 +ellps=bessel +towgs84=674.374,15.056,405.346,0,0,0,0 +units=m +no_defs',
+  2154: '+proj=lcc +lat_0=46.5 +lon_0=3 +lat_1=49 +lat_2=44 +x_0=700000 +y_0=6600000 +ellps=GRS80 +towgs84=0,0,0,0,0,0,0 +units=m +no_defs',
+  2169: '+proj=tmerc +lat_0=49.8333333333333 +lon_0=6.16666666666667 +k=1 +x_0=80000 +y_0=100000 +ellps=intl +towgs84=-265.8867,76.9851,20.2667,0.33746,3.09264,-2.53861,0.4598 +units=m +no_defs',
+  2177: '+proj=tmerc +lat_0=0 +lon_0=18 +k=0.999923 +x_0=6500000 +y_0=0 +ellps=GRS80 +towgs84=0,0,0,0,0,0,0 +units=m +no_defs',
+  2180: '+proj=tmerc +lat_0=0 +lon_0=19 +k=0.9993 +x_0=500000 +y_0=-5300000 +ellps=GRS80 +towgs84=0,0,0,0,0,0,0 +units=m +no_defs',
+  3059: '+proj=tmerc +lat_0=0 +lon_0=24 +k=0.9996 +x_0=500000 +y_0=-6000000 +ellps=GRS80 +towgs84=0,0,0,0,0,0,0 +units=m +no_defs',
+  3067: '+proj=utm +zone=35 +ellps=GRS80 +towgs84=0,0,0,0,0,0,0 +units=m +no_defs',
+  3301: '+proj=lcc +lat_0=57.5175539305556 +lon_0=24 +lat_1=59.3333333333333 +lat_2=58 +x_0=500000 +y_0=6375000 +ellps=GRS80 +towgs84=0,0,0,0,0,0,0 +units=m +no_defs',
+  3794: '+proj=tmerc +lat_0=0 +lon_0=15 +k=0.9999 +x_0=500000 +y_0=-5000000 +ellps=GRS80 +towgs84=0,0,0,0,0,0,0 +units=m +no_defs',
+  3812: '+proj=lcc +lat_0=50.797815 +lon_0=4.35921583333333 +lat_1=49.8333333333333 +lat_2=51.1666666666667 +x_0=649328 +y_0=665262 +ellps=GRS80 +towgs84=0,0,0,0,0,0,0 +units=m +no_defs',
+  4083: '+proj=utm +zone=28 +ellps=GRS80 +towgs84=0,0,0,0,0,0,0 +units=m +no_defs',
+  27700: '+proj=tmerc +lat_0=49 +lon_0=-2 +k=0.9996012717 +x_0=400000 +y_0=-100000 +ellps=airy +towgs84=446.448,-125.157,542.06,0.15,0.247,0.842,-20.489 +units=m +no_defs',
+  28992: '+proj=sterea +lat_0=52.1561605555556 +lon_0=5.38763888888889 +k=0.9999079 +x_0=155000 +y_0=463000 +ellps=bessel +towgs84=565.4171,50.3319,465.5524,1.9342,-1.6677,9.1019,4.0725 +units=m +no_defs',
+  29902: '+proj=tmerc +lat_0=53.5 +lon_0=-8 +k=1.000035 +x_0=200000 +y_0=250000 +a=6377340.189 +rf=299.3249646 +towgs84=482.5,-130.6,564.6,-1.042,-0.214,-0.631,8.15 +units=m +no_defs',
+  31370: '+proj=lcc +lat_0=90 +lon_0=4.36748666666667 +lat_1=51.1666672333333 +lat_2=49.8333339 +x_0=150000.013 +y_0=5400088.438 +ellps=intl +towgs84=-106.8686,52.2978,-103.7239,0.3366,-0.457,1.8422,-1.2747 +units=m +no_defs',
+};
+
+/**
+ * `EPSG:<n>` → a proj4 definition. Also derives the UTM families by rule: WGS84 (326xx north,
+ * 327xx south) and ETRS89 (258xx). Anything else (WKT, a proj string) passes through unchanged.
+ */
+export function crsDefinition(crs) {
+  const m = /^\s*EPSG:(\d+)\s*$/i.exec(String(crs));
+  if (!m) return crs;
+  const code = +m[1];
+  if (EPSG_DEFS[code]) return EPSG_DEFS[code];
+  if (code >= 32601 && code <= 32660) return `+proj=utm +zone=${code - 32600} +datum=WGS84 +units=m +no_defs`;
+  if (code >= 32701 && code <= 32760) return `+proj=utm +zone=${code - 32700} +south +datum=WGS84 +units=m +no_defs`;
+  if (code >= 25828 && code <= 25838) return `+proj=utm +zone=${code - 25800} +ellps=GRS80 +towgs84=0,0,0,0,0,0,0 +units=m +no_defs`;
+  return crs;                                   // EPSG:4326 / 3857 — proj4 knows them already
+}
+
+/**
+ * Root transform placing content that is local to `origin` (source-CRS coordinates minus origin) on
+ * the globe.
+ *
+ * A projected CRS's x/y axes are NOT east/north: they are rotated by the grid convergence (up to ~3°
+ * at a UTM zone edge, more in Lambert grids far from the central meridian) and scaled by the point
+ * scale factor (0.9996 on a UTM central meridian, up to ~1.001 at its edges). So instead of a plain
+ * ENU frame, the x and y columns are the ECEF images of the source's own unit vectors at the origin —
+ * a "1 m trihedron" measured with proj4 by central differences over ±50 m — and z is the ellipsoid
+ * normal (heights are heights). For a geographic source CRS (lon/lat degrees) the plain ENU frame is
+ * kept, since its axes are not metric.
+ */
 export function georefFromCrs(origin, crs, tag = 'geo') {
   if (!crs) return null;
-  crs = unwrapCompoundWkt(crs);
+  crs = unwrapCompoundWkt(crsDefinition(crs));
   try {
-    const [lon, lat, h] = proj4(crs, 'WGS84').forward(origin);
-    const e = llhToEcef(lon, lat, h ?? origin[2]);
-    return enuMatrix(lon, lat, e[0], e[1], e[2]);
+    const P = proj4(crs, 'WGS84');
+    const [lon, lat, h] = P.forward(origin);
+    const z = h ?? origin[2];
+    const e = llhToEcef(lon, lat, z);
+    const enu = enuMatrix(lon, lat, e[0], e[1], e[2]);
+    if (Math.abs(origin[0]) <= 360 && Math.abs(origin[1]) <= 90) return enu;     // geographic source CRS
+    const D = 50;
+    const at = (dx, dy) => { const [lo, la] = P.forward([origin[0] + dx, origin[1] + dy, z]); return llhToEcef(lo, la, z); };
+    const colX = at(D, 0).map((v, i) => (v - at(-D, 0)[i]) / (2 * D));
+    const colY = at(0, D).map((v, i) => (v - at(0, -D)[i]) / (2 * D));
+    if (![...colX, ...colY].every(Number.isFinite)) return enu;
+    return [colX[0], colX[1], colX[2], 0, colY[0], colY[1], colY[2], 0, enu[8], enu[9], enu[10], 0, e[0], e[1], e[2], 1];
   } catch (e) { console.warn(`[${tag}] georef failed:`, e.message); return null; }
 }
 

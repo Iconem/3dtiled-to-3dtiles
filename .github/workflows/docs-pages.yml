@@ -1,0 +1,62 @@
+name: Deploy docs to GitHub Pages
+
+# Static-exports the Fumadocs site (apps/docs) and publishes it to GitHub Pages.
+# DOCS_STATIC_EXPORT=1 flips next.config.mjs to `output: 'export'` with the repo-name basePath;
+# search ships as a static Orama index (see apps/docs/src/app/api/search/route.ts).
+#
+# MANUAL-ONLY, ON PURPOSE. The canonical docs deployment is NOT GitHub Pages — it is the `docs`
+# GHCR image (a live Next.js server, so the search API and /og routes work) published by
+# docker-publish.yml and reverse-proxied by Traefik. This workflow is kept as a ready-to-go
+# fallback: a zero-infrastructure static mirror, useful for forks or if the container host is
+# unavailable. It does NOT run on push, because Pages is not enabled on this repo
+# (Settings → Pages → Source: "GitHub Actions") and every push would otherwise fail the run.
+# Enable Pages first, then trigger this from the Actions tab.
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - run: pnpm install --frozen-lockfile
+
+      - run: pnpm --filter docs build
+        env:
+          DOCS_STATIC_EXPORT: '1'
+          # basePath defaults to /3dtiled-to-3dtiles in next.config.mjs; derive it from the repo name
+          # so forks deploy under their own project path without editing the config.
+          DOCS_BASE_PATH: /${{ github.event.repository.name }}
+
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: apps/docs/out
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4

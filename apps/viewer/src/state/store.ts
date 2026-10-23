@@ -3,6 +3,8 @@
 // for the shareable slice. Mirrors viewer.html's remaining module-level `let`s.
 import { create } from 'zustand';
 import type { AssetType } from '@/lib/formats';
+import type { BasemapId } from '@/lib/basemaps';
+import type { TerrainMode } from '@/lib/terrainModes';
 
 export interface CropBbox {
   w: number; s: number; minH: number; e: number; n: number; maxH: number;
@@ -39,10 +41,10 @@ interface ViewerStore {
   setLastLoadUrl: (v: string) => void;
 
   // Basemap / terrain
-  basemap: 'google' | 'osm' | 'none';
-  // 'wgs84' = flat ellipsoid (no elevation), 'cesium' = Cesium World Terrain (Ion), 'google' = Google
-  // Photorealistic 3D Tiles (a textured mesh that embeds its own terrain — Cesium-only, no-op on 3DTRJS).
-  terrainMode: 'wgs84' | 'cesium' | 'google';
+  basemap: BasemapId;
+  // 'auto' = Mapterhorn (ellipsoid) in each renderer's native form (lib/terrarium.ts), 'wgs84' = flat
+  // ellipsoid, 'cesium' = Cesium World Terrain (Ion), 'google' = Google Photorealistic 3D Tiles.
+  terrainMode: TerrainMode;
   setBasemap: (v: ViewerStore['basemap']) => void;
   setTerrainMode: (v: ViewerStore['terrainMode']) => void;
 
@@ -50,7 +52,9 @@ interface ViewerStore {
   maxSSE: number | null; // null = per-type default
   assetVisible: boolean;
   ortho: boolean;
-  debugTiles: boolean;
+  // 'cells' draws the loaded tileset's OWN tiles (a mosaic's quadtree cells and dataset roots);
+  // 'tiles' is the renderer's own debug view of every tile it holds (lib/mosaicOutlines.ts).
+  debugMode: 'off' | 'cells' | 'tiles';
   shadeless: boolean;
   brightness: number;
   fov: number;
@@ -59,7 +63,15 @@ interface ViewerStore {
   setMaxSSE: (v: number | null) => void;
   setAssetVisible: (v: boolean) => void;
   setOrtho: (v: boolean) => void;
-  setDebugTiles: (v: boolean) => void;
+  setDebugMode: (v: ViewerStore['debugMode']) => void;
+  // Point clouds (both renderers): px size; adaptive = size from the tile's geometric error / point
+  // spacing (Cesium: attenuation); eye-dome lighting is Cesium-only in the main viewer.
+  pointAdaptive: boolean;
+  edl: boolean;
+  edlStrength: number;
+  setPointAdaptive: (v: boolean) => void;
+  setEdl: (v: boolean) => void;
+  setEdlStrength: (v: number) => void;
   setShadeless: (v: boolean) => void;
   setBrightness: (v: number) => void;
   setFov: (v: number) => void;
@@ -138,21 +150,22 @@ export const useViewerStore = create<ViewerStore>((set, get) => ({
   lastLoadUrl: '',
   setLastLoadUrl: (v) => set({ lastLoadUrl: v }),
 
-  // OSM (not 'google'): mt1.google.com's raw tile endpoint is an unofficial hotlink that sometimes
-  // answers with an HTML error page instead of image bytes for a given x/y/z — Cesium's imagery
-  // pipeline doesn't gracefully skip that (it tries to decode the HTML as a texture and crashes the
-  // whole render loop: "InvalidStateError: the source image could not be decoded"). OSM is a properly
-  // public tile service that doesn't do this. 'google' stays selectable in the Basemap dropdown for
-  // when you want it — this only changes the safe DEFAULT.
-  basemap: 'osm',
-  terrainMode: 'wgs84',
+  // Esri imagery + labels (not 'google'): mt1.google.com's raw tile endpoint is an unofficial hotlink
+  // that sometimes answers with an HTML error page instead of image bytes — Cesium's imagery pipeline
+  // doesn't gracefully skip that ("InvalidStateError: the source image could not be decoded"). Esri's
+  // tile service is public, keyless and sends CORS headers (lib/basemaps.ts).
+  basemap: 'esri',
+  terrainMode: 'auto',
   setBasemap: (v) => set({ basemap: v }),
   setTerrainMode: (v) => set({ terrainMode: v }),
 
   maxSSE: null,
   assetVisible: true,
   ortho: false,
-  debugTiles: false,
+  debugMode: 'off',
+  pointAdaptive: true,
+  edl: true,
+  edlStrength: 1,
   shadeless: false,
   brightness: 1.6,
   fov: 60,
@@ -161,7 +174,10 @@ export const useViewerStore = create<ViewerStore>((set, get) => ({
   setMaxSSE: (v) => set({ maxSSE: v }),
   setAssetVisible: (v) => set({ assetVisible: v }),
   setOrtho: (v) => set({ ortho: v }),
-  setDebugTiles: (v) => set({ debugTiles: v }),
+  setDebugMode: (v) => set({ debugMode: v }),
+  setPointAdaptive: (v) => set({ pointAdaptive: v }),
+  setEdl: (v) => set({ edl: v }),
+  setEdlStrength: (v) => set({ edlStrength: v }),
   setShadeless: (v) => set({ shadeless: v }),
   setBrightness: (v) => set({ brightness: v }),
   setFov: (v) => set({ fov: v }),

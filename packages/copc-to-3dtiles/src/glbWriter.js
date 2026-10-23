@@ -17,6 +17,7 @@
  */
 
 import { Document, NodeIO } from '@gltf-transform/core';
+import { srgbToLinear } from '../../core/index.js';
 import fs from 'fs/promises';
 import path from 'path';
 
@@ -85,6 +86,11 @@ export async function writeTileGlb(view, tileCenter, outputPath) {
       }
     } else {
       colors.fill(1.0); // white
+    }
+    // glTF COLOR_0 is linear; LAS RGB (and the intensity-as-grey display mapping) is sRGB-encoded.
+    // Same fix as core/points-glb.js — without it every spec-following client renders washed out.
+    for (let i = 0; i < count * 4; i += 4) {
+      colors[i] = srgbToLinear(colors[i]); colors[i + 1] = srgbToLinear(colors[i + 1]); colors[i + 2] = srgbToLinear(colors[i + 2]);
     }
     prim.setAttribute('COLOR_0',
       doc.createAccessor().setType('VEC4').setArray(colors));

@@ -35,15 +35,28 @@ tiler, by reusing the octree-computation principles behind Potree 2.0's converte
 
 **This README is a pitch + quickstart.** The detailed, up-to-date documentation — architecture,
 per-converter usage, endpoint reference, format specs, TODOs, and findings — lives in a
-[Fumadocs](https://fumadocs.dev/) site under `apps/docs`. Run it locally:
+[Fumadocs](https://fumadocs.dev/) site under `apps/docs`.
+
+**→ Deployed: [docs.3dtiled.iconem.com](https://docs.3dtiled.iconem.com)** (live demo viewer:
+[demo.3dtiled.iconem.com](https://demo.3dtiled.iconem.com), middleware:
+[3dtiled.iconem.com](https://3dtiled.iconem.com)). Those are *this project's* instances, published
+from the GHCR images by the `docker-publish` workflow and fronted by Traefik.
+
+Or run it locally:
 
 ```sh
 pnpm --filter docs dev   # http://localhost:3002
 ```
 
-(There is no publicly deployed instance yet — run it locally, or read the source `.md` files directly
-on GitHub under [`apps/docs/content/docs/guide/`](apps/docs/content/docs/guide/) and
-[`apps/docs/content/docs/references/`](apps/docs/content/docs/references/).)
+You can also read the source `.md` files directly on GitHub under
+[`apps/docs/content/docs/guide/`](apps/docs/content/docs/guide/) and
+[`apps/docs/content/docs/references/`](apps/docs/content/docs/references/).
+
+> **Self-hosting note.** Those domains appear *only here*, in the human-facing README. The running
+> services never hardcode them: the tile-server's homepage and `openapi.json` build their links from
+> `DOCS_URL` / `VIEWER_URL` / `REPO_URL` (and the request's own origin), so your deployment links to
+> *your* instances, not these. See `packages/tile-server/homepage-live.js` and the `{{DOCS_URL}}`
+> placeholder in `openapi.json`.
 
 Guide pages (mirrors this README's original section breakdown, one page each):
 

@@ -213,7 +213,9 @@ export async function pipeB3dmAsGlb(filePath, res) {
  */
 export function buildPointsGlbFast(positions, colorsU8, count, rtcCenter) {
   const posBytes = count * 12;  // float32 × 3
-  const colBytes = colorsU8 ? count * 4 : 0;  // uint8 × 4
+  // .pnts RGB is sRGB-encoded; glTF COLOR_0 is LINEAR. Linearise, and widen to normalized uint16:
+  // linear 8-bit bands visibly in the shadows (the dark end of sRGB maps onto a handful of codes).
+  const colBytes = colorsU8 ? count * 8 : 0;  // uint16 × 4
   const binTotal = posBytes + colBytes;
 
   // Compute AABB for the required POSITION min/max
@@ -236,7 +238,7 @@ export function buildPointsGlbFast(positions, colorsU8, count, rtcCenter) {
 
   if (colorsU8) {
     bufferViews.push({ buffer: 0, byteOffset: posBytes, byteLength: colBytes, target: 34962 });
-    accessors.push({ bufferView: 1, byteOffset: 0, componentType: 5121 /* UNSIGNED_BYTE */, count, type: 'VEC4', normalized: true });
+    accessors.push({ bufferView: 1, byteOffset: 0, componentType: 5123 /* UNSIGNED_SHORT */, count, type: 'VEC4', normalized: true });
     attributes.COLOR_0 = 1;
   }
 
@@ -281,12 +283,29 @@ export function buildPointsGlbFast(positions, colorsU8, count, rtcCenter) {
     out.writeUInt32LE(binTotal + binPad, o); o += 4;
     out.writeUInt32LE(0x004E4942,        o); o += 4;      // 'BIN\0'
     Buffer.from(positions.buffer, positions.byteOffset, posBytes).copy(out, o); o += posBytes;
-    if (colorsU8) { Buffer.from(colorsU8.buffer, colorsU8.byteOffset, colBytes).copy(out, o); o += colBytes; }
+    if (colorsU8) {
+      // rgb: sRGB u8 → linear u16 through a 256-entry table; alpha is not colour-encoded, just widened.
+      for (let i = 0; i < count; i++) {
+        const s = i * 4;
+        out.writeUInt16LE(U8_SRGB_TO_LINEAR_U16[colorsU8[s]],   o);
+        out.writeUInt16LE(U8_SRGB_TO_LINEAR_U16[colorsU8[s+1]], o + 2);
+        out.writeUInt16LE(U8_SRGB_TO_LINEAR_U16[colorsU8[s+2]], o + 4);
+        out.writeUInt16LE(colorsU8[s+3] * 257,                  o + 6);   // 255 → 65535
+        o += 8;
+      }
+    }
     out.fill(0, o, o + binPad); o += binPad;
   }
 
   return out;
 }
+
+// sRGB 8-bit code → linear, as normalized uint16 (see buildPointsGlbFast).
+const U8_SRGB_TO_LINEAR_U16 = (() => {
+  const t = new Uint16Array(256);
+  for (let i = 0; i < 256; i++) { const c = i / 255; t[i] = Math.round((c <= 0.04045 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4) * 65535); }
+  return t;
+})();
 
 /**
  * Parse a pnts Buffer → GLB Buffer (fast native builder).

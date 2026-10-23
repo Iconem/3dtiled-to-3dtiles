@@ -1,0 +1,20 @@
+{
+  "label": "Vexcel 3D Cities — 10 Australian collections (via /proxy, needs VEXCEL_API_KEY)",
+  "provider": "Vexcel",
+  "attribution": "© Vexcel Imaging",
+  "source": "https://api.vexcelgroup.com/v2/3d/tileset — the root lists these collections",
+  "note": "The URLs carry no key. /proxy adds VEXCEL_API_KEY server-side, so the key never reaches a browser; without it the set is hidden.",
+  "requiresEnv": "VEXCEL_API_KEY",
+  "entries": [
+    { "format": "3dtiles", "proxy": true, "name": "Gold Coast 2023", "project": "Vexcel 3D Cities", "scene": "Gold Coast", "date": "2023", "url": "https://api.vexcelgroup.com/v2/3d/tileset?collection=au-qld-goldcoast-2023&layer=3d-cities" },
+    { "format": "3dtiles", "proxy": true, "name": "Canberra 2023", "project": "Vexcel 3D Cities", "scene": "Canberra", "date": "2023", "url": "https://api.vexcelgroup.com/v2/3d/tileset?collection=au-act-canberrar5-2023&layer=3d-cities" },
+    { "format": "3dtiles", "proxy": true, "name": "Sydney Opera House 2023 (prototype)", "project": "Vexcel 3D Prototypes", "scene": "Sydney Opera House", "date": "2023", "url": "https://api.vexcelgroup.com/v2/3d/tileset?collection=au-nsw-operahousesydney-2023&layer=3d-prototypes" },
+    { "format": "3dtiles", "proxy": true, "name": "Sydney Opera House 2023", "project": "Vexcel 3D Cities", "scene": "Sydney Opera House", "date": "2023", "url": "https://api.vexcelgroup.com/v2/3d/tileset?collection=au-nsw-operahousesydney-2023&layer=3d-cities" },
+    { "format": "3dtiles", "proxy": true, "name": "Sydney Opera House infill 2023 (prototype)", "project": "Vexcel 3D Prototypes", "scene": "Sydney Opera House", "date": "2023", "url": "https://api.vexcelgroup.com/v2/3d/tileset?collection=au-nsw-operahousesydney-infill-2023&layer=3d-prototypes" },
+    { "format": "3dtiles", "proxy": true, "name": "Perth 2021", "project": "Vexcel 3D Cities", "scene": "Perth", "date": "2021", "url": "https://api.vexcelgroup.com/v2/3d/tileset?collection=au-wa-perthr2-2021&layer=3d-cities" },
+    { "format": "3dtiles", "proxy": true, "name": "Brisbane 2021", "project": "Vexcel 3D Cities", "scene": "Brisbane", "date": "2021", "url": "https://api.vexcelgroup.com/v2/3d/tileset?collection=au-qld-brisbane-2021&layer=3d-cities" },
+    { "format": "3dtiles", "proxy": true, "name": "Sydney 2021", "project": "Vexcel 3D Cities", "scene": "Sydney", "date": "2021", "url": "https://api.vexcelgroup.com/v2/3d/tileset?collection=au-nsw-sydney-2021&layer=3d-cities" },
+    { "format": "3dtiles", "proxy": true, "name": "Melbourne 2020", "project": "Vexcel 3D Cities", "scene": "Melbourne", "date": "2020", "url": "https://api.vexcelgroup.com/v2/3d/tileset?collection=au-vic-melbourne-2020&layer=3d-cities" },
+    { "format": "3dtiles", "proxy": true, "name": "Adelaide 2020", "project": "Vexcel 3D Cities", "scene": "Adelaide", "date": "2020", "url": "https://api.vexcelgroup.com/v2/3d/tileset?collection=au-sa-adelaide-2020&layer=3d-cities" }
+  ]
+}

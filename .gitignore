@@ -2,3 +2,10 @@ node_modules
 sample-data
 # local Claude Code agent config
 .claude/
+.bench-cache/
+*.log
+# stderr redirect files from locally-spawned dev servers — same category as *.log above
+*.err
+screens/
+# machine-local state: generated aggregate manifests hold share-link URLs, which are bearer credentials
+.local/

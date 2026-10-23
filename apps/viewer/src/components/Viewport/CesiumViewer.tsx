@@ -1,9 +1,17 @@
 import { forwardRef, useEffect, useImperativeHandle, useRef } from 'react';
 import * as Cesium from 'cesium';
 import type { ViewerHandle } from '@/lib/viewer-handle';
+import type { DatasetMarker } from '@/lib/aggregate';
 import type { AssetType } from '@/lib/formats';
 import { CESIUM_ION_TOKEN } from '@/lib/ion';
 import { useViewerStore } from '@/state/store';
+import DatasetTooltip, { MARKER_COLORS, type TooltipChannel } from './DatasetTooltip';
+import { createRasterTerrainProvider, RASTER_TERRAINS, REEARTH_QM_URL, resolveTerrainMode, sampleRasterTerrain, snapRasterFor } from '@/lib/terrarium';
+import { BASEMAPS, type BasemapId } from '@/lib/basemaps';
+import { tileDatasetId, type DatasetStyle } from '@/lib/datasetStyle';
+import { fetchOutlines, outlineColor } from '@/lib/mosaicOutlines';
+import { datasetGroundSamples, offsetFromSamples } from '@/lib/datasetGround';
+import { SNAP_HALF, SNAP_SAMPLES, SNAP_MIN_HITS } from '@/lib/snapToGround';
 
 // Ported from viewer.html's Cesium section (lines ~855-1675), near-verbatim: a plain `Cesium.Viewer`
 // constructed imperatively in a mount effect against a bare container div, exactly like viewer.html's
@@ -27,6 +35,31 @@ interface Props {
 // `` `Failed to load tileset:\n${e.message}` `` rendered literally as "...\nundefined" with zero
 // actionable information (the actual bug behind a mis-issued cert on a Traefik-routed subdomain).
 // Extract whatever's actually there, falling back to an actionable hint instead of "undefined".
+// Aggregate markers: hide once a dataset's bounds span more than this fraction of the viewport height.
+const MARKER_HIDE_FRACTION = 0.1;
+
+/** Replace the imagery with a basemap's layers (lib/basemaps.ts), bottom first. */
+function setImagery(v: Cesium.Viewer, id: BasemapId) {
+  v.imageryLayers.removeAll();
+  if (id === 'none') return;
+  for (const l of BASEMAPS[id].layers) {
+    v.imageryLayers.addImageryProvider(new Cesium.UrlTemplateImageryProvider({ url: l.url, maximumLevel: l.maxZoom, credit: l.credit }));
+  }
+}
+
+/** A mosaic leaf's own dataset id (3D Tiles 1.1 tile metadata, class `dataset`). */
+const cesiumTileId = (t: any): string | undefined => {
+  const m = t.metadata;
+  if (!m?.hasProperty?.('id')) return undefined;
+  return m.getProperty('id');
+};
+const cssColors = new Map<string, Cesium.Color>();
+const cssColor = (c: string) => {
+  let col = cssColors.get(c);
+  if (!col) { col = Cesium.Color.fromCssColorString(c); cssColors.set(c, col); }
+  return col;
+};
+
 function describeLoadError(e: any): string {
   if (typeof e === 'string' && e) return e;
   if (e?.message) return String(e.message);
@@ -53,6 +86,15 @@ const CesiumViewer = forwardRef<ViewerHandle, Props>(function CesiumViewer({ vis
 
   const store = useViewerStore;
   const cleanupRef = useRef<(() => void) | null>(null);
+  // Aggregate dataset markers: one PointPrimitive per placed dataset (see setDatasetMarkers below).
+  const markersRef = useRef<Cesium.PointPrimitiveCollection | null>(null);
+  const markerDataRef = useRef<DatasetMarker[] | null>(null);
+  const tooltipRef: TooltipChannel = useRef(null);
+  const pendingFlyRef = useRef<{ lon: number; lat: number; height: number } | null>(null);
+  const datasetStyleRef = useRef<DatasetStyle | null>(null);
+  // Debug 'cells': the loaded tileset's own declared tiles, as polylines (lib/mosaicOutlines.ts).
+  const outlinesRef = useRef<Cesium.PolylineCollection | null>(null);
+  const outlinesAbortRef = useRef<AbortController | null>(null);
   const pendingLoadRef = useRef<{ url: string; type: AssetType; opts?: { sseOverride?: number | null; skipAutoFrame?: boolean } } | null>(null);
 
   const getViewer = () => viewerRef.current;
@@ -65,13 +107,16 @@ const CesiumViewer = forwardRef<ViewerHandle, Props>(function CesiumViewer({ vis
       v.scene.primitives.remove(currentTilesetRef.current);
       currentTilesetRef.current = null;
     }
+    clearOutlines();
     currentTypeRef.current = type;
     placementBaseRef.current = null;
     store.getState().hideError();
     store.getState().setStatus(`Loading…\n${url}`);
     const isSplat = type === 'splat';
     const isMesh = type === 'mesh';
-    const defaultSSE = isSplat ? 0.5 : isMesh ? 16 : 4;
+    // 2 px for point clouds: at 4 px a Potree root (6.8 m spacing at Carcassonne) only refines below
+    // ~1 km, which reads as "it does not load" — points are sparse where a mesh would still look whole.
+    const defaultSSE = isSplat ? 0.5 : isMesh ? 16 : 2;
     const sse = opts?.sseOverride ?? store.getState().maxSSE ?? defaultSSE;
     const loadOpts: any = isSplat
       ? { maximumScreenSpaceError: sse, skipLevelOfDetail: false, cacheBytes: 512 * 1024 * 1024 }
@@ -84,19 +129,23 @@ const CesiumViewer = forwardRef<ViewerHandle, Props>(function CesiumViewer({ vis
         v.scene.primitives.add(tileset);
         currentTilesetRef.current = tileset;
         tileset.show = store.getState().assetVisible;
-        if (store.getState().debugTiles) {
-          (tileset as any).debugShowBoundingVolume = true;
-          (tileset as any).debugColorizeTiles = true;
-        }
+        // Per-dataset show/hide and tint (the aggregate picker): decided per rendered tile, every frame,
+        // before Cesium updates it — so it applies to tiles as they stream in, and no reload is needed.
+        tileset.colorBlendMode = Cesium.Cesium3DTileColorBlendMode.MIX;
+        tileset.colorBlendAmount = 0.65;
+        tileset.tileVisible.addEventListener((tile: any) => {
+          const model = tile.content?._model;
+          if (!model) return;
+          const st = datasetStyleRef.current;
+          const id = st ? tileDatasetId(tile, cesiumTileId) : null;
+          model.show = !(id && st!.hidden.has(id));
+          const c = id ? st!.colors?.get(id) : undefined;
+          if (c) model.color = cssColor(c);
+          else if (model.color && store.getState().debugMode !== 'tiles') model.color = undefined;
+        });
+        applyDebugMode(store.getState().debugMode, url);
         applyShadingInternal();
-        if (!isSplat && (tileset as any).pointCloudShading) {
-          const pcs = (tileset as any).pointCloudShading;
-          pcs.attenuation = true;
-          pcs.maximumAttenuation = 4;
-          pcs.eyeDomeLighting = true;
-          pcs.eyeDomeLightingStrength = 1.0;
-          pcs.eyeDomeLightingRadius = 1.0;
-        }
+        applyPointShadingInternal();
         const bs = tileset.boundingSphere;
         const distFromEcefOrigin = Cesium.Cartesian3.magnitude(bs.center);
         const isLocalCoords = distFromEcefOrigin < 1e6 && bs.radius < 1e6;
@@ -181,6 +230,60 @@ const CesiumViewer = forwardRef<ViewerHandle, Props>(function CesiumViewer({ vis
     if (v && !v.isDestroyed()) v.useDefaultRenderLoop = visible;
   }, [visible]);
 
+  /**
+   * "There is data here" markers for an /aggregate mosaic: a fixed-pixel point on the ellipsoid per
+   * dataset, which disappears once the dataset itself is big enough on screen to speak for itself.
+   *
+   * That hand-off is a per-point DistanceDisplayCondition rather than per-frame JS: a sphere of radius
+   * r seen from distance d spans r / (d·tan(fovy/2)) of the viewport height, so it exceeds
+   * MARKER_HIDE_FRACTION once d < r / (MARKER_HIDE_FRACTION·tan(fovy/2)). Cesium then evaluates the
+   * cut-off on the GPU side for all ~700 points at once. The distance is measured to the marker on the
+   * ellipsoid rather than to the sphere centre — close enough for a visibility hint.
+   */
+  function applyDatasetMarkers() {
+    const v = getViewer();
+    if (!v) return;
+    if (markersRef.current) { v.scene.primitives.remove(markersRef.current); markersRef.current = null; }
+    tooltipRef.current?.(null);
+    const list = markerDataRef.current;
+    if (!list?.length) return;
+    const fr: any = v.camera.frustum;
+    const fovy: number = fr?.fovy ?? 1.047;
+    const hideBelow = 1 / (MARKER_HIDE_FRACTION * Math.tan(fovy / 2));
+    const pts = new Cesium.PointPrimitiveCollection();
+    const outline = Cesium.Color.fromCssColorString('#0b0b0f');
+    for (const d of list) {
+      pts.add({
+        // A few metres above the ellipsoid so the sprite doesn't z-fight with the globe surface.
+        position: Cesium.Cartesian3.fromDegrees(d.lon, d.lat, 30),
+        // Hidden-by-the-picker datasets stay as small grey dots, so they can still be found and re-shown.
+        pixelSize: d.inactive ? 6 : 9,
+        color: d.inactive
+          ? Cesium.Color.fromCssColorString('#9ca3af').withAlpha(0.55)
+          : cssColor(d.color ?? MARKER_COLORS[d.format] ?? '#94a3b8'),
+        outlineColor: outline,
+        outlineWidth: 1.5,
+        distanceDisplayCondition: new Cesium.DistanceDisplayCondition(d.radius * hideBelow, Number.MAX_VALUE),
+        // Depth-tested from far away (so the far side of the globe hides its markers), but never hidden
+        // by terrain once the camera is within 50 km.
+        disableDepthTestDistance: 50_000,
+        id: { dataset: d },
+      });
+    }
+    v.scene.primitives.add(pts);
+    markersRef.current = pts;
+  }
+
+  function flyToSphereInternal(lon: number, lat: number, height: number, radius: number) {
+    const v = getViewer();
+    if (!v) return;
+    const center = Cesium.Cartesian3.fromDegrees(lon, lat, height);
+    v.camera.flyToBoundingSphere(new Cesium.BoundingSphere(center, Math.max(radius, 20)), {
+      offset: new Cesium.HeadingPitchRange(0, Cesium.Math.toRadians(-35), Math.max(150, radius * 3)),
+      duration: 1.5,
+    });
+  }
+
   function initViewer(container: HTMLDivElement) {
     // A personal Cesium Ion token — required for Cesium World Terrain and Google Photorealistic 3D
     // Tiles (see setTerrainMode below). Ships client-side like any Ion demo token; rotate it in the
@@ -224,13 +327,7 @@ const CesiumViewer = forwardRef<ViewerHandle, Props>(function CesiumViewer({ vis
     v.scene.requestRenderMode = true;
     v.scene.backgroundColor = Cesium.Color.fromCssColorString('#0a0a0f');
     (window as any).viewer = v;
-    const initialBasemap = store.getState().basemap;
-    if (initialBasemap !== 'osm') {
-      v.imageryLayers.removeAll();
-      if (initialBasemap === 'google') {
-        v.imageryLayers.addImageryProvider(new Cesium.UrlTemplateImageryProvider({ url: 'https://mt1.google.com/vt/lyrs=y&x={x}&y={y}&z={z}', credit: 'Google Hybrid' }));
-      }
-    }
+    setImagery(v, store.getState().basemap);
     const handler = new Cesium.ScreenSpaceEventHandler(v.scene.canvas);
     handler.setInputAction((movement: any) => {
       const picked = v.scene.pickPosition(movement.position);
@@ -244,13 +341,166 @@ const CesiumViewer = forwardRef<ViewerHandle, Props>(function CesiumViewer({ vis
         easingFunction: Cesium.EasingFunction.QUADRATIC_OUT,
       });
     }, Cesium.ScreenSpaceEventType.LEFT_DOUBLE_CLICK);
-    store.getState().setStatus('Cesium ready. Select a preset or enter a tileset.json URL.');
-    cleanupRef.current = () => { handler.destroy(); v.destroy(); viewerRef.current = null; };
+    // Dataset markers: click flies to the dataset, hover shows its card (DatasetTooltip).
+    const markerOf = (pos: Cesium.Cartesian2): DatasetMarker | null => {
+      if (!markersRef.current) return null;
+      // drillPick, not pick: the marker of a small dataset often sits under a larger one that has
+      // already loaded (Canal Grande under the Venice airborne cloud) and must still answer.
+      const hit: any = v.scene.drillPick(pos, 6).find((p: any) => p?.collection === markersRef.current);
+      return hit?.id?.dataset ?? null;
+    };
+    handler.setInputAction((e: any) => {
+      const d = markerOf(e.position);
+      if (!d) return;
+      flyToSphereInternal(d.lon, d.lat, d.height, d.radius);
+      store.getState().setStatus(`${d.name}${d.project ? ` — ${d.project}` : ''} [${d.format}]`);
+    }, Cesium.ScreenSpaceEventType.LEFT_CLICK);
+    // scene.pick renders a pick pass, so skip it entirely while no markers are shown.
+    // At most one pick per frame, however fast the mouse moves.
+    let hoverRaf = 0;
+    handler.setInputAction((e: any) => {
+      const at = Cesium.Cartesian2.clone(e.endPosition);
+      cancelAnimationFrame(hoverRaf);
+      hoverRaf = requestAnimationFrame(() => {
+        if (v.isDestroyed()) return;
+        const d = markersRef.current ? markerOf(at) : null;
+        const canvas = v.scene.canvas;
+        canvas.style.cursor = d ? 'pointer' : '';
+        tooltipRef.current?.(d ? { d, x: at.x, y: at.y, w: canvas.clientWidth, h: canvas.clientHeight } : null);
+      });
+    }, Cesium.ScreenSpaceEventType.MOUSE_MOVE);
+    if (visibleRef.current) store.getState().setStatus('Cesium ready. Select a preset or enter a tileset.json URL.');
+    // The sidebar pushed the terrain before this viewer existed (construction waits a frame).
+    void applyTerrainMode(store.getState().terrainMode);
+    cleanupRef.current = () => { cancelAnimationFrame(hoverRaf); handler.destroy(); v.destroy(); viewerRef.current = null; };
     if (pendingLoadRef.current) {
       const { url, type, opts } = pendingLoadRef.current;
       pendingLoadRef.current = null;
       loadTilesetInternal(url, type, opts);
     }
+    if (pendingFlyRef.current) {
+      const { lon, lat, height } = pendingFlyRef.current;
+      pendingFlyRef.current = null;
+      lookAtFrom(v, lon, lat, height);
+    }
+  }
+
+  /**
+   * Fly so the point (lon, lat) is at the CENTRE of the view, seen 45° down from `height` metres up.
+   * (This used to put the camera directly above the point, pitched 45° — which looks `height` metres
+   * north of it: the target itself was out of view, and 3DTRjs, which looks at the point, disagreed.)
+   */
+  function lookAtFrom(v: Cesium.Viewer, lon: number, lat: number, height: number) {
+    const pitch = Cesium.Math.toRadians(-45);
+    v.camera.flyToBoundingSphere(new Cesium.BoundingSphere(Cesium.Cartesian3.fromDegrees(lon, lat, 0), 1), {
+      offset: new Cesium.HeadingPitchRange(0, pitch, height / Math.sin(-pitch)),
+      duration: 2,
+    });
+  }
+
+  async function applyTerrainMode(requested: Parameters<ViewerHandle['setTerrainMode']>[0]) {
+    const v = getViewer();
+    if (!v) return;
+    const mode = resolveTerrainMode(requested, 'cesium');
+    // both renderers stay mounted: only the one on screen reports into the status panel
+    const say = (m: string) => { if (visibleRef.current) store.getState().setStatus(m); };
+    if (googleTilesetRef.current) {
+      v.scene.primitives.remove(googleTilesetRef.current);
+      googleTilesetRef.current = null;
+    }
+    if (mode === 'wgs84') {
+      v.terrainProvider = new Cesium.EllipsoidTerrainProvider();
+      return;
+    }
+    if (mode === 'terrarium' || mode === 'mapterhorn' || mode === 'mapterhorn-ellipsoid') {
+      v.terrainProvider = createRasterTerrainProvider(mode);
+      const src = RASTER_TERRAINS[mode];
+      say(`${src.credit} — heights above the ${src.datum === 'ellipsoid' ? 'WGS84 ellipsoid' : 'geoid (mean sea level)'}.`);
+      return;
+    }
+    if (mode === 'reearth-qm') {
+      try {
+        v.terrainProvider = await Cesium.CesiumTerrainProvider.fromUrl(REEARTH_QM_URL, { requestVertexNormals: false });
+        say('Mapterhorn quantized mesh (Re:Earth Terrain) — heights above the WGS84 ellipsoid.');
+      } catch (e) {
+        v.terrainProvider = new Cesium.EllipsoidTerrainProvider();
+        store.getState().setTerrainMode('wgs84');
+        say(`Re:Earth quantized-mesh terrain failed to load:\n${(e as Error).message}`);
+      }
+      return;
+    }
+    if (mode === 'cesium') {
+      try {
+        v.terrainProvider = await Cesium.createWorldTerrainAsync();
+      } catch (e) {
+        v.terrainProvider = new Cesium.EllipsoidTerrainProvider();
+        store.getState().setTerrainMode('wgs84');
+        say(`Cesium World Terrain failed to load:\n${(e as Error).message}`);
+      }
+      return;
+    }
+    // 'google': a photorealistic textured mesh that embeds its own ground — no separate terrain
+    // provider needed (leave whatever elevation provider was active; the tileset sits on top of it).
+    try {
+      say('Loading Google Photorealistic 3D Tiles…');
+      const tileset = await Cesium.createGooglePhotorealistic3DTileset();
+      googleTilesetRef.current = tileset;
+      v.scene.primitives.add(tileset);
+      say('Google Photorealistic 3D Tiles loaded.');
+    } catch (e) {
+      store.getState().setTerrainMode('wgs84');
+      say(`Google Photorealistic 3D Tiles failed to load:\n${(e as Error).message}`);
+    }
+  }
+
+  /** Cesium's point-cloud shading from the store: px size / attenuation cap, adaptive sizing, EDL. */
+  function applyPointShadingInternal() {
+    const tileset: any = currentTilesetRef.current;
+    if (!tileset || currentTypeRef.current === 'splat' || !tileset.pointCloudShading) return;
+    const { pointSize, pointAdaptive, edl, edlStrength } = store.getState();
+    const pcs = tileset.pointCloudShading;
+    pcs.attenuation = pointAdaptive;
+    pcs.maximumAttenuation = pointSize * 2;          // adaptive: the cap; points never grow past it
+    pcs.geometricErrorScale = 1;
+    pcs.eyeDomeLighting = edl;
+    pcs.eyeDomeLightingStrength = edlStrength;
+    pcs.eyeDomeLightingRadius = 1.0;
+    // fixed size comes from the style; with attenuation on the style size is the minimum
+    // the style size is the fixed size, and with attenuation on the floor under the attenuated one
+    try { tileset.style = new Cesium.Cesium3DTileStyle({ pointSize }); } catch { /* splat/mesh */ }
+  }
+
+  function clearOutlines() {
+    outlinesAbortRef.current?.abort();
+    outlinesAbortRef.current = null;
+    const v = getViewer();
+    if (outlinesRef.current) { v?.scene.primitives.remove(outlinesRef.current); outlinesRef.current = null; }
+  }
+
+  /** 'tiles' = Cesium's own debug view of every loaded tile; 'cells' = the tileset's declared tiles only. */
+  function applyDebugMode(mode: 'off' | 'cells' | 'tiles', url = store.getState().lastLoadUrl) {
+    const v = getViewer();
+    const ts: any = currentTilesetRef.current;
+    if (ts) { ts.debugShowBoundingVolume = mode === 'tiles'; ts.debugColorizeTiles = mode === 'tiles'; }
+    clearOutlines();
+    if (!v || mode !== 'cells' || !url) return;
+    const ac = new AbortController();
+    outlinesAbortRef.current = ac;
+    fetchOutlines(url, ac.signal).then((outlines) => {
+      if (ac.signal.aborted || v.isDestroyed()) return;
+      const pl = new Cesium.PolylineCollection();
+      if (ts) pl.modelMatrix = ts.modelMatrix;
+      for (const o of outlines) {
+        const color = Cesium.Color.fromCssColorString(outlineColor(o));
+        for (const line of o.lines) {
+          pl.add({ positions: Cesium.Cartesian3.unpackArray(line), width: o.leaf ? 1.5 : 2, material: Cesium.Material.fromType('Color', { color }) });
+        }
+      }
+      v.scene.primitives.add(pl);
+      outlinesRef.current = pl;
+      v.scene.requestRender();
+      store.getState().setStatus(`Debug cells: ${outlines.filter((o) => !o.leaf).length} group tiles, ${outlines.filter((o) => o.leaf).length} dataset roots.`);
+    }).catch((e) => { if (!ac.signal.aborted) store.getState().setStatus(`Debug cells: ${e.message}`); });
   }
 
   function applyZOffsetInternal(dz: number) {
@@ -261,6 +511,7 @@ const CesiumViewer = forwardRef<ViewerHandle, Props>(function CesiumViewer({ vis
     const t = Cesium.Cartesian3.multiplyByScalar(up, dz, new Cesium.Cartesian3());
     const base = placementBaseRef.current || Cesium.Matrix4.IDENTITY;
     tileset.modelMatrix = Cesium.Matrix4.multiply(Cesium.Matrix4.fromTranslation(t), base, new Cesium.Matrix4());
+    if (outlinesRef.current) outlinesRef.current.modelMatrix = tileset.modelMatrix;
     const gsp = (tileset as any).gaussianSplatPrimitive;
     if (gsp) { gsp._rootTransform = undefined; gsp._dirty = true; }
     store.getState().setStatus(`Vertical Z offset: ${dz} m along local up (georef preserved).`);
@@ -404,49 +655,9 @@ const CesiumViewer = forwardRef<ViewerHandle, Props>(function CesiumViewer({ vis
     },
     setBasemap(id) {
       const v = getViewer();
-      if (!v) return;
-      const layers = v.imageryLayers;
-      layers.removeAll();
-      if (id === 'google') {
-        layers.addImageryProvider(new Cesium.UrlTemplateImageryProvider({ url: 'https://mt1.google.com/vt/lyrs=y&x={x}&y={y}&z={z}', credit: 'Google Hybrid' }));
-      } else if (id === 'osm') {
-        layers.addImageryProvider(new Cesium.OpenStreetMapImageryProvider({ url: 'https://tile.openstreetmap.org/' }));
-      }
+      if (v) setImagery(v, id);
     },
-    async setTerrainMode(mode) {
-      const v = getViewer();
-      if (!v) return;
-      if (googleTilesetRef.current) {
-        v.scene.primitives.remove(googleTilesetRef.current);
-        googleTilesetRef.current = null;
-      }
-      if (mode === 'wgs84') {
-        v.terrainProvider = new Cesium.EllipsoidTerrainProvider();
-        return;
-      }
-      if (mode === 'cesium') {
-        try {
-          v.terrainProvider = await Cesium.createWorldTerrainAsync();
-        } catch (e) {
-          v.terrainProvider = new Cesium.EllipsoidTerrainProvider();
-          store.getState().setTerrainMode('wgs84');
-          store.getState().setStatus(`Cesium World Terrain failed to load:\n${(e as Error).message}`);
-        }
-        return;
-      }
-      // 'google': a photorealistic textured mesh that embeds its own ground — no separate terrain
-      // provider needed (leave whatever elevation provider was active; the tileset sits on top of it).
-      try {
-        store.getState().setStatus('Loading Google Photorealistic 3D Tiles…');
-        const tileset = await Cesium.createGooglePhotorealistic3DTileset();
-        googleTilesetRef.current = tileset;
-        v.scene.primitives.add(tileset);
-        store.getState().setStatus('Google Photorealistic 3D Tiles loaded.');
-      } catch (e) {
-        store.getState().setTerrainMode('wgs84');
-        store.getState().setStatus(`Google Photorealistic 3D Tiles failed to load:\n${(e as Error).message}`);
-      }
-    },
+    setTerrainMode(mode) { return applyTerrainMode(mode); },
     setMaxSSE(v) {
       if (currentTilesetRef.current) (currentTilesetRef.current as any).maximumScreenSpaceError = v ?? (currentTilesetRef.current as any).maximumScreenSpaceError;
     },
@@ -459,12 +670,8 @@ const CesiumViewer = forwardRef<ViewerHandle, Props>(function CesiumViewer({ vis
       if (on) v.camera.switchToOrthographicFrustum();
       else v.camera.switchToPerspectiveFrustum();
     },
-    toggleDebug(on) {
-      if (currentTilesetRef.current) {
-        (currentTilesetRef.current as any).debugShowBoundingVolume = on;
-        (currentTilesetRef.current as any).debugColorizeTiles = on;
-      }
-    },
+    setDebugMode(mode) { applyDebugMode(mode); },
+    applyPointShading() { applyPointShadingInternal(); },
     applyShading() { applyShadingInternal(); },
     setFov(deg) {
       const v = getViewer();
@@ -475,6 +682,114 @@ const CesiumViewer = forwardRef<ViewerHandle, Props>(function CesiumViewer({ vis
         const aspect = v.scene.canvas.clientWidth / v.scene.canvas.clientHeight;
         fr.fov = aspect > 1 ? 2 * Math.atan(Math.tan(vrad / 2) * aspect) : vrad;
       }
+      // Marker hide distances are derived from the vertical field of view.
+      if (markerDataRef.current) applyDatasetMarkers();
+    },
+    setDatasetStyle(style) {
+      datasetStyleRef.current = style;
+      // tiles that are not rendered this frame get re-decided when they are
+    },
+    setDatasetMarkers(list) {
+      markerDataRef.current = list;
+      applyDatasetMarkers();
+    },
+    flyToSphere(lon, lat, height, radius) { flyToSphereInternal(lon, lat, height, radius); },
+    async snapToGround() {
+      const v = getViewer();
+      const ts = currentTilesetRef.current;
+      if (!v || !ts) return 'Load a tileset first.';
+      const exclude = [googleTilesetRef.current, markersRef.current].filter(Boolean) as object[];
+
+      // 1. Preferred: the dataset's own top geometry, binned (lib/datasetGround.ts). Renderer-independent.
+      const mode = store.getState().terrainMode;
+      const raster = snapRasterFor(mode);
+      const samples = await datasetGroundSamples(store.getState().lastLoadUrl).catch(() => null);
+      if (samples) {
+        const cartos = samples.map((s) => Cesium.Cartographic.fromDegrees(s.lon, s.lat, 0));
+        let terrain: (number | null)[];
+        if (mode === 'wgs84') terrain = samples.map(() => 0);
+        else if (raster) {
+          // the quantized mesh is the same DEM as its Terrarium twin — read the raster directly
+          terrain = await Promise.all(samples.map((s) => sampleRasterTerrain(raster, s.lon, s.lat)));
+        } else if (googleTilesetRef.current) {
+          terrain = (await v.scene.sampleHeightMostDetailed(cartos, [ts, markersRef.current].filter(Boolean) as object[])).map((c) => c?.height ?? null);
+        } else {
+          const tp: any = v.terrainProvider;
+          const got = tp.availability ? await Cesium.sampleTerrainMostDetailed(tp, cartos) : await Cesium.sampleTerrain(tp, 14, cartos);
+          terrain = got.map((c) => c?.height ?? null);
+        }
+        const r = offsetFromSamples(samples, terrain);
+        if (r) {
+          const next = +r.dz.toFixed(2);                          // absolute: the samples come from the file, not the moved tileset
+          store.getState().setLocalFrame({ zOffset: next });
+          applyZOffsetInternal(next);
+          return `Snapped to ground: Z offset ${next} m — from the dataset's own top geometry (${r.used}/${samples.length} ground bins, spread ${r.spread.toFixed(1)} m).`;
+        }
+      }
+      // 2. Fallback (compressed or unreadable content): pick the rendered surface on a grid.
+      let total = 0, last = '';
+      // Two passes: the first move changes what LOD is on screen, the second settles on it.
+      for (let pass = 0; pass < 2; pass++) {
+        const bs = ts.boundingSphere;
+        const enu = Cesium.Transforms.eastNorthUpToFixedFrame(bs.center);
+        const reach = Math.min(bs.radius * 0.5, 5000);
+        const grid: Cesium.Cartographic[] = [];
+        for (let i = -SNAP_HALF; i <= SNAP_HALF; i++) {
+          for (let j = -SNAP_HALF; j <= SNAP_HALF; j++) {
+            const p = Cesium.Matrix4.multiplyByPoint(enu, new Cesium.Cartesian3((i / SNAP_HALF) * reach, (j / SNAP_HALF) * reach, 0), new Cesium.Cartesian3());
+            const c = Cesium.Cartographic.fromCartesian(p);
+            c.height = 0;
+            grid.push(c);
+          }
+        }
+        const clone = () => grid.map((c) => Cesium.Cartographic.clone(c));
+        // The dataset's own surface. sampleHeight ALSO hits the globe, and a sparse point cloud leaves
+        // gaps where the ray reaches it — which silently returned terrain heights ("already on the
+        // ground"). Hide the globe while sampling; a pick volume ~1% of the sampled area catches points.
+        const globeShown = v.scene.globe.show;
+        v.scene.globe.show = false;
+        let data: (Cesium.Cartographic | undefined)[];
+        try { data = await v.scene.sampleHeightMostDetailed(clone(), exclude, Math.max(0.5, reach / 100)); }
+        finally { v.scene.globe.show = globeShown; }
+        let ground: (Cesium.Cartographic | undefined)[];
+        if (googleTilesetRef.current) ground = await v.scene.sampleHeightMostDetailed(clone(), [ts, markersRef.current].filter(Boolean) as object[]);
+        else if (v.terrainProvider instanceof Cesium.EllipsoidTerrainProvider) ground = clone();
+        else if ((v.terrainProvider as any).availability) ground = await Cesium.sampleTerrainMostDetailed(v.terrainProvider, clone());
+        else ground = await Cesium.sampleTerrain(v.terrainProvider, 14, clone());   // custom providers publish no availability
+        const diffs = data
+          .map((d, i) => (d && ground[i] && Number.isFinite(d.height) && Number.isFinite(ground[i]!.height) ? ground[i]!.height - d.height : NaN))
+          .filter(Number.isFinite)
+          .sort((a, b) => a - b);
+        if (diffs.length < SNAP_MIN_HITS) return `Snap to ground: only ${diffs.length} of ${SNAP_SAMPLES} samples hit the dataset — zoom in so more of it is loaded, then retry.`;
+        // 80th percentile: points on roofs / canopy sit ABOVE the ground and give smaller differences;
+        // the ground-level ones are the largest, minus a margin for noise.
+        const dz = diffs[Math.floor(0.8 * (diffs.length - 1))];
+        total += dz;
+        const next = +(store.getState().localFrame.zOffset + dz).toFixed(2);
+        store.getState().setLocalFrame({ zOffset: next });
+        applyZOffsetInternal(next);
+        last = `${diffs.length}/${SNAP_SAMPLES} samples, spread ${(diffs[diffs.length - 1] - diffs[0]).toFixed(1)} m`;
+        if (Math.abs(dz) < 0.25) break;
+        await new Promise((r) => setTimeout(r, 1500));      // let the moved tileset refine before re-sampling
+      }
+      return `Snapped to ground: moved ${total.toFixed(2)} m (Z offset now ${store.getState().localFrame.zOffset} m; ${last}).`;
+    },
+    datasetsInView(list, minFraction) {
+      const v = getViewer();
+      if (!v) return [];
+      const cam = v.camera, fr: any = cam.frustum;
+      const culling = fr.computeCullingVolume(cam.positionWC, cam.directionWC, cam.upWC);
+      const tanHalf = Math.tan((fr.fovy ?? 1.047) / 2);
+      const bs = new Cesium.BoundingSphere();
+      const ids: string[] = [];
+      for (const d of list) {
+        Cesium.Cartesian3.fromDegrees(d.lon, d.lat, d.height, undefined, bs.center);
+        bs.radius = d.radius;
+        if (culling.computeVisibility(bs) === Cesium.Intersect.OUTSIDE) continue;
+        const dist = Cesium.Cartesian3.distance(bs.center, cam.positionWC);
+        if (dist <= d.radius || d.radius / (dist * tanHalf) >= minFraction) ids.push(d.id);
+      }
+      return ids;
     },
     flyToLocalFrame(lon, lat, alt, range) {
       const v = getViewer();
@@ -578,8 +893,10 @@ const CesiumViewer = forwardRef<ViewerHandle, Props>(function CesiumViewer({ vis
     },
     flyToCity(lon, lat, height) {
       const v = getViewer();
-      if (!v) return;
-      v.camera.flyTo({ destination: Cesium.Cartesian3.fromDegrees(lon, lat, height), orientation: { heading: 0, pitch: Cesium.Math.toRadians(-45), roll: 0 }, duration: 2 });
+      // Before the viewer exists (a `?load=…&fly=…` start, a preset clicked during init) keep the
+      // request, like pendingLoadRef, instead of silently dropping it.
+      if (!v) { pendingFlyRef.current = { lon, lat, height }; return; }
+      lookAtFrom(v, lon, lat, height);
     },
     autoZoomToTileset() {
       const v = getViewer();
@@ -637,6 +954,7 @@ const CesiumViewer = forwardRef<ViewerHandle, Props>(function CesiumViewer({ vis
   return (
     <div style={{ position: 'absolute', inset: 0, visibility: visible ? 'visible' : 'hidden' }}>
       <div ref={containerRef} style={{ position: 'absolute', inset: 0 }} />
+      <DatasetTooltip channel={tooltipRef} visible={visible} />
     </div>
   );
 });

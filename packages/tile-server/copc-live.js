@@ -184,7 +184,20 @@ export async function copcTileset(url, opts = {}) {
     if (pf === -1) Promise.resolve().then(() => { try { return ctx.drainAll(); } catch {} });
     else if (pf > 0) Promise.resolve().then(async () => { try { for (let L = 0; L < pf; L++) await ctx.ensureForSubtree(L, 0, 0, 0); } catch {} });
   }
-  return opts.tiling === 'explicit' ? buildTilesetExplicit(ctx, url) : buildTilesetImplicit(ctx, url);
+  const ts = opts.tiling === 'explicit' ? buildTilesetExplicit(ctx, url) : buildTilesetImplicit(ctx, url);
+  return withCrsOverride(ts, ctx, opts.crs, 'copc-live');
+}
+
+/**
+ * &crs=EPSG:<n> for sources that carry no CRS of their own (every flai-ai open-lidar COPC). Only the
+ * ROOT transform depends on the CRS — tile content is local to `ctx.origin` either way — so this is
+ * applied per request, without touching the cached context. A CRS the file DOES declare wins.
+ */
+export function withCrsOverride(ts, ctx, crs, tag) {
+  if (!crs || ctx.transform) return ts;
+  const transform = georefFromCrs(ctx.origin, crs, tag);
+  if (transform) ts.root.transform = transform;
+  return ts;
 }
 export async function copcTile(url, key) { return serveTileGlb(await getCtx(url), key); }
 export async function copcSubtree(url, key) {

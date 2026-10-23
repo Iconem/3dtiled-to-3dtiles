@@ -6,6 +6,7 @@ import { Button } from '@/components/ui/button';
 import { useViewerStore } from '@/state/store';
 import type { ViewerHandle } from '@/lib/viewer-handle';
 import { SidebarSection } from './SidebarSection';
+import { BASEMAPS } from '@/lib/basemaps';
 
 export default function BasemapSection({ activeHandleRef }: { activeHandleRef: React.RefObject<ViewerHandle | null> }) {
   const basemap = useViewerStore((s) => s.basemap);
@@ -25,8 +26,7 @@ export default function BasemapSection({ activeHandleRef }: { activeHandleRef: R
         <Select value={basemap} onValueChange={(v) => setBasemap(v as any)}>
           <SelectTrigger size="sm"><SelectValue /></SelectTrigger>
           <SelectContent>
-            <SelectItem value="google">Google Hybrid</SelectItem>
-            <SelectItem value="osm">OpenStreetMap</SelectItem>
+            {Object.entries(BASEMAPS).map(([id, b]) => <SelectItem key={id} value={id}>{b.label}</SelectItem>)}
             <SelectItem value="none">None</SelectItem>
           </SelectContent>
         </Select>
@@ -36,8 +36,13 @@ export default function BasemapSection({ activeHandleRef }: { activeHandleRef: R
         <Select value={terrainMode} onValueChange={(v) => setTerrainMode(v as any)}>
           <SelectTrigger size="sm"><SelectValue /></SelectTrigger>
           <SelectContent>
+            <SelectItem value="auto" title="Quantized mesh in Cesium, Terrarium tiles in 3DTRjs — the same ellipsoidal DEM">Mapterhorn (auto)</SelectItem>
             <SelectItem value="wgs84">WGS84 (none)</SelectItem>
             <SelectItem value="cesium">Cesium World Terrain</SelectItem>
+            <SelectItem value="reearth-qm">Mapterhorn · quantized mesh (ellipsoid)</SelectItem>
+            <SelectItem value="mapterhorn-ellipsoid">Mapterhorn · Terrarium (ellipsoid)</SelectItem>
+            <SelectItem value="mapterhorn">Mapterhorn · Terrarium (sea level)</SelectItem>
+            <SelectItem value="terrarium">AWS Terrain Tiles (sea level)</SelectItem>
             <SelectItem value="google">Google 3D</SelectItem>
           </SelectContent>
         </Select>

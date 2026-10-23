@@ -1,0 +1,147 @@
+---
+title: "Hierarchy explorer: reading a tileset's shape (/stats)"
+description: "Depth, breadth, leaf counts, fan-out and geometric-error distribution for any 3D Tiles endpoint — one tileset in the server's own page, several side by side in the viewer's React explorer."
+---
+
+Every source format this repo reads is already a spatial tree, so almost every streaming bug is a
+**shape** bug: an octree that stops refining at level 4, a mosaic whose root fans out to 500
+children, a converter emitting one enormous leaf. Those are invisible in a 3D viewport — tiles that
+never load look exactly like tiles that don't exist — and obvious the moment you draw the tree.
+
+There are two front ends over the same endpoint:
+
+| | Where | Good for |
+|---|---|---|
+| `/hierarchy` | the **tile-server**, e.g. `localhost:3001/hierarchy` — dependency-free single page | one tileset, works with nothing but the server running |
+| Hierarchy explorer | the **viewer app**, e.g. `localhost:3000/hierarchy` (React + shadcn + `d3-hierarchy`) | **several tilesets at once**, content sampling, shareable comparison URLs |
+
+Three ways in:
+
+- Straight to the URL, optionally pre-loaded: `/hierarchy?url=<encoded tileset.json>`. Repeat `url=`
+  to open a comparison; the address bar keeps itself in sync, so any comparison is a shareable link.
+- The **⌗ hierarchy** button in the viewer's top bar, which forwards whatever is currently loaded.
+  It sends the *resolved* tileset URL, not the raw input field — in `raw url` mode the field holds a
+  bare dataset (`…/cloud.js`), which `/stats` cannot walk; only the wrapped middleware URL can be.
+- The desktop app's **Hierarchy graph** button, which prefers this explorer when a viewer is
+  reachable and falls back to the server's own page otherwise.
+
+The preset list starts with ready-made `/aggregate` demo mosaics (see
+[Meta-tilesets](/docs/guide/meta-tilesets)), then one entry per source format drawn from the viewer's
+own preset table.
+
+## The endpoint
+
+```
+GET /stats/tileset.json?url=<any tileset.json>
+    [&maxNodes=4000] [&maxDepth=32] [&maxExternal=64] [&sample=N]
+```
+
+It walks **explicit** children, **3D Tiles 1.1 implicit tiling** (fetching and decoding `.subtree`
+availability buffers), and **external-tileset refs** — so it follows an `/aggregate` mosaic into each
+child. It works against this server's own `/stream`, `/convert`, `/bing` or `/aggregate` output, or
+any remote tileset.
+
+The walk is deliberately **structural**: it reads tileset JSON and subtree buffers and *never*
+downloads geometry, which is what makes it fast enough to point at a live remote host. It returns:
+
+- totals — `totalNodes`, `contentNodes`, `leafNodes`, `maxDepth`, `maxFanout`, `subtreesFetched`,
+  `externalTilesets`, and `truncated`;
+- per level — tile count, how many carry content, how many are **leaves**, and the geometric-error
+  min/max;
+- `nodes[]` — a bounded `{i, p, l, ge, r, c}` dump (index, parent, level, geometric error, radius,
+  has-content) for the graph views.
+
+### Three budgets, and knowing which one stopped you
+
+`truncated: true` means every count is a **lower bound**. But three different budgets can stop a
+walk, and the fix differs for each — so `truncatedBy[]` names the one that did:
+
+| `truncatedBy` | Meaning | Fix |
+|---|---|---|
+| `nodes` | hit `maxNodes` (default 4 000, max 20 000) | raise `&maxNodes` |
+| `depth` | hit `maxDepth` (default 32) | raise `&maxDepth` |
+| `external` | followed `maxExternal` external tileset refs (default 64) | raise `&maxExternal` |
+
+<Callout type="warn">
+`external` is the one that surprises people. Formats that express LoD as **chains of external
+tilesets** — RAD is the extreme case — and `/aggregate` mosaics, which are *made* of external refs,
+exhaust it long before the node budget. A RAD scene reporting 2 296 nodes under a **20 000** node
+budget is not a small tileset; it ran out of external-ref fetches at 64. Before this was reported,
+that walk was simply inexplicable.
+</Callout>
+
+The explorer shows this as a red **“stopped: external”** badge, and exposes all three as dropdowns.
+The depth cap doubles as a display control: capping at level 8 keeps a deep tileset's top structure
+legible instead of burying it under 4 000 leaves.
+
+### Small numbers are often real
+
+Before assuming a low tile count is a bug, check `truncatedBy` and `maxFanout`:
+
+- **LCC Big Mirror → 3 tiles, `truncatedBy: []`.** Real — but *not* because LCC is flat.
+
+  LCC **is** hierarchical: `index.bin` packs each **Unit** as a grid cell (`x` low16 / `y` high16),
+  and each Unit carries its own per-LOD runs, so the emitted tree is *root → one child per Unit →
+  a REPLACE LoD chain within that Unit*. Root fan-out is therefore the **Unit count**.
+
+  Big Mirror is simply a **single-Unit** capture, so its fan-out is 1 and it looks like a bare chain.
+  The same adapter on XGRIDS' Guan Temple (11.4 M splats) gives **155 nodes, fan-out 41, depth 4**
+  (levels `1, 41, 40, 37, 36`) — 41 spatial cells, each up to four LOD levels deep. Judge from
+  `maxFanout`, not from one small dataset.
+- **RAD Tastier (500 k splats) → 11 tiles, depth 3.** Also real — a small scene.
+- **RAD Coit (40 M splats) → 2 296 nodes, `truncatedBy: ["external"]`.** *Not* real; that's the cap.
+
+### Content sampling (`&sample=N`, opt-in)
+
+`&sample=N` is the one part that downloads tiles. It picks N content tiles **stratified across
+depth** so leaves *and* intermediate nodes are represented, then reads **only each GLB's JSON
+chunk** — primitive counts, `extensionsUsed`, texture MIME types and compression are all declared
+there, so nothing is Draco/meshopt/SPZ-decoded. You get average triangles, points/splats, vertices
+and tile size, plus tallies of extensions, compression and texture formats.
+
+This is how you confirm a splat tileset really is emitting what you think:
+
+```
+…/stats/tileset.json?url=<splat tileset>&sample=12
+→ 24 759 splats/tile · KHR_gaussian_splatting + _compression_spz_2 + KHR_materials_unlit
+  + EXT_splat_opacity · spz
+```
+
+It also doubles as a liveness check on your own presets: a sample where every tile 404s means the
+tileset's content URIs are broken, which is easy to miss when the root `tileset.json` still answers.
+
+## Reading the graphs
+
+The explorer draws three overlaid per-level charts plus one tidy tree per tileset.
+
+- **Breadth per level.** A healthy octree roughly quadruples per level. A line that **flattens
+  early** is a truncated hierarchy — this is exactly the signature the Potree 1.x `.hrc`
+  [chunk-boundary bug](/docs/references/pointclouds/potree) produced: Geghard stopped dead at level 4
+  against a real depth of 11.
+- **Leaves per level.** Where refinement actually stops. Leaves spread across many levels mean
+  adaptive depth; every leaf on one level means a fixed-depth tiler.
+- **Geometric error by level** (log scale). Should roughly halve per level. A flat run means tiles at
+  different depths compete at the same screen-space error, so a client cannot order them sensibly.
+- **The tree.** Rows are depth, larger dots carry content. Layout is `d3-hierarchy`'s tidy tree;
+  drawing is **not** per-node — links are concatenated into one `<path>` and nodes batched into one
+  path per depth level, so a 4 000-node tree stays around 20 DOM elements and several trees can sit
+  on screen at once.
+
+Colour carries two independent axes: **hue = which tileset** (held constant across every chart, so a
+series is identifiable by colour alone) and **lightness = depth** within that hue.
+
+## Comparing several at once
+
+Add tilesets by URL or from the preset list; each gets a colour and a row in the comparison table.
+The loaded set is mirrored into the address bar (`?url=…&url=…&sample=…`), so a comparison is a
+shareable link — which is the point of loading more than one. Turning "is this shallow?" into
+"shallower than *what*?" is the whole reason this exists as a multi-tileset view rather than a second
+copy of the server's single-tileset page.
+
+## Limits
+
+- The node dump is capped by `maxNodes` (default 4 000, max 20 000) — a full walk of a large implicit
+  tileset is unbounded, so the budget is a real constraint rather than a formality.
+- External-tileset refs are followed up to 64 per walk.
+- Content sampling reports **averages over the sample**, not totals over the tileset. Multiplying an
+  average by tile count is not a point count.

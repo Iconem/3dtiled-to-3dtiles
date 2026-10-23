@@ -1,0 +1,23 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <link rel="icon" type="image/svg+xml" href="/logo.svg" />
+    <title>Tileset hierarchy explorer — 3D Tiled</title>
+    <script>
+      // Same pre-paint theme init as index.html — this page shares the app's theme key so switching
+      // here and in the viewer stay in agreement.
+      (function () {
+        var theme = localStorage.getItem('3d-tiled-theme') || 'dark';
+        if (theme === 'dark') document.documentElement.classList.add('dark');
+      })();
+    </script>
+  </head>
+  <body>
+    <div id="root"></div>
+    <!-- Runtime-overridable tile-server URL — must run before the module below reads formats.ts's MW. -->
+    <script src="/env-config.js"></script>
+    <script type="module" src="/src/hierarchy/main.tsx"></script>
+  </body>
+</html>
