@@ -891,6 +891,15 @@
               "type": "string"
             },
             "description": "Drop children whose URL contains this case-insensitive substring. Repeatable. Applied after only."
+          },
+          {
+            "name": "native",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "enum": ["1", "true"]
+            },
+            "description": "Also describe each Potree leaf in its source format: content.extensions.ICONEM_content_source = { format, version, encoding, uri, transform }, listed in extensionsUsed (never required). content.uri stays the /stream 3D Tiles wrapper, so clients that do not know the extension are unaffected. transform maps the source's own coordinates to the leaf frame. Used by the viewer's 3DTRjs 'Native Potree leaves' setting."
           }
         ],
         "responses": {

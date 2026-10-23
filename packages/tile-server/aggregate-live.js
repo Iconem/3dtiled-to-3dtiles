@@ -118,8 +118,34 @@ const childInfo = ttlCache(async (url) => {
   // degenerate ones to their bounding radius; ≥ the child root's GE keeps refinement monotonic.
   const declared = [ts.geometricError, root.geometricError].filter(Number.isFinite);
   const geometricError = Math.max(sphere[3] || 0, ...declared, declared.length ? 0 : 1e6);
-  return { sphere, geometricError };
+  return { sphere, geometricError, native: nativeSource(url, root) };
 });
+
+// ── &native=1: leaves a renderer may load in their SOURCE format ─────────────────────────────────
+//
+// Every leaf stays a /stream 3D Tiles child — `content.uri` is untouched, so CesiumJS and every spec
+// client render exactly what they did. With &native=1 a leaf whose /stream root reports its native
+// frame (root.extras.native, see potree-live's nativeInfo) also carries the source itself:
+//
+//   content.extensions.ICONEM_content_source = { format, version, encoding, uri, transform }
+//
+// `transform` (column-major 4×4) maps the source's OWN coordinates — what 3DTRjs's PotreePlugin
+// draws — to the leaf's frame: the child root transform (CRS georef, &crs=, &lon=&lat= placement)
+// composed with translate(−origin). Listed in `extensionsUsed`, never `extensionsRequired`: a client
+// that does not know it falls back to content.uri. Prior art: MAXAR_content_geojson.
+const NATIVE_EXT = 'ICONEM_content_source';
+function nativeSource(url, root) {
+  const n = root.extras?.native;
+  if (!n || !Array.isArray(n.origin)) return null;
+  let src;
+  try { src = new URL(url).searchParams.get('url'); } catch { return null; }
+  if (!src) return null;
+  const T = Array.isArray(root.transform) && root.transform.length === 16 ? root.transform : [1,0,0,0, 0,1,0,0, 0,0,1,0, 0,0,0,1];
+  const [ox, oy, oz] = n.origin;
+  const M = T.slice();
+  for (let r = 0; r < 3; r++) M[12 + r] = T[12 + r] - (T[r] * ox + T[4 + r] * oy + T[8 + r] * oz);
+  return { format: n.format, version: n.version, encoding: n.encoding, uri: src, transform: M };
+}
 
 // ── spatial auto-nesting ─────────────────────────────────────────────────────────────────────────
 //
@@ -463,7 +489,7 @@ const DATASET_SCHEMA = {
   },
 };
 
-export async function buildAggregate(urls, { nest = 'auto', ttlMs = DEFAULT_TTL_MS, bv = DEFAULT_BV, labels = {}, snap = null } = {}) {
+export async function buildAggregate(urls, { nest = 'auto', ttlMs = DEFAULT_TTL_MS, bv = DEFAULT_BV, labels = {}, snap = null, native = false } = {}) {
   // Timings are part of the output because they are the whole cost story of a mosaic: fetching every
   // child root dominates a cold build by orders of magnitude, while the tree itself takes milliseconds.
   const t0 = performance.now();
@@ -473,7 +499,7 @@ export async function buildAggregate(urls, { nest = 'auto', ttlMs = DEFAULT_TTL_
   const children = [], failed = [], unplaced = [];
   results.forEach((res, i) => {
     if (res.status === 'rejected') { failed.push({ url: urls[i], error: String(res.reason?.message || res.reason) }); return; }
-    const { sphere, geometricError } = res.value;
+    const { sphere, geometricError, native: nativeSrc } = res.value;
     // A dataset in its own local frame (no georeference, no root transform) has its centre near the
     // ECEF origin — i.e. inside the Earth. Mosaicking it is worse than useless: ecefToLlh of a point
     // at the core yields an arbitrary lon/lat, so it lands in a random quadtree cell, and its sphere
@@ -489,7 +515,7 @@ export async function buildAggregate(urls, { nest = 'auto', ttlMs = DEFAULT_TTL_
       boundingVolume: { sphere },
       geometricError,
       refine: 'ADD',
-      content: { uri: urls[i] },
+      content: { uri: urls[i], ...(native && nativeSrc ? { extensions: { [NATIVE_EXT]: nativeSrc } } : {}) },
       ...(Object.keys(props).length ? { metadata: { class: 'dataset', properties: props } } : {}),
     });
   });
@@ -598,6 +624,7 @@ export async function buildAggregate(urls, { nest = 'auto', ttlMs = DEFAULT_TTL_
       },
     },
     schema: DATASET_SCHEMA,
+    ...(children.some((c) => c.content?.extensions?.[NATIVE_EXT]) ? { extensionsUsed: [NATIVE_EXT] } : {}),
     geometricError: root.geometricError * 2,
     root,
   };
@@ -711,8 +738,8 @@ export const DEMO_SETS = {
  * single tile — and a 3D Tiles client re-requests the root more than once per session.
  */
 const aggregateCached = ttlCache(async (key) => {
-  const { urls, nest, ttlMs, bv, labels, snap } = JSON.parse(key);
-  return buildAggregate(urls, { nest, ttlMs, bv, labels, snap });
+  const { urls, nest, ttlMs, bv, labels, snap, native } = JSON.parse(key);
+  return buildAggregate(urls, { nest, ttlMs, bv, labels, snap, native });
 });
 
 // ── local sets ───────────────────────────────────────────────────────────────────────────────────
@@ -960,7 +987,7 @@ export async function handleAggregate(req, res, u) {
     provider: it.provider, attribution: it.attribution,
   }]));
 
-  const key = JSON.stringify({ urls, nest, ttlMs, bv, labels, snap: sel.snap });
+  const key = JSON.stringify({ urls, nest, ttlMs, bv, labels, snap: sel.snap, native: sel.native });
   let ts;
   try {
     ts = await aggregateCached(key, ttlMs);
@@ -1160,7 +1187,9 @@ function selectChildren(req, u, sets) {
   const snapParam = u.searchParams.get('snap');
   const snap = !snapParam || snapParam === '0' ? null : TERRAINS[snapParam] ? snapParam : 'mapterhorn-ellipsoid';
   const latest = ['1', 'true'].includes(u.searchParams.get('latest') ?? '');
-  return { items, nest, ttlMs, bv, latest, snap };
+  // &native=1: leaves also carry their source (Potree …) for renderers that read it directly
+  const native = ['1', 'true'].includes(u.searchParams.get('native') ?? '');
+  return { items, nest, ttlMs, bv, latest, snap, native };
 }
 
 /** Internals exposed for scripts/debug-aggregate-nesting.mjs. */

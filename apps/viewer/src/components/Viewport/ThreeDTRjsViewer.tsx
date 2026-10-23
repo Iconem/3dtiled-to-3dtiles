@@ -33,6 +33,8 @@ import { tileDatasetId, type DatasetStyle } from '@/lib/datasetStyle';
 import { fetchOutlines, outlineColor, type TileOutline } from '@/lib/mosaicOutlines';
 import { datasetGroundSamples, offsetFromSamples } from '@/lib/datasetGround';
 import { ImplicitAddRefineFixPlugin } from '@/lib/implicitAddFix';
+import { NativeLeavesPlugin, withNativeLeaves } from '@/lib/nativeLeaves';
+import { useUrlState } from '@/state/urlState';
 import { SNAP_HALF, SNAP_SAMPLES, SNAP_MIN_HITS } from '@/lib/snapToGround';
 import type { DatasetMarker } from '@/lib/aggregate';
 import DatasetTooltip, { type TooltipChannel } from './DatasetTooltip';
@@ -543,6 +545,10 @@ const Scene = forwardRef<ViewerHandle, { loadArgs: LoadArgs; tooltip: TooltipCha
   const maxSSE = useViewerStore((s) => s.maxSSE);
   const assetVisible = useViewerStore((s) => s.assetVisible);
   const pointSize = useViewerStore((s) => s.pointSize);
+  // Native mosaic leaves (3DTRjs only): an /aggregate URL is requested with &native=1, and Potree
+  // leaves render through PotreePlugin child renderers instead of /stream. See lib/nativeLeaves.ts.
+  const [{ native }] = useUrlState();
+  const tilesUrl = loadArgs ? (native ? withNativeLeaves(loadArgs.url) : loadArgs.url) : undefined;
   const basemap = useViewerStore((s) => s.basemap);
   const terrainMode = useViewerStore((s) => s.terrainMode);
   const terrain = resolveTerrainMode(terrainMode, '3dtrjs');
@@ -926,6 +932,7 @@ const Scene = forwardRef<ViewerHandle, { loadArgs: LoadArgs; tooltip: TooltipCha
    */
   const applyPointSize = (o: any, tile: any) => {
     if (!o.isPoints || !o.material) return;
+    if (tile?.internal?.nativeLeaf || o.material.isPointCloudMaterial) return;   // PotreePlugin sizes its own
     const adaptive = pointAdaptiveRef.current && Number.isFinite(tile?.geometricError) && tile.geometricError > 0;
     o.material.sizeAttenuation = adaptive;
     o.material.size = adaptive ? tile.geometricError * pointSizeRef.current * 0.5 : pointSizeRef.current;
@@ -965,6 +972,8 @@ const Scene = forwardRef<ViewerHandle, { loadArgs: LoadArgs; tooltip: TooltipCha
       const tiles = tilesRef.current;
       if (!tiles) return;
       tiles.forEachLoadedModel((sc: THREE.Object3D, tile: any) => sc.traverse((o: any) => applyPointSize(o, tile)));
+      const nativePlugin = (tiles as any).getPluginByName?.('NATIVE_LEAVES_PLUGIN');
+      if (nativePlugin) nativePlugin.pointScale = pointSize / 2;
       invalidate();
     });
     return () => { if (pointSizeRaf.current != null) cancelAnimationFrame(pointSizeRaf.current); };
@@ -1295,7 +1304,7 @@ const Scene = forwardRef<ViewerHandle, { loadArgs: LoadArgs; tooltip: TooltipCha
       {loadArgs && (
         <TilesRendererR3F
           ref={tilesRef as any}
-          url={loadArgs.url}
+          url={tilesUrl}
           errorTarget={errorTarget}
           // Skipped when the caller (a flyTo-tagged preset — e.g. Bing's per-city pills, which all
           // load the SAME global tileset URL) is about to issue its OWN flyToCity right after load()
@@ -1333,6 +1342,8 @@ const Scene = forwardRef<ViewerHandle, { loadArgs: LoadArgs; tooltip: TooltipCha
           <TilesPlugin plugin={ImplicitTilingPlugin as any} />
           <TilesPlugin plugin={ImplicitAddRefineFixPlugin as any} />
           <TilesPlugin plugin={GLTFExtensionsPlugin as any} args={{ dracoLoader, ktxLoader } as any} />
+          {native && <TilesPlugin plugin={NativeLeavesPlugin as any} args={{ pointScale: pointSizeRef.current / 2,
+            onChildModel: (sc: THREE.Object3D, leaf: any) => styleDatasetModel(sc, leaf, datasetStyleRef.current) } as any} />}
           {isSplat && <TilesPlugin plugin={GaussianSplatPlugin as any} args={{ renderer: gl, scene } as any} />}
           {debugMode === 'tiles' && <TilesPlugin plugin={DebugTilesPlugin as any} displayBoxBounds colorMode={7} />}
           {debugMode === 'cells' && <MosaicOutlines url={loadArgs.url} tilesRef={tilesRef} />}

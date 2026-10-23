@@ -9,7 +9,7 @@ import type { ViewerHandle } from '@/lib/viewer-handle';
 import { SidebarSection } from './SidebarSection';
 
 export default function TilesetLodSection({ activeHandleRef }: { activeHandleRef: React.RefObject<ViewerHandle | null> }) {
-  const [url] = useUrlState();
+  const [url, setUrl] = useUrlState();
   const s = useViewerStore();
   const h = () => activeHandleRef.current;
 
@@ -102,6 +102,10 @@ export default function TilesetLodSection({ activeHandleRef }: { activeHandleRef
                 </SelectContent>
               </Select>
             </div>
+            <Label className="text-xs" title="Mosaics only. Each Potree dataset in an /aggregate mosaic is read directly by 3DTRjs's PotreePlugin (adaptive point size, Potree's own octree) instead of through /stream's 3D Tiles. The mosaic still carries the /stream link, so CesiumJS and other clients are unaffected. Potree 1.x .bin and 2.0 DEFAULT only; COPC, Brotli and LAS/LAZ-node clouds stay on /stream.">
+              <Checkbox checked={url.native} onCheckedChange={(v) => setUrl({ native: !!v })} />
+              Native Potree leaves
+            </Label>
           </>
         )}
     </SidebarSection>

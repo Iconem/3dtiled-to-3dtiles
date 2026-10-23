@@ -5,11 +5,21 @@ Format loosely follows [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
-### Noted — 2026-10-23 (mixed-format mosaic leaves)
-- Design note in docs *Meta-tilesets*: an `/aggregate` leaf can carry its native source (Potree,
-  COPC, ...) in a content extension listed in `extensionsUsed`, keeping `content.uri` as the
-  `/stream` 3D Tiles fallback. A 3DTRjs plugin would mount a `PotreePlugin` child renderer per leaf.
-  Same idea as `MAXAR_content_geojson`, one level up. Not built.
+### Added — 2026-10-23 (native Potree leaves in mosaics)
+- **`/aggregate?native=1`:** each Potree leaf also carries its source in
+  `content.extensions.ICONEM_content_source` (`format`, `version`, `encoding`, `uri`, and a
+  `transform` from the cloud's own coordinates to the leaf frame), listed in `extensionsUsed` only.
+  `content.uri` is still the `/stream` 3D Tiles wrapper, so Cesium and other clients are unaffected.
+  On the full Iconem manifest all 628 Potree leaves qualify (337 × 1.7, 291 × 1.8, all `.bin`).
+- **`/stream` Potree roots report `extras.native`** (version, encoding, origin), which the aggregate
+  reads from the child root it already fetches.
+- **Viewer, 3DTRjs mode: *Native Potree leaves*** (`?native=true`). A plugin
+  (`lib/nativeLeaves.ts`) mounts a `PotreePlugin` child renderer per visible Potree leaf, sharing
+  the mosaic's cache and queues. Hide, tint, point size and raycast picking work on native points.
+- **Measured:** identical nodes, points and placement to `/stream` at normal error targets
+  (Geghard, six Angkor Thom clouds). At 0.25 px, native kept refining to 3.7 M points while `/stream`
+  stopped at 1.7 M: under 3DTRjs, `/stream` Potree never passed level 3, its first child-subtree
+  boundary. That is a separate `/stream` bug, logged in docs *Meta-tilesets*.
 
 ### Noted — 2026-10-20 (spec direction)
 - glTF#1809 (Draco point compression) closed as superseded by `KHR_meshopt_compression`; Cesium's

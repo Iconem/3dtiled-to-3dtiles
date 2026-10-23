@@ -661,35 +661,34 @@ by client, by year — nest the endpoint in itself: a child URL can be another `
 3D Tiles external references compose to any depth. Auto-nesting and hand-nesting mix freely, so a
 hand-authored "Cambodia" node can have an auto-nested mosaic of 40 Angkor scans underneath it.
 
-## Design note: leaves that are other formats, loaded natively (not built)
+## Native Potree leaves: `&native=1` and the 3DTRjs setting
 
-*Noted 2026-10-23. Idea, not implemented.*
-
-Today every leaf of a mosaic is 3D Tiles: Potree and COPC children are wrapped through `/stream`
-first. The idea is to let a leaf say "this dataset is really a Potree 1.8 cloud at this URL", so a
-renderer that reads Potree natively loads it directly, and every other client still gets 3D Tiles.
+Every leaf of a mosaic is 3D Tiles: Potree and COPC children are wrapped through `/stream`. With
+`&native=1` a Potree leaf **also** says "this dataset is really a Potree 1.8 cloud at this URL", so a
+renderer that reads Potree itself loads it directly, and every other client still gets 3D Tiles.
+In the viewer this is **Native Potree leaves** under *Tileset & LOD*, in 3DTRjs mode (`?native=true`).
+CesiumJS has no Potree reader, so the setting does not exist there.
 
 **Prior art.** [`MAXAR_content_geojson`](https://github.com/CesiumGS/3d-tiles/tree/main/extensions)
 ships GeoJSON as tile content: a 3D Tiles extension for content that is not glTF. This is the same
-pattern one level up, where the "content" is a whole hierarchy instead of one tile payload. The
-Potree-only catalogue handing off to `PotreePlugin`, noted earlier, is the special case where every
-leaf is Potree.
+pattern one level up, where the "content" is a whole hierarchy instead of one tile payload.
 
-**Shape: keep `content.uri` valid, put the native source in an extension.**
+### What the server emits
 
 ```json
 {
   "extensionsUsed": ["ICONEM_content_source"],
   "root": { "children": [ {
     "boundingVolume": { "sphere": [ ... ] },
-    "geometricError": 240,
+    "geometricError": 609,
+    "refine": "ADD",
     "content": {
-      "uri": "/stream/tileset.json?format=potree&url=https://.../cloud.js",
+      "uri": "http://.../stream/tileset.json?format=potree&url=https%3A%2F%2F.../cloud.js&cache=none",
       "extensions": {
         "ICONEM_content_source": {
-          "format": "potree", "version": "1.8",
+          "format": "potree", "version": "1.7", "encoding": "BINARY",
           "uri": "https://.../cloud.js",
-          "crs": "EPSG:32638"
+          "transform": [ 16 numbers, column-major ]
         }
       }
     }
@@ -698,51 +697,63 @@ leaf is Potree.
 ```
 
 - `content.uri` stays the `/stream` 3D Tiles wrapper, so CesiumJS, Cesium for Unreal and any spec
-  client render the leaf unchanged.
-- The extension is listed in `extensionsUsed`, never `extensionsRequired`. That is the difference
-  from `MAXAR_content_geojson`, whose `uri` itself points at non-3D-Tiles content, so clients without
-  it cannot fall back.
-- `format` is open-ended: `potree`, `copc`, `ept`, `3dtiles`, `i3s`, `lcc`, and so on. A client uses
-  the native path only for formats it can read and takes the fallback for the rest. Today 3DTRjs
-  reads Potree 1.7, 1.8 with our patch, and 2.0 DEFAULT. COPC, EPT and Potree 2.0 BROTLI would
-  keep the fallback until a loader exists, so the extension is forward-compatible.
-- `ICONEM_` is a placeholder vendor prefix. Publishing it would mean registering a prefix with the
-  3D Tiles extension registry.
-- The aggregate builder already knows each child's format and source URL, so emitting this is a
-  small change, behind a flag such as `&native=1`.
+  client render the leaf unchanged. The extension is in `extensionsUsed`, never
+  `extensionsRequired`. That is the difference from `MAXAR_content_geojson`, whose `uri` itself
+  points at non-3D-Tiles content.
+- `transform` maps the cloud's **own** coordinates, which is what `PotreePlugin` draws, to the leaf
+  frame. It is `/stream`'s root transform composed with a shift by the cloud's centre, so the CRS
+  georeference, a `&crs=` override and `&lon=&lat=` placement all carry over.
+- `/stream` reports what this needs in its Potree root's `extras.native`: `version`, `encoding`
+  (`BINARY`, `LAS`, `LAZ` for 1.x, the metadata encoding for 2.0) and `origin`. The aggregate reads it
+  from the child root it already fetches, so `&native=1` costs no extra requests.
+- `format` is open-ended. Only `potree` is emitted today.
+- `ICONEM_` is a placeholder vendor prefix. Publishing the extension would mean registering one.
 
-**Renderer side: a 3DTRjs plugin that mounts a child renderer per leaf.** In the viewer's user code,
-not upstream:
+On the full Iconem manifest, all 628 Potree leaves get the extension: 337 are Potree 1.7 and 291
+are 1.8, all with `.bin` nodes, so every one is readable natively.
 
-1. When a leaf carrying the extension is about to load, the plugin checks `format` against the
-   loaders it has. If supported, it skips `content.uri` and creates a child `TilesRenderer` with
-   `PotreePlugin` (plus `PointCloudEffectsPlugin`) on the native URI. Otherwise nothing changes.
-2. The child's group is parented under the leaf, so the leaf `transform` and placement apply.
-3. The child shares the parent's LRU cache, download queue and parse queue, so memory and
-   bandwidth budgets stay global across hundreds of datasets.
-4. The child is updated with the same camera and error target each frame while the leaf is
-   active, hidden when the leaf is not, and disposed when the leaf is evicted. Only the handful of
-   visible datasets ever hold a child renderer.
+### What the viewer does
 
-Which plugin hooks claim the leaf (`preprocessNode`, `fetchData`, `setTileActive`, `disposeTile`)
-needs checking against 3DTRjs master before building.
+`lib/nativeLeaves.ts` is a 3DTRjs plugin on the mosaic's renderer:
 
-**Things to get right.**
+1. **Claims a leaf** whose extension it can read: Potree 1.x `.bin` (1.8 through the vendored
+   loader patch) or 2.0 DEFAULT. COPC, Brotli and LAS/LAZ-node clouds keep the `/stream` path.
+   The core marks a `.json` content as an external tileset, so the plugin flips the leaf to
+   renderable content. It redirects only the request, not `content.uri`, because dataset ids,
+   hide and tint are derived from that link.
+2. **Mounts a child renderer** when the leaf's placeholder content "loads": a `TilesRenderer` with
+   `PotreePlugin` under a node carrying `transform`. The parent then places the leaf as usual.
+3. **Shares budgets.** The child uses the parent's LRU cache, download queue and parse queue.
+4. **Updates only visible leaves**, each frame after the parent, with the parent's cameras,
+   resolutions and error target. A hidden dataset stops loading. An evicted leaf disposes its child.
+5. **Keeps the viewer's controls working.** Hide applies to the whole cloud. Tint applies to native
+   points as they arrive. The point-size slider drives `PotreePlugin`'s point scale, and its
+   adaptive sizing replaces the viewer's own. Raycasts reach native points, so double-click zoom
+   and the controls' pivot work on them.
 
-- *Error parity.* The leaf's geometric error comes from the child root. The native Potree tree must
-  refine at the same screen-space error as its `/stream` twin, or the two paths look different.
-- *Refinement.* A REPLACE parent above the leaf has to hand over to the child renderer only when
-  the child has drawn something, or there is a blank frame at the switch.
-- *Tooling.* Raycasting, debug bounding volumes and stats each need to walk into the child
-  renderers.
-- *3D Tiles 2.0.* glTF 2.1 adds external references to other glTF assets. A reference to a
-  non-glTF hierarchy is the same open question, so the extension is worth keeping small enough to
-  propose there later.
+### Measured (2026-10-23, `set=iconem&nest=geodetic&format=potree`)
 
-- [ ] Emit `ICONEM_content_source` on `/aggregate` leaves behind `&native=1`.
-- [ ] 3DTRjs plugin in the viewer: mount `PotreePlugin` child renderers on supported leaves with
-  shared cache and queues, fallback to `content.uri` otherwise.
-- [ ] Compare one Iconem set both ways: points on screen, requests, and frame time.
+| View | Native | `/stream` |
+|---|---|---|
+| Geghard, 780 m | 5 nodes, 23,074 points | 5 nodes, 23,074 points |
+| Angkor Thom, 6 clouds, default 2 px | 10 nodes, 142,342 points, all in 8 s | 10 nodes, 142,342 points |
+| Same, 0.25 px target | 315 nodes, 3.7 M points after 70 s, still refining | 118 nodes, 1.7 M points, stops at 20 s |
+| Screen-grid raycast, 384 rays | 28 hits | 28 hits |
+
+At equal depth both paths load the same Potree nodes and place them on the same pixels. The native
+points look denser because `PotreePlugin` sizes each point from its node. The 0.25 px row shows a
+`/stream` limitation, not a native one. `/stream`'s implicit Potree tilesets use 3-level subtrees, and
+under 3DTRjs no visible node ever went past level 3, the first child-subtree boundary. The native
+path reached level 4 on the same clouds. That is worth its own investigation.
+
+### Not done yet
+
+- [ ] Find why `/stream` Potree stops refining at the first child-subtree boundary in 3DTRjs.
+- [ ] Native COPC, once 3DTRjs has a COPC loader (roadmap issue 943), and EPT.
+- [ ] Eye-dome lighting on native leaves. `PointCloudEffectsPlugin` supports it per renderer, and
+  one pass over the whole mosaic would need a shared depth target.
+- [ ] Count child-renderer tiles in the status panel (it shows the mosaic's own tiles only).
+- [ ] Drafts (`/aggregate/draft/…`) do not take `&native=1` yet.
 
 ## Inspecting the result
 

@@ -141,7 +141,7 @@ const getCtx = memoizeAsync(async (url) => {
       console.log(`[potree-live] (1.x lazy implicit) ${url} → .hrc chunked (stepSize=${stepSize}), georef=${!!ctx.transform}`);
     } else {
       // inline (1.4) layout → whole tiny hierarchy is in cloud.js already; build it eagerly.
-      ctx = finishCtx(src.nodes, src.rootBox, src.crs, src.spacing, name => src.readNode(src.nodes.get(name)));
+      ctx = { ...finishCtx(src.nodes, src.rootBox, src.crs, src.spacing, name => src.readNode(src.nodes.get(name))), src };
       console.log(`[potree-live] (1.4 inline) ${url} → ${src.nodes.size} nodes, georef=${!!ctx.transform}`);
     }
   } else {                                                  // ── Potree 2.0 (lazy) ──
@@ -341,7 +341,26 @@ async function buildTilesetExplicit1x(ctx, urlParam) {
 // Pure builders the /stream dispatcher reuses. Tile token is a Potree name (explicit, "r012") OR a
 // "level-x-y-z" coord (implicit) — potreeTile resolves either.
 export const potreeTileRe = /^([r0-7]+|\d+-\d+-\d+-\d+)$/;
+// What a client needs to read this cloud ITSELF instead of through /stream (the aggregate's
+// `&native=1` leaves, rendered by 3DTRjs's PotreePlugin): the source version and node encoding, so it
+// can tell whether its own loader copes, and `origin` — the point in SOURCE coordinates that tile
+// coordinates are relative to. Native-coords → ECEF is then `root.transform · translate(−origin)`,
+// with any &crs= override and &lon=&lat= placement already folded into root.transform.
+function nativeInfo(ctx) {
+  const origin = ctx.origin.map((v) => +v.toFixed(4));
+  if (ctx.meta) return { format: 'potree', version: String(ctx.meta.version ?? '2.0'), encoding: String(ctx.meta.encoding || 'DEFAULT').toUpperCase(), origin };
+  const pa = ctx.src?.meta?.pointAttributes;
+  // 1.x: a pointAttributes STRING ("LAS"/"LAZ") means each node is a LAS/LAZ file; a list means .bin
+  return { format: 'potree', version: String(ctx.src?.version ?? '1.x'), encoding: typeof pa === 'string' ? pa.toUpperCase() : 'BINARY', origin };
+}
+
 export async function potreeTileset(url, opts = {}) {
+  const ts = await potreeTilesetInner(url, opts);
+  const ctx = await getCtx(url);
+  ts.root.extras = { ...(ts.root.extras || {}), native: nativeInfo(ctx) };
+  return ts;
+}
+async function potreeTilesetInner(url, opts) {
   const ctx = await getCtx(url);
   const eager = opts.hierarchy === 'eager';
   if (eager) progressStart(url, 'Potree hierarchy drain (cache=hierarchy)');   // reported via /progress?key=url

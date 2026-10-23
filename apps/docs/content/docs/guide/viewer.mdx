@@ -361,6 +361,11 @@ mosaic included — *Open data* is typed `mesh` but carries 113 COPC clouds):
 | **Adaptive point size** | `pointCloudShading.attenuation`: size from the tile's geometric error | `sizeAttenuation` with a world-space size of *geometric error × px size / 2* — the tile's point spacing for Potree/COPC-derived tiles, so coarse tiles close their gaps (what the potree lab's *size from tile GE* does) |
 | **Eye-dome lighting**, strength | `pointCloudShading.eyeDomeLighting` | not in the main viewer — the potree lab has it, through `PointCloudEffectsPlugin` |
 
+**Native Potree leaves** (3DTRjs only, `?native=true`) renders the Potree datasets of an
+`/aggregate` mosaic through 3DTRjs's `PotreePlugin` instead of `/stream`, with Potree's own adaptive
+point size. The point-size slider then sets `PotreePlugin`'s point scale. See
+[Meta-tilesets](/docs/guide/meta-tilesets#native-potree-leaves-native1-and-the-3dtrjs-setting).
+
 There is no `useHQ` in either renderer: Potree's high-quality splatting (a depth pass, then a
 depth-weighted blend of the points) exists in neither Cesium's `PointCloudShading` nor 3DTRjs. Cesium's
 attenuation + EDL is the closest it offers; 3DTRjs's `PointCloudEffectsPlugin` (round / sphere point
