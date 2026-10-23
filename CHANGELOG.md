@@ -5,6 +5,12 @@ Format loosely follows [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+### Noted — 2026-10-23 (mixed-format mosaic leaves)
+- Design note in docs *Meta-tilesets*: an `/aggregate` leaf can carry its native source (Potree,
+  COPC, ...) in a content extension listed in `extensionsUsed`, keeping `content.uri` as the
+  `/stream` 3D Tiles fallback. A 3DTRjs plugin would mount a `PotreePlugin` child renderer per leaf.
+  Same idea as `MAXAR_content_geojson`, one level up. Not built.
+
 ### Noted — 2026-10-20 (spec direction)
 - glTF#1809 (Draco point compression) closed as superseded by `KHR_meshopt_compression`; Cesium's
   benchmark puts meshopt point GLBs at 1.01 GiB vs 1.19 GiB for `.pnts`+Draco on 313 M points, same

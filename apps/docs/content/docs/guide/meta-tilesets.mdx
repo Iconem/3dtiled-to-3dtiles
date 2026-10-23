@@ -661,6 +661,89 @@ by client, by year — nest the endpoint in itself: a child URL can be another `
 3D Tiles external references compose to any depth. Auto-nesting and hand-nesting mix freely, so a
 hand-authored "Cambodia" node can have an auto-nested mosaic of 40 Angkor scans underneath it.
 
+## Design note: leaves that are other formats, loaded natively (not built)
+
+*Noted 2026-10-23. Idea, not implemented.*
+
+Today every leaf of a mosaic is 3D Tiles: Potree and COPC children are wrapped through `/stream`
+first. The idea is to let a leaf say "this dataset is really a Potree 1.8 cloud at this URL", so a
+renderer that reads Potree natively loads it directly, and every other client still gets 3D Tiles.
+
+**Prior art.** [`MAXAR_content_geojson`](https://github.com/CesiumGS/3d-tiles/tree/main/extensions)
+ships GeoJSON as tile content: a 3D Tiles extension for content that is not glTF. This is the same
+pattern one level up, where the "content" is a whole hierarchy instead of one tile payload. The
+Potree-only catalogue handing off to `PotreePlugin`, noted earlier, is the special case where every
+leaf is Potree.
+
+**Shape: keep `content.uri` valid, put the native source in an extension.**
+
+```json
+{
+  "extensionsUsed": ["ICONEM_content_source"],
+  "root": { "children": [ {
+    "boundingVolume": { "sphere": [ ... ] },
+    "geometricError": 240,
+    "content": {
+      "uri": "/stream/tileset.json?format=potree&url=https://.../cloud.js",
+      "extensions": {
+        "ICONEM_content_source": {
+          "format": "potree", "version": "1.8",
+          "uri": "https://.../cloud.js",
+          "crs": "EPSG:32638"
+        }
+      }
+    }
+  } ] }
+}
+```
+
+- `content.uri` stays the `/stream` 3D Tiles wrapper, so CesiumJS, Cesium for Unreal and any spec
+  client render the leaf unchanged.
+- The extension is listed in `extensionsUsed`, never `extensionsRequired`. That is the difference
+  from `MAXAR_content_geojson`, whose `uri` itself points at non-3D-Tiles content, so clients without
+  it cannot fall back.
+- `format` is open-ended: `potree`, `copc`, `ept`, `3dtiles`, `i3s`, `lcc`, and so on. A client uses
+  the native path only for formats it can read and takes the fallback for the rest. Today 3DTRjs
+  reads Potree 1.7, 1.8 with our patch, and 2.0 DEFAULT. COPC, EPT and Potree 2.0 BROTLI would
+  keep the fallback until a loader exists, so the extension is forward-compatible.
+- `ICONEM_` is a placeholder vendor prefix. Publishing it would mean registering a prefix with the
+  3D Tiles extension registry.
+- The aggregate builder already knows each child's format and source URL, so emitting this is a
+  small change, behind a flag such as `&native=1`.
+
+**Renderer side: a 3DTRjs plugin that mounts a child renderer per leaf.** In the viewer's user code,
+not upstream:
+
+1. When a leaf carrying the extension is about to load, the plugin checks `format` against the
+   loaders it has. If supported, it skips `content.uri` and creates a child `TilesRenderer` with
+   `PotreePlugin` (plus `PointCloudEffectsPlugin`) on the native URI. Otherwise nothing changes.
+2. The child's group is parented under the leaf, so the leaf `transform` and placement apply.
+3. The child shares the parent's LRU cache, download queue and parse queue, so memory and
+   bandwidth budgets stay global across hundreds of datasets.
+4. The child is updated with the same camera and error target each frame while the leaf is
+   active, hidden when the leaf is not, and disposed when the leaf is evicted. Only the handful of
+   visible datasets ever hold a child renderer.
+
+Which plugin hooks claim the leaf (`preprocessNode`, `fetchData`, `setTileActive`, `disposeTile`)
+needs checking against 3DTRjs master before building.
+
+**Things to get right.**
+
+- *Error parity.* The leaf's geometric error comes from the child root. The native Potree tree must
+  refine at the same screen-space error as its `/stream` twin, or the two paths look different.
+- *Refinement.* A REPLACE parent above the leaf has to hand over to the child renderer only when
+  the child has drawn something, or there is a blank frame at the switch.
+- *Tooling.* Raycasting, debug bounding volumes and stats each need to walk into the child
+  renderers.
+- *3D Tiles 2.0.* glTF 2.1 adds external references to other glTF assets. A reference to a
+  non-glTF hierarchy is the same open question, so the extension is worth keeping small enough to
+  propose there later.
+
+- [ ] Emit `ICONEM_content_source` on `/aggregate` leaves behind `&native=1`.
+- [ ] 3DTRjs plugin in the viewer: mount `PotreePlugin` child renderers on supported leaves with
+  shared cache and queues, fallback to `content.uri` otherwise.
+- [ ] Compare one Iconem set both ways: points on screen, requests, and frame time.
+
 ## Inspecting the result
 
 `/aggregate` output is a tileset like any other, so
