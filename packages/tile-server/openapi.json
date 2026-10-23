@@ -1074,6 +1074,36 @@
         }
       }
     },
+    "/aggregate/set": {
+      "post": {
+        "tags": [
+          "aggregate"
+        ],
+        "summary": "Upload a set manifest, then mosaic it with /aggregate?set=upload-<hash>",
+        "description": "Body: a local-set manifest ({ label?, entries: [{ url, format: potree|copc|3dtiles, name?, project?, scene?, date?, crs?, lon?, lat? }] }) or the bare entries array, up to 10 MB. Held in memory for 24 h after last use (a restart clears it), never listed in demo.json. The name is a hash of the entries, so re-sending the same manifest returns the same set name. Every /aggregate/tileset.json and index.json parameter works with it.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "{ set, label, count, url, expiresInS }"
+          },
+          "400": {
+            "description": "Not JSON, no entries, an entry without an absolute http(s) url, or an unknown format"
+          },
+          "413": {
+            "description": "Manifest larger than 10 MB"
+          }
+        }
+      }
+    },
     "/export": {
       "get": {
         "tags": [

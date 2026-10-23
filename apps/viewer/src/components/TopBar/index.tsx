@@ -8,7 +8,7 @@ import { PSEUDO_FORMATS, FORMAT_PILL_ORDER, pillMeta, fmtMeta, canCentroids, MW 
 import { buildMiddlewareUrl, currentPresets, type MiddlewareParams, type Preset } from '@/lib/middleware';
 import type { ViewerHandle } from '@/lib/viewer-handle';
 import { cn } from '@/lib/utils';
-import { aggregateIndexUrl, isAggregateUrl, useAvailableSets } from '@/lib/aggregate';
+import { aggregateIndexUrl, isAggregateUrl, restoreUploadedSet, uploadManifest, useAvailableSets } from '@/lib/aggregate';
 
 // `?load=<tileset URL>[&type=mesh|pointcloud|splat]` — load an arbitrary tileset on start instead of a
 // preset (the Aggregate Builder's "Preview in viewer" uses it for drafts). Read once: the URL itself is
@@ -93,6 +93,29 @@ export default function TopBar({ activeHandleRef }: { activeHandleRef: React.Ref
   const urlField = useViewerStore((s) => s.urlField);
   const rawUrlMode = useViewerStore((s) => s.rawUrlMode);
   const inputRef = useRef<HTMLInputElement>(null);
+  const manifestRef = useRef<HTMLInputElement>(null);
+
+  // Your own set manifest (e.g. the Iconem share-link list from scripts/iconem-share-links.mjs), from
+  // a local file: uploaded to the server, then loaded as an /aggregate mosaic like any server set.
+  async function loadManifestFile(file: File) {
+    const st = store.getState();
+    st.setStatus(`Uploading ${file.name}…`);
+    try {
+      const up = await uploadManifest(file);
+      setUrl({ preset: '' });
+      st.setRawUrlMode(false);
+      st.setUrlField(up.url);
+      doLoad(up.url, up.pointsOnly ? 'pointcloud' : 'mesh');
+      // the page URL reopens the same mosaic (re-sending the manifest kept in this browser)
+      const page = new URL(location.href);
+      page.searchParams.set('load', up.url);
+      page.searchParams.set('type', up.pointsOnly ? 'pointcloud' : 'mesh');
+      history.replaceState(history.state, '', page);
+      st.setStatus(`${up.label} · ${up.count} datasets from ${file.name}`);
+    } catch (e) {
+      st.setStatus(`Manifest ${file.name}: ${(e as Error).message}`);
+    }
+  }
 
   const params: MiddlewareParams = {
     selectedFormat: url.format,
@@ -189,7 +212,8 @@ export default function TopBar({ activeHandleRef }: { activeHandleRef: React.Ref
     if (START_LOAD && depsKey === startKey.current) {
       store.getState().setRawUrlMode(false);
       store.getState().setUrlField(START_LOAD);
-      doLoad(START_LOAD, START_TYPE, START_FLY);
+      // a mosaic of an uploaded manifest: the server may have restarted since, so re-send it first
+      restoreUploadedSet(START_LOAD).finally(() => doLoad(START_LOAD, START_TYPE, START_FLY));
       return;
     }
     const wanted = url.preset && presets.find((p) => p.id === url.preset && p.url);
@@ -357,6 +381,28 @@ export default function TopBar({ activeHandleRef }: { activeHandleRef: React.Ref
           data-testid="open-builder"
         >
           🧱 builder
+        </Button>
+        <input
+          ref={manifestRef}
+          type="file"
+          accept=".json,application/json"
+          className="hidden"
+          onChange={(e) => {
+            const f = e.target.files?.[0];
+            e.target.value = '';                       // the same file again must still fire onChange
+            if (f) loadManifestFile(f);
+          }}
+          data-testid="manifest-file"
+        />
+        <Button
+          size="sm"
+          variant="outline"
+          className="h-7 px-2 text-xs"
+          onClick={() => manifestRef.current?.click()}
+          title="Load your own set manifest from a local file ({ label, entries: [{ url, format: 'potree'|'copc'|'3dtiles', name? }] }, the .local/aggregate-sets/<name>.json shape) and view it as an /aggregate mosaic. The file goes to the tile-server's memory (24 h) and this browser's storage, nowhere else."
+          data-testid="open-manifest"
+        >
+          📂 manifest
         </Button>
       </div>
     </header>

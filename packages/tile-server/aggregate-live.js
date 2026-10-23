@@ -899,6 +899,65 @@ async function handleDraft(req, res, u, origin) {
     : { count: sel.rows.length, datasets: sel.rows, unplaced: [], failed: [] }));
 }
 
+// ── uploaded manifests: a local set, sent from the browser ───────────────────────────────────────
+//
+// The same manifest shape as `.local/aggregate-sets/<name>.json`, POSTed by the viewer's "manifest"
+// button, so a deployment that has none of your local files can still mosaic your datasets:
+//
+//   POST /aggregate/set            body = { label?, entries: [{ url, format, name?, … }] } (or the bare array)
+//                                  → { set: 'upload-<hash>', url, count, expiresInS }
+//   GET  /aggregate/tileset.json?set=upload-<hash>&…   every selection param works, as for any set
+//
+// The name is a hash of the manifest: re-sending the same file gives the same URL, so a client that
+// kept the file can restore a mosaic link after a server restart just by POSTing it again. Without the
+// file the hash is unguessable, and uploads are never listed in demo.json or in error messages —
+// their URLs are share links. In memory, bounded like drafts (count, size, age since last use).
+const UPLOAD_MAX = 20;
+const UPLOAD_TTL_MS = 24 * 3600 * 1000;
+const UPLOAD_MAX_BYTES = 10 * 1024 * 1024;
+const UPLOAD_FORMATS = new Set(['potree', 'copc', '3dtiles']);
+const uploads = new Map();                         // name → { at, set }; Map order = LRU order
+const UPLOAD_NAME = /^upload-[0-9a-f]{32}$/;
+
+function getUpload(name) {
+  const d = uploads.get(name);
+  if (!d) return null;
+  if (Date.now() - d.at > UPLOAD_TTL_MS) { uploads.delete(name); return null; }
+  uploads.delete(name);
+  uploads.set(name, { ...d, at: Date.now() });     // sliding expiry: a mosaic in use stays
+  return d.set;
+}
+
+/** A manifest body → a set, or a message saying why not. Unknown entry fields pass through. */
+function manifestToSet(m) {
+  const entries = Array.isArray(m) ? m : m?.entries;
+  if (!Array.isArray(entries) || !entries.length) return { error: 'expected { entries: [{ url, format }, …] } or a bare array of entries' };
+  for (const [i, e] of entries.entries()) {
+    if (!e || typeof e.url !== 'string' || !/^https?:\/\//.test(e.url)) return { error: `entry ${i}: needs an absolute http(s) \`url\`` };
+    if (e.format != null && !UPLOAD_FORMATS.has(e.format)) return { error: `entry ${i}: format "${e.format}" is not one of ${[...UPLOAD_FORMATS].join(', ')}` };
+  }
+  return { set: { label: (!Array.isArray(m) && m.label) || 'Uploaded manifest', entries, manifest: true, local: true,
+    provider: (!Array.isArray(m) && m.provider) || null, attribution: (!Array.isArray(m) && m.attribution) || null } };
+}
+
+async function handleUpload(req, res, origin) {
+  if (req.method !== 'POST') { res.writeHead(405, { ...CORS, Allow: 'POST' }); res.end('POST a set manifest'); return; }
+  let m;
+  try { m = await readJsonBody(req, UPLOAD_MAX_BYTES); }
+  catch (e) { res.writeHead(e.status || 400, CORS); res.end(e.message); return; }
+  const { set, error } = manifestToSet(m);
+  if (error) { res.writeHead(400, CORS); res.end(error); return; }
+  const name = 'upload-' + createHash('sha256').update(JSON.stringify(set.entries)).digest('hex').slice(0, 32);
+  const now = Date.now();
+  for (const [k, d] of uploads) if (now - d.at > UPLOAD_TTL_MS) uploads.delete(k);
+  uploads.delete(name);
+  while (uploads.size >= UPLOAD_MAX) uploads.delete(uploads.keys().next().value);
+  uploads.set(name, { at: now, set });
+  res.writeHead(201, { 'Content-Type': 'application/json', ...CORS });
+  res.end(JSON.stringify({ set: name, label: set.label, count: set.entries.length,
+    url: `${origin}/aggregate/tileset.json?set=${name}&nest=geodetic`, expiresInS: UPLOAD_TTL_MS / 1000 }));
+}
+
 /** Try to handle an /aggregate/* request. Returns true iff it owned the response. */
 export async function handleAggregate(req, res, u) {
   // Before the set lookup: drafts never need the manifests read from disk.
@@ -907,8 +966,20 @@ export async function handleAggregate(req, res, u) {
     await handleDraft(req, res, u, `${proto}://${req.headers['x-forwarded-host'] || req.headers.host}`);
     return true;
   }
+  if (u.pathname === '/aggregate/set') {
+    const proto = (req.headers['x-forwarded-proto'] || 'http').split(',')[0].trim();
+    await handleUpload(req, res, `${proto}://${req.headers['x-forwarded-host'] || req.headers.host}`);
+    return true;
+  }
   const localSets = await loadLocalSets();
   const sets = { ...DEMO_SETS, ...localSets };
+  // an uploaded manifest joins the lookup only when asked for by name: never listed
+  const setParam = u.searchParams.get('set') ?? '';
+  if (UPLOAD_NAME.test(setParam)) {
+    const up = getUpload(setParam);
+    if (!up) { res.writeHead(404, CORS); res.end('no such uploaded manifest (uploads live in memory for 24 h, and a restart clears them): POST it to /aggregate/set again'); return true; }
+    sets[setParam] = up;
+  }
 
   // Machine-readable index of the available sets, so a UI can list them without hardcoding contents.
   // Local sets report counts and names only: their URLs are share links, and this index is a far
