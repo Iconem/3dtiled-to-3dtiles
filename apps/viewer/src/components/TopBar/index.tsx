@@ -94,6 +94,7 @@ export default function TopBar({ activeHandleRef }: { activeHandleRef: React.Ref
   const rawUrlMode = useViewerStore((s) => s.rawUrlMode);
   const inputRef = useRef<HTMLInputElement>(null);
   const manifestRef = useRef<HTMLInputElement>(null);
+  const startFlyRef = useRef(START_FLY);
 
   // Your own set manifest (e.g. the Iconem share-link list from scripts/iconem-share-links.mjs), from
   // a local file: uploaded to the server, then a pill of the Aggregate row like any server set. The
@@ -175,8 +176,11 @@ export default function TopBar({ activeHandleRef }: { activeHandleRef: React.Ref
     store.getState().setUrlField(field);
     const loadUrl = rawUrlMode && p.rawSrc ? buildMiddlewareUrl(p.rawSrc, params) : p.url;
     // an uploaded manifest's mosaic: the server may have restarted since, so re-send the file first
-    if (uploadedSetOf(loadUrl)) restoreUploadedSet(loadUrl).finally(() => doLoad(loadUrl, p.type, p.flyTo));
-    else doLoad(loadUrl, p.type, p.flyTo);
+    // a `?load=…&fly=` link to an uploaded set reaches here through its pill: keep its viewpoint
+    const flyTo = p.flyTo ?? (uploadedSetOf(loadUrl) && startFlyRef.current ? startFlyRef.current : undefined);
+    startFlyRef.current = undefined;
+    if (uploadedSetOf(loadUrl)) restoreUploadedSet(loadUrl).finally(() => doLoad(loadUrl, p.type, flyTo));
+    else doLoad(loadUrl, p.type, flyTo);
   }
 
   function handleLoadClick() {
