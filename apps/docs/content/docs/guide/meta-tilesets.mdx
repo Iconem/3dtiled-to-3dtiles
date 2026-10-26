@@ -418,8 +418,8 @@ A deployment has none of your local files, so the same manifest can also be **up
 viewer's *Aggregate* row, **📂 manifest…** takes a local `.json` in the shape above, sends it to the
 tile-server and adds the mosaic as a pill in that row, before the server's own sets; every picker,
 filter and `native` setting then works as for a server set. The pill stays (the file is kept in the
-browser), and the page URL names it: `?format=aggregate&preset=agg-upload-<hash>`. Shift-click a
-pill to drop it. Directly:
+browser), and the page URL names it: `?format=aggregate&preset=agg-upload-<hash>`. The pill's ×
+(or Shift-click) drops it from the row and from the browser's storage. Directly:
 
 ```bash
 curl -X POST --data-binary @.local/aggregate-sets/iconem.json https://<server>/aggregate/set

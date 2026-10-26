@@ -362,20 +362,42 @@ export default function TopBar({ activeHandleRef }: { activeHandleRef: React.Ref
         {presets.map((p, i) => (
           <Fragment key={p.id}>
             {url.format === 'aggregate' && i === uploadPresets.length && manifestButton}
-            <Button
-              size="sm"
-              variant="outline"
-              disabled={!p.url}
-              onClick={(e) => {
-                if (i < uploadPresets.length && e.shiftKey) { forgetUploadedSet(p.id.slice(4)); return; }
-                selectPreset(p);
-              }}
-              className={cn('h-7 px-2 text-xs', url.preset === p.id ? ACTIVE_TINT.fuchsia : HOVER_TINT.fuchsia, !p.url && 'opacity-40')}
-              title={!p.url ? `${url.format} has no ${url.mode} adapter`
-                : i < uploadPresets.length ? `${uploads[i].label} — a manifest you uploaded (kept in this browser; Shift-click removes the pill)` : undefined}
-            >
-              {p.label}
-            </Button>
+            {i < uploadPresets.length ? (
+              // an uploaded manifest: the pill, welded to a small × that drops it (also Shift-click)
+              <span className="inline-flex" data-testid="upload-pill">
+                <Button
+                  size="sm"
+                  variant="outline"
+                  onClick={(e) => { if (e.shiftKey) forgetUploadedSet(p.id.slice(4)); else selectPreset(p); }}
+                  className={cn('h-7 rounded-r-none px-2 text-xs', url.preset === p.id ? ACTIVE_TINT.fuchsia : HOVER_TINT.fuchsia)}
+                  title={`${uploads[i].label} — a manifest you uploaded (kept in this browser)`}
+                >
+                  {p.label}
+                </Button>
+                <Button
+                  size="sm"
+                  variant="outline"
+                  aria-label={`Remove ${uploads[i].label}`}
+                  onClick={() => forgetUploadedSet(p.id.slice(4))}
+                  className={cn('-ml-px h-7 w-5 rounded-l-none px-0 text-xs opacity-60 hover:opacity-100', HOVER_TINT.fuchsia)}
+                  title="Remove this manifest from the row and this browser's storage (the server forgets it after 24 h)"
+                  data-testid="forget-upload"
+                >
+                  ×
+                </Button>
+              </span>
+            ) : (
+              <Button
+                size="sm"
+                variant="outline"
+                disabled={!p.url}
+                onClick={() => selectPreset(p)}
+                className={cn('h-7 px-2 text-xs', url.preset === p.id ? ACTIVE_TINT.fuchsia : HOVER_TINT.fuchsia, !p.url && 'opacity-40')}
+                title={!p.url ? `${url.format} has no ${url.mode} adapter` : undefined}
+              >
+                {p.label}
+              </Button>
+            )}
           </Fragment>
         ))}
         {url.format === 'aggregate' && presets.length === uploadPresets.length && manifestButton}
