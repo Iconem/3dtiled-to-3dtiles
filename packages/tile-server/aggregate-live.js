@@ -24,7 +24,7 @@ import { fileURLToPath } from 'node:url';
 import { createHash, randomUUID } from 'node:crypto';
 import { datasetGroundSamples, offsetFromSamples } from '../core/dataset-ground.js';
 import { sampleTerrain, TERRAINS } from '../core/terrain.js';
-import { llhToEcef, ecefToLlh } from '../core/index.js';
+import { llhToEcef, ecefToLlh, curvedParam } from '../core/index.js';
 
 const CORS = { 'Access-Control-Allow-Origin': '*', 'Access-Control-Allow-Headers': '*' };
 
@@ -1001,6 +1001,10 @@ export async function handleAggregate(req, res, u) {
   let { items } = sel;
   // &latest=1 needs every dataset's footprint, so it runs after selection, on the cached child roots.
   if (sel.latest) items = await keepLatest(items, ttlMs);
+  // &curved=on|off: every /stream child of this server carries it (copc-live's ellipsoid placement
+  // rule); the child URLs change, so the mosaic cache key does too.
+  const curved = curvedParam(u.searchParams.get('curved'));
+  if (curved) items = items.map((it) => /\/stream\/tileset\.json\?/.test(it.url) ? { ...it, url: `${it.url}&curved=${curved}` } : it);
   const urls = items.map((it) => it.url);
   const labels = Object.fromEntries(items.map((it) => [it.url, {
     id: it.id, name: it.name, project: it.project, scene: it.scene, date: it.date, format: it.fmt, licence: it.licence,

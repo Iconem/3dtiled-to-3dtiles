@@ -10,7 +10,9 @@ Format loosely follows [Keep a Changelog](https://keepachangelog.com/).
   → the root frame instead of "source minus origin" on the tangent plane, which floated Corsica 30 km
   above the ground in the France-wide IGN overview (d²/2R) and misplaced Catalonia and the Canaries.
   Such a source is served as an explicit tree with per-tile boxes fitted to the placed corners.
-  `scripts/check-curved.mjs` verifies a tileset's farthest tile.
+  `scripts/check-curved.mjs` verifies a tileset's farthest tile. The placement is sampled per tile
+  on a ≤ 505 m grid and interpolated (1 cm), not computed per point; `&curved=on|off` (viewer:
+  the *curved:* select) overrides the 20 km rule, and a mosaic forwards it to its COPC children.
 - **3DTRjs orbit/env controls:** switching controls keeps the point last looked at as the pivot and
   takes "up" from the ellipsoid there (not the tileset's centre, degrees off once far from it);
   near/far clip planes now follow the pivot distance each frame (they were frozen at the first

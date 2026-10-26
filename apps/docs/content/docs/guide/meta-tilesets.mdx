@@ -664,9 +664,14 @@ for site-sized data.
 d²/2R: 8 m at 10 km, 20 km at 500 km. The flai overviews span whole countries, so Corsica, 680 km from
 the centre of the France cube, floated 30 km above the ground, and Catalonia and the Canaries sat
 likewise above or below the Spanish cubes. Past a 20 km extent, `/stream` for COPC (`curvedFor` in
-`copc-live.js`, `curvedLocalizer` in `core/geo.js`) keeps the same root transform but writes every
-point through proj4 → ECEF → the root frame, so a point 680 km away lands on the curved surface, and
-the projection's scale distortion is gone too. Two consequences:
+`copc-live.js`, `curvedLocalizer` in `core/geo.js`) keeps the same single root transform but writes
+the points through proj4 → ECEF → the root frame, so a point 680 km away lands on the curved surface,
+and the projection's scale distortion is gone too. Not one proj4 call per point: the placement is
+sampled on a grid over each tile (`curvedTileLocalizer`, a step of at most 505 m, which bounds the
+bilinear error by h²/4R = 1 cm) and interpolated, so a leaf tile costs 8 projections and a 32 km tile
+8 450, against ~1 µs a point for the exact path, which only the few sparse tiles wider than that keep.
+`&curved=on|off` on a `/stream` or `/aggregate` URL (the viewer's *curved:* select, next to
+*transform:*) overrides the 20 km rule; a mosaic forwards it to every COPC child. Two consequences:
 - the tree is **explicit** for such a source, whatever `&tiling=` says: implicit tiling subdivides the
   root box, which curved content no longer fits, so each tile gets a box fitted to its placed corners
   (a 5 × 5 grid of the sub-cube's top and bottom faces, plus the sag between samples);

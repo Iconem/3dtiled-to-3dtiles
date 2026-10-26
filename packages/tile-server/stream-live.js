@@ -43,7 +43,7 @@ import { i3sTileset, i3sTile, i3sTileRe } from './i3s-live.js';
 import { threemxTileset, threemxTile, threemxTileRe, threemxNode } from './threemx-live.js';
 import { geosplatsTileset, geosplatsTile, geosplatsTileRe } from './geosplats-live.js';
 import { handleSelfContained } from './3dtiles-self-contained.js';
-import { detectFormatByName, compressGlb, decompressGlb, applyPlacement } from '../core/index.js';
+import { detectFormatByName, compressGlb, decompressGlb, applyPlacement, curvedParam } from '../core/index.js';
 
 // Per-tile glTF-Transform op applied to every streamed tile GLB, the streaming counterpart of the
 // /gltf proxy (which only reaches *explicit* tilesets). Because /stream builds each tile GLB itself,
@@ -193,7 +193,9 @@ export async function handleStream(req, res, u) {
     } : null;
     // crs: EPSG:<n> for point clouds whose file declares no CRS (copc/potree; ignored elsewhere).
     const crs = u.searchParams.get('crs') || undefined;
-    const ts = await adapter.tileset(url, { tiling: u.searchParams.get('tiling'), lazy, hierarchy, prefetch, centroids, crs, ...geosplatsOpts });
+    // curved: on|off overrides copc-live's extent rule for placing points on the ellipsoid (default auto).
+    const curved = curvedParam(u.searchParams.get('curved'));
+    const ts = await adapter.tileset(url, { tiling: u.searchParams.get('tiling'), lazy, hierarchy, prefetch, centroids, crs, curved, ...geosplatsOpts });
     // User-directed globe placement (&lon=&lat=[&alt=][&heading=][&scale=]): attach a LOCAL dataset to
     // a real location so ANY 3D Tiles client (Cesium for Unreal/Unity, QGIS, native CesiumJS) streams
     // it in place — no viewer-side reorientation needed. Composes ON TOP of the adapter's own
@@ -201,7 +203,7 @@ export async function handleStream(req, res, u) {
     // convention stays normalized at the tileset level. Skipped when the source is already
     // georeferenced (its own placement wins) and for geosplats (own georef params: frame/yaw/alt).
     if (fmt !== 'geosplats') applyPlacement(ts.root, u.searchParams, `stream:${fmt}`);
-    tagContentUris(ts.root, `&format=${fmt}` + (centroids ? '&centroids=1' : '') + (crs ? `&crs=${encodeURIComponent(crs)}` : '')
+    tagContentUris(ts.root, `&format=${fmt}` + (centroids ? '&centroids=1' : '') + (crs ? `&crs=${encodeURIComponent(crs)}` : '') + (curved ? `&curved=${curved}` : '')
       + (transform ? `&transform=${transform}` + (transform === 'decompress' && tex === 'png' ? '&tex=png' : '') : ''));
     res.writeHead(200, { 'Content-Type': 'application/json', ...CORS });
     res.end(JSON.stringify(ts));
@@ -210,7 +212,7 @@ export async function handleStream(req, res, u) {
   const m = u.pathname.match(/^\/stream\/tile\/(.+)\.glb$/);
   if (m && adapter.tileRe.test(m[1])) {
     const centroids = u.searchParams.get('centroids') === '1' || u.searchParams.get('centroids') === 'true';
-    let glb = await adapter.tile(url, m[1], { centroids, crs: u.searchParams.get('crs') || undefined });
+    let glb = await adapter.tile(url, m[1], { centroids, crs: u.searchParams.get('crs') || undefined, curved: curvedParam(u.searchParams.get('curved')) });
     if (!glb) { res.writeHead(404, CORS); res.end('no such node'); return true; }
     const transform = TRANSFORMS.has(u.searchParams.get('transform')) ? u.searchParams.get('transform') : null;
     if (transform) glb = await applyTransform(glb, transform, u.searchParams.get('tex'));
