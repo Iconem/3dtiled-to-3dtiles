@@ -152,6 +152,12 @@ export default function TopBar({ activeHandleRef }: { activeHandleRef: React.Ref
     .filter((item): item is typeof item & { meta: NonNullable<typeof item.meta> } => item.meta != null);
 
   function doLoad(loadUrl: string, type: Preset['type'], flyTo?: Preset['flyTo']) {
+    // &curved=on|off on this server's /stream and /aggregate URLs (auto = the server's extent rule)
+    if (/\/(stream|aggregate)\/tileset\.json\?/.test(loadUrl)) {
+      const w = new URL(loadUrl, location.href);
+      if (url.curved === 'auto') w.searchParams.delete('curved'); else w.searchParams.set('curved', url.curved);
+      loadUrl = w.toString();
+    }
     store.getState().setCurrentType(type);
     store.getState().setLastLoadUrl(loadUrl);
     store.getState().tlogReset(`${url.mode} · ${url.format}${flyTo ? ' [fly]' : ''}`);
@@ -220,7 +226,7 @@ export default function TopBar({ activeHandleRef }: { activeHandleRef: React.Ref
   // keystroke would be jarring; its value is just read fresh the next time something else reloads.
   // The startup `?load=` wins only for the mode/format/… the page opened with: keyed on those deps
   // rather than a run-once flag, because StrictMode runs this effect twice on mount.
-  const depsKey = [url.mode, url.format, url.tool, url.tilesetOp, url.cache, url.tiling, url.centroids, url.transform].join('|');
+  const depsKey = [url.mode, url.format, url.tool, url.tilesetOp, url.cache, url.tiling, url.centroids, url.transform, url.curved].join('|');
   const startKey = useRef(depsKey);
   useEffect(() => {
     if (START_LOAD && depsKey === startKey.current) {
@@ -248,7 +254,7 @@ export default function TopBar({ activeHandleRef }: { activeHandleRef: React.Ref
     const target = wanted || presets.find((p) => p.url);
     if (target) selectPreset(target);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [url.mode, url.format, url.tool, url.tilesetOp, url.cache, url.tiling, url.centroids, url.transform]);
+  }, [url.mode, url.format, url.tool, url.tilesetOp, url.cache, url.tiling, url.centroids, url.transform, url.curved]);
 
   const manifestButton = (
     <>
@@ -323,6 +329,19 @@ export default function TopBar({ activeHandleRef }: { activeHandleRef: React.Ref
                   <SelectItem value="meshopt">meshopt ↓</SelectItem>
                   <SelectItem value="draco">draco ↓ (mesh)</SelectItem>
                   <SelectItem value="decompress">decompress ↑</SelectItem>
+                </SelectContent>
+              </Select>
+            )}
+            {(url.format === 'copc' || url.format === 'aggregate') && (
+              <Select value={url.curved} onValueChange={(v) => setUrl({ curved: v as any })}>
+                <SelectTrigger size="sm" className="h-7 text-xs"
+                  title="COPC placement. Tangent plane: a point's source XY/Z minus the origin, exact at the origin, d²/2R above the ground away from it (30 km for Corsica in a France-wide file). Curved: each tile's points placed on the ellipsoid (proj4 → ECEF, sampled on a ≤505 m grid and interpolated, 1 cm). auto = curved past a 20 km extent. Applies to every COPC child of a mosaic too.">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="auto">curved: auto (&gt; 20 km)</SelectItem>
+                  <SelectItem value="on">curved: on</SelectItem>
+                  <SelectItem value="off">curved: off (tangent plane)</SelectItem>
                 </SelectContent>
               </Select>
             )}

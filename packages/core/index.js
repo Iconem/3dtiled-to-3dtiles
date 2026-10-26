@@ -10,7 +10,7 @@ export { detectFormat, detectFormatByName } from './detect.js';
 export { keyToCoords, coordsToKey, octreeChildKeys, octreeSubCube, cubeToBox,
          buildExplicitTree, buildSubtreeBuffer, subtreeRootKeys,
          parseSubtreeBuffer, morton2Decode, morton3Decode } from './tiling.js';
-export { DEG, llhToEcef, ecefToLlh, enuFrame, enuMatrix, georefFromCrs, crsDefinition, curvedLocalizer, mat4Invert, cgcs2000Lon0, lccGeoref, LCC_LOCAL_UPRIGHT, mat4Multiply, placementMatrix, isEcefPlaced, applyPlacement } from './geo.js';
+export { DEG, llhToEcef, ecefToLlh, enuFrame, enuMatrix, georefFromCrs, crsDefinition, curvedLocalizer, curvedTileLocalizer, curvedParam, mat4Invert, cgcs2000Lon0, lccGeoref, LCC_LOCAL_UPRIGHT, mat4Multiply, placementMatrix, isEcefPlaced, applyPlacement } from './geo.js';
 export { Source } from './source.js';
 export { CORS, sendJson, sendGlb, sendBin, sendErr } from './http.js';
 export { buildImplicitTileset } from './octree.js';

@@ -33,6 +33,9 @@ const urlStateParsers = {
   preset: parseAsString.withDefault(''),
   // 3DTRjs only: mosaic leaves in their source format (Potree via PotreePlugin) instead of /stream.
   native: parseAsBoolean.withDefault(false),
+  // COPC on /stream (also every COPC child of a mosaic): points on the ellipsoid (proj4 → ECEF per
+  // tile grid) instead of the tangent plane. auto = on past a 20 km extent.
+  curved: parseAsStringEnum<'auto' | 'on' | 'off'>(['auto', 'on', 'off']).withDefault('auto'),
 };
 
 /** One hook, one URL sync — everything in the "shareable" slice. */

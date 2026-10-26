@@ -215,6 +215,50 @@ export function curvedLocalizer(origin, crs, transform, tag = 'geo') {
   } catch (e) { console.warn(`[${tag}] curved placement unavailable:`, e.message); return null; }
 }
 
+/**
+ * The curved placement of ONE tile's points, fast: `toLocal` (curvedLocalizer, ~1 µs a point through
+ * proj4) sampled on a grid over the tile's source cube `sc = [x0,y0,z0, x1,y1,z1]`, then bilinear in
+ * x/y and linear in z (the placement IS linear in z: ellipsoid normal × height). The sampled function
+ * bends as 1/R, so a grid step h is wrong by at most h²/8R per axis, h²/4R for both: 505 m for 1 cm.
+ * A tile under 505 m costs 8 proj4 calls instead of one per point; a 32 km tile (a 64 × 64 grid)
+ * 8 450. Wider tiles, the few sparse ones at the top of a national cube, keep the exact per-point path.
+ */
+export function curvedTileLocalizer(toLocal, sc, { maxErr = 0.01, maxCells = 64 } = {}) {
+  const sx = sc[3]-sc[0], sy = sc[4]-sc[1], z0 = sc[2], dz = sc[5]-sc[2];
+  if (!(sx > 0) || !(sy > 0)) return toLocal;
+  const step = Math.sqrt(4 * 6378137 * maxErr);
+  const NX = Math.max(1, Math.ceil(sx / step)), NY = Math.max(1, Math.ceil(sy / step));
+  if (NX > maxCells || NY > maxCells) return toLocal;
+  const W = NX + 1, g = new Float64Array(W * (NY+1) * 6), p = new Float64Array(3);
+  for (let j = 0; j <= NY; j++) for (let i = 0; i <= NX; i++) {
+    const x = sc[0] + sx * i / NX, y = sc[1] + sy * j / NY, k = (j*W + i) * 6;
+    toLocal(x, y, z0, p);      g[k] = p[0]; g[k+1] = p[1]; g[k+2] = p[2];
+    toLocal(x, y, z0 + dz, p); g[k+3] = p[0]; g[k+4] = p[1]; g[k+5] = p[2];
+  }
+  for (let k = 0; k < g.length; k++) if (!Number.isFinite(g[k])) return toLocal;   // a node outside the projection's domain
+  const zs = dz > 0 ? 1 / dz : 0;
+  return (x, y, z, out, o = 0) => {
+    const u = (x - sc[0]) / sx * NX, v = (y - sc[1]) / sy * NY;
+    // COPC nodes are not clipped to their cube: the few points outside it take the exact path
+    if (!(u >= 0 && u <= NX && v >= 0 && v <= NY)) return toLocal(x, y, z, out, o);
+    let i = Math.floor(u), j = Math.floor(v);
+    if (i >= NX) i = NX-1; if (j >= NY) j = NY-1;
+    const fu = u - i, fv = v - j, w = (z - z0) * zs;
+    const k00 = (j*W + i) * 6, k10 = k00 + 6, k01 = k00 + W*6, k11 = k01 + 6;
+    for (let c = 0; c < 3; c++) {
+      const b = (g[k00+c] + (g[k10+c]-g[k00+c])*fu) + ((g[k01+c] + (g[k11+c]-g[k01+c])*fu) - (g[k00+c] + (g[k10+c]-g[k00+c])*fu))*fv;
+      const t = (g[k00+3+c] + (g[k10+3+c]-g[k00+3+c])*fu) + ((g[k01+3+c] + (g[k11+3+c]-g[k01+3+c])*fu) - (g[k00+3+c] + (g[k10+3+c]-g[k00+3+c])*fu))*fv;
+      out[o+c] = b + (t - b) * w;
+    }
+  };
+}
+
+/** `&curved=` of a /stream or /aggregate request: 'on' | 'off' | null (auto: on past 20 km). */
+export function curvedParam(v) {
+  if (v == null || v === '' || v === 'auto') return null;
+  return ['0', 'off', 'false', 'no'].includes(String(v).toLowerCase()) ? 'off' : 'on';
+}
+
 /** Central meridian (lon_0) for the CGCS2000 3°-Gauss-Krüger EPSG codes XGRIDS LCC uses, or null. */
 export function cgcs2000Lon0(epsg) {
   if (epsg >= 4513 && epsg <= 4533) return 75 + 3 * (epsg - 4513);
