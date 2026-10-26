@@ -8,7 +8,7 @@ import { PSEUDO_FORMATS, FORMAT_PILL_ORDER, pillMeta, fmtMeta, canCentroids, MW 
 import { buildMiddlewareUrl, currentPresets, type MiddlewareParams, type Preset } from '@/lib/middleware';
 import type { ViewerHandle } from '@/lib/viewer-handle';
 import { cn } from '@/lib/utils';
-import { aggregateIndexUrl, isAggregateUrl, restoreUploadedSet, uploadManifest, useAvailableSets } from '@/lib/aggregate';
+import { aggregateIndexUrl, isAggregateUrl, forgetUploadedSet, noteUploadedUrl, restoreUploadedSet, uploadManifest, uploadedSetOf, useAvailableSets, useUploadedSets } from '@/lib/aggregate';
 
 // `?load=<tileset URL>[&type=mesh|pointcloud|splat]` — load an arbitrary tileset on start instead of a
 // preset (the Aggregate Builder's "Preview in viewer" uses it for drafts). Read once: the URL itself is
@@ -96,21 +96,22 @@ export default function TopBar({ activeHandleRef }: { activeHandleRef: React.Ref
   const manifestRef = useRef<HTMLInputElement>(null);
 
   // Your own set manifest (e.g. the Iconem share-link list from scripts/iconem-share-links.mjs), from
-  // a local file: uploaded to the server, then loaded as an /aggregate mosaic like any server set.
+  // a local file: uploaded to the server, then a pill of the Aggregate row like any server set. The
+  // pill's preset id names the set, so the page URL (`format=aggregate&preset=agg-upload-…`) reopens
+  // it in this browser, which kept the file.
   async function loadManifestFile(file: File) {
     const st = store.getState();
     st.setStatus(`Uploading ${file.name}…`);
     try {
       const up = await uploadManifest(file);
-      setUrl({ preset: '' });
-      st.setRawUrlMode(false);
-      st.setUrlField(up.url);
-      doLoad(up.url, up.pointsOnly ? 'pointcloud' : 'mesh');
-      // the page URL reopens the same mosaic (re-sending the manifest kept in this browser)
-      const page = new URL(location.href);
-      page.searchParams.set('load', up.url);
-      page.searchParams.set('type', up.pointsOnly ? 'pointcloud' : 'mesh');
-      history.replaceState(history.state, '', page);
+      const id = `agg-${up.set}`;
+      if (url.format !== 'aggregate') setUrl({ format: 'aggregate', preset: id });   // the effect below loads it
+      else {
+        setUrl({ preset: id });
+        st.setRawUrlMode(false);
+        st.setUrlField(up.url);
+        doLoad(up.url, up.pointsOnly ? 'pointcloud' : 'mesh');
+      }
       st.setStatus(`${up.label} · ${up.count} datasets from ${file.name}`);
     } catch (e) {
       st.setStatus(`Manifest ${file.name}: ${(e as Error).message}`);
@@ -128,10 +129,17 @@ export default function TopBar({ activeHandleRef }: { activeHandleRef: React.Ref
   };
 
   const availableSets = useAvailableSets();
-  const presets = currentPresets({ ...params, toolName: url.tool, tilesetOp: url.tilesetOp as any })
+  const uploads = useUploadedSets();
+  // Uploaded manifests come first in the Aggregate row, before the server's own sets.
+  const uploadPresets: Preset[] = url.format === 'aggregate' ? uploads.map((u) => {
+    const name = u.label.replace(/\s*\(\d+ datasets?\)$/i, '');
+    return { id: `agg-${u.set}`, label: `📂 ${name.length > 40 ? name.slice(0, 39) + '…' : name}${u.count ? ` (${u.count})` : ''}`,
+      type: u.pointsOnly ? 'pointcloud' : 'mesh', url: u.url };
+  }) : [];
+  const presets = [...uploadPresets, ...currentPresets({ ...params, toolName: url.tool, tilesetOp: url.tilesetOp as any })
     // Presets backed by a machine-local aggregate set stay hidden until the server confirms it has it.
     .filter((p) => !p.requiresSet || availableSets?.has(p.requiresSet))
-    .filter((p) => !p.unlessSet || (availableSets != null && !availableSets.has(p.unlessSet)));
+    .filter((p) => !p.unlessSet || (availableSets != null && !availableSets.has(p.unlessSet)))];
   const fmtOfSelected = fmtMeta(url.format);
 
   // Deliberately-grouped pill order (see FORMAT_PILL_ORDER's own comment) — pseudo-formats (3D Tiles,
@@ -166,7 +174,9 @@ export default function TopBar({ activeHandleRef }: { activeHandleRef: React.Ref
     const field = rawUrlMode && p.rawSrc ? p.rawSrc : p.url;
     store.getState().setUrlField(field);
     const loadUrl = rawUrlMode && p.rawSrc ? buildMiddlewareUrl(p.rawSrc, params) : p.url;
-    doLoad(loadUrl, p.type, p.flyTo);
+    // an uploaded manifest's mosaic: the server may have restarted since, so re-send the file first
+    if (uploadedSetOf(loadUrl)) restoreUploadedSet(loadUrl).finally(() => doLoad(loadUrl, p.type, p.flyTo));
+    else doLoad(loadUrl, p.type, p.flyTo);
   }
 
   function handleLoadClick() {
@@ -210,10 +220,24 @@ export default function TopBar({ activeHandleRef }: { activeHandleRef: React.Ref
   const startKey = useRef(depsKey);
   useEffect(() => {
     if (START_LOAD && depsKey === startKey.current) {
+      // A shared link to an uploaded manifest's mosaic becomes its pill in the Aggregate row (even
+      // without the file: the server still holds the set), and loads through the preset path below.
+      const upSet = uploadedSetOf(START_LOAD);
+      if (upSet) {
+        noteUploadedUrl(START_LOAD);
+        const page = new URL(location.href);
+        for (const k of ['load', 'type', 'fly']) page.searchParams.delete(k);
+        history.replaceState(history.state, '', page);
+        if (url.format !== 'aggregate') { setUrl({ format: 'aggregate', preset: `agg-${upSet}` }); return; }
+        setUrl({ preset: `agg-${upSet}` });
+        store.getState().setRawUrlMode(false);
+        store.getState().setUrlField(START_LOAD);
+        restoreUploadedSet(START_LOAD).finally(() => doLoad(START_LOAD, START_TYPE, START_FLY));
+        return;
+      }
       store.getState().setRawUrlMode(false);
       store.getState().setUrlField(START_LOAD);
-      // a mosaic of an uploaded manifest: the server may have restarted since, so re-send it first
-      restoreUploadedSet(START_LOAD).finally(() => doLoad(START_LOAD, START_TYPE, START_FLY));
+      doLoad(START_LOAD, START_TYPE, START_FLY);
       return;
     }
     const wanted = url.preset && presets.find((p) => p.id === url.preset && p.url);
@@ -221,6 +245,33 @@ export default function TopBar({ activeHandleRef }: { activeHandleRef: React.Ref
     if (target) selectPreset(target);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [url.mode, url.format, url.tool, url.tilesetOp, url.cache, url.tiling, url.centroids, url.transform]);
+
+  const manifestButton = (
+    <>
+      <input
+        ref={manifestRef}
+        type="file"
+        accept=".json,application/json"
+        className="hidden"
+        onChange={(e) => {
+          const f = e.target.files?.[0];
+          e.target.value = '';                       // the same file again must still fire onChange
+          if (f) loadManifestFile(f);
+        }}
+        data-testid="manifest-file"
+      />
+      <Button
+        size="sm"
+        variant="outline"
+        className={cn('h-7 px-2 text-xs', HOVER_TINT.fuchsia)}
+        onClick={() => manifestRef.current?.click()}
+        title="Load your own set manifest from a local file ({ label, entries: [{ url, format: 'potree'|'copc'|'3dtiles', name? }] }, the .local/aggregate-sets/<name>.json shape) as an /aggregate mosaic. The file goes to the tile-server's memory (24 h) and this browser's storage, nowhere else."
+        data-testid="open-manifest"
+      >
+        📂 manifest…
+      </Button>
+    </>
+  );
 
   return (
     <header className="flex flex-col gap-2 border-b bg-background/95 p-2">
@@ -304,19 +355,26 @@ export default function TopBar({ activeHandleRef }: { activeHandleRef: React.Ref
       </div>
 
       <PillGroup tint="fuchsia" className="self-start">
-        {presets.map((p) => (
-          <Button
-            key={p.id}
-            size="sm"
-            variant="outline"
-            disabled={!p.url}
-            onClick={() => selectPreset(p)}
-            className={cn('h-7 px-2 text-xs', url.preset === p.id ? ACTIVE_TINT.fuchsia : HOVER_TINT.fuchsia, !p.url && 'opacity-40')}
-            title={!p.url ? `${url.format} has no ${url.mode} adapter` : undefined}
-          >
-            {p.label}
-          </Button>
+        {presets.map((p, i) => (
+          <Fragment key={p.id}>
+            {url.format === 'aggregate' && i === uploadPresets.length && manifestButton}
+            <Button
+              size="sm"
+              variant="outline"
+              disabled={!p.url}
+              onClick={(e) => {
+                if (i < uploadPresets.length && e.shiftKey) { forgetUploadedSet(p.id.slice(4)); return; }
+                selectPreset(p);
+              }}
+              className={cn('h-7 px-2 text-xs', url.preset === p.id ? ACTIVE_TINT.fuchsia : HOVER_TINT.fuchsia, !p.url && 'opacity-40')}
+              title={!p.url ? `${url.format} has no ${url.mode} adapter`
+                : i < uploadPresets.length ? `${uploads[i].label} — a manifest you uploaded (kept in this browser; Shift-click removes the pill)` : undefined}
+            >
+              {p.label}
+            </Button>
+          </Fragment>
         ))}
+        {url.format === 'aggregate' && presets.length === uploadPresets.length && manifestButton}
       </PillGroup>
 
       <div className="flex flex-wrap items-center gap-2">
@@ -381,28 +439,6 @@ export default function TopBar({ activeHandleRef }: { activeHandleRef: React.Ref
           data-testid="open-builder"
         >
           🧱 builder
-        </Button>
-        <input
-          ref={manifestRef}
-          type="file"
-          accept=".json,application/json"
-          className="hidden"
-          onChange={(e) => {
-            const f = e.target.files?.[0];
-            e.target.value = '';                       // the same file again must still fire onChange
-            if (f) loadManifestFile(f);
-          }}
-          data-testid="manifest-file"
-        />
-        <Button
-          size="sm"
-          variant="outline"
-          className="h-7 px-2 text-xs"
-          onClick={() => manifestRef.current?.click()}
-          title="Load your own set manifest from a local file ({ label, entries: [{ url, format: 'potree'|'copc'|'3dtiles', name? }] }, the .local/aggregate-sets/<name>.json shape) and view it as an /aggregate mosaic. The file goes to the tile-server's memory (24 h) and this browser's storage, nowhere else."
-          data-testid="open-manifest"
-        >
-          📂 manifest
         </Button>
       </div>
     </header>

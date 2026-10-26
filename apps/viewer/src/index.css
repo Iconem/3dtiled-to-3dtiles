@@ -83,6 +83,13 @@
     font-family: system-ui, sans-serif;
     overscroll-behavior: none;
   }
+  /* Tailwind v4's preflight leaves buttons at `cursor: default`; everything clickable gets the hand. */
+  button:not(:disabled), [role='button']:not([aria-disabled='true']), [role='checkbox']:not([data-disabled]),
+  [role='radio'], [role='switch'], [role='combobox'], [role='option'], [role='menuitem'], [role='tab'],
+  [role='slider'], summary, label:has(> input[type='checkbox']), label:has(> [role='checkbox']),
+  input[type='checkbox'], input[type='range'], input[type='file'], select {
+    cursor: pointer;
+  }
 }
 
 /* Full-bleed app shell */

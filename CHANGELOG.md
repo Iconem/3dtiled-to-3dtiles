@@ -5,6 +5,26 @@ Format loosely follows [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+### Fixed — 2026-10-26 (country-scale COPC placement, 3DTRjs controls, viewer)
+- **`/stream` COPC: curved placement past a 20 km extent.** Points are written through proj4 → ECEF
+  → the root frame instead of "source minus origin" on the tangent plane, which floated Corsica 30 km
+  above the ground in the France-wide IGN overview (d²/2R) and misplaced Catalonia and the Canaries.
+  Such a source is served as an explicit tree with per-tile boxes fitted to the placed corners.
+  `scripts/check-curved.mjs` verifies a tileset's farthest tile.
+- **3DTRjs orbit/env controls:** switching controls keeps the point last looked at as the pivot and
+  takes "up" from the ellipsoid there (not the tileset's centre, degrees off once far from it);
+  near/far clip planes now follow the pivot distance each frame (they were frozen at the first
+  framing, so zooming into a facade clipped it).
+- **3DTRjs native Potree leaves + picker:** re-showing a dataset also restyles the models its child
+  renderer loaded while it was hidden (they stayed invisible).
+- **3DTRjs picker "in view" list:** tested against the view pyramid alone, not the live clip planes
+  (after framing a world mosaic the near plane sat at 200 km until the controls' next tick, so the
+  picker listed nothing on screen).
+- **Viewer:** everything clickable shows a pointer cursor (Tailwind v4 preflight left buttons at
+  `default`); the 📂 manifest button moved into the *Aggregate* row, where each uploaded manifest is
+  a pill before the server sets, named by the page URL (`preset=agg-upload-<hash>`); a `?load=`
+  link to an uploaded mosaic shows that pill too.
+
 ### Added — 2026-10-23 (upload your own set manifest)
 - **`POST /aggregate/set`** takes a local-set manifest (`{ label, entries: [{ url, format, name? … }] }`)
   and answers with `set=upload-<hash>`, usable with every `/aggregate` parameter. In memory, 24 h

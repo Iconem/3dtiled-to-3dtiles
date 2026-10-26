@@ -10,7 +10,7 @@
  *   GET /copc/tile/<D-X-Y-Z>.glb?url=<COPC_URL>    → that node's points as a POINTS GLB
  */
 import { Copc, Getter } from 'copc';
-import { buildPointsGlb, keyToCoords, coordsToKey, buildSubtreeBuffer, georefFromCrs, buildImplicitTileset, memoizeAsync } from '../core/index.js';
+import { buildPointsGlb, keyToCoords, coordsToKey, buildSubtreeBuffer, georefFromCrs, curvedLocalizer, buildImplicitTileset, memoizeAsync } from '../core/index.js';
 
 const SUBTREE_LEVELS = 3;
 
@@ -59,13 +59,14 @@ const getCtx = memoizeAsync(async (url) => {
 
   const cube = copc.info.cube;
   const origin = [(cube[0]+cube[3])/2, (cube[1]+cube[4])/2, (cube[2]+cube[5])/2];
-  let transform = null;
+  let transform = null, crs = null;
   try {
     const wkt = await readWkt(getter, copc);
-    if (wkt) transform = georefFromCrs(origin, wkt, 'copc-live');
+    if (wkt) { transform = georefFromCrs(origin, wkt, 'copc-live'); crs = wkt; }
     else console.warn(`[copc-live] no WKT CRS in ${url} — local-origin (not geo-referenced)`);
   } catch (e) { console.warn('[copc-live] georef failed:', e.message); }
   const rootDiag = Math.hypot(cube[3]-cube[0], cube[4]-cube[1], cube[5]-cube[2]);
+  const curvedCache = new Map();                   // crs → curved placement (see curvedFor)
 
   // For subtree (L,x,y,z): load pending pages whose cells overlap the [L, L+SUBTREE_LEVELS] block.
   const ensureForSubtree = async (L, x, y, z) => {
@@ -104,18 +105,61 @@ const getCtx = memoizeAsync(async (url) => {
 
   let warmed = false;   // guard so background prefetch fires at most once per ctx
   console.log(`[copc-live] ${url} → root page loaded (${nodeMap.size} nodes), pending=${pendingPages.size} child pages, georef=${!!transform}`);
-  return { getter, copc, nodeMap, origin, transform, rootDiag, cube, ensureForSubtree, drainAll,
+  return { getter, copc, nodeMap, origin, transform, crs, rootDiag, cube, curvedCache, ensureForSubtree, drainAll,
                 get warmed() { return warmed; }, set warmed(v) { warmed = v; } };
 });
+
+// ── curved placement for country-scale sources ───────────────────────────────────────────────────
+//
+// Tile content is "source coordinates minus origin", placed by ONE root transform: the tangent
+// trihedron at the origin. Correct to centimetres for a site, wrong by kilometres for a national
+// LiDAR overview: the tangent plane leaves the ellipsoid as d²/2R (20 km at 500 km — Corsica, from
+// the centre of a France-wide cube), and the projection's scale distortion shifts points sideways.
+// Past this extent each point is placed exactly (core's curvedLocalizer), and the tree is EXPLICIT:
+// implicit tiling subdivides the root box, which the curved content no longer fits, so each tile
+// gets its own box measured on the placed corners instead.
+const CURVED_MIN_DIAG = 20000;                     // 20 km: the plane is 8 m off at the edge
+const EARTH_R = 6378137;
+
+/** The curved placement of a context for a CRS (the file's own, or the &crs= override), or null. */
+function curvedFor(ctx, crsOverride) {
+  const crs = ctx.crs ?? crsOverride ?? null;
+  if (!crs || ctx.rootDiag < CURVED_MIN_DIAG) return null;
+  if (ctx.curvedCache.has(crs)) return ctx.curvedCache.get(crs);
+  const transform = ctx.transform ?? georefFromCrs(ctx.origin, crs, 'copc-live');
+  const toLocal = transform && curvedLocalizer(ctx.origin, crs, transform, 'copc-live');
+  const curved = toLocal ? { transform, toLocal } : null;
+  ctx.curvedCache.set(crs, curved);
+  if (curved) console.log(`[copc-live] curved placement on (${Math.round(ctx.rootDiag / 1000)} km extent)`);
+  return curved;
+}
+
+/** A tile box fitted to a sub-cube's PLACED corners: a 5×5 grid of its top and bottom faces, plus the sag between samples. */
+function curvedBox(sc, toLocal) {
+  const p = new Float64Array(3);
+  const min = [Infinity, Infinity, Infinity], max = [-Infinity, -Infinity, -Infinity];
+  const N = 4;
+  for (let i = 0; i <= N; i++) for (let j = 0; j <= N; j++) for (const z of [sc[2], sc[5]]) {
+    toLocal(sc[0] + (sc[3]-sc[0]) * i / N, sc[1] + (sc[4]-sc[1]) * j / N, z, p);
+    for (let k = 0; k < 3; k++) { if (p[k] < min[k]) min[k] = p[k]; if (p[k] > max[k]) max[k] = p[k]; }
+  }
+  const step = Math.max(sc[3]-sc[0], sc[4]-sc[1]) / N;
+  const sag = (step / 2) ** 2 / (2 * EARTH_R) + 1;  // the surface between two samples dips below their chord
+  min[2] -= sag; max[2] += sag;
+  const c = [0,1,2].map((k) => (min[k] + max[k]) / 2), h = [0,1,2].map((k) => Math.max((max[k] - min[k]) / 2, 0.01));
+  return [c[0],c[1],c[2], h[0],0,0, 0,h[1],0, 0,0,h[2]];
+}
 
 const subCube = (cube, level, x, y, z) => {
   const n = 2**level, dx = (cube[3]-cube[0])/n, dy = (cube[4]-cube[1])/n, dz = (cube[5]-cube[2])/n;
   return [cube[0]+x*dx, cube[1]+y*dy, cube[2]+z*dz, cube[0]+(x+1)*dx, cube[1]+(y+1)*dy, cube[2]+(z+1)*dz];
 };
 
-// Explicit 3D Tiles tree from the COPC hierarchy. Boxes = octree sub-cube relative to the origin.
-function buildTilesetExplicit(ctx, urlParam) {
-  const { nodeMap, origin, transform, rootDiag, cube } = ctx;
+// Explicit 3D Tiles tree from the COPC hierarchy. Boxes = octree sub-cube relative to the origin
+// (or, with a curved placement, fitted to the placed sub-cube).
+function buildTilesetExplicit(ctx, urlParam, curved = null) {
+  const { nodeMap, origin, rootDiag, cube } = ctx;
+  const transform = curved?.transform ?? ctx.transform;
   const enc = encodeURIComponent(urlParam);
   const tileFor = (key) => {
     const { level, x, y, z } = keyToCoords(key);
@@ -123,7 +167,8 @@ function buildTilesetExplicit(ctx, urlParam) {
     const c = [(sc[0]+sc[3])/2-origin[0], (sc[1]+sc[4])/2-origin[1], (sc[2]+sc[5])/2-origin[2]];
     const h = [Math.max((sc[3]-sc[0])/2,0.01), Math.max((sc[4]-sc[1])/2,0.01), Math.max((sc[5]-sc[2])/2,0.01)];
     const node = nodeMap.get(key);
-    const tile = { boundingVolume: { box: [c[0],c[1],c[2], h[0],0,0, 0,h[1],0, 0,0,h[2]] }, geometricError: rootDiag / (2**level), refine: 'ADD' };
+    const box = curved ? curvedBox(sc, curved.toLocal) : [c[0],c[1],c[2], h[0],0,0, 0,h[1],0, 0,0,h[2]];
+    const tile = { boundingVolume: { box }, geometricError: rootDiag / (2**level), refine: 'ADD' };
     if (node && node.pointCount > 0) tile.content = { uri: `tile/${key}.glb?url=${enc}` };
     const kids = [];
     for (let i = 0; i < 8; i++) {
@@ -149,14 +194,15 @@ function buildTilesetImplicit(ctx, urlParam) {
     maxLevel, subtreeLevels: SUBTREE_LEVELS, transform, urlParam });
 }
 
-async function serveTileGlb(ctx, key) {
+async function serveTileGlb(ctx, key, curved = null) {
   const node = ctx.nodeMap.get(key);
   if (!node || !node.pointCount) return null;
   const view = await Copc.loadPointDataView(ctx.getter, ctx.copc, node);
   const n = view.pointCount, [ox, oy, oz] = ctx.origin;
   const gx = view.getter('X'), gy = view.getter('Y'), gz = view.getter('Z');
   const pos = new Float32Array(n * 3);
-  for (let i = 0; i < n; i++) { pos[i*3] = gx(i)-ox; pos[i*3+1] = gy(i)-oy; pos[i*3+2] = gz(i)-oz; }
+  if (curved) for (let i = 0; i < n; i++) curved.toLocal(gx(i), gy(i), gz(i), pos, i*3);
+  else for (let i = 0; i < n; i++) { pos[i*3] = gx(i)-ox; pos[i*3+1] = gy(i)-oy; pos[i*3+2] = gz(i)-oz; }
   const d = view.dimensions; let colors = null;
   if (d.Red && d.Green && d.Blue) {
     const gr = view.getter('Red'), gg = view.getter('Green'), gb = view.getter('Blue'), s = d.Red.size === 2 ? 1/65535 : 1/255;
@@ -184,7 +230,9 @@ export async function copcTileset(url, opts = {}) {
     if (pf === -1) Promise.resolve().then(() => { try { return ctx.drainAll(); } catch {} });
     else if (pf > 0) Promise.resolve().then(async () => { try { for (let L = 0; L < pf; L++) await ctx.ensureForSubtree(L, 0, 0, 0); } catch {} });
   }
-  const ts = opts.tiling === 'explicit' ? buildTilesetExplicit(ctx, url) : buildTilesetImplicit(ctx, url);
+  const curved = curvedFor(ctx, opts.crs);
+  if (curved) await ctx.drainAll();                         // per-tile boxes need the whole index
+  const ts = opts.tiling === 'explicit' || curved ? buildTilesetExplicit(ctx, url, curved) : buildTilesetImplicit(ctx, url);
   return withCrsOverride(ts, ctx, opts.crs, 'copc-live');
 }
 
@@ -199,7 +247,10 @@ export function withCrsOverride(ts, ctx, crs, tag) {
   if (transform) ts.root.transform = transform;
   return ts;
 }
-export async function copcTile(url, key) { return serveTileGlb(await getCtx(url), key); }
+export async function copcTile(url, key, opts = {}) {
+  const ctx = await getCtx(url);
+  return serveTileGlb(ctx, key, curvedFor(ctx, opts.crs));   // &crs= rides on the tile URL (stream-live tags it)
+}
 export async function copcSubtree(url, key) {
   const ctx = await getCtx(url);
   if (ctx.ensureForSubtree) {

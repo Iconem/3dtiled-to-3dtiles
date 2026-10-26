@@ -2,7 +2,7 @@
  * Client helpers for the tile-server's /aggregate mosaics: which sets the server has, the per-dataset
  * index of a loaded mosaic, and the search that runs over it.
  */
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useSyncExternalStore } from 'react';
 import { MW } from './formats';
 import { snapRasterFor, type TerrainMode } from './terrainModes';
 
@@ -168,9 +168,65 @@ export function useAvailableSets(): Set<string> | null {
 // name? … }] }), POSTed to /aggregate/set: the server keeps it in memory and answers with a set name
 // (a hash of the manifest) every /aggregate param works with. The file is also kept in localStorage
 // under that name, so a link to the mosaic survives a server restart: restoreUploadedSet re-sends it.
-const UPLOAD_KEY = (set: string) => `3dtiled:manifest:${set}`;
+const UPLOAD_PREFIX = '3dtiled:manifest:';
+const UPLOAD_KEY = (set: string) => `${UPLOAD_PREFIX}${set}`;
 
 export interface UploadedSet { set: string; label: string; count: number; url: string; pointsOnly: boolean }
+
+/** The mosaic URL of an uploaded set, on this page's tile-server. */
+export const uploadedSetUrl = (set: string) => `${MW}/aggregate/tileset.json?set=${set}&nest=geodetic`;
+/** The `set=upload-…` name an /aggregate URL refers to, or null. */
+export function uploadedSetOf(url: string): string | null {
+  try {
+    const set = new URL(url, location.href).searchParams.get('set');
+    return set?.startsWith('upload-') ? set : null;
+  } catch { return null; }
+}
+
+// ── the uploaded manifests this browser knows: pills in the Aggregate row ────────────────────────
+//
+// Every manifest kept in localStorage becomes a pill, like a server set. One opened through a shared
+// `?load=` link, without the file, is listed too (for this page only): the server still holds it.
+const uploadListeners = new Set<() => void>();
+const transient = new Map<string, UploadedSet>();
+let uploadsCache: UploadedSet[] | null = null;
+const describe = (set: string, text: string): UploadedSet => {
+  let label = 'uploaded manifest', count = 0, pointsOnly = false;
+  try {
+    const m = JSON.parse(text);
+    const entries: any[] = Array.isArray(m) ? m : m?.entries ?? [];
+    label = (!Array.isArray(m) && m?.label) || label;
+    count = entries.length;
+    pointsOnly = count > 0 && entries.every((e) => e?.format === 'potree' || e?.format === 'copc');
+  } catch { /* unreadable: still a pill, the server decides */ }
+  return { set, label, count, url: uploadedSetUrl(set), pointsOnly };
+};
+function uploadsChanged() { uploadsCache = null; uploadListeners.forEach((f) => f()); }
+export function listUploadedSets(): UploadedSet[] {
+  if (uploadsCache) return uploadsCache;
+  const out = new Map<string, UploadedSet>();
+  for (let i = 0; i < localStorage.length; i++) {
+    const k = localStorage.key(i)!;
+    if (k.startsWith(UPLOAD_PREFIX)) out.set(k.slice(UPLOAD_PREFIX.length), describe(k.slice(UPLOAD_PREFIX.length), localStorage.getItem(k) ?? ''));
+  }
+  transient.forEach((v, k) => { if (!out.has(k)) out.set(k, v); });
+  return (uploadsCache = [...out.values()]);
+}
+/** List a mosaic URL's uploaded set without its file (a shared link opened in another browser). */
+export function noteUploadedUrl(url: string) {
+  const set = uploadedSetOf(url);
+  if (!set || transient.has(set) || localStorage.getItem(UPLOAD_KEY(set))) return;
+  transient.set(set, { set, label: 'uploaded manifest', count: 0, url: uploadedSetUrl(set), pointsOnly: false });
+  uploadsChanged();
+}
+export function forgetUploadedSet(set: string) {
+  localStorage.removeItem(UPLOAD_KEY(set));
+  transient.delete(set);
+  uploadsChanged();
+}
+export function useUploadedSets(): UploadedSet[] {
+  return useSyncExternalStore((cb) => { uploadListeners.add(cb); return () => { uploadListeners.delete(cb); }; }, listUploadedSets);
+}
 
 async function postManifest(text: string): Promise<{ set: string; label: string; count: number; url: string }> {
   const r = await fetch(`${MW}/aggregate/set`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: text });
@@ -186,7 +242,10 @@ export async function uploadManifest(file: File): Promise<UploadedSet> {
   const res = await postManifest(text);
   try { localStorage.setItem(UPLOAD_KEY(res.set), text); }
   catch { /* over quota: the mosaic still works, it just won't survive a server restart */ }
-  return { ...res, pointsOnly: entries.length > 0 && entries.every((e) => e?.format === 'potree' || e?.format === 'copc') };
+  const up = { ...res, url: uploadedSetUrl(res.set), pointsOnly: entries.length > 0 && entries.every((e) => e?.format === 'potree' || e?.format === 'copc') };
+  transient.set(res.set, up);                 // listed even when localStorage refused it
+  uploadsChanged();
+  return up;
 }
 
 /** Re-send the stored manifest a mosaic URL refers to (a no-op for any other URL). */

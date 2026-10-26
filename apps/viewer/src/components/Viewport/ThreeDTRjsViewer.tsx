@@ -1,5 +1,5 @@
 import { forwardRef, useCallback, useEffect, useImperativeHandle, useMemo, useRef, useState } from 'react';
-import { Canvas, useThree } from '@react-three/fiber';
+import { Canvas, useFrame, useThree } from '@react-three/fiber';
 import { OrbitControls, TransformControls, GizmoHelper, GizmoViewport } from '@react-three/drei';
 import {
   TilesRenderer as TilesRendererR3F,
@@ -512,6 +512,10 @@ const Scene = forwardRef<ViewerHandle, { loadArgs: LoadArgs; tooltip: TooltipCha
   // `.target` at the default (0,0,0) — for georeferenced (ECEF-scale) content that's ~Earth's center,
   // not the tileset ("orbit pivot/target should be the tileset origin, not earth center").
   const lastSphereCenterRef = useRef<THREE.Vector3 | null>(null);
+  // Where the user is looking now: the orbit target, or globe/env's last zoom/drag pivot, sampled
+  // every frame. A control scheme mounting mid-session starts from HERE, not from the tileset's
+  // centre (which, after navigating away, could be a continent off: the "huge jump" on switching).
+  const lastPivotRef = useRef<THREE.Vector3 | null>(null);
   // Whether THIS load needed the synthetic ENU anchor below (null = not yet determined). Decided ONCE,
   // on the fresh-load call, from the tileset's true native bounding sphere (still near local origin at
   // that point) — and then REUSED as-is on every later re-frame (e.g. "Auto-zoom to tileset"). Re-testing
@@ -556,7 +560,7 @@ const Scene = forwardRef<ViewerHandle, { loadArgs: LoadArgs; tooltip: TooltipCha
   // Whether the WGS84-radius wireframe globe is meaningful to show at all — see frameToTileset below.
   const [showGlobe, setShowGlobe] = useState(true);
   useEffect(() => { if (!loadArgs) setShowGlobe(true); }, [loadArgs]);
-  useEffect(() => { setPickScene(null); }, [loadArgs]);
+  useEffect(() => { setPickScene(null); }, [tilesUrl]);
 
   // GlobeControls/EnvironmentControls default to raycasting the WHOLE R3F scene (3d-tiles-renderer's
   // own ControlsBaseComponent falls back to useThree's default scene when no `scene` prop is given) to
@@ -590,6 +594,7 @@ const Scene = forwardRef<ViewerHandle, { loadArgs: LoadArgs; tooltip: TooltipCha
     if (!controls) return;
     if (controls.target) controls.target.copy(point);
     if (controls.pivotPoint) controls.pivotPoint.copy(point);
+    (lastPivotRef.current ??= new THREE.Vector3()).copy(point);
     if ('zoomPoint' in controls) { controls.zoomPoint.copy(point); controls.zoomPointSet = true; }
     // Only used after a hard camera teleport (frameToTileset) — see call site for why this is NOT the
     // default for every setControlsPivot caller (double-click-to-pivot, camera tween, etc. all want the
@@ -760,14 +765,50 @@ const Scene = forwardRef<ViewerHandle, { loadArgs: LoadArgs; tooltip: TooltipCha
   // tileset in the default 'globe' mode, then switching to 'orbit' afterward) — a freshly-mounted
   // OrbitControls/EnvironmentControls otherwise starts at its own default (0,0,0 target, world +Y up),
   // which frameToTileset above never gets a chance to correct since it only runs once at load time.
+  // The pivot is the point last looked at (lastPivotRef), and "up" is the ellipsoid normal THERE: the
+  // normal at the tileset's centre is degrees off once the camera has moved a few hundred km, which
+  // read as "orbit/env up is not north-aligned when far away".
   useEffect(() => {
     const controls = controlsRef.current;
     if (!controls) return;
-    if (lastSphereCenterRef.current) setControlsPivot(lastSphereCenterRef.current);
-    if (upDirRef.current && controls.up) controls.up.copy(upDirRef.current);
-    controls.update?.();
+    const pivot = lastPivotRef.current ?? lastSphereCenterRef.current;
+    if (!pivot) return;
+    const up = pivot.length() > 6378137 * 0.5 ? WGS84_ELLIPSOID.getPositionToNormal(pivot, new THREE.Vector3()) : new THREE.Vector3(0, 1, 0);
+    camera.up.copy(up);
+    if (controls.up) controls.up.copy(up);
+    // OrbitControls turned camera.up into a quaternion once, at construction: refresh it
+    if (controls._quat && controls._quatInverse) {
+      controls._quat.setFromUnitVectors(up, new THREE.Vector3(0, 1, 0));
+      controls._quatInverse.copy(controls._quat).invert();
+    }
+    setControlsPivot(pivot, true);
     invalidate();
-  }, [controlMode, setControlsPivot, invalidate]);
+  }, [controlMode, setControlsPivot, invalidate, camera]);
+
+  // Per frame: remember the current pivot, and keep the clip planes sane for orbit/env. GlobeControls
+  // sets near/far itself (adjustCamera, from the horizon); OrbitControls and EnvironmentControls never
+  // touch them, so they stayed at whatever frameToTileset chose for the first framing distance: zoom
+  // from a city overview to a facade and the near plane (1 % of that first distance) eats the facade.
+  const pivotProbe = useMemo(() => new THREE.Vector3(), []);
+  useFrame(() => {
+    const controls = controlsRef.current;
+    if (!controls) return;
+    if (controls.target) (lastPivotRef.current ??= new THREE.Vector3()).copy(controls.target);
+    else if (controls.getPivotPoint && controls.getPivotPoint(pivotProbe)) (lastPivotRef.current ??= new THREE.Vector3()).copy(pivotProbe);
+    if (controlMode === 'globe' || !(camera as THREE.PerspectiveCamera).isPerspectiveCamera) return;
+    const pivot = lastPivotRef.current ?? lastSphereCenterRef.current;
+    if (!pivot) return;
+    const d = camera.position.distanceTo(pivot);
+    const geo = pivot.length() > 6378137 * 0.5;
+    // logarithmicDepthBuffer is on (see <Canvas>), so a near:far ratio of 1e8 costs no precision
+    const near = THREE.MathUtils.clamp(d * 5e-4, 0.05, 1000);
+    const far = geo ? camera.position.length() + 6378137 * 2.5 : Math.max(d * 200, 1e4);
+    if (Math.abs(camera.near - near) > near * 0.05 || Math.abs(camera.far - far) > far * 0.05) {
+      camera.near = near;
+      camera.far = far;
+      (camera as THREE.PerspectiveCamera).updateProjectionMatrix();
+    }
+  });
 
   // rAF-driven eased camera tween — Canvas runs frameloop="demand", so each step must invalidate() to
   // actually get drawn. Used by double-click-to-zoom below (previously an instant one-frame jump).
@@ -1120,6 +1161,10 @@ const Scene = forwardRef<ViewerHandle, { loadArgs: LoadArgs; tooltip: TooltipCha
     setDatasetStyle(style) {
       datasetStyleRef.current = style;
       tilesRef.current?.forEachLoadedModel((sc: THREE.Object3D, tile: any) => styleDatasetModel(sc, tile, style));
+      // native Potree leaves: their points live in child renderers, styled per model as they load —
+      // a model that arrived while its dataset was hidden must be re-shown too
+      const nativePlugin = (tilesRef.current as any)?.getPluginByName?.('NATIVE_LEAVES_PLUGIN');
+      nativePlugin?.mounted.forEach((m: any, leaf: any) => m.child.forEachLoadedModel((sc: THREE.Object3D) => styleDatasetModel(sc, leaf, style)));
       invalidate();
     },
     async snapToGround() {

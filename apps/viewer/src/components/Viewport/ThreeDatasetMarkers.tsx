@@ -197,8 +197,12 @@ export default function ThreeDatasetMarkers({ list, tilesRef, tooltip, onPick }:
 /** Datasets inside the frustum and at least `minFraction` of the viewport tall. */
 export function datasetsInView3d(list: DatasetMarker[], camera: THREE.Camera, groupMatrix: THREE.Matrix4 | null, minFraction: number): string[] {
   camera.updateMatrixWorld();
+  // The live clip planes are not the question (after framing a world mosaic, near sits at 200 km until
+  // the controls' next tick): test against the view pyramid alone.
+  const wide = camera.clone() as THREE.PerspectiveCamera;
+  if (wide.isPerspectiveCamera) { wide.near = 1; wide.far = 1e9; wide.updateProjectionMatrix(); }
   const frustum = new THREE.Frustum().setFromProjectionMatrix(
-    new THREE.Matrix4().multiplyMatrices(camera.projectionMatrix, camera.matrixWorldInverse));
+    new THREE.Matrix4().multiplyMatrices(wide.projectionMatrix, camera.matrixWorldInverse));
   const sphere = new THREE.Sphere();
   const ids: string[] = [];
   for (const d of list) {

@@ -415,9 +415,11 @@ share URL is an opaque token, so `only=_d2024` could never match `/s/<token>/clo
 ### Uploading your own manifest
 
 A deployment has none of your local files, so the same manifest can also be **uploaded**. In the
-viewer, **📂 manifest** (next to *builder*) takes a local `.json` in the shape above, sends it to the
-tile-server and loads the mosaic; every picker, filter and `native` setting then works as for a
-server set. Directly:
+viewer's *Aggregate* row, **📂 manifest…** takes a local `.json` in the shape above, sends it to the
+tile-server and adds the mosaic as a pill in that row, before the server's own sets; every picker,
+filter and `native` setting then works as for a server set. The pill stays (the file is kept in the
+browser), and the page URL names it: `?format=aggregate&preset=agg-upload-<hash>`. Shift-click a
+pill to drop it. Directly:
 
 ```bash
 curl -X POST --data-binary @.local/aggregate-sets/iconem.json https://<server>/aggregate/set
@@ -427,9 +429,9 @@ curl -X POST --data-binary @.local/aggregate-sets/iconem.json https://<server>/a
 - **Kept in memory, 24 h after last use.** A restart clears it, like builder drafts. Up to 20
   manifests of 10 MB each; the oldest goes first.
 - **The set name is a hash of the entries.** Re-sending the same file gives the same URL. The viewer
-  also keeps the file in the browser's localStorage and puts `?load=<mosaic URL>` in the page URL, so
-  reopening that page after a server restart re-sends the manifest before loading. On another
-  browser, the link works only while the server still holds the upload.
+  keeps the file in the browser's localStorage and re-sends it before loading the pill, so a server
+  restart goes unnoticed. A `?load=<mosaic URL>` link opened in another browser also shows the pill
+  (as *uploaded manifest*, without the file), and works while the server still holds the upload.
 - **Never listed.** Uploads do not appear in `/aggregate/demo.json` or in "unknown set" errors, and
   without the file the hash cannot be guessed. Anyone given the mosaic URL can still read the share
   links inside it, as with any mosaic.
@@ -653,11 +655,34 @@ Unlike a plain east-north-up frame at the origin, this keeps the projection's **
 - at Geghard in its UTM zone the convergence is 0.117°, about 1 m of error at 500 m from the origin;
 - 300 km from a UTM central meridian it is 1.379°.
 
-A geographic source CRS (lon/lat) keeps plain ENU. Per-point reprojection would be exact everywhere.
-The trihedron is exact at the origin and linear away from it: about 500 m out, the change in
-convergence adds up to ~1.5 cm, and treating source heights as a flat axis ignores the Earth's
-curvature (2 cm at 500 m, 20 cm at 1.6 km). That is fine for site-sized data; region-sized sources
-should be tiled so each tile gets its own origin.
+A geographic source CRS (lon/lat) keeps plain ENU. The trihedron is exact at the origin and linear
+away from it: about 500 m out, the change in convergence adds up to ~1.5 cm, and treating source
+heights as a flat axis ignores the Earth's curvature (2 cm at 500 m, 20 cm at 1.6 km). That is fine
+for site-sized data.
+
+**Country-scale sources are placed point by point.** The tangent plane leaves the ellipsoid as
+d²/2R: 8 m at 10 km, 20 km at 500 km. The flai overviews span whole countries, so Corsica, 680 km from
+the centre of the France cube, floated 30 km above the ground, and Catalonia and the Canaries sat
+likewise above or below the Spanish cubes. Past a 20 km extent, `/stream` for COPC (`curvedFor` in
+`copc-live.js`, `curvedLocalizer` in `core/geo.js`) keeps the same root transform but writes every
+point through proj4 → ECEF → the root frame, so a point 680 km away lands on the curved surface, and
+the projection's scale distortion is gone too. Two consequences:
+- the tree is **explicit** for such a source, whatever `&tiling=` says: implicit tiling subdivides the
+  root box, which curved content no longer fits, so each tile gets a box fitted to its placed corners
+  (a 5 × 5 grid of the sub-cube's top and bottom faces, plus the sag between samples);
+- the whole COPC hierarchy is read first, which the overviews make cheap (the France overview: 29 000
+  tiles, 8 s cold, 2 s warm).
+
+`scripts/check-curved.mjs <stream url>` reads the farthest tile of a tileset and prints the heights of
+its points: 0–5 m for the Corsica tile of the IGN overview, where the plane gave 30 000.
+
+Two flai files show what the fix does and does not cover. *Spain — CNIG 2008-2015 epsg25831* has a
+4 000 km cube from outlier points, so its origin sits over Tunisia at 1 000 km altitude: the tangent
+plane put all of Catalonia hundreds of kilometres off, the curved placement lands its farthest tile
+at 1 631–2 155 m (the Pyrenees), while the dataset's marker and bounding sphere stay as wrong as the
+header. *Spain — CNIG 2015-2021 epsg25831* is a 2 km patch near Barcelona whose points sit 50 m above
+the ellipsoidal terrain (`&snap=1` reports `dz: 50.4`): orthometric heights, which the per-dataset
+snap corrects, not a placement error.
 
 Cell bounds are decoded from the path key (`cellBounds`, the inverse of `cellAt`). Writing that
 decoder exposed a bug in the geodetic key: it re-encoded the hemisphere bit and dropped the finest
