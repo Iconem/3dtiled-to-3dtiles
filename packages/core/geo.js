@@ -167,6 +167,54 @@ export function georefFromCrs(origin, crs, tag = 'geo') {
   } catch (e) { console.warn(`[${tag}] georef failed:`, e.message); return null; }
 }
 
+/** Column-major 4×4 inverse (general; null when singular). */
+export function mat4Invert(m) {
+  const [a00,a01,a02,a03, a10,a11,a12,a13, a20,a21,a22,a23, a30,a31,a32,a33] = m;
+  const b00 = a00*a11 - a01*a10, b01 = a00*a12 - a02*a10, b02 = a00*a13 - a03*a10, b03 = a01*a12 - a02*a11;
+  const b04 = a01*a13 - a03*a11, b05 = a02*a13 - a03*a12, b06 = a20*a31 - a21*a30, b07 = a20*a32 - a22*a30;
+  const b08 = a20*a33 - a23*a30, b09 = a21*a32 - a22*a31, b10 = a21*a33 - a23*a31, b11 = a22*a33 - a23*a32;
+  let det = b00*b11 - b01*b10 + b02*b09 + b03*b08 - b04*b07 + b05*b06;
+  if (!det) return null;
+  det = 1 / det;
+  return [
+    (a11*b11 - a12*b10 + a13*b09)*det, (a02*b10 - a01*b11 - a03*b09)*det, (a31*b05 - a32*b04 + a33*b03)*det, (a22*b04 - a21*b05 - a23*b03)*det,
+    (a12*b08 - a10*b11 - a13*b07)*det, (a00*b11 - a02*b08 + a03*b07)*det, (a32*b02 - a30*b05 - a33*b01)*det, (a20*b05 - a22*b02 + a23*b01)*det,
+    (a10*b10 - a11*b08 + a13*b06)*det, (a01*b08 - a00*b10 - a03*b06)*det, (a30*b04 - a31*b02 + a33*b00)*det, (a21*b02 - a20*b04 - a23*b00)*det,
+    (a11*b07 - a10*b09 - a12*b06)*det, (a00*b09 - a01*b07 + a02*b06)*det, (a31*b01 - a30*b03 - a32*b00)*det, (a20*b03 - a21*b01 + a22*b00)*det,
+  ];
+}
+
+/**
+ * Exact placement for a PROJECTED source. georefFromCrs's root transform is the tangent trihedron at
+ * the origin: fine within a few km, but a point 500 km away lands 20 km above the ellipsoid (the
+ * plane leaves the curved surface as d²/2R) and sideways by the grid's scale distortion. Returns a
+ * function writing the exact local coordinates of a source point — projected → lon/lat → ECEF, then
+ * into `transform`'s own frame, so the root transform and every nearby point stay as they were —
+ * or null for a geographic/unknown CRS. The caller pays one proj4 inverse per point.
+ */
+export function curvedLocalizer(origin, crs, transform, tag = 'geo') {
+  if (!crs || !transform || Math.abs(origin[0]) <= 360 && Math.abs(origin[1]) <= 90) return null;
+  const inv = mat4Invert(transform);
+  if (!inv) return null;
+  try {
+    const P = proj4(unwrapCompoundWkt(crsDefinition(crs)), 'WGS84');
+    const probe = P.forward([origin[0], origin[1]]);
+    if (!probe.every(Number.isFinite)) return null;
+    const [ox, oy, oz] = origin;
+    return (x, y, z, out, o = 0) => {
+      const [lon, lat] = P.forward([x, y]);
+      const [ex, ey, ez] = llhToEcef(lon, lat, z);
+      const lx = inv[0]*ex + inv[4]*ey + inv[8]*ez  + inv[12];
+      const ly = inv[1]*ex + inv[5]*ey + inv[9]*ez  + inv[13];
+      const lz = inv[2]*ex + inv[6]*ey + inv[10]*ez + inv[14];
+      // an outlier outside the projection's domain (flai's Estonia file has points millions of metres
+      // east) comes back NaN from proj4: keep it on the tangent plane rather than poison the buffer
+      if (Number.isFinite(lx) && Number.isFinite(ly) && Number.isFinite(lz)) { out[o] = lx; out[o+1] = ly; out[o+2] = lz; }
+      else { out[o] = x - ox; out[o+1] = y - oy; out[o+2] = z - oz; }
+    };
+  } catch (e) { console.warn(`[${tag}] curved placement unavailable:`, e.message); return null; }
+}
+
 /** Central meridian (lon_0) for the CGCS2000 3°-Gauss-Krüger EPSG codes XGRIDS LCC uses, or null. */
 export function cgcs2000Lon0(epsg) {
   if (epsg >= 4513 && epsg <= 4533) return 75 + 3 * (epsg - 4513);

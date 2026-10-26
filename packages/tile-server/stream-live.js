@@ -201,7 +201,7 @@ export async function handleStream(req, res, u) {
     // convention stays normalized at the tileset level. Skipped when the source is already
     // georeferenced (its own placement wins) and for geosplats (own georef params: frame/yaw/alt).
     if (fmt !== 'geosplats') applyPlacement(ts.root, u.searchParams, `stream:${fmt}`);
-    tagContentUris(ts.root, `&format=${fmt}` + (centroids ? '&centroids=1' : '')
+    tagContentUris(ts.root, `&format=${fmt}` + (centroids ? '&centroids=1' : '') + (crs ? `&crs=${encodeURIComponent(crs)}` : '')
       + (transform ? `&transform=${transform}` + (transform === 'decompress' && tex === 'png' ? '&tex=png' : '') : ''));
     res.writeHead(200, { 'Content-Type': 'application/json', ...CORS });
     res.end(JSON.stringify(ts));
@@ -210,7 +210,7 @@ export async function handleStream(req, res, u) {
   const m = u.pathname.match(/^\/stream\/tile\/(.+)\.glb$/);
   if (m && adapter.tileRe.test(m[1])) {
     const centroids = u.searchParams.get('centroids') === '1' || u.searchParams.get('centroids') === 'true';
-    let glb = await adapter.tile(url, m[1], { centroids });
+    let glb = await adapter.tile(url, m[1], { centroids, crs: u.searchParams.get('crs') || undefined });
     if (!glb) { res.writeHead(404, CORS); res.end('no such node'); return true; }
     const transform = TRANSFORMS.has(u.searchParams.get('transform')) ? u.searchParams.get('transform') : null;
     if (transform) glb = await applyTransform(glb, transform, u.searchParams.get('tex'));
