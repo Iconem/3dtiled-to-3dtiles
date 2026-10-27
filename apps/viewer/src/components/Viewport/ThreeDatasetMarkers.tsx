@@ -42,6 +42,10 @@ const vertexShader = /* glsl */ `
     gl_Position = projectionMatrix * mv;
     // The dataset is big enough on screen to speak for itself: drop the marker (outside clip space).
     if (aRadius / (length(mv.xyz) * uTanHalf) > uHideFraction) gl_Position = vec4(2.0, 2.0, 2.0, 1.0);
+    // Drawn without a depth test (so terrain and clouds never z-fight them), the far side of the globe
+    // must be culled here instead: the camera is below the marker's tangent plane.
+    vec3 wp = (modelMatrix * vec4(position, 1.0)).xyz;
+    if (dot(cameraPosition - wp, wp - modelMatrix[3].xyz) < 0.0) gl_Position = vec4(2.0, 2.0, 2.0, 1.0);
     gl_PointSize = aSize * uPixelRatio;
     vColor = aColor;
     #include <logdepthbuf_vertex>
@@ -110,11 +114,12 @@ export default function ThreeDatasetMarkers({ list, tilesRef, tooltip, onPick }:
     const m = new THREE.ShaderMaterial({
       vertexShader, fragmentShader,
       uniforms: { uTanHalf: { value: 0.577 }, uHideFraction: { value: MARKER_HIDE_FRACTION }, uPixelRatio: { value: 1 } },
+      depthTest: false, depthWrite: false, transparent: true,   // composited on top: no z-fighting with the ground
     });
     const p = new THREE.Points(g, m);
     p.frustumCulled = false;          // positions span the globe; the shader does the culling
     p.matrixAutoUpdate = false;
-    p.renderOrder = 10;
+    p.renderOrder = 1000;             // after everything else
     p.raycast = () => {};             // never a pivot target for the globe controls
     return p;
   }, [list]);

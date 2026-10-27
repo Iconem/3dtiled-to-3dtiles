@@ -5,6 +5,23 @@ Format loosely follows [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+### Fixed — 2026-10-27 (3DTRjs navigation, terrain "none", markers)
+- **3DTRjs Environment controls:** left/right drag works on the terrain, not only on the loaded
+  content: the controls now raycast the content *and* the globe/terrain renderers, and the fallback
+  plane (a drag that hits nothing) is the local horizontal at the pivot instead of world Y = 0.
+- **Framing faces north** (the camera used to sit north of the tileset, looking south).
+- **Orbit/env near plane** also follows the camera's height above the ellipsoid, so content a few
+  metres away is not clipped when the pivot was left kilometres behind (the tileset or the terrain
+  "disappearing" in orbit).
+- **Double-click fly:** the view direction and the roll ease from the current state (no jump on the
+  first frame).
+- **Adaptive point size** on 3D Tiles point clouds (Angkor): a tile's geometric error is only used as
+  the point spacing when it is one; otherwise the spacing is estimated from the tile's own points.
+- **Dataset markers** are composited on top (no depth test, far side of the globe culled in the
+  shader): no more z-fighting with the ground.
+- **Terrain "None (no globe)"** in both renderers, switched in place (the loaded tileset is untouched),
+  for datasets that sit under the terrain or clouds seen from below.
+
 ### Fixed — 2026-10-26 (country-scale COPC placement, 3DTRjs controls, viewer)
 - **`/stream` COPC: curved placement past a 20 km extent.** Points are written through proj4 → ECEF
   → the root frame instead of "source minus origin" on the tangent plane, which floated Corsica 30 km

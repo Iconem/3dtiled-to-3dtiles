@@ -28,7 +28,7 @@ export default function DatasetTooltip({ channel, visible }: { channel: TooltipC
   const place = [d.scene && d.scene !== d.name ? d.scene : null, d.project && d.project !== d.scene ? d.project : null].filter(Boolean);
   return (
     <div
-      className="pointer-events-none absolute z-30 max-w-[320px] rounded-md border bg-popover/95 px-2.5 py-1.5 text-xs text-popover-foreground shadow-lg backdrop-blur"
+      className="pointer-events-none absolute z-30 max-w-[min(320px,calc(100vw-2rem))] overflow-hidden rounded-md border bg-popover/95 px-2.5 py-1.5 text-xs text-popover-foreground shadow-lg backdrop-blur [overflow-wrap:anywhere]"
       // Right of and below the cursor; flipped back towards the centre near the right/bottom edges.
       style={{ left: x + 14, top: y + 14, transform: `translate(${x > 0.6 * w ? 'calc(-100% - 28px)' : '0'}, ${y > 0.7 * h ? 'calc(-100% - 28px)' : '0'})` }}
     >
