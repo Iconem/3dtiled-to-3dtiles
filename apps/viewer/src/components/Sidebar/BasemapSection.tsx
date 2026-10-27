@@ -37,7 +37,8 @@ export default function BasemapSection({ activeHandleRef }: { activeHandleRef: R
           <SelectTrigger size="sm"><SelectValue /></SelectTrigger>
           <SelectContent>
             <SelectItem value="auto" title="Quantized mesh in Cesium, Terrarium tiles in 3DTRjs — the same ellipsoidal DEM">Mapterhorn (auto)</SelectItem>
-            <SelectItem value="wgs84">WGS84 (none)</SelectItem>
+            <SelectItem value="none" title="No globe at all: for datasets that sit under the terrain, or to look at a cloud from below">None (no globe)</SelectItem>
+            <SelectItem value="wgs84">WGS84 ellipsoid (flat)</SelectItem>
             <SelectItem value="cesium">Cesium World Terrain</SelectItem>
             <SelectItem value="reearth-qm">Mapterhorn · quantized mesh (ellipsoid)</SelectItem>
             <SelectItem value="mapterhorn-ellipsoid">Mapterhorn · Terrarium (ellipsoid)</SelectItem>

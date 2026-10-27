@@ -572,6 +572,11 @@ const Scene = forwardRef<ViewerHandle, { loadArgs: LoadArgs; tooltip: TooltipCha
   // content group once it's actually mounted (set from onLoadRootTileset below, so it's never a stale
   // ref read at render time) instead of the whole scene.
   const [pickScene, setPickScene] = useState<THREE.Object3D | null>(null);
+  // What the globe/env controls raycast to find the point under the cursor: the content AND the
+  // globe/terrain renderers (one group around both, below). With the content group alone, a drag
+  // that started on the terrain found nothing: EnvironmentControls then fell back to its default
+  // plane (world Y = 0, through the Earth's centre) and did nothing useful ("only middle-drag works").
+  const [navScene, setNavScene] = useState<THREE.Object3D | null>(null);
 
   useEffect(() => {
     if ('fov' in camera) (camera as THREE.PerspectiveCamera).fov = fov;
@@ -728,7 +733,9 @@ const Scene = forwardRef<ViewerHandle, { loadArgs: LoadArgs; tooltip: TooltipCha
       const east = new THREE.Vector3().crossVectors(helper, surfaceUp).normalize();
       const north = new THREE.Vector3().crossVectors(surfaceUp, east).normalize();
       const pitch = THREE.MathUtils.degToRad(35);
-      dir = surfaceUp.clone().multiplyScalar(Math.sin(pitch)).addScaledVector(north, Math.cos(pitch)).normalize();
+      // camera SOUTH of the target, so the view faces north and, with camera.up = surface normal,
+      // north is up on screen (it used to sit north of it, looking south: "globe is not north up")
+      dir = surfaceUp.clone().multiplyScalar(Math.sin(pitch)).addScaledVector(north, -Math.cos(pitch)).normalize();
     } else {
       dir = camera.position.clone().sub(sphere.center);
       if (dir.lengthSq() < 1e-6) dir.set(0, 0, 1);
@@ -790,6 +797,7 @@ const Scene = forwardRef<ViewerHandle, { loadArgs: LoadArgs; tooltip: TooltipCha
   // touch them, so they stayed at whatever frameToTileset chose for the first framing distance: zoom
   // from a city overview to a facade and the near plane (1 % of that first distance) eats the facade.
   const pivotProbe = useMemo(() => new THREE.Vector3(), []);
+  const cartoProbe = useMemo(() => ({ lat: 0, lon: 0, height: 0 }), []);
   useFrame(() => {
     const controls = controlsRef.current;
     if (!controls) return;
@@ -800,8 +808,20 @@ const Scene = forwardRef<ViewerHandle, { loadArgs: LoadArgs; tooltip: TooltipCha
     if (!pivot) return;
     const d = camera.position.distanceTo(pivot);
     const geo = pivot.length() > 6378137 * 0.5;
-    // logarithmicDepthBuffer is on (see <Canvas>), so a near:far ratio of 1e8 costs no precision
-    const near = THREE.MathUtils.clamp(d * 5e-4, 0.05, 1000);
+    // EnvironmentControls' fallback plane (a drag or zoom that hits no geometry) is world Y = 0 by
+    // default, i.e. through the Earth's centre: make it the local horizontal plane at the pivot.
+    if (controls.fallbackPlane && controls.isEnvironmentControls && !controls.isGlobeControls) {
+      const up = geo ? WGS84_ELLIPSOID.getPositionToNormal(pivot, pivotProbe) : pivotProbe.set(0, 1, 0);
+      controls.fallbackPlane.setFromNormalAndCoplanarPoint(up, pivot);
+    }
+    // The pivot can sit kilometres away (an orbit target left behind, the horizon under a globe
+    // drag) while the camera is a few metres above a facade: the near plane also follows the
+    // camera's own height above the ellipsoid, or the content beneath it is clipped away
+    // ("the tileset disappears in orbit", "terrain disappears").
+    let base = d;
+    if (geo) { WGS84_ELLIPSOID.getPositionToCartographic(camera.position, cartoProbe); base = Math.min(d, Math.max(cartoProbe.height, 1)); }
+    // logarithmicDepthBuffer is on (see <Canvas>), so a near:far ratio of 1e9 costs no precision
+    const near = THREE.MathUtils.clamp(base * 2e-4, 0.02, 1000);
     const far = geo ? camera.position.length() + 6378137 * 2.5 : Math.max(d * 200, 1e4);
     if (Math.abs(camera.near - near) > near * 0.05 || Math.abs(camera.far - far) > far * 0.05) {
       camera.near = near;
@@ -816,7 +836,13 @@ const Scene = forwardRef<ViewerHandle, { loadArgs: LoadArgs; tooltip: TooltipCha
   const animateCameraTo = useCallback((toPos: THREE.Vector3, toLookAt: THREE.Vector3, durationMs = 450) => {
     if (cameraTweenRef.current != null) cancelAnimationFrame(cameraTweenRef.current);
     const fromPos = camera.position.clone();
-    const fromLookAt = controlsRef.current?.target?.clone() ?? camera.position.clone().add(camera.getWorldDirection(new THREE.Vector3()));
+    const controls = controlsRef.current;
+    // where the camera looks NOW, at the target's distance: the orbit target, the globe/env pivot, or
+    // a point along the view axis. (It used to be 1 m ahead of the camera for globe/env, so the first
+    // frames swung the view direction: "the camera jumps at the start of the animation".)
+    const fromLookAt: THREE.Vector3 = controls?.target?.clone()
+      ?? (controls?.getPivotPoint ? controls.getPivotPoint(new THREE.Vector3()) : null)
+      ?? camera.position.clone().addScaledVector(camera.getWorldDirection(new THREE.Vector3()), camera.position.distanceTo(toLookAt));
     // lookAt() orients the roll from camera.up, which three defaults to ECEF +Y — an arbitrary
     // heading on the ground (it read as "facing west"). Use the local up at the target; when the view
     // is nearly vertical (up ∥ view direction, where lookAt degenerates), north instead.
@@ -828,11 +854,13 @@ const Scene = forwardRef<ViewerHandle, { loadArgs: LoadArgs; tooltip: TooltipCha
       E.getPositionToCartographic(toLookAt, c);
       up.set(-Math.sin(c.lat) * Math.cos(c.lon), -Math.sin(c.lat) * Math.sin(c.lon), Math.cos(c.lat));
     }
-    if (toLookAt.length() > 1e6) camera.up.copy(up);   // georeferenced content only; local scenes keep +Y
+    const geoUp = toLookAt.length() > 1e6;             // georeferenced content only; local scenes keep +Y
+    const fromUp = camera.up.clone();
     const t0 = performance.now();
     const step = () => {
       const t = Math.min(1, (performance.now() - t0) / durationMs);
       const eased = t < 0.5 ? 2 * t * t : 1 - Math.pow(-2 * t + 2, 2) / 2; // ease-in-out-quad
+      if (geoUp) camera.up.copy(fromUp).lerp(up, eased).normalize();   // the roll eases too, no snap
       camera.position.lerpVectors(fromPos, toPos, eased);
       const lookAt = new THREE.Vector3().lerpVectors(fromLookAt, toLookAt, eased);
       camera.lookAt(lookAt);
@@ -971,12 +999,27 @@ const Scene = forwardRef<ViewerHandle, { loadArgs: LoadArgs; tooltip: TooltipCha
    * close their gaps and fine tiles stay sharp (what the potree lab's "size from tile GE" does, and
    * Cesium's attenuation approximates). Half the px size acts as the multiplier.
    */
+  /**
+   * A tile's point spacing. /stream's Potree/COPC tiles say it (geometricError = spacing); a 3D Tiles
+   * point cloud's geometric error is whatever its author chose (Iconem's Angkor: many times the
+   * spacing, so every point drew as a blob). Estimate it from the tile itself (points over a disc of
+   * the geometry's bounding radius) and trust the geometric error only when it agrees.
+   */
+  const pointSpacing = (o: any, tile: any): number => {
+    const g = o.geometry;
+    const n = g?.attributes?.position?.count ?? 0;
+    if (!n) return tile.geometricError;
+    if (!g.boundingSphere) g.computeBoundingSphere();
+    const est = g.boundingSphere.radius * Math.sqrt(Math.PI / n);
+    const ge = tile.geometricError;
+    return est > 0 && ge > 4 * est ? est : ge;
+  };
   const applyPointSize = (o: any, tile: any) => {
     if (!o.isPoints || !o.material) return;
     if (tile?.internal?.nativeLeaf || o.material.isPointCloudMaterial) return;   // PotreePlugin sizes its own
     const adaptive = pointAdaptiveRef.current && Number.isFinite(tile?.geometricError) && tile.geometricError > 0;
     o.material.sizeAttenuation = adaptive;
-    o.material.size = adaptive ? tile.geometricError * pointSizeRef.current * 0.5 : pointSizeRef.current;
+    o.material.size = adaptive ? pointSpacing(o, tile) * pointSizeRef.current * 0.5 : pointSizeRef.current;
     o.material.needsUpdate = true;
   };
 
@@ -1330,7 +1373,8 @@ const Scene = forwardRef<ViewerHandle, { loadArgs: LoadArgs; tooltip: TooltipCha
           above, same Ion token, no basemap overlay needed); otherwise a real OSM/Google-tile-draped
           WGS84 ellipsoid (Globe above) when imagery is on, or a plain wireframe sphere as a ground
           reference when imagery is off. */}
-      {showGlobe && (terrain === 'cesium' ? (
+      <group ref={setNavScene}>
+      {showGlobe && terrain !== 'none' && (terrain === 'cesium' ? (
         <TerrainGlobe basemap={basemap} gl={gl} />
       ) : terrain === 'reearth-qm' ? (
         <TerrainGlobe basemap={basemap} gl={gl} url={`${REEARTH_QM_URL}/`} />
@@ -1357,7 +1401,7 @@ const Scene = forwardRef<ViewerHandle, { loadArgs: LoadArgs; tooltip: TooltipCha
           // AFTER and override that flyTo with the tileset's own (possibly world-sized) bounding sphere.
           onLoadRootTileset={() => {
             // devtools / headless inspection — the counterpart of CesiumViewer's window.viewer
-            (window as any).tiles3dtr = { tiles: tilesRef.current, scene, camera };
+            (window as any).tiles3dtr = { tiles: tilesRef.current, scene, camera, invalidate, store, controls: () => controlsRef.current };
             if (!loadArgs?.skipAutoFrame) frameToTileset(tilesRef.current, true);
             const fly = pendingFlyToRef.current;
             pendingFlyToRef.current = null;
@@ -1392,8 +1436,8 @@ const Scene = forwardRef<ViewerHandle, { loadArgs: LoadArgs; tooltip: TooltipCha
           {isSplat && <TilesPlugin plugin={GaussianSplatPlugin as any} args={{ renderer: gl, scene } as any} />}
           {debugMode === 'tiles' && <TilesPlugin plugin={DebugTilesPlugin as any} displayBoxBounds colorMode={7} />}
           {debugMode === 'cells' && <MosaicOutlines url={loadArgs.url} tilesRef={tilesRef} />}
-          {controlMode === 'globe' && <GlobeControls ref={controlsRef} scene={pickScene ?? undefined} enableDamping dampingFactor={0.05} minDistance={1} />}
-          {controlMode === 'env' && <EnvironmentControls ref={controlsRef} scene={pickScene ?? undefined} enableDamping dampingFactor={0.05} minDistance={1} />}
+          {controlMode === 'globe' && <GlobeControls ref={controlsRef} scene={navScene ?? undefined} enableDamping dampingFactor={0.05} minDistance={1} />}
+          {controlMode === 'env' && <EnvironmentControls ref={controlsRef} scene={navScene ?? undefined} enableDamping dampingFactor={0.05} minDistance={1} />}
         </TilesRendererR3F>
       )}
       {/* makeDefault registers this as R3F's `state.controls` — same thing GlobeControls/EnvironmentControls
@@ -1403,6 +1447,7 @@ const Scene = forwardRef<ViewerHandle, { loadArgs: LoadArgs; tooltip: TooltipCha
           same pointer drag ("clicking the gizmo should pause the control") — no extra wiring needed once
           every control scheme is registered the same way. */}
       {controlMode === 'orbit' && <OrbitControls ref={controlsRef} makeDefault enableDamping dampingFactor={0.05} />}
+      </group>
       <CameraTransition
         mode={ortho ? 'orthographic' : 'perspective'}
         onBeforeToggle={(manager: any) => {
