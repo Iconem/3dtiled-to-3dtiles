@@ -724,7 +724,10 @@ Every leaf of a mosaic is 3D Tiles: Potree and COPC children are wrapped through
 `&native=1` a Potree leaf **also** says "this dataset is really a Potree 1.8 cloud at this URL", so a
 renderer that reads Potree itself loads it directly, and every other client still gets 3D Tiles.
 In the viewer this is **Native Potree leaves** under *Tileset & LOD*, in 3DTRjs mode (`?native=true`).
-CesiumJS has no Potree reader, so the setting does not exist there.
+CesiumJS has no Potree reader, so the setting does not exist there. The 3DTRjs viewer always
+requests the mosaic with `&native=1` and switches each Potree leaf **in place**: its Potree reader and
+its `/stream` reader are both mounted (lazily), and the checkbox picks which one loads and draws, so
+toggling never reloads the mosaic and flipping back is instant.
 
 **Prior art.** [`MAXAR_content_geojson`](https://github.com/CesiumGS/3d-tiles/tree/main/extensions)
 ships GeoJSON as tile content: a 3D Tiles extension for content that is not glTF. This is the same
