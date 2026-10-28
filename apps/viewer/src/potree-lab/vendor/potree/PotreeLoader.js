@@ -1,8 +1,9 @@
 // Vendored from NASA-AMMOS/3DTilesRendererJS@70847eb9580479cc7bfa574abf15a868394a6f69 (identical to the 0.5.3 release)
 // src/three/plugins/potree/PotreeLoader.js — Apache-2.0 (see ./LICENSE; upstream copyright applies).
-// This copy is the fork branch jo-chemla/3DTilesRendererJS:pointcloud-fixes, i.e. upstream plus three commits
-// proposed there (PR pending): Potree 1.8 attribute objects (c3381669), a clear error for LAS/LAZ nodes
-// and BROTLI encoding (8cb78c1e), and a thrown error on failed node downloads (6b9071f5).
+// This copy is the head of upstream PR #1780 (https://github.com/NASA-AMMOS/3DTilesRendererJS/pull/1780), i.e. upstream plus three
+// commits proposed there: Potree 1.8 attribute objects (https://github.com/NASA-AMMOS/3DTilesRendererJS/pull/1780/commits/c3381669),
+// a clear error for LAS/LAZ nodes and BROTLI encoding (https://github.com/NASA-AMMOS/3DTilesRendererJS/pull/1780/commits/8cb78c1e),
+// and a thrown error on failed node downloads (https://github.com/NASA-AMMOS/3DTilesRendererJS/pull/1780/commits/6b9071f5).
 // Delete this copy once 3d-tiles-renderer ships them.
 // @ts-nocheck
 import { BufferGeometry, BufferAttribute, Color, SRGBColorSpace, Vector3 } from 'three';
