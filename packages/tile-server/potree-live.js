@@ -55,18 +55,35 @@ const finishCtx = (nodes, rootBox, crs, spacingMeta, readTile) => {
   return { nodes, rootBox, origin, transform: georef(origin, crs), rootDiag, spacing: spacingMeta || rootDiag / 128, readTile, byCoord, avail, maxLevel };
 };
 
+// Azure-specific query inheritance: container/account SAS can authorize sibling blobs.
+// Object-bound signatures (including Azure blob SAS and S3 presigned URLs) and other queries stay on metadata.
+function createAzureSasSourceResolver(source) {
+  const params = source.searchParams;
+  const reusableAzureSas = Boolean(params.get('sv') && params.get('sig') &&
+    (params.get('sr') === 'c' || (!params.has('sr') &&
+      params.get('ss')?.includes('b') && params.get('srt')?.includes('o'))));
+  return (rel) => {
+    const child = new URL(rel, source);
+    if (reusableAzureSas && child.origin === source.origin && !child.search) child.search = source.search;
+    return child.href;
+  };
+}
+
 // Per-URL context (hierarchy + georef + a readTile(name) closure), cached. 2.0 → range reads of
 // octree.bin; 1.x → whole-file fetch per node through loadPotree1's injectable reader.
 // memoizeAsync caches FAILURES too — a broken source fails fast on retry instead of redoing the
 // full metadata/hierarchy read every time (see cache.js's own comment) — for a minute, so a
 // transient network error on the first read does not pin the source as broken.
 const getCtx = memoizeAsync(async (url) => {
-  const base = url.slice(0, url.lastIndexOf('/') + 1);
+  const source = new URL(url);
+  const resolveSource = createAzureSasSourceResolver(source);
   let ctx;
 
   if (/cloud\.js(\?|$)/i.test(url)) {                       // ── Potree 1.x ──
     // lazy: skip the eager full-.hrc walk; we load one .hrc chunk per request (see buildLazyFragment).
-    const src = await loadPotree1('', { read: rel => fetchFull(base + rel), lazy: true });
+    const src = await loadPotree1('', {
+      read: rel => fetchFull(rel === 'cloud.js' ? source.href : resolveSource(rel)), lazy: true,
+    });
     if (src.loadChunk) {
       // .hrc layout → LAZY hierarchy. Default output is IMPLICIT tiling: the tileset is one tiny root
       // with an implicitTiling block; each `.subtree` is generated on demand by loading ONLY the .hrc
@@ -150,8 +167,8 @@ const getCtx = memoizeAsync(async (url) => {
     if ((meta.version || '').toString()[0] !== '2') console.warn(`[potree-live] ${url}: metadata.version=${meta.version} — expected 2.x`);
     const schema = preparePotree2Schema(meta);
     const rootBox = { min: meta.boundingBox.min.slice(), max: meta.boundingBox.max.slice() };
-    const hierUrl = base + 'hierarchy.bin';
-    const octreeUrl = base + 'octree.bin';
+    const hierUrl = resolveSource('hierarchy.bin');
+    const octreeUrl = resolveSource('octree.bin');
     const firstChunkSize = meta.hierarchy?.firstChunkSize;
 
     // Load only the first hierarchy chunk (range read, no full download).

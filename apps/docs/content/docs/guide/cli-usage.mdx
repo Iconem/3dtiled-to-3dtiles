@@ -188,6 +188,22 @@ cd packages/potree-to-3dtiles && npm install
 node src/index.js path/to/potree-dir ./out-potree
 ```
 
+**Azure SAS query inheritance (live Potree only):** `/stream` and `/tiles?cache=none|hierarchy`
+request the original metadata URL with its query intact. The following query
+inheritance is Azure-specific, not general signed-URL support. Only reusable Azure SAS
+queries are inherited by hierarchy and point files: container scope (`sr=c`), or
+account scope with blob service (`ss` containing `b`) and object access (`srt`
+containing `o`, with no `sr`). Both require nonempty `sv` and `sig`. Inheritance is
+limited to the same origin, and a child URL's own query takes precedence.
+These scopes follow Azure's [service SAS](https://learn.microsoft.com/en-us/rest/api/storageservices/create-service-sas)
+and [account SAS](https://learn.microsoft.com/en-us/rest/api/storageservices/create-account-sas) definitions.
+
+Other queries stay on the metadata request. Object-specific signatures, including
+S3 presigned URLs and Azure blob SAS, do not authorize sibling files; those files
+must be accessible independently. Directory-scoped Azure SAS and arbitrary shared-token schemes
+are not inherited. This policy is specific to live Potree streaming; it does not
+change the other format adapters or `cache=full` conversion.
+
 **How it works:** the Potree octree (`r`, `r0`..`r7`, …) maps 1:1 to a 3D Tiles tree with
 **`refine: ADD`** (children add denser detail in sub-octants, like COPC); `geometricError` = point
 spacing per depth (`rootSpacing / 2^depth`). 2.0 decode is authoritative (`hierarchy.bin` 22 B/node:
