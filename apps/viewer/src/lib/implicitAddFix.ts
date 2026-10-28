@@ -1,6 +1,9 @@
 /**
- * Works around a 3d-tiles-renderer (0.5.2, and master as of 70847eb) traversal bug that hides
- * ADD-refined implicit tilesets whenever they are far enough to be "good enough".
+ * Works around a 3d-tiles-renderer (0.5.1 to 0.5.3, and master as of d265429) traversal bug that hides
+ * ADD-refined implicit tilesets whenever they are far enough to be "good enough". Fixed upstream in
+ * https://github.com/jo-chemla/3DTilesRendererJS/commit/53a4415469ec5856deffbd99e1cc3132ed3acdef
+ * (branch fix-implicit-add-skip, PR to NASA-AMMOS pending): the skip only applies when the parent has
+ * renderable content, as CesiumJS does. Delete this plugin once a release ships it.
  *
  * `markUsedTiles` skips a child of an ADD tile when "the parent already meets the error target in the
  * child's region" (an optimisation borrowed from Cesium) — without checking that the parent has
