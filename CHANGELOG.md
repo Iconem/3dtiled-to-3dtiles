@@ -23,9 +23,17 @@ Format loosely follows [Keep a Changelog](https://keepachangelog.com/).
   only the child-box ADD sizing remains marked local (its generic form, an active-nodes driver for
   implicit octrees, is a separate feature request). Docs updated: the plugins are released in 0.5.3,
   the copies stay for the patches.
-- Not in the branch: the per-renderer EDL pre-pass (dropped), per-point LOD for non-Potree octrees
-  (kept for later), and the ADD-skip traversal regression (#1673), which is a traversal change for a
-  branch of its own.
+- Not in the PR: the per-renderer EDL pre-pass (dropped) and per-point LOD for non-Potree octrees
+  (kept for later).
+- **The ADD-skip traversal regression (#1673) is fixed on its own fork branch**,
+  `jo-chemla/3DTilesRendererJS:fix-implicit-add-skip` (`53a4415`): the additive parent error skip
+  in `markUsedTiles` now requires a parent with renderable content, as CesiumJS's
+  `meetsScreenSpaceErrorEarly` does. Reproduced and verified headlessly in Node (no WebGL) with
+  `.local/addskip-harness.mjs` on the public Lion Takanawa `/stream` tileset at
+  3dtiled.iconem.com: master shows 0 visible tiles at 3, 10, 30 and 100 m (root content child
+  error 13.8 px under the 16 px target); fixed, the root is drawn at every distance and 3 tiles at
+  0.5 m. Upstream lint and the core/three/r3f suites pass (Babylon/PlayCanvas tests fail on
+  pristine master too). `lib/implicitAddFix.ts` stays until a release ships it.
 
 ### Changed — 2026-10-28 (3DTRjs: native leaves switch in place, round points, ADD-refinement sizing)
 - **Native Potree leaves no longer reload the mosaic.** An `/aggregate` URL is always requested with
