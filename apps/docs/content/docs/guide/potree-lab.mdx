@@ -25,7 +25,7 @@ URL field opens as itself; a loaded point-cloud tileset (a `/stream` or `/aggreg
 | Source | `PotreePlugin` (raw, in the browser) | Through our `/stream` (3D Tiles) |
 |---|---|---|
 | Potree 1.7 `cloud.js` (attribute **names**) | ✅ | ✅ |
-| Potree 1.8 `cloud.js` (attribute **objects**) | ❌ upstream: `Cannot read properties of undefined (reading 'size')`. ✅ **with our local patch** | ✅ |
+| Potree 1.8 `cloud.js` (attribute **objects**) | ❌ upstream: `Cannot read properties of undefined (reading 'size')`. ✅ **with our patch** (upstream `c3381669`, pending) | ✅ |
 | Potree 1.x with LAS/LAZ node files | ❌ (always fetches `.bin`) | ✅ |
 | Potree 2.0 `metadata.json`, DEFAULT encoding | ✅ | ✅ |
 | Potree 2.0, BROTLI encoding | ❌ (`encoding` is never checked) | ✅ |
@@ -33,9 +33,9 @@ URL field opens as itself; a loaded point-cloud tileset (a `/stream` or `/aggreg
 
 **Potree 1.8 is most of our data.** 38 of 40 sampled Iconem clouds are 1.8. The version is decided
 by file name only (`metadata.json` → v2, anything else → v1) and v1 attributes are looked up by name,
-which is the same bug our own decoder had. The vendored `PotreeLoader.js` carries one local patch,
+which is the same bug our own decoder had. The vendored `PotreeLoader.js` carries the patch,
 `v1Attributes()`, that accepts 1.8's objects (their `size`, or `elements × elementSize`). With it an
-Iconem 1.8 cloud loads raw (12,343 points on screen; 0 before). It is worth an upstream PR.
+Iconem 1.8 cloud loads raw (12,343 points on screen; 0 before). It is the first commit of the fork branch described below.
 
 **COPC therefore always goes through the middleware**, in `stream` mode (a `.copc.laz` URL is
 detected), and the lab's `potree` mode is the raw, middleware-free path for Potree only.
@@ -136,11 +136,21 @@ release ships the work, bump the dependency and delete `.local/3DTilesRendererJS
 
 ## Why the plugins are vendored
 
-`PotreePlugin` and `PointCloudEffectsPlugin` are on 3DTilesRendererJS `master` only — `0.5.2`, the
-latest npm release, predates them. They are copied verbatim, pinned to the upstream commit, under
-`apps/viewer/src/potree-lab/vendor/` (Apache-2.0, license included). Everything they need from the
-renderer (`loadRootTileset`, `setTileActive`, `invokeOnePlugin`, `processNodeQueue`, …) already exists
-in `0.5.2`, which the viewer now uses. Delete the copy once a release ships them.
+`PotreePlugin` and `PointCloudEffectsPlugin` shipped in 3DTilesRendererJS `0.5.3` (2026-09-18), the
+same code as the `70847eb` master commit the copies under `apps/viewer/src/potree-lab/vendor/` are pinned
+to (Apache-2.0, license included). The copies stay because they carry patches the release does not:
+five are proposed upstream as one commit each on the fork branch
+[`jo-chemla/3DTilesRendererJS:pointcloud-fixes`](https://github.com/jo-chemla/3DTilesRendererJS/commits/pointcloud-fixes)
+(Potree 1.8 attribute objects, a clear error for LAS/LAZ nodes and BROTLI encoding, a thrown error on
+failed node downloads, `maxPointSize`, `sizeAttenuation = false`), each linked from the file header, and
+one is local (child-box sizing, see [Viewer](/docs/guide/viewer)). The viewer itself still depends on
+`0.5.2`; the plugins need nothing newer. Delete the copies once a release includes the upstream commits.
+
+A public Potree 1.8 reproducer for the attribute bug: Iconem's STAC catalogue at
+`https://app.iconem.com/api/stac/collections/pointcloud` lists 1.8 clouds among its items (32 of the
+first 80), e.g. item `1cc42849-d27d-4954-9d52-fac110d8a480` (3.2 M points). Its `data` asset is a
+signed blob URL valid for a day whose query string must be forwarded to every node request, so a
+`fetchData` override is needed when loading it outside the Iconem share-link proxy.
 
 ## What comparing the two modes showed
 

@@ -1,6 +1,6 @@
-// Vendored verbatim from NASA-AMMOS/3DTilesRendererJS@70847eb9580479cc7bfa574abf15a868394a6f69
+// Vendored from NASA-AMMOS/3DTilesRendererJS@70847eb9580479cc7bfa574abf15a868394a6f69 (identical to the 0.5.3 release)
 // src/three/plugins/potree/PotreePlugin.js — Apache-2.0 (see ./LICENSE; upstream copyright applies).
-// Not in any npm release yet (0.5.2 predates it); delete this copy once 3d-tiles-renderer ships it.
+// Unmodified. Kept because PotreeLoader.js and PointCloudEffectsPlugin.js next to it carry patches.
 // @ts-nocheck
 import {
 	DataTexture,

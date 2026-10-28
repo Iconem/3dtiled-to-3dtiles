@@ -5,6 +5,28 @@ Format loosely follows [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+### Changed — 2026-10-28b (3DTRjs point-cloud patches proposed upstream)
+- **Fork branch [`jo-chemla/3DTilesRendererJS:pointcloud-fixes`](https://github.com/jo-chemla/3DTilesRendererJS/commits/pointcloud-fixes)**,
+  off upstream master (which has not touched the Potree / point-cloud plugins since `0.5.3` shipped
+  them on 2026-09-18), one commit per patch, each with a CHANGELOG line in upstream's format and
+  passing upstream's lint: Potree 1.8 attribute objects (`c3381669`), a clear error for LAS/LAZ node
+  files and BROTLI encoding (`8cb78c1e`), a thrown error when a hierarchy or node download fails
+  instead of decoding the error page as points (`6b9071f5`, found while testing: the loader had
+  "loaded" a 403 body as 11 points per node), `maxPointSize` (`ed4bcbb3`), `sizeAttenuation = false`
+  (`4e313f88`), and an R3F docs note that `TilesPlugin` `args` are compared shallowly, so inline
+  callbacks rebuild the plugin every render (`aecb1edd`). Verified against the unpatched loader on a
+  public Potree 1.8 cloud from Iconem's STAC catalogue (32 of the first 80 items are 1.8): upstream
+  throws `Cannot read properties of undefined (reading 'name')`, the branch parses r=3409, r0=2788…
+  points, same shape as the 1.7 Lion control.
+- **Vendored copies re-synced to the branch.** `PotreeLoader.js` is the branch file verbatim; the
+  material and effects plugin keep their patches with comments now naming the upstream commit, and
+  only the child-box ADD sizing remains marked local (its generic form, an active-nodes driver for
+  implicit octrees, is a separate feature request). Docs updated: the plugins are released in 0.5.3,
+  the copies stay for the patches.
+- Not in the branch: the per-renderer EDL pre-pass (dropped), per-point LOD for non-Potree octrees
+  (kept for later), and the ADD-skip traversal regression (#1673), which is a traversal change for a
+  branch of its own.
+
 ### Changed — 2026-10-28 (3DTRjs: native leaves switch in place, round points, ADD-refinement sizing)
 - **Native Potree leaves no longer reload the mosaic.** An `/aggregate` URL is always requested with
   `&native=1` (the mosaic is the same either way), and `NativeLeavesPlugin` now mounts, per Potree
