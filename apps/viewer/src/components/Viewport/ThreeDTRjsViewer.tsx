@@ -34,6 +34,8 @@ import { fetchOutlines, outlineColor, type TileOutline } from '@/lib/mosaicOutli
 import { datasetGroundSamples, offsetFromSamples } from '@/lib/datasetGround';
 import { ImplicitAddRefineFixPlugin } from '@/lib/implicitAddFix';
 import { NativeLeavesPlugin, withNativeLeaves } from '@/lib/nativeLeaves';
+import { MAX_POINT_PX, patchPointsMaterial } from '@/lib/pointsShader';
+import { AddRefinePointSizePlugin } from '@/lib/addRefinePointSize';
 import { useUrlState } from '@/state/urlState';
 import { SNAP_HALF, SNAP_SAMPLES, SNAP_MIN_HITS } from '@/lib/snapToGround';
 import type { DatasetMarker } from '@/lib/aggregate';
@@ -96,25 +98,6 @@ class PrioritizedCesiumIonAuthPlugin extends CesiumIonAuthPlugin {
 // mosaic root was framed from there: "globe controls start centred on the north pole".)
 const ALULA = { lat: THREE.MathUtils.degToRad(26.6), lon: THREE.MathUtils.degToRad(37.9) };
 const northAt = (lat: number, lon: number) => new THREE.Vector3(-Math.sin(lat) * Math.cos(lon), -Math.sin(lat) * Math.sin(lon), Math.cos(lat));
-
-// Screen-size clamp for attenuated points. three's PointsMaterial has no maximum: a 20 cm "adaptive"
-// point seen from 30 cm covers thousands of pixels, and a few tens of thousands of those stall the GPU
-// on fill rate alone (what zooming close into a dense cloud "freezing" looks like). Cesium's
-// PointCloudShading has `maximumAttenuation` for the same reason. One shared uniform, set from the
-// point-size slider (below); the floor keeps far tiles from vanishing into sub-pixel points.
-const MAX_POINT_PX = { value: 24 };
-function clampPointSize(material: any) {
-  if (material.userData.__ptClamp) return;
-  material.userData.__ptClamp = true;
-  material.onBeforeCompile = (shader: any) => {
-    shader.uniforms.uMaxPointPx = MAX_POINT_PX;
-    shader.vertexShader = shader.vertexShader
-      .replace('uniform float scale;', 'uniform float scale;\nuniform float uMaxPointPx;')
-      .replace('#include <logdepthbuf_vertex>', 'gl_PointSize = clamp( gl_PointSize, 1.0, uMaxPointPx );\n#include <logdepthbuf_vertex>');
-  };
-  material.customProgramCacheKey = () => 'ptclamp';
-  material.needsUpdate = true;
-}
 
 function buildBoundsTrees(scene: THREE.Object3D) {
   scene.traverse((o: any) => {
@@ -574,10 +557,12 @@ const Scene = forwardRef<ViewerHandle, { loadArgs: LoadArgs; tooltip: TooltipCha
   const maxSSE = useViewerStore((s) => s.maxSSE);
   const assetVisible = useViewerStore((s) => s.assetVisible);
   const pointSize = useViewerStore((s) => s.pointSize);
-  // Native mosaic leaves (3DTRjs only): an /aggregate URL is requested with &native=1, and Potree
-  // leaves render through PotreePlugin child renderers instead of /stream. See lib/nativeLeaves.ts.
+  // Native mosaic leaves (3DTRjs only): an /aggregate URL is ALWAYS requested with &native=1 (the
+  // mosaic is the same either way: the extension sits beside each leaf's /stream link), and the
+  // NativeLeavesPlugin switches each Potree leaf between its PotreePlugin child and its /stream child
+  // in place — so the checkbox never remounts the renderer. See lib/nativeLeaves.ts.
   const [{ native }] = useUrlState();
-  const tilesUrl = loadArgs ? (native ? withNativeLeaves(loadArgs.url) : loadArgs.url) : undefined;
+  const tilesUrl = loadArgs ? withNativeLeaves(loadArgs.url) : undefined;
   const basemap = useViewerStore((s) => s.basemap);
   const terrainMode = useViewerStore((s) => s.terrainMode);
   const terrain = resolveTerrainMode(terrainMode, '3dtrjs');
@@ -1105,7 +1090,7 @@ const Scene = forwardRef<ViewerHandle, { loadArgs: LoadArgs; tooltip: TooltipCha
     const adaptive = pointAdaptiveRef.current && Number.isFinite(tile?.geometricError) && tile.geometricError > 0;
     o.material.sizeAttenuation = adaptive;
     o.material.size = adaptive ? pointSpacing(o, tile) * pointSizeRef.current * 0.5 : pointSizeRef.current;
-    if (adaptive) clampPointSize(o.material);
+    patchPointsMaterial(o.material);                                // round sprites, size cap, ADD sizing
     o.material.needsUpdate = true;
   };
 
@@ -1114,11 +1099,36 @@ const Scene = forwardRef<ViewerHandle, { loadArgs: LoadArgs; tooltip: TooltipCha
   // EVERY Scene render: a terrain, point-size or controls change disposed the Potree child renderers,
   // and the new plugin never re-claims already-parsed leaves ("switching terrain / changing point
   // size / switching controls disables the Potree tileset" with native leaves on).
-  const nativeArgs = useMemo(() => ({
-    pointScale: pointSizeRef.current / 2,
-    onChildModel: (sc: THREE.Object3D, leaf: any) => styleDatasetModel(sc, leaf, datasetStyleRef.current),
-  }), []);
   const gltfArgs = useMemo(() => ({ dracoLoader, ktxLoader }), [ktxLoader]);
+  const gltfArgsRef = useRef(gltfArgs);
+  gltfArgsRef.current = gltfArgs;
+  const nativeRef = useRef(native);
+  nativeRef.current = native;
+  const nativeArgs = useMemo(() => ({
+    // read at construction: a renderer remount (new URL) picks up the checkbox's current state
+    get mode() { return nativeRef.current ? 'native' : 'stream'; },
+    pointScale: pointSizeRef.current / 2,
+    // a /stream child renderer gets the same plugin set as the parent's own /stream leaves
+    createStreamPlugins: () => [
+      new ImplicitTilingPlugin(),
+      new ImplicitAddRefineFixPlugin(),
+      new (GLTFExtensionsPlugin as any)(gltfArgsRef.current),
+      new AddRefinePointSizePlugin(),
+    ],
+    // a child's model is treated like one of the parent's own: pickable, styled, sized
+    onChildModel: (sc: THREE.Object3D, leaf: any, childTile: any) => {
+      buildBoundsTrees(sc);
+      styleDatasetModel(sc, leaf, datasetStyleRef.current);
+      sc.traverse((o: any) => applyPointSize(o, childTile));
+    },
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }), []);
+  // the checkbox flips the variant in place (both stay mounted; see lib/nativeLeaves.ts)
+  useEffect(() => {
+    const plugin = (tilesRef.current as any)?.getPluginByName?.('NATIVE_LEAVES_PLUGIN');
+    if (plugin) plugin.mode = native ? 'native' : 'stream';
+    invalidate();
+  }, [native, invalidate]);
   const splatArgs = useMemo(() => ({ renderer: gl, scene }), [gl, scene]);
 
   // Point size was only ever (re)applied by the rAF-throttled effect below, which fires on slider drag
@@ -1156,7 +1166,10 @@ const Scene = forwardRef<ViewerHandle, { loadArgs: LoadArgs; tooltip: TooltipCha
       MAX_POINT_PX.value = THREE.MathUtils.clamp(pointSize * 8, 12, 48);
       tiles.forEachLoadedModel((sc: THREE.Object3D, tile: any) => sc.traverse((o: any) => applyPointSize(o, tile)));
       const nativePlugin = (tiles as any).getPluginByName?.('NATIVE_LEAVES_PLUGIN');
-      if (nativePlugin) nativePlugin.pointScale = pointSize / 2;
+      if (nativePlugin) {
+        nativePlugin.pointScale = pointSize / 2;
+        nativePlugin.forEachChildModel((sc: THREE.Object3D, _leaf: any, ct: any) => sc.traverse((o: any) => applyPointSize(o, ct)));
+      }
       invalidate();
     });
     return () => { if (pointSizeRaf.current != null) cancelAnimationFrame(pointSizeRaf.current); };
@@ -1306,7 +1319,7 @@ const Scene = forwardRef<ViewerHandle, { loadArgs: LoadArgs; tooltip: TooltipCha
       // native Potree leaves: their points live in child renderers, styled per model as they load —
       // a model that arrived while its dataset was hidden must be re-shown too
       const nativePlugin = (tilesRef.current as any)?.getPluginByName?.('NATIVE_LEAVES_PLUGIN');
-      nativePlugin?.mounted.forEach((m: any, leaf: any) => m.child.forEachLoadedModel((sc: THREE.Object3D) => styleDatasetModel(sc, leaf, style)));
+      nativePlugin?.forEachChildModel((sc: THREE.Object3D, leaf: any) => styleDatasetModel(sc, leaf, style));
       invalidate();
     },
     async snapToGround() {
@@ -1530,7 +1543,8 @@ const Scene = forwardRef<ViewerHandle, { loadArgs: LoadArgs; tooltip: TooltipCha
           <TilesPlugin plugin={ImplicitTilingPlugin as any} />
           <TilesPlugin plugin={ImplicitAddRefineFixPlugin as any} />
           <TilesPlugin plugin={GLTFExtensionsPlugin as any} args={gltfArgs as any} />
-          {native && <TilesPlugin plugin={NativeLeavesPlugin as any} args={nativeArgs as any} />}
+          <TilesPlugin plugin={AddRefinePointSizePlugin as any} />
+          <TilesPlugin plugin={NativeLeavesPlugin as any} args={nativeArgs as any} />
           {isSplat && <TilesPlugin plugin={GaussianSplatPlugin as any} args={splatArgs as any} />}
           {debugMode === 'tiles' && <TilesPlugin plugin={DebugTilesPlugin as any} displayBoxBounds colorMode={7} />}
           {debugMode === 'cells' && <MosaicOutlines url={loadArgs.url} tilesRef={tilesRef} />}

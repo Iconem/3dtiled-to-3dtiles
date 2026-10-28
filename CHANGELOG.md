@@ -5,6 +5,23 @@ Format loosely follows [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+### Changed — 2026-10-28 (3DTRjs: native leaves switch in place, round points, ADD-refinement sizing)
+- **Native Potree leaves no longer reload the mosaic.** An `/aggregate` URL is always requested with
+  `&native=1` (the mosaic is the same either way), and `NativeLeavesPlugin` now mounts, per Potree
+  leaf, both a `PotreePlugin` child and a plain `/stream` child renderer, created lazily: the
+  checkbox flips which one updates and draws. Nothing is re-requested; the inactive reader keeps its
+  tiles until the shared LRU evicts them, so flipping back is instant. The `/stream` child gets the
+  parent's plugin set (implicit tiling, the ADD-refine fix, glTF extensions) and its models are
+  picked, styled and sized like the parent's own.
+- **Round point sprites** for 3D Tiles point clouds in 3DTRjs (the quad corners are discarded in
+  the fragment shader), as Potree and Cesium draw them.
+- **ADD-refinement point sizing.** A `/stream` Potree/COPC cloud refines additively, so a coarse
+  tile kept drawing its points at its own spacing under its finer children: big blobs among small
+  points ("weird adaptive point sizing"). `AddRefinePointSizePlugin` now gives each tile's material
+  the boxes of up to 8 visible children (looking through implicit subtree roots) and the size to
+  use inside each — the child's size scaled to the finest spacing visible in its subtree — and the
+  vertex shader picks it per point. The size cap moved to `lib/pointsShader.ts` with the rest.
+
 ### Fixed — 2026-10-28 (3DTRjs: native leaves surviving re-renders, zoom gestures, point-size cap)
 - **Native Potree leaves vanished on a terrain, point-size or controls change.** `<TilesPlugin>`
   re-instantiates its plugin whenever its `args` object changes, and an inline literal with a fresh
