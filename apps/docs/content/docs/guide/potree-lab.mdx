@@ -9,6 +9,13 @@ time with the point-rendering controls 3DTilesRendererJS added in
 example has no URL parameter — its datasets are hard-coded — so this page exists to point the same
 renderer at *our* datasets.
 
+Since 2026-10-28 the main 3DTRjs viewer uses the same vendored `PointCloudEffectsPlugin` for every
+point cloud (3D Tiles, `/stream` and native Potree leaves), with its *Point shape* and *Eye-dome
+lighting* controls under *Tileset & LOD*; the lab remains the single-dataset bench with the debug
+colour modes and the raw, middleware-free Potree path. The vendored material carries two local
+patches (a maximum point size, and child-box sizing for ADD-refined non-octree tilesets), see
+[Viewer](/docs/guide/viewer).
+
 Open it from the demo app with **✺ potree lab** in the top bar. A raw `cloud.js` / `.copc.laz` in the
 URL field opens as itself; a loaded point-cloud tileset (a `/stream` or `/aggregate` URL) opens in
 `tileset` mode.

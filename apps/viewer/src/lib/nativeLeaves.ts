@@ -88,6 +88,8 @@ export interface NativeLeavesOptions {
   errorTarget?: number | null;
   /** Fresh plugin instances for every /stream child renderer (implicit tiling, glTF extensions…). */
   createStreamPlugins?: (() => any[]) | null;
+  /** PointCloudEffectsPlugin options (shape, min/max size, EDL) for every native PotreePlugin. */
+  effectOptions?: (() => Record<string, unknown>) | null;
   /**
    * Called for every model a child loads, with the PARENT leaf tile (for per-dataset styling) and
    * the child's own tile (geometric error, for point sizing).
@@ -103,17 +105,28 @@ export class NativeLeavesPlugin {
   private _pointScale: number;
   errorTarget: number | null;
   createStreamPlugins: NativeLeavesOptions['createStreamPlugins'];
+  effectOptions: NativeLeavesOptions['effectOptions'];
   onChildModel: NativeLeavesOptions['onChildModel'];
   private _seq = 0;
   private _onUpdateAfter = () => this._updateChildren();
   private _forward = (e: any) => this.tiles?.dispatchEvent({ type: e.type });
 
-  constructor({ mode = 'native', pointScale = 1, errorTarget = null, createStreamPlugins = null, onChildModel = null }: NativeLeavesOptions = {}) {
+  constructor({ mode = 'native', pointScale = 1, errorTarget = null, createStreamPlugins = null, effectOptions = null, onChildModel = null }: NativeLeavesOptions = {}) {
     this._mode = mode;
     this._pointScale = pointScale;
     this.errorTarget = errorTarget;
     this.createStreamPlugins = createStreamPlugins;
+    this.effectOptions = effectOptions;
     this.onChildModel = onChildModel;
+  }
+
+  /** Every PointCloudEffectsPlugin under this plugin: each native PotreePlugin, each /stream child's. */
+  forEachEffects(cb: (plugin: any) => void) {
+    this.mounted.forEach((m) => {
+      if (m.native) cb(m.native.potree);
+      const p = m.stream?.child.getPluginByName?.('POINT_CLOUD_EFFECTS_PLUGIN');
+      if (p) cb(p);
+    });
   }
 
   get mode() { return this._mode; }
@@ -219,7 +232,7 @@ export class NativeLeavesPlugin {
 
   private _mountNative(m: Mounted): Variant {
     const child = this._newChild(m);
-    const potree = new PotreePlugin({ url: m.src.uri, pointScale: this._pointScale, useRecommendedSettings: false });
+    const potree = new PotreePlugin({ ...(this.effectOptions?.() ?? {}), url: m.src.uri, pointScale: this._pointScale, useRecommendedSettings: false });
     child.registerPlugin(potree);
     // The native→leaf matrix is a georeferenced projected CRS: near-orthogonal, not exactly, so it
     // goes on its own node with a raw matrix rather than through a lossy decompose.

@@ -368,15 +368,28 @@ mosaic included — *Open data* is typed `mesh` but carries 113 COPC clouds):
 |---|---|---|
 | **Point size (px)** | the style's `pointSize`; with adaptive sizing, the attenuation cap (`maximumAttenuation = 2 × size`) | `PointsMaterial.size` |
 | **Adaptive point size** | `pointCloudShading.attenuation`: size from the tile's geometric error | `sizeAttenuation` with a world-space size of *geometric error × px size / 2* — the tile's point spacing for Potree/COPC-derived tiles, so coarse tiles close their gaps (what the potree lab's *size from tile GE* does), capped on screen at 8 × the px size (12–48 px) |
-| **Eye-dome lighting**, strength | `pointCloudShading.eyeDomeLighting` | not in the main viewer — the potree lab has it, through `PointCloudEffectsPlugin` |
+| **Point shape** | — (squares) | `PointCloudEffectsPlugin.pointShape`: round, square or sphere (bulged depth, so overlapping points intersect) |
+| **Eye-dome lighting**, strength | `pointCloudShading.eyeDomeLighting` | `PointCloudEffectsPlugin.edlStrength`: a depth pre-pass per renderer, then each point is shaded by how far it sits behind a ring of neighbours |
 
-3DTRjs draws 3D Tiles points as **round sprites** (the quad corners are discarded in the fragment
-shader, as Potree and Cesium do). A Potree/COPC cloud streamed as 3D Tiles refines **additively**: a
-coarse tile keeps drawing under its children, and sized by its own spacing its points would be blobs
-several times the size of the points around them. Each tile's points therefore take, inside the box
-of each visible child, that child's size (down to the finest spacing visible in the child's
-subtree) — Potree's per-point "deepest active node" sizing, at tile granularity
-(`lib/addRefinePointSize.ts`, `lib/pointsShader.ts`).
+In 3DTRjs every point cloud goes through 3DTilesRendererJS's `PointCloudEffectsPlugin` (vendored
+from master with the potree lab, see [Potree lab](/docs/guide/potree-lab)): it swaps each tile's
+`PointsMaterial` for its `PointCloudMaterial`, which the native Potree leaves' `PotreePlugin` also
+extends, so the *Point shape* and *Eye-dome lighting* controls drive 3D Tiles points, `/stream`
+children and native leaves alike. Two **local patches** on the vendored material, both marked
+`LOCAL PATCH` in the source:
+
+- a **maximum point size** (`maxPointSize`, set to 8 × the px size): three has no cap, and a 20 cm
+  point seen from 30 cm covers thousands of pixels, tens of thousands of which stall the GPU on fill
+  rate (what "the viewer freezes when zooming close" is). Cesium has `maximumAttenuation` for this.
+  The material also honours `sizeAttenuation = false` (fixed pixel size) now;
+- **ADD-refinement sizing** for tilesets that are not a Potree octree. A Potree/COPC cloud streamed
+  as 3D Tiles refines additively: a coarse tile keeps drawing under its children, and sized by its
+  own spacing its points would be blobs several times the size of the points around them. Potree
+  sizes each point by the deepest active node containing it, from an octree texture only
+  `PotreePlugin` fills. `AddRefinePointSizePlugin` (`lib/addRefinePointSize.ts`) does the same at
+  tile granularity: each tile's material gets the boxes of up to 8 visible children (looking through
+  implicit subtree roots) and the size to use inside each, down to the finest spacing visible in the
+  child's subtree, and the vertex shader picks it per point.
 
 **Native Potree leaves** (3DTRjs only, `?native=true`) renders the Potree datasets of an
 `/aggregate` mosaic through 3DTRjs's `PotreePlugin` instead of `/stream`, with Potree's own adaptive

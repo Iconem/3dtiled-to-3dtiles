@@ -34,8 +34,9 @@ import { fetchOutlines, outlineColor, type TileOutline } from '@/lib/mosaicOutli
 import { datasetGroundSamples, offsetFromSamples } from '@/lib/datasetGround';
 import { ImplicitAddRefineFixPlugin } from '@/lib/implicitAddFix';
 import { NativeLeavesPlugin, withNativeLeaves } from '@/lib/nativeLeaves';
-import { MAX_POINT_PX, patchPointsMaterial } from '@/lib/pointsShader';
 import { AddRefinePointSizePlugin } from '@/lib/addRefinePointSize';
+// Vendored from 3DTilesRendererJS master (unreleased), with local patches (size cap, child boxes).
+import { PointCloudEffectsPlugin } from '@/potree-lab/vendor/pointcloud/PointCloudEffectsPlugin.js';
 import { useUrlState } from '@/state/urlState';
 import { SNAP_HALF, SNAP_SAMPLES, SNAP_MIN_HITS } from '@/lib/snapToGround';
 import type { DatasetMarker } from '@/lib/aggregate';
@@ -1086,13 +1087,45 @@ const Scene = forwardRef<ViewerHandle, { loadArgs: LoadArgs; tooltip: TooltipCha
   };
   const applyPointSize = (o: any, tile: any) => {
     if (!o.isPoints || !o.material) return;
-    if (tile?.internal?.nativeLeaf || o.material.isPointCloudMaterial) return;   // PotreePlugin sizes its own
+    // PotreePlugin sizes its own points, per point, from its active-nodes texture
+    if (tile?.internal?.nativeLeaf || o.material.uniforms?.uActiveNodes?.value) return;
+    // The material is PointCloudEffectsPlugin's PointCloudMaterial (swapped in by processTileModel
+    // before this runs): shape, min/max size, EDL and the ADD child boxes live there.
     const adaptive = pointAdaptiveRef.current && Number.isFinite(tile?.geometricError) && tile.geometricError > 0;
     o.material.sizeAttenuation = adaptive;
     o.material.size = adaptive ? pointSpacing(o, tile) * pointSizeRef.current * 0.5 : pointSizeRef.current;
-    patchPointsMaterial(o.material);                                // round sprites, size cap, ADD sizing
     o.material.needsUpdate = true;
   };
+
+  // PointCloudEffectsPlugin options, read from the store at construction (getters), for the parent
+  // renderer, every /stream child and every native Potree leaf (PotreePlugin extends the same class).
+  const effectsArgs = useMemo(() => ({
+    get pointShape() { return store.getState().pointShape; },
+    get edlStrength() { const s = store.getState(); return s.edl ? s.edlStrength : 0; },
+    get minPointSize() { return Math.min(2, store.getState().pointSize); },
+    get maxPointSize() { return THREE.MathUtils.clamp(store.getState().pointSize * 8, 12, 48); },
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }), []);
+  const applyEffects = useCallback(() => {
+    const tiles = tilesRef.current as any;
+    if (!tiles) return;
+    const s = store.getState();
+    const apply = (p: any) => {
+      if (!p) return;
+      p.pointShape = s.pointShape;
+      p.edlStrength = s.edl ? s.edlStrength : 0;
+      p.minPointSize = Math.min(2, s.pointSize);
+      p.maxPointSize = THREE.MathUtils.clamp(s.pointSize * 8, 12, 48);
+    };
+    apply(tiles.getPluginByName?.('POINT_CLOUD_EFFECTS_PLUGIN'));
+    tiles.getPluginByName?.('NATIVE_LEAVES_PLUGIN')?.forEachEffects(apply);
+    invalidate();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [invalidate]);
+  const pointShape = useViewerStore((s) => s.pointShape);
+  const edl = useViewerStore((s) => s.edl);
+  const edlStrength = useViewerStore((s) => s.edlStrength);
+  useEffect(() => { applyEffects(); }, [pointShape, edl, edlStrength, pointSize, loadArgs, applyEffects]);
 
   // ONE args object for the plugin's lifetime. <TilesPlugin> re-instantiates its plugin whenever
   // `args` changes (a shallow compare), and an inline literal with a fresh arrow function did that on
@@ -1113,8 +1146,10 @@ const Scene = forwardRef<ViewerHandle, { loadArgs: LoadArgs; tooltip: TooltipCha
       new ImplicitTilingPlugin(),
       new ImplicitAddRefineFixPlugin(),
       new (GLTFExtensionsPlugin as any)(gltfArgsRef.current),
+      new (PointCloudEffectsPlugin as any)({ ...effectsArgs }),
       new AddRefinePointSizePlugin(),
     ],
+    effectOptions: () => ({ ...effectsArgs }),
     // a child's model is treated like one of the parent's own: pickable, styled, sized
     onChildModel: (sc: THREE.Object3D, leaf: any, childTile: any) => {
       buildBoundsTrees(sc);
@@ -1163,7 +1198,6 @@ const Scene = forwardRef<ViewerHandle, { loadArgs: LoadArgs; tooltip: TooltipCha
       pointSizeRaf.current = null;
       const tiles = tilesRef.current;
       if (!tiles) return;
-      MAX_POINT_PX.value = THREE.MathUtils.clamp(pointSize * 8, 12, 48);
       tiles.forEachLoadedModel((sc: THREE.Object3D, tile: any) => sc.traverse((o: any) => applyPointSize(o, tile)));
       const nativePlugin = (tiles as any).getPluginByName?.('NATIVE_LEAVES_PLUGIN');
       if (nativePlugin) {
@@ -1184,7 +1218,7 @@ const Scene = forwardRef<ViewerHandle, { loadArgs: LoadArgs; tooltip: TooltipCha
     toggleAssetVisible(show) { store.getState().setAssetVisible(show); },
     setOrtho(on) { store.getState().setOrtho(on); },
     setDebugMode(mode) { store.getState().setDebugMode(mode); },
-    applyPointShading() { store.getState().setPointAdaptive(store.getState().pointAdaptive); /* the effect above re-applies */ },
+    applyPointShading() { store.getState().setPointAdaptive(store.getState().pointAdaptive); /* the effect above re-applies */ applyEffects(); },
     applyShading() { /* shadeless/brightness is a Cesium-only CustomShader path; splats+meshes here use plain materials */ },
     setFov(deg) { store.getState().setFov(deg); },
     flyToLocalFrame(lon, lat, alt) {
@@ -1543,6 +1577,9 @@ const Scene = forwardRef<ViewerHandle, { loadArgs: LoadArgs; tooltip: TooltipCha
           <TilesPlugin plugin={ImplicitTilingPlugin as any} />
           <TilesPlugin plugin={ImplicitAddRefineFixPlugin as any} />
           <TilesPlugin plugin={GLTFExtensionsPlugin as any} args={gltfArgs as any} />
+          {/* point sprites: shape, min/max size, EDL — the same plugin the potree lab and the native
+              Potree leaves use, so one sidebar block drives all of them */}
+          {!isSplat && <TilesPlugin plugin={PointCloudEffectsPlugin as any} args={effectsArgs as any} />}
           <TilesPlugin plugin={AddRefinePointSizePlugin as any} />
           <TilesPlugin plugin={NativeLeavesPlugin as any} args={nativeArgs as any} />
           {isSplat && <TilesPlugin plugin={GaussianSplatPlugin as any} args={splatArgs as any} />}

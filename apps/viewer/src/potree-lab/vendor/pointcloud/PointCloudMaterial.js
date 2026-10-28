@@ -2,7 +2,10 @@
 // src/three/plugins/pointcloud/PointCloudMaterial.js — Apache-2.0 (see ./LICENSE; upstream copyright applies).
 // Not in any npm release yet (0.5.2 predates it); delete this copy once 3d-tiles-renderer ships it.
 // @ts-nocheck
-import { PointsMaterial, Vector2, Vector3 } from 'three';
+import { Matrix4, PointsMaterial, Vector2, Vector3 } from 'three';
+
+// LOCAL PATCH (not upstream): visible child-tile boxes a material can size by (see the constructor)
+export const CHILD_BOXES = 8;
 
 /**
  * PointsMaterial that draws points at a world space size with optional shapes and eye dome
@@ -16,6 +19,7 @@ import { PointsMaterial, Vector2, Vector3 } from 'three';
  * @param {Object} [params] PointsMaterial parameters plus the properties below.
  * @param {('square'|'round'|'sphere')} [params.pointShape='round'] Sprite shape. Spheres write bulged depth so overlapping points intersect, at a fill rate cost.
  * @param {number} [params.minPointSize=2] Smallest projected point size in pixels.
+ * @param {number} [params.maxPointSize=0] LOCAL PATCH: largest projected size in pixels of an attenuated point; 0 for no cap.
  * @param {number} [params.edlStrength=0] Eye dome lighting falloff rate. Zero compiles the effect out.
  * @param {number} [params.edlRadius=1.4] Radius of the eye dome lighting neighbor ring in pixels.
  * @param {('none'|'node'|'depth'|'tile')} [params.debugColorMode='none'] Color points by the node they are sized by, that node's depth, or the tile they came from.
@@ -73,6 +77,19 @@ export class PointCloudMaterial extends PointsMaterial {
 
 	}
 
+	// LOCAL PATCH (not upstream): largest projected point size in pixels, 0 for no cap
+	get maxPointSize() {
+
+		return this.uniforms.uMaxPointSize.value;
+
+	}
+
+	set maxPointSize( value ) {
+
+		this.uniforms.uMaxPointSize.value = value;
+
+	}
+
 	get edlStrength() {
 
 		return this.uniforms.uEdlStrength.value;
@@ -122,6 +139,7 @@ export class PointCloudMaterial extends PointsMaterial {
 		const {
 			pointShape = 'round',
 			minPointSize = 2,
+			maxPointSize = 0,
 			debugColorMode = 'none',
 			edlStrength = 0,
 			edlRadius = 1.4,
@@ -140,6 +158,21 @@ export class PointCloudMaterial extends PointsMaterial {
 			uNodeMinOffset: { value: new Vector3() },
 			uMinPointSize: { value: minPointSize },
 			uTileId: { value: 0 },
+
+			// LOCAL PATCH (not upstream) — see the two blocks in the vertex shader below.
+			// 1. uMaxPointSize: a screen-size cap for attenuated points (0 = none). three has no
+			//    maximum: a 20 cm point seen from 30 cm covers thousands of pixels and tens of
+			//    thousands of those stall the GPU on fill rate, which reads as "the viewer freezes
+			//    when zooming close". Cesium's PointCloudShading has `maximumAttenuation` for this.
+			// 2. Child boxes: tile-granular LOD sizing for ADD-refined 3D Tiles that are not a Potree
+			//    octree (so have no uActiveNodes texture). A point inside one of up to CHILD_BOXES
+			//    visible child tiles takes that child's world size (lib/addRefinePointSize.ts).
+			uMaxPointSize: { value: maxPointSize },
+			uChildCount: { value: 0 },
+			uChildInv: { value: Array.from( { length: CHILD_BOXES }, () => new Matrix4() ) },
+			uChildMin: { value: Array.from( { length: CHILD_BOXES }, () => new Vector3() ) },
+			uChildMax: { value: Array.from( { length: CHILD_BOXES }, () => new Vector3() ) },
+			uChildSize: { value: new Float32Array( CHILD_BOXES ) },
 
 			uEdlTexture: { value: null },
 			uEdlResolution: { value: new Vector2( 1, 1 ) },
@@ -160,6 +193,14 @@ export class PointCloudMaterial extends PointsMaterial {
 					/* glsl */`
 						uniform float size;
 						uniform float uMinPointSize;
+
+						// LOCAL PATCH (not upstream): size cap and child-box LOD sizing, see the constructor
+						uniform float uMaxPointSize;
+						uniform int uChildCount;
+						uniform mat4 uChildInv[ CHILD_BOXES ];
+						uniform vec3 uChildMin[ CHILD_BOXES ];
+						uniform vec3 uChildMax[ CHILD_BOXES ];
+						uniform float uChildSize[ CHILD_BOXES ];
 
 						varying vec3 vViewPosition;
 						varying float vRadius;
@@ -248,6 +289,21 @@ export class PointCloudMaterial extends PointsMaterial {
 
 						float worldSize = size / pow( 2.0, activeResult.x + activeResult.z );
 
+						// LOCAL PATCH (not upstream): a point inside a visible child tile's box takes
+						// that child's size (tile-granular LOD for ADD-refined non-octree tilesets)
+						for ( int i = 0; i < CHILD_BOXES; i ++ ) {
+
+							if ( i >= uChildCount ) break;
+							vec3 q = ( uChildInv[ i ] * vec4( position, 1.0 ) ).xyz;
+							if ( all( greaterThanEqual( q, uChildMin[ i ] ) ) && all( lessThanEqual( q, uChildMax[ i ] ) ) ) {
+
+								worldSize = uChildSize[ i ];
+								break;
+
+							}
+
+						}
+
 						// three's "scale" omits the 1 / tan( fov / 2 ) term, so its attenuation is
 						// not world scale. The projection y scale restores it, as potree does.
 						// Orthographic projections have no distance falloff at all.
@@ -258,8 +314,19 @@ export class PointCloudMaterial extends PointsMaterial {
 
 						}
 
-						gl_PointSize = worldSize * projFactor;
-						gl_PointSize = max( gl_PointSize, uMinPointSize );
+						// LOCAL PATCH (not upstream): honour three's sizeAttenuation = false ("size" is
+						// pixels then, as PointsMaterial draws it), and cap attenuated points
+						#ifdef USE_SIZEATTENUATION
+
+							gl_PointSize = worldSize * projFactor;
+							gl_PointSize = max( gl_PointSize, uMinPointSize );
+							if ( uMaxPointSize > 0.0 ) gl_PointSize = min( gl_PointSize, uMaxPointSize );
+
+						#else
+
+							gl_PointSize = max( size, uMinPointSize );
+
+						#endif
 
 						vViewPosition = mvPosition.xyz;
 						vNodeId = activeResult.y;
@@ -437,7 +504,7 @@ export class PointCloudMaterial extends PointsMaterial {
 
 	_updateDefines() {
 
-		const defines = {};
+		const defines = { CHILD_BOXES };   // LOCAL PATCH (not upstream)
 		if ( this.uniforms.uActiveNodes.value !== null ) defines.LOD_SIZING = '';
 		if ( this.uniforms.uEdlStrength.value > 0 ) defines.EDL_ENABLED = '';
 		if ( this._pointShape === 'round' ) defines.ROUND_POINTS = '';

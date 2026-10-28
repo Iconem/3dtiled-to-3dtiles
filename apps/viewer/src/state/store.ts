@@ -69,11 +69,14 @@ interface ViewerStore {
   setOrtho: (v: boolean) => void;
   setDebugMode: (v: ViewerStore['debugMode']) => void;
   // Point clouds (both renderers): px size; adaptive = size from the tile's geometric error / point
-  // spacing (Cesium: attenuation); eye-dome lighting is Cesium-only in the main viewer.
+  // spacing (Cesium: attenuation); eye-dome lighting in both; the sprite shape is 3DTRjs-only
+  // (PointCloudEffectsPlugin), Cesium draws squares.
   pointAdaptive: boolean;
+  pointShape: 'square' | 'round' | 'sphere';
   edl: boolean;
   edlStrength: number;
   setPointAdaptive: (v: boolean) => void;
+  setPointShape: (v: ViewerStore['pointShape']) => void;
   setEdl: (v: boolean) => void;
   setEdlStrength: (v: number) => void;
   setShadeless: (v: boolean) => void;
@@ -170,6 +173,7 @@ export const useViewerStore = create<ViewerStore>((set, get) => ({
   ortho: false,
   debugMode: 'off',
   pointAdaptive: true,
+  pointShape: 'round',
   edl: true,
   edlStrength: 1,
   shadeless: false,
@@ -182,6 +186,7 @@ export const useViewerStore = create<ViewerStore>((set, get) => ({
   setOrtho: (v) => set({ ortho: v }),
   setDebugMode: (v) => set({ debugMode: v }),
   setPointAdaptive: (v) => set({ pointAdaptive: v }),
+  setPointShape: (v) => set({ pointShape: v }),
   setEdl: (v) => set({ edl: v }),
   setEdlStrength: (v) => set({ edlStrength: v }),
   setShadeless: (v) => set({ shadeless: v }),
