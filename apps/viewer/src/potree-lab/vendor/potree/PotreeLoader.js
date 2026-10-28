@@ -1,6 +1,9 @@
-// Vendored from NASA-AMMOS/3DTilesRendererJS@70847eb9580479cc7bfa574abf15a868394a6f69
+// Vendored from NASA-AMMOS/3DTilesRendererJS@70847eb9580479cc7bfa574abf15a868394a6f69 (identical to the 0.5.3 release)
 // src/three/plugins/potree/PotreeLoader.js — Apache-2.0 (see ./LICENSE; upstream copyright applies).
-// One local patch: v1Attributes() (Potree 1.8 attribute objects). Not in any npm release yet (0.5.2 predates it); delete this copy once 3d-tiles-renderer ships it.
+// This copy is the fork branch jo-chemla/3DTilesRendererJS:pointcloud-fixes, i.e. upstream plus three commits
+// proposed there (PR pending): Potree 1.8 attribute objects (c3381669), a clear error for LAS/LAZ nodes
+// and BROTLI encoding (8cb78c1e), and a thrown error on failed node downloads (6b9071f5).
+// Delete this copy once 3d-tiles-renderer ships them.
 // @ts-nocheck
 import { BufferGeometry, BufferAttribute, Color, SRGBColorSpace, Vector3 } from 'three';
 
@@ -46,21 +49,23 @@ const V1_ATTRIBUTES = {
 	'RGB565': { name: 'rgb565', size: 2, type: 'uint16' },
 };
 
-// LOCAL PATCH (not upstream): Potree 1.8 writes `pointAttributes` as objects
-// { name, size, elements, elementSize, type } where 1.7 wrote bare names, so upstream's
-// `V1_ATTRIBUTES[ name ]` lookup returned undefined for every 1.8 cloud and loading failed with
-// "Cannot read properties of undefined (reading 'size')" — 95% of Iconem's clouds are 1.8.
-// "LAS"/"LAZ" (node files in LAS/LAZ instead of .bin) are not supported by this loader.
+// Potree 1.7 lists the "pointAttributes" of cloud.js by name while 1.8 (PotreeConverter 1.7)
+// writes objects: { name, size, elements, elementSize, type, description }. Both are mapped onto
+// the v2 attribute description. Unknown 1.8 attributes keep their declared size so the point
+// stride stays correct.
 function v1Attributes( list ) {
 
-	if ( ! Array.isArray( list ) ) throw new Error( `PotreeLoader: pointAttributes "${ list }" (LAS/LAZ nodes) is not supported` );
-	return list.map( a => {
+	return list.map( attr => {
 
-		const name = typeof a === 'string' ? a : a.name;
-		const known = V1_ATTRIBUTES[ name ];
-		if ( typeof a === 'string' ) return known;
-		const size = a.size ?? ( a.elements && a.elementSize ? a.elements * a.elementSize : known?.size );
-		return known ? { ...known, size } : { name: name.toLowerCase(), size, type: a.type };
+		if ( typeof attr === 'string' ) {
+
+			return V1_ATTRIBUTES[ attr ];
+
+		}
+
+		const known = V1_ATTRIBUTES[ attr.name ];
+		const size = attr.size ?? attr.elements * attr.elementSize;
+		return known ? { ...known, size } : { name: attr.name.toLowerCase(), size, type: attr.type };
 
 	} );
 
@@ -272,6 +277,20 @@ export class PotreeLoader {
 
 	}
 
+	// hierarchy and node files are binary, so an error page would otherwise be decoded as points
+	async _fetchBuffer( url, options ) {
+
+		const res = await this.fetchData( url, options );
+		if ( ! res.ok ) {
+
+			throw new Error( `PotreeLoader: Could not fetch "${ url }" with status ${ res.status }` );
+
+		}
+
+		return res.arrayBuffer();
+
+	}
+
 	/**
 	 * Loads the dataset metadata and root hierarchy from the given metadata file url.
 	 * @param {string} url Full url of the `cloud.js` or `metadata.json` file.
@@ -291,6 +310,17 @@ export class PotreeLoader {
 		}
 
 		const json = await res.json();
+		if ( version === 2 && json.encoding && json.encoding !== 'DEFAULT' ) {
+
+			throw new Error( `PotreeLoader: "${ json.encoding }" encoded point data is not supported` );
+
+		} else if ( version === 1 && ! Array.isArray( json.pointAttributes ) ) {
+
+			// "LAS" / "LAZ" clouds store each node as a LAS / LAZ file rather than a ".bin" buffer
+			throw new Error( `PotreeLoader: "${ json.pointAttributes }" node files are not supported` );
+
+		}
+
 		this.version = version;
 		this.metadata = version === 2 ? json : normalizeV1( json );
 		this.hierarchy = new Map();
@@ -300,8 +330,7 @@ export class PotreeLoader {
 			// the root hierarchy chunk spans the first "firstChunkSize" bytes of hierarchy.bin
 			this._octreeUrl = new URL( 'octree.bin', baseUrl ).href;
 
-			const hierRes = await this.fetchData( new URL( 'hierarchy.bin', baseUrl ).href, this.fetchOptions );
-			const hierBuf = await hierRes.arrayBuffer();
+			const hierBuf = await this._fetchBuffer( new URL( 'hierarchy.bin', baseUrl ).href, this.fetchOptions );
 			v2ParseHierarchy( hierBuf, 'r', 0, json.hierarchy.firstChunkSize, this.hierarchy );
 
 		} else {
@@ -318,8 +347,7 @@ export class PotreeLoader {
 
 			} else {
 
-				const hierRes = await this.fetchData( new URL( 'r/r.hrc', this._dataDirUrl ).href, this.fetchOptions );
-				const hierBuf = await hierRes.arrayBuffer();
+				const hierBuf = await this._fetchBuffer( new URL( 'r/r.hrc', this._dataDirUrl ).href, this.fetchOptions );
 				v1ParseHierarchy( hierBuf, 'r', this.hierarchy );
 				this._loadedChunks = new Set( [ 'r' ] );
 
@@ -351,20 +379,18 @@ export class PotreeLoader {
 
 			const start = node.byteOffset;
 			const end = node.byteOffset + node.byteSize - 1n;
-			const res = await this.fetchData( this._octreeUrl, {
+			return this._fetchBuffer( this._octreeUrl, {
 				...fetchOptions,
 				headers: {
 					...fetchOptions.headers,
 					Range: `bytes=${ start }-${ end }`,
 				},
 			} );
-			return res.arrayBuffer();
 
 		} else if ( this._inlineHierarchy ) {
 
 			// 1.4 node files sit flat in the octree directory
-			const res = await this.fetchData( `${ this._dataDirUrl }${ key }.bin`, fetchOptions );
-			return res.arrayBuffer();
+			return this._fetchBuffer( `${ this._dataDirUrl }${ key }.bin`, fetchOptions );
 
 		} else {
 
@@ -376,14 +402,12 @@ export class PotreeLoader {
 			if ( level % hierarchyStepSize === 0 && ! this._loadedChunks.has( key ) ) {
 
 				this._loadedChunks.add( key );
-				const hierRes = await this.fetchData( `${ this._dataDirUrl }${ path }/${ key }.hrc`, fetchOptions );
-				const hierBuf = await hierRes.arrayBuffer();
+				const hierBuf = await this._fetchBuffer( `${ this._dataDirUrl }${ path }/${ key }.hrc`, fetchOptions );
 				v1ParseHierarchy( hierBuf, key, this.hierarchy );
 
 			}
 
-			const res = await this.fetchData( `${ this._dataDirUrl }${ path }/${ key }.bin`, fetchOptions );
-			return res.arrayBuffer();
+			return this._fetchBuffer( `${ this._dataDirUrl }${ path }/${ key }.bin`, fetchOptions );
 
 		}
 

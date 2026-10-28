@@ -1,6 +1,8 @@
-// Vendored verbatim from NASA-AMMOS/3DTilesRendererJS@70847eb9580479cc7bfa574abf15a868394a6f69
+// Vendored from NASA-AMMOS/3DTilesRendererJS@70847eb9580479cc7bfa574abf15a868394a6f69 (identical to the 0.5.3 release)
 // src/three/plugins/pointcloud/PointCloudEffectsPlugin.js — Apache-2.0 (see ./LICENSE; upstream copyright applies).
-// Not in any npm release yet (0.5.2 predates it); delete this copy once 3d-tiles-renderer ships it.
+// Two patches, both proposed upstream on jo-chemla/3DTilesRendererJS:pointcloud-fixes (PR pending):
+// maxPointSize (ed4bcbb3) and sizeAttenuation carried over from the replaced material (4e313f88).
+// Delete this copy once 3d-tiles-renderer ships them.
 // @ts-nocheck
 import {
 	BufferGeometry,
@@ -102,7 +104,7 @@ export class PointCloudEffectsPlugin {
 
 	}
 
-	// LOCAL PATCH (not upstream): screen-size cap for attenuated points, 0 for none — see PointCloudMaterial
+	// PATCH (upstream ed4bcbb3): screen-size cap for attenuated points, 0 for none — see PointCloudMaterial
 	get maxPointSize() {
 
 		return this._maxPointSize;
@@ -238,7 +240,7 @@ export class PointCloudEffectsPlugin {
 					color: previousMaterial.color,
 					vertexColors: previousMaterial.vertexColors,
 					size: previousMaterial.size,
-					sizeAttenuation: previousMaterial.sizeAttenuation,   // LOCAL PATCH: keep fixed-pixel points fixed
+					sizeAttenuation: previousMaterial.sizeAttenuation,   // PATCH (upstream 4e313f88): keep fixed-pixel points fixed
 					map: previousMaterial.map,
 					transparent: previousMaterial.transparent,
 					opacity: previousMaterial.opacity,
@@ -324,7 +326,7 @@ export class PointCloudEffectsPlugin {
 
 		material.pointShape = this.pointShape;
 		material.minPointSize = this.minPointSize;
-		material.maxPointSize = this.maxPointSize;   // LOCAL PATCH
+		material.maxPointSize = this.maxPointSize;   // PATCH (upstream ed4bcbb3)
 		material.debugColorMode = this.debugColorMode;
 		material.edlStrength = this.edlStrength;
 
