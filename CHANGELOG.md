@@ -182,6 +182,12 @@ Format loosely follows [Keep a Changelog](https://keepachangelog.com/).
 - **Terrain "None (no globe)"** in both renderers, switched in place (the loaded tileset is untouched),
   for datasets that sit under the terrain or clouds seen from below.
 
+### Fixed — 2026-10-27 (Azure SAS access for live Potree)
+- **Azure SAS support (live Potree 1.x/2.0 only):** preserves the metadata URL query
+  and forwards reusable Azure container/account SAS to same-origin child files
+  without replacing child queries. This is not general signed-URL inheritance.
+  Object-bound signatures and arbitrary metadata queries are not forwarded.
+
 ### Fixed — 2026-10-26 (country-scale COPC placement, 3DTRjs controls, viewer)
 - **`/stream` COPC: curved placement past a 20 km extent.** Points are written through proj4 → ECEF
   → the root frame instead of "source minus origin" on the tangent plane, which floated Corsica 30 km
