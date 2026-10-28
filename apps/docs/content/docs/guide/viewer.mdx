@@ -375,8 +375,8 @@ In 3DTRjs every point cloud goes through 3DTilesRendererJS's `PointCloudEffectsP
 from master with the potree lab, see [Potree lab](/docs/guide/potree-lab)): it swaps each tile's
 `PointsMaterial` for its `PointCloudMaterial`, which the native Potree leaves' `PotreePlugin` also
 extends, so the *Point shape* and *Eye-dome lighting* controls drive 3D Tiles points, `/stream`
-children and native leaves alike. Two patches on the vendored material, the first proposed upstream (fork branch
-`pointcloud-fixes`, see [Potree lab](/docs/guide/potree-lab)), the second local and marked `LOCAL` in the
+children and native leaves alike. Two patches on the vendored material, the first proposed upstream ([PR #1780](https://github.com/NASA-AMMOS/3DTilesRendererJS/pull/1780),
+see [Potree lab](/docs/guide/potree-lab)), the second local and marked `LOCAL` in the
 source:
 
 - a **maximum point size** (`maxPointSize`, set to 8 × the px size): three has no cap, and a 20 cm

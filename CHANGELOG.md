@@ -6,15 +6,15 @@ Format loosely follows [Keep a Changelog](https://keepachangelog.com/).
 ## [Unreleased]
 
 ### Changed — 2026-10-28b (3DTRjs point-cloud patches proposed upstream)
-- **Fork branch [`jo-chemla/3DTilesRendererJS:pointcloud-fixes`](https://github.com/jo-chemla/3DTilesRendererJS/commits/pointcloud-fixes)**,
+- **Upstream [PR #1780](https://github.com/NASA-AMMOS/3DTilesRendererJS/pull/1780)** (branch `jo-chemla/3DTilesRendererJS:pointcloud-fixes`),
   off upstream master (which has not touched the Potree / point-cloud plugins since `0.5.3` shipped
   them on 2026-09-18), one commit per patch, each with a CHANGELOG line in upstream's format and
-  passing upstream's lint: Potree 1.8 attribute objects (`c3381669`), a clear error for LAS/LAZ node
-  files and BROTLI encoding (`8cb78c1e`), a thrown error when a hierarchy or node download fails
-  instead of decoding the error page as points (`6b9071f5`, found while testing: the loader had
-  "loaded" a 403 body as 11 points per node), `maxPointSize` (`ed4bcbb3`), `sizeAttenuation = false`
-  (`4e313f88`), and an R3F docs note that `TilesPlugin` `args` are compared shallowly, so inline
-  callbacks rebuild the plugin every render (`aecb1edd`). Verified against the unpatched loader on a
+  passing upstream's lint: Potree 1.8 attribute objects ([`c3381669`](https://github.com/NASA-AMMOS/3DTilesRendererJS/pull/1780/commits/c3381669)), a clear error for LAS/LAZ node
+  files and BROTLI encoding ([`8cb78c1e`](https://github.com/NASA-AMMOS/3DTilesRendererJS/pull/1780/commits/8cb78c1e)), a thrown error when a hierarchy or node download fails
+  instead of decoding the error page as points ([`6b9071f5`](https://github.com/NASA-AMMOS/3DTilesRendererJS/pull/1780/commits/6b9071f5), found while testing: the loader had
+  "loaded" a 403 body as 11 points per node), `maxPointSize` ([`ed4bcbb3`](https://github.com/NASA-AMMOS/3DTilesRendererJS/pull/1780/commits/ed4bcbb3)), `sizeAttenuation = false`
+  ([`4e313f88`](https://github.com/NASA-AMMOS/3DTilesRendererJS/pull/1780/commits/4e313f88)), and an R3F docs note that `TilesPlugin` `args` are compared shallowly, so inline
+  callbacks rebuild the plugin every render ([`aecb1edd`](https://github.com/NASA-AMMOS/3DTilesRendererJS/pull/1780/commits/aecb1edd)). Verified against the unpatched loader on a
   public Potree 1.8 cloud from Iconem's STAC catalogue (32 of the first 80 items are 1.8): upstream
   throws `Cannot read properties of undefined (reading 'name')`, the branch parses r=3409, r0=2788…
   points, same shape as the 1.7 Lion control.

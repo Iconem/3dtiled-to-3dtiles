@@ -25,7 +25,7 @@ URL field opens as itself; a loaded point-cloud tileset (a `/stream` or `/aggreg
 | Source | `PotreePlugin` (raw, in the browser) | Through our `/stream` (3D Tiles) |
 |---|---|---|
 | Potree 1.7 `cloud.js` (attribute **names**) | ✅ | ✅ |
-| Potree 1.8 `cloud.js` (attribute **objects**) | ❌ upstream: `Cannot read properties of undefined (reading 'size')`. ✅ **with our patch** (upstream `c3381669`, pending) | ✅ |
+| Potree 1.8 `cloud.js` (attribute **objects**) | ❌ upstream: `Cannot read properties of undefined (reading 'size')`. ✅ **with our patch** ([PR #1780](https://github.com/NASA-AMMOS/3DTilesRendererJS/pull/1780/commits/c3381669)) | ✅ |
 | Potree 1.x with LAS/LAZ node files | ❌ (always fetches `.bin`) | ✅ |
 | Potree 2.0 `metadata.json`, DEFAULT encoding | ✅ | ✅ |
 | Potree 2.0, BROTLI encoding | ❌ (`encoding` is never checked) | ✅ |
@@ -35,7 +35,7 @@ URL field opens as itself; a loaded point-cloud tileset (a `/stream` or `/aggreg
 by file name only (`metadata.json` → v2, anything else → v1) and v1 attributes are looked up by name,
 which is the same bug our own decoder had. The vendored `PotreeLoader.js` carries the patch,
 `v1Attributes()`, that accepts 1.8's objects (their `size`, or `elements × elementSize`). With it an
-Iconem 1.8 cloud loads raw (12,343 points on screen; 0 before). It is the first commit of the fork branch described below.
+Iconem 1.8 cloud loads raw (12,343 points on screen; 0 before). It is the first commit of PR #1780, described below.
 
 **COPC therefore always goes through the middleware**, in `stream` mode (a `.copc.laz` URL is
 detected), and the lab's `potree` mode is the raw, middleware-free path for Potree only.
@@ -139,8 +139,8 @@ release ships the work, bump the dependency and delete `.local/3DTilesRendererJS
 `PotreePlugin` and `PointCloudEffectsPlugin` shipped in 3DTilesRendererJS `0.5.3` (2026-09-18), the
 same code as the `70847eb` master commit the copies under `apps/viewer/src/potree-lab/vendor/` are pinned
 to (Apache-2.0, license included). The copies stay because they carry patches the release does not:
-five are proposed upstream as one commit each on the fork branch
-[`jo-chemla/3DTilesRendererJS:pointcloud-fixes`](https://github.com/jo-chemla/3DTilesRendererJS/commits/pointcloud-fixes)
+five are proposed upstream as one commit each in [PR #1780](https://github.com/NASA-AMMOS/3DTilesRendererJS/pull/1780) (branch
+`jo-chemla/3DTilesRendererJS:pointcloud-fixes`)
 (Potree 1.8 attribute objects, a clear error for LAS/LAZ nodes and BROTLI encoding, a thrown error on
 failed node downloads, `maxPointSize`, `sizeAttenuation = false`), each linked from the file header, and
 one is local (child-box sizing, see [Viewer](/docs/guide/viewer)). The viewer itself still depends on

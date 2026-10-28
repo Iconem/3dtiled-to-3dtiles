@@ -2,7 +2,7 @@
 export interface PointCloudEffectsOptions {
   pointShape?: 'square' | 'round' | 'sphere';
   minPointSize?: number;
-  /** PATCH (upstream ed4bcbb3): largest projected size in pixels of an attenuated point; 0 for no cap. */
+  /** PATCH (PR #1780, ed4bcbb3): largest projected size in pixels of an attenuated point; 0 for no cap. */
   maxPointSize?: number;
   edlStrength?: number;
   edlRadius?: number;

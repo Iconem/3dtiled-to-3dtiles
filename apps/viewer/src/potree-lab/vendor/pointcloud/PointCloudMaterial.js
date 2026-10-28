@@ -1,7 +1,8 @@
 // Vendored from NASA-AMMOS/3DTilesRendererJS@70847eb9580479cc7bfa574abf15a868394a6f69 (identical to the 0.5.3 release)
 // src/three/plugins/pointcloud/PointCloudMaterial.js — Apache-2.0 (see ./LICENSE; upstream copyright applies).
-// Three patches. Two are proposed upstream on jo-chemla/3DTilesRendererJS:pointcloud-fixes (PR pending):
-// maxPointSize (ed4bcbb3) and sizeAttenuation = false (4e313f88). The third, child-box LOD sizing for
+// Three patches. Two are in upstream PR #1780 (https://github.com/NASA-AMMOS/3DTilesRendererJS/pull/1780):
+// maxPointSize (https://github.com/NASA-AMMOS/3DTilesRendererJS/pull/1780/commits/ed4bcbb3) and
+// sizeAttenuation = false (https://github.com/NASA-AMMOS/3DTilesRendererJS/pull/1780/commits/4e313f88). The third, child-box LOD sizing for
 // ADD-refined non-octree tilesets, is LOCAL and marked so; its generic form (an active-nodes driver for
 // implicit octrees) is a separate feature request. Delete this copy once 3d-tiles-renderer ships the first two.
 // @ts-nocheck
@@ -22,7 +23,7 @@ export const CHILD_BOXES = 8;
  * @param {Object} [params] PointsMaterial parameters plus the properties below.
  * @param {('square'|'round'|'sphere')} [params.pointShape='round'] Sprite shape. Spheres write bulged depth so overlapping points intersect, at a fill rate cost.
  * @param {number} [params.minPointSize=2] Smallest projected point size in pixels.
- * @param {number} [params.maxPointSize=0] PATCH (upstream ed4bcbb3): largest projected size in pixels of an attenuated point; 0 for no cap.
+ * @param {number} [params.maxPointSize=0] PATCH (PR #1780, ed4bcbb3): largest projected size in pixels of an attenuated point; 0 for no cap.
  * @param {number} [params.edlStrength=0] Eye dome lighting falloff rate. Zero compiles the effect out.
  * @param {number} [params.edlRadius=1.4] Radius of the eye dome lighting neighbor ring in pixels.
  * @param {('none'|'node'|'depth'|'tile')} [params.debugColorMode='none'] Color points by the node they are sized by, that node's depth, or the tile they came from.
@@ -80,7 +81,7 @@ export class PointCloudMaterial extends PointsMaterial {
 
 	}
 
-	// PATCH (upstream ed4bcbb3): largest projected point size in pixels, 0 for no cap
+	// PATCH (PR #1780, ed4bcbb3): largest projected point size in pixels, 0 for no cap
 	get maxPointSize() {
 
 		return this.uniforms.uMaxPointSize.value;
@@ -163,7 +164,7 @@ export class PointCloudMaterial extends PointsMaterial {
 			uTileId: { value: 0 },
 
 			// PATCHES — see the blocks in the vertex shader below.
-			// 1. uMaxPointSize (upstream ed4bcbb3): a screen-size cap for attenuated points (0 = none). three has no
+			// 1. uMaxPointSize (PR #1780, ed4bcbb3): a screen-size cap for attenuated points (0 = none). three has no
 			//    maximum: a 20 cm point seen from 30 cm covers thousands of pixels and tens of
 			//    thousands of those stall the GPU on fill rate, which reads as "the viewer freezes
 			//    when zooming close". Cesium's PointCloudShading has `maximumAttenuation` for this.
@@ -197,7 +198,7 @@ export class PointCloudMaterial extends PointsMaterial {
 						uniform float size;
 						uniform float uMinPointSize;
 
-						// PATCHES: size cap (upstream ed4bcbb3) and child-box LOD sizing (local), see the constructor
+						// PATCHES: size cap (PR #1780, ed4bcbb3) and child-box LOD sizing (local), see the constructor
 						uniform float uMaxPointSize;
 						uniform int uChildCount;
 						uniform mat4 uChildInv[ CHILD_BOXES ];
@@ -317,7 +318,7 @@ export class PointCloudMaterial extends PointsMaterial {
 
 						}
 
-						// PATCH (upstream 4e313f88, ed4bcbb3): honour three's sizeAttenuation = false ("size" is
+						// PATCH (PR #1780, 4e313f88 + ed4bcbb3): honour three's sizeAttenuation = false ("size" is
 						// pixels then, as PointsMaterial draws it), and cap attenuated points
 						#ifdef USE_SIZEATTENUATION
 
