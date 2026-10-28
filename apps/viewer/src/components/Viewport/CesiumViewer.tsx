@@ -408,11 +408,6 @@ const CesiumViewer = forwardRef<ViewerHandle, Props>(function CesiumViewer({ vis
       v.scene.primitives.remove(googleTilesetRef.current);
       googleTilesetRef.current = null;
     }
-    // 'none': no globe at all (datasets under the terrain, a cloud seen from below). The tileset
-    // stays as it is: only the globe's visibility changes.
-    v.scene.globe.show = mode !== 'none';
-    if (v.scene.skyAtmosphere) v.scene.skyAtmosphere.show = mode !== 'none';
-    if (mode === 'none') return;
     if (mode === 'wgs84') {
       v.terrainProvider = new Cesium.EllipsoidTerrainProvider();
       return;
@@ -663,6 +658,13 @@ const CesiumViewer = forwardRef<ViewerHandle, Props>(function CesiumViewer({ vis
       if (v) setImagery(v, id);
     },
     setTerrainMode(mode) { return applyTerrainMode(mode); },
+    // no globe at all (datasets under the terrain, a cloud seen from below): the tileset stays as it is
+    setGlobeVisible(visible) {
+      const v = getViewer();
+      if (!v) return;
+      v.scene.globe.show = visible;
+      if (v.scene.skyAtmosphere) v.scene.skyAtmosphere.show = visible;
+    },
     setMaxSSE(v) {
       if (currentTilesetRef.current) (currentTilesetRef.current as any).maximumScreenSpaceError = v ?? (currentTilesetRef.current as any).maximumScreenSpaceError;
     },

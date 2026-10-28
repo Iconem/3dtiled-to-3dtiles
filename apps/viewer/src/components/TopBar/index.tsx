@@ -15,7 +15,10 @@ import { aggregateIndexUrl, isAggregateUrl, forgetUploadedSet, noteUploadedUrl, 
 // deliberately not part of the nuqs state (see urlState.ts), and this param is left untouched there.
 const START = new URLSearchParams(location.search);
 const START_LOAD = START.get('load');
-const START_TYPE = (['mesh', 'pointcloud', 'splat'] as const).find((t) => t === START.get('type')) ?? 'mesh';
+const START_TYPE = (['mesh', 'pointcloud', 'splat'] as const).find((t) => t === START.get('type'))
+  // no &type=: a /stream point-cloud format IS a point cloud (the renderers' default error target
+  // differs: 2 px for points, 16 for meshes, and 16 on a cloud stops refining far too early)
+  ?? (/[?&]format=(potree|copc|las|laz|e57|ept)\b/i.test(START_LOAD ?? '') ? 'pointcloud' : 'mesh');
 // `&fly=<lon>,<lat>,<height>` — where to look instead of auto-framing the whole tileset (a mosaic's
 // root is often continent-sized, and from there no site is close enough to load).
 const START_FLY = (() => {

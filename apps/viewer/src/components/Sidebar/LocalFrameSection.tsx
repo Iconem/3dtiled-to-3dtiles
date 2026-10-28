@@ -18,7 +18,7 @@ export default function LocalFrameSection({ activeHandleRef }: { activeHandleRef
   const h = () => activeHandleRef.current;
   const terrainMode = useViewerStore((s) => s.terrainMode);
   const terrainLabel = {
-    auto: 'Mapterhorn', none: 'Mapterhorn (globe hidden)', wgs84: 'ellipsoid', cesium: 'World Terrain', 'reearth-qm': 'Mapterhorn', 'mapterhorn-ellipsoid': 'Mapterhorn',
+    auto: 'Mapterhorn', wgs84: 'ellipsoid', cesium: 'World Terrain', 'reearth-qm': 'Mapterhorn', 'mapterhorn-ellipsoid': 'Mapterhorn',
     mapterhorn: 'Mapterhorn, sea level', terrarium: 'AWS, sea level', google: 'Google 3D',
   }[terrainMode];
 

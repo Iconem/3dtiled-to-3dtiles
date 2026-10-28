@@ -5,6 +5,29 @@ Format loosely follows [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+### Fixed — 2026-10-28 (3DTRjs: native leaves surviving re-renders, zoom gestures, point-size cap)
+- **Native Potree leaves vanished on a terrain, point-size or controls change.** `<TilesPlugin>`
+  re-instantiates its plugin whenever its `args` object changes, and an inline literal with a fresh
+  callback did that on every render of the scene: the Potree child renderers were disposed and the
+  new plugin never re-claimed the already-parsed leaves. The args are now created once.
+- **Middle-drag zoom** goes toward the point under the cursor (content or terrain), drag **down**
+  zooms in, and OrbitControls' own middle-button dolly (which pulled the other way at the same time)
+  is off. In globe/env mode the clicked point also becomes the pivot.
+- **Double-click** zooms toward content *and* terrain in every control mode, the controls' built-in
+  double-tap zoom is off (it raced the animated one: a jump, then the tween), any damping still in
+  flight is cancelled first, and the tween starts from the camera's real orientation (the roll no
+  longer snaps on the first frame). OrbitControls' cached up vector follows at the end.
+- **Point size cap:** attenuated points are clamped to a screen size (8× the slider, 12–48 px) in
+  the vertex shader. Zooming close into a dense cloud used to draw tens of thousands of points
+  hundreds of pixels wide each, which stalls the GPU on fill rate (what a "freeze past a given zoom
+  level" looks like); Cesium has `maximumAttenuation` for the same reason.
+- **Default view** over AlUla (most Iconem projects are in Europe and MENA): a world-sized mosaic root
+  used to be framed from the Canvas default on +Z, i.e. over the north pole.
+- **Globe on/off is a checkbox** beside the Terrain select (the terrain choice is kept) instead of a
+  "None (no globe)" terrain mode.
+- `?load=` without `&type=` on a `/stream` point-cloud format loads as a point cloud (2 px error
+  target, not the mesh default of 16).
+
 ### Fixed — 2026-10-27 (3DTRjs navigation, terrain "none", markers)
 - **3DTRjs Environment controls:** left/right drag works on the terrain, not only on the loaded
   content: the controls now raycast the content *and* the globe/terrain renderers, and the fallback
