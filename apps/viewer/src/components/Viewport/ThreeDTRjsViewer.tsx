@@ -91,6 +91,31 @@ class PrioritizedCesiumIonAuthPlugin extends CesiumIonAuthPlugin {
   }
 }
 
+// Where the globe is looked at when nothing says otherwise: most Iconem projects are in Europe and
+// MENA. (The Canvas camera default sits on +Z, i.e. straight above the north pole; a world-sized
+// mosaic root was framed from there: "globe controls start centred on the north pole".)
+const ALULA = { lat: THREE.MathUtils.degToRad(26.6), lon: THREE.MathUtils.degToRad(37.9) };
+const northAt = (lat: number, lon: number) => new THREE.Vector3(-Math.sin(lat) * Math.cos(lon), -Math.sin(lat) * Math.sin(lon), Math.cos(lat));
+
+// Screen-size clamp for attenuated points. three's PointsMaterial has no maximum: a 20 cm "adaptive"
+// point seen from 30 cm covers thousands of pixels, and a few tens of thousands of those stall the GPU
+// on fill rate alone (what zooming close into a dense cloud "freezing" looks like). Cesium's
+// PointCloudShading has `maximumAttenuation` for the same reason. One shared uniform, set from the
+// point-size slider (below); the floor keeps far tiles from vanishing into sub-pixel points.
+const MAX_POINT_PX = { value: 24 };
+function clampPointSize(material: any) {
+  if (material.userData.__ptClamp) return;
+  material.userData.__ptClamp = true;
+  material.onBeforeCompile = (shader: any) => {
+    shader.uniforms.uMaxPointPx = MAX_POINT_PX;
+    shader.vertexShader = shader.vertexShader
+      .replace('uniform float scale;', 'uniform float scale;\nuniform float uMaxPointPx;')
+      .replace('#include <logdepthbuf_vertex>', 'gl_PointSize = clamp( gl_PointSize, 1.0, uMaxPointPx );\n#include <logdepthbuf_vertex>');
+  };
+  material.customProgramCacheKey = () => 'ptclamp';
+  material.needsUpdate = true;
+}
+
 function buildBoundsTrees(scene: THREE.Object3D) {
   scene.traverse((o: any) => {
     if (o.isMesh && o.geometry && !o.geometry.boundsTree) {
@@ -556,6 +581,7 @@ const Scene = forwardRef<ViewerHandle, { loadArgs: LoadArgs; tooltip: TooltipCha
   const basemap = useViewerStore((s) => s.basemap);
   const terrainMode = useViewerStore((s) => s.terrainMode);
   const terrain = resolveTerrainMode(terrainMode, '3dtrjs');
+  const globeVisible = useViewerStore((s) => s.globeVisible);
   const datasetStyleRef = useRef<DatasetStyle | null>(null);
   // Whether the WGS84-radius wireframe globe is meaningful to show at all — see frameToTileset below.
   const [showGlobe, setShowGlobe] = useState(true);
@@ -577,6 +603,8 @@ const Scene = forwardRef<ViewerHandle, { loadArgs: LoadArgs; tooltip: TooltipCha
   // that started on the terrain found nothing: EnvironmentControls then fell back to its default
   // plane (world Y = 0, through the Earth's centre) and did nothing useful ("only middle-drag works").
   const [navScene, setNavScene] = useState<THREE.Object3D | null>(null);
+  const navSceneRef = useRef<THREE.Object3D | null>(null);
+  navSceneRef.current = navScene;
 
   useEffect(() => {
     if ('fov' in camera) (camera as THREE.PerspectiveCamera).fov = fov;
@@ -711,7 +739,9 @@ const Scene = forwardRef<ViewerHandle, { loadArgs: LoadArgs; tooltip: TooltipCha
     const geoReferenced = sphere.center.length() > 6378137 * 0.5 || global;
     setShowGlobe(geoReferenced);
     const fovRad = THREE.MathUtils.degToRad((camera as THREE.PerspectiveCamera).fov ?? fov);
-    const dist = (sphere.radius / Math.sin(fovRad / 2)) * 1.5;
+    // a whole-planet root's sphere is bigger than the Earth (every dataset around the globe): frame
+    // the Earth itself, not that sphere, or the globe is a marble
+    const dist = global ? 2.6 * 6378137 : (sphere.radius / Math.sin(fovRad / 2)) * 1.5;
     // EnvironmentControls assumes world +Y is "up", which is only true for local/non-georeferenced
     // content — real Earth-surface content needs the actual ellipsoid normal at that point instead, or
     // orbiting tilts the camera against the true horizon ("env mode has the wrong up" without this).
@@ -736,6 +766,10 @@ const Scene = forwardRef<ViewerHandle, { loadArgs: LoadArgs; tooltip: TooltipCha
       // camera SOUTH of the target, so the view faces north and, with camera.up = surface normal,
       // north is up on screen (it used to sit north of it, looking south: "globe is not north up")
       dir = surfaceUp.clone().multiplyScalar(Math.sin(pitch)).addScaledVector(north, -Math.cos(pitch)).normalize();
+    } else if (global) {
+      // a whole-planet root (an aggregate mosaic): from above AlUla, north up
+      dir = WGS84_ELLIPSOID.getPositionToNormal(WGS84_ELLIPSOID.getCartographicToPosition(ALULA.lat, ALULA.lon, 0, new THREE.Vector3()), new THREE.Vector3());
+      camera.up.copy(northAt(ALULA.lat, ALULA.lon));
     } else {
       dir = camera.position.clone().sub(sphere.center);
       if (dir.lengthSq() < 1e-6) dir.set(0, 0, 1);
@@ -792,6 +826,34 @@ const Scene = forwardRef<ViewerHandle, { loadArgs: LoadArgs; tooltip: TooltipCha
     invalidate();
   }, [controlMode, setControlsPivot, invalidate, camera]);
 
+  // Nothing loaded yet: the Earth seen from above AlUla, north up (see ALULA).
+  useEffect(() => {
+    if (loadArgs) return;
+    const E = WGS84_ELLIPSOID;
+    camera.position.copy(E.getCartographicToPosition(ALULA.lat, ALULA.lon, 1.4e7, new THREE.Vector3()));
+    camera.up.copy(northAt(ALULA.lat, ALULA.lon));
+    camera.lookAt(0, 0, 0);
+    (camera as THREE.PerspectiveCamera).updateProjectionMatrix?.();
+    setControlsPivot(E.getCartographicToPosition(ALULA.lat, ALULA.lon, 0, new THREE.Vector3()), true);
+    invalidate();
+  }, [loadArgs, camera, setControlsPivot, invalidate]);
+
+  // Kill whatever motion the controls still carry (a drag's damping, a wheel zoom in flight) before
+  // a scripted camera move; otherwise both drive the camera for the first frames ("the camera jumps
+  // at the start of the animation").
+  const stopControlsMotion = useCallback(() => {
+    const c = controlsRef.current;
+    if (!c) return;
+    if (c.isEnvironmentControls) {
+      c.resetState?.();
+      c.zoomDelta = 0; c.zoomDirectionSet = false; c.zoomPointSet = false;
+      c.dragInertia?.set(0, 0, 0); c.rotationInertia?.set(0, 0);
+    } else {
+      c._sphericalDelta?.set(0, 0, 0); c._panOffset?.set(0, 0, 0);
+      if ('_scale' in c) c._scale = 1;
+    }
+  }, []);
+
   // Per frame: remember the current pivot, and keep the clip planes sane for orbit/env. GlobeControls
   // sets near/far itself (adjustCamera, from the horizon); OrbitControls and EnvironmentControls never
   // touch them, so they stayed at whatever frameToTileset chose for the first framing distance: zoom
@@ -837,12 +899,14 @@ const Scene = forwardRef<ViewerHandle, { loadArgs: LoadArgs; tooltip: TooltipCha
     if (cameraTweenRef.current != null) cancelAnimationFrame(cameraTweenRef.current);
     const fromPos = camera.position.clone();
     const controls = controlsRef.current;
-    // where the camera looks NOW, at the target's distance: the orbit target, the globe/env pivot, or
-    // a point along the view axis. (It used to be 1 m ahead of the camera for globe/env, so the first
-    // frames swung the view direction: "the camera jumps at the start of the animation".)
-    const fromLookAt: THREE.Vector3 = controls?.target?.clone()
-      ?? (controls?.getPivotPoint ? controls.getPivotPoint(new THREE.Vector3()) : null)
-      ?? camera.position.clone().addScaledVector(camera.getWorldDirection(new THREE.Vector3()), camera.position.distanceTo(toLookAt));
+    // Where the camera looks NOW: a point ON the view axis (not the pivot itself, which sits off-axis
+    // after a pan or a globe drag), at the pivot's distance. Frame 0 of the tween then reproduces the
+    // current view exactly. (It used to be the pivot, or 1 m ahead of the camera: the first frames
+    // swung the view direction, "the camera jumps at the start of the animation".)
+    const pivot = new THREE.Vector3();
+    const hasPivot = controls?.target ? !!pivot.copy(controls.target) : !!controls?.getPivotPoint?.(pivot);
+    const fromLookAt = camera.position.clone().addScaledVector(camera.getWorldDirection(new THREE.Vector3()),
+      hasPivot ? camera.position.distanceTo(pivot) : camera.position.distanceTo(toLookAt));
     // lookAt() orients the roll from camera.up, which three defaults to ECEF +Y — an arbitrary
     // heading on the ground (it read as "facing west"). Use the local up at the target; when the view
     // is nearly vertical (up ∥ view direction, where lookAt degenerates), north instead.
@@ -854,17 +918,26 @@ const Scene = forwardRef<ViewerHandle, { loadArgs: LoadArgs; tooltip: TooltipCha
       E.getPositionToCartographic(toLookAt, c);
       up.set(-Math.sin(c.lat) * Math.cos(c.lon), -Math.sin(c.lat) * Math.sin(c.lon), Math.cos(c.lat));
     }
-    const geoUp = toLookAt.length() > 1e6;             // georeferenced content only; local scenes keep +Y
-    const fromUp = camera.up.clone();
+    const toUp = toLookAt.length() > 1e6 ? up : new THREE.Vector3(0, 1, 0);   // local scenes keep +Y
+    // the camera's REAL up right now, from its orientation: camera.up is only the hint lookAt() last
+    // used, and is stale after a controls switch (the roll snapped on frame 0: "wrong camera up before
+    // the transition")
+    const fromUp = new THREE.Vector3(0, 1, 0).applyQuaternion(camera.quaternion);
     const t0 = performance.now();
     const step = () => {
       const t = Math.min(1, (performance.now() - t0) / durationMs);
       const eased = t < 0.5 ? 2 * t * t : 1 - Math.pow(-2 * t + 2, 2) / 2; // ease-in-out-quad
-      if (geoUp) camera.up.copy(fromUp).lerp(up, eased).normalize();   // the roll eases too, no snap
+      camera.up.copy(fromUp).lerp(toUp, eased).normalize();   // the roll eases too, no snap
       camera.position.lerpVectors(fromPos, toPos, eased);
       const lookAt = new THREE.Vector3().lerpVectors(fromLookAt, toLookAt, eased);
       camera.lookAt(lookAt);
       setControlsPivot(lookAt);
+      if (t >= 1) {
+        // OrbitControls cached camera.up as a quaternion at construction; EnvironmentControls keeps
+        // its own `up`. Both must follow, or the next drag snaps the roll back.
+        if (controls?._quat && controls._quatInverse) { controls._quat.setFromUnitVectors(camera.up, new THREE.Vector3(0, 1, 0)); controls._quatInverse.copy(controls._quat).invert(); }
+        if (controls?.up && controls.isEnvironmentControls && !controls.isGlobeControls) controls.up.copy(camera.up);
+      }
       invalidate();
       cameraTweenRef.current = t < 1 ? requestAnimationFrame(step) : null;
     };
@@ -888,14 +961,16 @@ const Scene = forwardRef<ViewerHandle, { loadArgs: LoadArgs; tooltip: TooltipCha
       const raycaster = new THREE.Raycaster();
       applyPointsPickTolerance(raycaster, camera, dom, lastSphereCenterRef.current ?? camera.position);
       raycaster.setFromCamera(ndc, camera);
-      const hit = raycaster.intersectObject(tiles.group, true)[0];
+      // the content and the globe/terrain (navScene), so a double-click on the ground works too
+      const hit = raycaster.intersectObject(navSceneRef.current ?? tiles.group, true)[0];
       if (!hit) return;
+      stopControlsMotion();
       const targetPos = camera.position.clone().lerp(hit.point, 0.5);
       animateCameraTo(targetPos, hit.point);
     }
     dom.addEventListener('dblclick', onDblClick);
     return () => dom.removeEventListener('dblclick', onDblClick);
-  }, [gl, camera, animateCameraTo]);
+  }, [gl, camera, animateCameraTo, stopControlsMotion]);
 
   // Middle-mouse-drag to smoothly dolly in/out — a continuous alternative to the mousewheel's
   // discrete zoom steps. Vertical drag distance maps to a fraction of the current camera-to-pivot
@@ -933,7 +1008,8 @@ const Scene = forwardRef<ViewerHandle, { loadArgs: LoadArgs; tooltip: TooltipCha
       const raycaster = new THREE.Raycaster();
       applyPointsPickTolerance(raycaster, camera, dom, lastSphereCenterRef.current ?? camera.position);
       raycaster.setFromCamera(ndc, camera);
-      const hit = tilesRef.current ? raycaster.intersectObject(tilesRef.current.group, true)[0] : undefined;
+      const target = navSceneRef.current ?? tilesRef.current?.group;
+      const hit = target ? raycaster.intersectObject(target, true)[0] : undefined;
       if (hit) return hit.point;
       const controls = controlsRef.current;
       if (controls?.target) return controls.target.clone();
@@ -944,6 +1020,9 @@ const Scene = forwardRef<ViewerHandle, { loadArgs: LoadArgs; tooltip: TooltipCha
       if (e.button !== 1) return;
       dragging = true; lastY = e.clientY;
       pivot.copy(resolvePivot(e));
+      // globe/env: the clicked point also becomes the rotate/zoom pivot. (Not for OrbitControls,
+      // which re-aims the camera at .target: the view would jump to centre the point.)
+      if (!controlsRef.current?.target) setControlsPivot(pivot);
       pivotMesh.position.copy(pivot);
       pivotMesh.updateMatrixWorld();
       scene.add(pivotMesh);
@@ -956,10 +1035,16 @@ const Scene = forwardRef<ViewerHandle, { loadArgs: LoadArgs; tooltip: TooltipCha
       const dy = e.clientY - lastY;
       lastY = e.clientY;
       const toCam = camera.position.clone().sub(pivot);
-      // Drag down (+dy) dollies out, drag up dollies in — matches the mousewheel's own convention.
-      const scale = Math.exp(dy * 0.005);
-      toCam.multiplyScalar(scale);
-      camera.position.copy(pivot).add(toCam);
+      // Drag DOWN (+dy) dollies in, drag up dollies out ("dragging down should always zoom in").
+      const scale = Math.exp(-dy * 0.005);
+      if (scale < 1 && toCam.length() * scale < 0.1) return;             // never through the point
+      const delta = toCam.multiplyScalar(scale - 1);                     // camera displacement
+      camera.position.add(delta);
+      // OrbitControls: slide the target by the same amount, so the view direction holds and the zoom
+      // converges on the CLICKED point rather than the screen centre (its own middle-drag is off, below)
+      const controls = controlsRef.current;
+      if (controls?.target) controls.target.add(delta);
+      controls?.update?.();
       invalidate();
     }
     function onPointerUp(e: PointerEvent) {
@@ -979,7 +1064,7 @@ const Scene = forwardRef<ViewerHandle, { loadArgs: LoadArgs; tooltip: TooltipCha
       pivotMesh.removeFromParent();
       pivotMesh.dispose();
     };
-  }, [gl, camera, invalidate, scene]);
+  }, [gl, camera, invalidate, scene, setControlsPivot]);
 
   const isSplat = loadArgs?.type === 'splat';
   const isPoints = loadArgs?.type === 'pointcloud';
@@ -1020,8 +1105,21 @@ const Scene = forwardRef<ViewerHandle, { loadArgs: LoadArgs; tooltip: TooltipCha
     const adaptive = pointAdaptiveRef.current && Number.isFinite(tile?.geometricError) && tile.geometricError > 0;
     o.material.sizeAttenuation = adaptive;
     o.material.size = adaptive ? pointSpacing(o, tile) * pointSizeRef.current * 0.5 : pointSizeRef.current;
+    if (adaptive) clampPointSize(o.material);
     o.material.needsUpdate = true;
   };
+
+  // ONE args object for the plugin's lifetime. <TilesPlugin> re-instantiates its plugin whenever
+  // `args` changes (a shallow compare), and an inline literal with a fresh arrow function did that on
+  // EVERY Scene render: a terrain, point-size or controls change disposed the Potree child renderers,
+  // and the new plugin never re-claims already-parsed leaves ("switching terrain / changing point
+  // size / switching controls disables the Potree tileset" with native leaves on).
+  const nativeArgs = useMemo(() => ({
+    pointScale: pointSizeRef.current / 2,
+    onChildModel: (sc: THREE.Object3D, leaf: any) => styleDatasetModel(sc, leaf, datasetStyleRef.current),
+  }), []);
+  const gltfArgs = useMemo(() => ({ dracoLoader, ktxLoader }), [ktxLoader]);
+  const splatArgs = useMemo(() => ({ renderer: gl, scene }), [gl, scene]);
 
   // Point size was only ever (re)applied by the rAF-throttled effect below, which fires on slider drag
   // or on the INITIAL loadArgs change — but tiles for a large point cloud keep streaming in well after
@@ -1055,6 +1153,7 @@ const Scene = forwardRef<ViewerHandle, { loadArgs: LoadArgs; tooltip: TooltipCha
       pointSizeRaf.current = null;
       const tiles = tilesRef.current;
       if (!tiles) return;
+      MAX_POINT_PX.value = THREE.MathUtils.clamp(pointSize * 8, 12, 48);
       tiles.forEachLoadedModel((sc: THREE.Object3D, tile: any) => sc.traverse((o: any) => applyPointSize(o, tile)));
       const nativePlugin = (tiles as any).getPluginByName?.('NATIVE_LEAVES_PLUGIN');
       if (nativePlugin) nativePlugin.pointScale = pointSize / 2;
@@ -1374,7 +1473,7 @@ const Scene = forwardRef<ViewerHandle, { loadArgs: LoadArgs; tooltip: TooltipCha
           WGS84 ellipsoid (Globe above) when imagery is on, or a plain wireframe sphere as a ground
           reference when imagery is off. */}
       <group ref={setNavScene}>
-      {showGlobe && terrain !== 'none' && (terrain === 'cesium' ? (
+      {showGlobe && globeVisible && (terrain === 'cesium' ? (
         <TerrainGlobe basemap={basemap} gl={gl} />
       ) : terrain === 'reearth-qm' ? (
         <TerrainGlobe basemap={basemap} gl={gl} url={`${REEARTH_QM_URL}/`} />
@@ -1430,14 +1529,15 @@ const Scene = forwardRef<ViewerHandle, { loadArgs: LoadArgs; tooltip: TooltipCha
               explicit tilesets (only triggers on nodes that actually carry `implicitTiling`). */}
           <TilesPlugin plugin={ImplicitTilingPlugin as any} />
           <TilesPlugin plugin={ImplicitAddRefineFixPlugin as any} />
-          <TilesPlugin plugin={GLTFExtensionsPlugin as any} args={{ dracoLoader, ktxLoader } as any} />
-          {native && <TilesPlugin plugin={NativeLeavesPlugin as any} args={{ pointScale: pointSizeRef.current / 2,
-            onChildModel: (sc: THREE.Object3D, leaf: any) => styleDatasetModel(sc, leaf, datasetStyleRef.current) } as any} />}
-          {isSplat && <TilesPlugin plugin={GaussianSplatPlugin as any} args={{ renderer: gl, scene } as any} />}
+          <TilesPlugin plugin={GLTFExtensionsPlugin as any} args={gltfArgs as any} />
+          {native && <TilesPlugin plugin={NativeLeavesPlugin as any} args={nativeArgs as any} />}
+          {isSplat && <TilesPlugin plugin={GaussianSplatPlugin as any} args={splatArgs as any} />}
           {debugMode === 'tiles' && <TilesPlugin plugin={DebugTilesPlugin as any} displayBoxBounds colorMode={7} />}
           {debugMode === 'cells' && <MosaicOutlines url={loadArgs.url} tilesRef={tilesRef} />}
-          {controlMode === 'globe' && <GlobeControls ref={controlsRef} scene={navScene ?? undefined} enableDamping dampingFactor={0.05} minDistance={1} />}
-          {controlMode === 'env' && <EnvironmentControls ref={controlsRef} scene={navScene ?? undefined} enableDamping dampingFactor={0.05} minDistance={1} />}
+          {/* enableDoubleTapZoom off: the controls' own double-click zoom raced our animated one
+              (it starts on pointerup, ours on dblclick: a jump, then the tween) */}
+          {controlMode === 'globe' && <GlobeControls ref={controlsRef} scene={navScene ?? undefined} enableDamping dampingFactor={0.05} minDistance={1} enableDoubleTapZoom={false} />}
+          {controlMode === 'env' && <EnvironmentControls ref={controlsRef} scene={navScene ?? undefined} enableDamping dampingFactor={0.05} minDistance={1} enableDoubleTapZoom={false} />}
         </TilesRendererR3F>
       )}
       {/* makeDefault registers this as R3F's `state.controls` — same thing GlobeControls/EnvironmentControls
@@ -1446,7 +1546,9 @@ const Scene = forwardRef<ViewerHandle, { loadArgs: LoadArgs; tooltip: TooltipCha
           `state.controls.enabled` while a gizmo handle is being dragged, so they stop fighting over the
           same pointer drag ("clicking the gizmo should pause the control") — no extra wiring needed once
           every control scheme is registered the same way. */}
-      {controlMode === 'orbit' && <OrbitControls ref={controlsRef} makeDefault enableDamping dampingFactor={0.05} />}
+      {/* MIDDLE off: the middle-drag zoom is ours (toward the clicked point, drag down = in); OrbitControls'
+          own dolly on the same button went the other way at the same time */}
+      {controlMode === 'orbit' && <OrbitControls ref={controlsRef} makeDefault enableDamping dampingFactor={0.05} mouseButtons={{ LEFT: THREE.MOUSE.ROTATE, MIDDLE: undefined, RIGHT: THREE.MOUSE.PAN }} />}
       </group>
       <CameraTransition
         mode={ortho ? 'orthographic' : 'perspective'}

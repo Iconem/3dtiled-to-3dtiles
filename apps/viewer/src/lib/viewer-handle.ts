@@ -19,6 +19,8 @@ export interface ViewerHandle {
   load(url: string, type: AssetType, opts?: { sseOverride?: number | null; skipAutoFrame?: boolean }): void;
   setBasemap(id: BasemapId): void;
   setTerrainMode(mode: TerrainMode): void;
+  /** Draw the globe (terrain/ellipsoid) at all; the loaded tileset is untouched. 3DTRjs reads the store. */
+  setGlobeVisible?(visible: boolean): void;
   setMaxSSE(v: number | null): void;
   toggleAssetVisible(show: boolean): void;
   setOrtho(on: boolean): void;

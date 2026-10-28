@@ -45,8 +45,12 @@ interface ViewerStore {
   // 'auto' = Mapterhorn (ellipsoid) in each renderer's native form (lib/terrarium.ts), 'wgs84' = flat
   // ellipsoid, 'cesium' = Cesium World Terrain (Ion), 'google' = Google Photorealistic 3D Tiles.
   terrainMode: TerrainMode;
+  // Globe drawn at all? Off for datasets that sit under the terrain, or a cloud seen from below;
+  // the terrain choice is kept for when it comes back.
+  globeVisible: boolean;
   setBasemap: (v: ViewerStore['basemap']) => void;
   setTerrainMode: (v: ViewerStore['terrainMode']) => void;
+  setGlobeVisible: (v: boolean) => void;
 
   // Tileset & LOD
   maxSSE: number | null; // null = per-type default
@@ -158,6 +162,8 @@ export const useViewerStore = create<ViewerStore>((set, get) => ({
   terrainMode: 'auto',
   setBasemap: (v) => set({ basemap: v }),
   setTerrainMode: (v) => set({ terrainMode: v }),
+  globeVisible: true,
+  setGlobeVisible: (v) => set({ globeVisible: v }),
 
   maxSSE: null,
   assetVisible: true,

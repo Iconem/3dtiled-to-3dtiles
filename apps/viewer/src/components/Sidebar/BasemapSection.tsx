@@ -13,6 +13,8 @@ export default function BasemapSection({ activeHandleRef }: { activeHandleRef: R
   const terrainMode = useViewerStore((s) => s.terrainMode);
   const setBasemap = useViewerStore((s) => s.setBasemap);
   const setTerrainMode = useViewerStore((s) => s.setTerrainMode);
+  const globeVisible = useViewerStore((s) => s.globeVisible);
+  const setGlobeVisible = useViewerStore((s) => s.setGlobeVisible);
   const collisionEnabled = useViewerStore((s) => s.collisionEnabled);
   const setCollisionEnabled = useViewerStore((s) => s.setCollisionEnabled);
 
@@ -32,12 +34,14 @@ export default function BasemapSection({ activeHandleRef }: { activeHandleRef: R
         </Select>
       </div>
       <div className="flex items-center justify-between">
-        <Label className="text-xs">Terrain</Label>
-        <Select value={terrainMode} onValueChange={(v) => setTerrainMode(v as any)}>
+        <Label className="text-xs" title="Unchecked: no globe at all (no terrain, no ellipsoid), for datasets that sit under the terrain or to look at a cloud from below. The tileset stays; the terrain choice is kept for when it comes back.">
+          <Checkbox checked={globeVisible} onCheckedChange={(v) => { setGlobeVisible(!!v); activeHandleRef.current?.setGlobeVisible?.(!!v); }} />
+          Terrain
+        </Label>
+        <Select value={terrainMode} onValueChange={(v) => setTerrainMode(v as any)} disabled={!globeVisible}>
           <SelectTrigger size="sm"><SelectValue /></SelectTrigger>
           <SelectContent>
             <SelectItem value="auto" title="Quantized mesh in Cesium, Terrarium tiles in 3DTRjs — the same ellipsoidal DEM">Mapterhorn (auto)</SelectItem>
-            <SelectItem value="none" title="No globe at all: for datasets that sit under the terrain, or to look at a cloud from below">None (no globe)</SelectItem>
             <SelectItem value="wgs84">WGS84 ellipsoid (flat)</SelectItem>
             <SelectItem value="cesium">Cesium World Terrain</SelectItem>
             <SelectItem value="reearth-qm">Mapterhorn · quantized mesh (ellipsoid)</SelectItem>
