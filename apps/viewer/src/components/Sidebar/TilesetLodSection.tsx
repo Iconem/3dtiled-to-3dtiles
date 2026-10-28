@@ -52,22 +52,31 @@ export default function TilesetLodSection({ activeHandleRef }: { activeHandleRef
               <Checkbox checked={s.pointAdaptive} onCheckedChange={(v) => { s.setPointAdaptive(!!v); h()?.applyPointShading(); }} />
               Adaptive point size
             </Label>
-            {url.renderer === 'cesium' && (
-              <>
-                <Label className="text-xs" title="Eye-dome lighting (Cesium pointCloudShading). 3DTRjs has it in the potree lab only.">
-                  <Checkbox checked={s.edl} onCheckedChange={(v) => { s.setEdl(!!v); h()?.applyPointShading(); }} />
-                  Eye-dome lighting
-                </Label>
-                {s.edl && (
-                  <div className="flex items-center justify-between">
-                    <Label className="text-xs">EDL strength</Label>
-                    <div className="flex w-32 items-center gap-2">
-                      <Slider min={0.1} max={3} step={0.1} value={[s.edlStrength]} onValueChange={([v]) => { s.setEdlStrength(v); h()?.applyPointShading(); }} />
-                      <span className="w-8 text-right text-xs text-muted-foreground">{s.edlStrength}</span>
-                    </div>
-                  </div>
-                )}
-              </>
+            {url.renderer === '3dtrjs' && (
+              <div className="flex items-center justify-between">
+                <Label className="text-xs" title="Sprite shape (3DTRjs PointCloudEffectsPlugin, applied to 3D Tiles points and native Potree leaves alike). Spheres write bulged depth so overlapping points intersect, at a fill-rate cost. Cesium always draws squares.">Point shape</Label>
+                <Select value={s.pointShape} onValueChange={(v) => { s.setPointShape(v as any); h()?.applyPointShading(); }}>
+                  <SelectTrigger size="sm"><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="round">Round</SelectItem>
+                    <SelectItem value="square">Square</SelectItem>
+                    <SelectItem value="sphere">Sphere</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+            )}
+            <Label className="text-xs" title="Eye-dome lighting: Cesium pointCloudShading.eyeDomeLighting; 3DTRjs PointCloudEffectsPlugin (a depth pre-pass per renderer, then each point is shaded by how far it sits behind its neighbours).">
+              <Checkbox checked={s.edl} onCheckedChange={(v) => { s.setEdl(!!v); h()?.applyPointShading(); }} />
+              Eye-dome lighting
+            </Label>
+            {s.edl && (
+              <div className="flex items-center justify-between">
+                <Label className="text-xs">EDL strength</Label>
+                <div className="flex w-32 items-center gap-2">
+                  <Slider min={0.1} max={3} step={0.1} value={[s.edlStrength]} onValueChange={([v]) => { s.setEdlStrength(v); h()?.applyPointShading(); }} />
+                  <span className="w-8 text-right text-xs text-muted-foreground">{s.edlStrength}</span>
+                </div>
+              </div>
             )}
           </>
         )}

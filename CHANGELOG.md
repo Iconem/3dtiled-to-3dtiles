@@ -13,14 +13,25 @@ Format loosely follows [Keep a Changelog](https://keepachangelog.com/).
   tiles until the shared LRU evicts them, so flipping back is instant. The `/stream` child gets the
   parent's plugin set (implicit tiling, the ADD-refine fix, glTF extensions) and its models are
   picked, styled and sized like the parent's own.
-- **Round point sprites** for 3D Tiles point clouds in 3DTRjs (the quad corners are discarded in
-  the fragment shader), as Potree and Cesium draw them.
+- **One point renderer in 3DTRjs: `PointCloudEffectsPlugin` everywhere.** The main viewer now
+  registers 3DTilesRendererJS's (vendored, unreleased) `PointCloudEffectsPlugin` on the parent
+  renderer and on every `/stream` child, and the native leaves' `PotreePlugin` extends the same
+  class, so one sidebar block drives all of them: **Point shape** (round / square / sphere, new,
+  3DTRjs only) and **Eye-dome lighting** with its strength (previously Cesium-only in the main
+  viewer; the lab had it). The hand-written `PointsMaterial` shader patch is gone.
+- **Two local patches on the vendored `PointCloudMaterial`** (marked `LOCAL PATCH`, candidates for
+  upstream): `maxPointSize`, a screen-size cap for attenuated points (three has none; Cesium has
+  `maximumAttenuation`), set to 8 × the px size; and `sizeAttenuation = false` support, so the fixed
+  pixel size works through the material. `PointCloudEffectsPlugin.processTileModel` keeps the
+  source material's `sizeAttenuation`.
 - **ADD-refinement point sizing.** A `/stream` Potree/COPC cloud refines additively, so a coarse
   tile kept drawing its points at its own spacing under its finer children: big blobs among small
-  points ("weird adaptive point sizing"). `AddRefinePointSizePlugin` now gives each tile's material
-  the boxes of up to 8 visible children (looking through implicit subtree roots) and the size to
-  use inside each — the child's size scaled to the finest spacing visible in its subtree — and the
-  vertex shader picks it per point. The size cap moved to `lib/pointsShader.ts` with the rest.
+  points ("weird adaptive point sizing"). Potree's per-point sizing needs an octree texture only
+  `PotreePlugin` fills; `AddRefinePointSizePlugin` does it at tile granularity for any ADD tileset:
+  each tile's material gets the boxes of up to 8 visible children (looking through implicit subtree
+  roots) and the size to use inside each — the child's size scaled to the finest spacing visible in
+  its subtree — and the vertex shader picks it per point (the child-box uniforms are the second
+  local patch on the material).
 
 ### Fixed — 2026-10-28 (3DTRjs: native leaves surviving re-renders, zoom gestures, point-size cap)
 - **Native Potree leaves vanished on a terrain, point-size or controls change.** `<TilesPlugin>`
