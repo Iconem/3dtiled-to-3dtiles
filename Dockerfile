@@ -72,6 +72,7 @@ CMD ["serve", "-l", "3000", "dist"]
 
 # ---- docs: next build → next start, its own service (see the Traefik-routing note up top) ----
 FROM deps AS docs-build
+COPY CHANGELOG.md ./
 RUN pnpm --filter docs build
 
 FROM base AS docs
