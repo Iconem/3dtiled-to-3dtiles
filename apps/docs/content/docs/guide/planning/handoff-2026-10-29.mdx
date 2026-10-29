@@ -43,18 +43,18 @@ remote `main` unless you need the machine-local files listed at the end.
    under 1 s; Portainer logs should show `[range] … retrying` lines at most, no `FetchError`. If the
    mosaic is still slow, the next suspect is `childInfo` on non-`/stream` children (cities, Esri,
    Aerometrex through `/proxy`), which are fetched from third-party hosts.
-3. **When PR #1780 merges**, re-sync `apps/viewer/src/potree-lab/vendor/*` to the merged commits and
+2. **When PR #1780 merges**, re-sync `apps/viewer/src/potree-lab/vendor/*` to the merged commits and
    rewrite the `PR #1780, <sha>` links (vendored headers, `potree-lab.mdx`, `viewer.mdx`, CHANGELOG).
    When a release ships #1782, delete `apps/viewer/src/lib/implicitAddFix.ts`. When #1783 lands,
    drop the `LOCAL PATCH` child-box sizing in the vendored `PointCloudMaterial.js`.
-4. **Potree LAZ / BROTLI nodes** fail loudly on purpose (PotreeConverter 1.7 LAZ output, Potree 2.0).
+3. **Potree LAZ / BROTLI nodes** fail loudly on purpose (PotreeConverter 1.7 LAZ output, Potree 2.0).
    Decoders exist (laz-perf WASM, brotli-wasm); an optional decoder hook was discussed, not started.
-5. **Lion quadtree sample** for `jo-chemla/3dtiles-samples` (Garrett's "implicit octree and
+4. **Lion quadtree sample** for `jo-chemla/3dtiles-samples` (Garrett's "implicit octree and
    quadtree"): flatten the octree's z cells per level into one tile. Not started.
-6. **Iconem STAC** `/api/stac/search?collections=pointcloud` returns 500 at `offset≥80` and for
+5. **Iconem STAC** `/api/stac/search?collections=pointcloud` returns 500 at `offset≥80` and for
    `limit>80` (platform bug, not ours); 45 of 94 items are Potree 1.8. Asset hrefs are day-long SAS
    URLs whose query string must be forwarded on node requests.
-7. **Roadmap items untouched this session**: see `todo-future-work.mdx` Summary (fastest point-cloud
+6. **Roadmap items untouched this session**: see `todo-future-work.mdx` Summary (fastest point-cloud
    tiler research, native 3DTRjs plugin for the middleware, `potree-to-copc` blocked on a JS LAZ
    encoder, SH colour for splats, WorkerPool wiring, browser runtime audit).
 
