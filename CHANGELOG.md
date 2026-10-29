@@ -19,6 +19,9 @@ Format loosely follows [Keep a Changelog](https://keepachangelog.com/).
   ×100 (3DTRjs divides the raw geometric error by distance, it does not scale it by the transform),
   so the 464 m model is on screen at the kitchen-sink example's 690 m start and vanishes past ~1 km
   on master.
+- **Feature request [#1783](https://github.com/NASA-AMMOS/3DTilesRendererJS/issues/1783)**, adaptive
+  point size for implicit ADD octrees (the generic form of our child-box sizing), with a proposed
+  implementation shape; PR offered, pending Garrett's direction.
 - PR #1780 review follow-up: the R3F `TilesPlugin` args note moved from the generated `API.md` into
   the JSDoc (`2878f781`); Potree's own material has `minSize` 2 / `maxSize` 50, our `maxPointSize`
   stays 0 (off) by default unless Garrett prefers 50.
