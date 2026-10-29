@@ -5,6 +5,24 @@ Format loosely follows [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+### Changed — 2026-10-29 (ADD-skip regression filed upstream, public reproducer repo)
+- **Upstream issue [#1781](https://github.com/NASA-AMMOS/3DTilesRendererJS/issues/1781) and PR
+  [#1782](https://github.com/NASA-AMMOS/3DTilesRendererJS/pull/1782)** for the ADD-skip traversal
+  regression (fork branch `fix-implicit-add-skip`, `53a4415`), after Garrett asked for a dedicated
+  issue in the #912 thread. `lib/implicitAddFix.ts` now points at them.
+- **New public samples repo [jo-chemla/3dtiles-samples](https://github.com/jo-chemla/3dtiles-samples)**
+  (GitHub Pages, CORS `*`): `lion_takanawa/implicit-octree/tileset.json` is the Lion `/stream`
+  tileset exported static with `3dtiled export --keep-implicit` (no depth cap needed: 167 glb, 128
+  subtrees, 7.8 MB, 9.5 s), so the upstream reproducer no longer depends on our server. The headless
+  harness gives identical numbers against the Pages URL (master 0 tiles beyond 0.5 m, fix 1).
+  `tileset-x100.json` next to it carries a root transform of scale 100 **and** geometric errors
+  ×100 (3DTRjs divides the raw geometric error by distance, it does not scale it by the transform),
+  so the 464 m model is on screen at the kitchen-sink example's 690 m start and vanishes past ~1 km
+  on master.
+- PR #1780 review follow-up: the R3F `TilesPlugin` args note moved from the generated `API.md` into
+  the JSDoc (`2878f781`); Potree's own material has `minSize` 2 / `maxSize` 50, our `maxPointSize`
+  stays 0 (off) by default unless Garrett prefers 50.
+
 ### Fixed — 2026-10-29 (tile-server: S3 "socket hang up" no longer sticks)
 - **Prod logs showed repeated `FetchError … socket hang up` from node-fetch inside the `copc` library**
   while the `open` mosaic loaded the DEFRA / NOAA overview COPCs. The errors were caught per request,
