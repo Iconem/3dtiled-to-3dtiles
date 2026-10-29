@@ -5,6 +5,24 @@ Format loosely follows [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+### Fixed — 2026-10-29b (the prod stall: curved COPC trees built 113 times on the event loop)
+- **Root cause of "3dtiled stalls on the open mosaic", found after the hang-up fix landed and prod
+  got slower, not faster:** curved placement (2026-10-26) builds an EXPLICIT tree for every
+  country-scale COPC, 15–25 k tiles with a 5×5×2 proj4 sample grid per tile — ~1 s of CPU locally,
+  ~8 s on prod — and `/aggregate`'s `childInfo` fetched that whole 6–10 MB tree from our own
+  `/stream` just to read the root bounds, 113 times for `flai`, on the single event loop. Before the
+  hang-up fix most of those loads failed fast, which hid the cost behind holes in the mosaic; with
+  every dataset loading, `set=open` took over five minutes on prod and the root page five seconds.
+- **`/stream/tileset.json?…&depth=0`** returns the root tile alone (copc-live: from the header and
+  root page already in the context, no drain, no prefetch, a curved root box from the cube corners);
+  `childInfo` appends it to every `/stream` child URL. **`curvedBox`** samples only the 8 corners of
+  tiles under 20 km (the `sag` term already covers the chord dip; the fine grid stays for the few
+  tiles above), and the finished curved tree is **cached per context and CRS**, so the first client to
+  open a dataset builds it once (~150–250 ms locally).
+- Measured on a cold local server: Liège root-only 766 B in 0.35 s; full curved tree 6 MB in 0.4 s;
+  **`flai` (113 COPCs) 2.4 s cold, 15 ms warm, 113/113 roots, no failures**; `open` 3.8 s. S3 still
+  reset 4 range reads during that run; all 4 were retried successfully by `range-getter.js`.
+
 ### Changed — 2026-10-29 (ADD-skip regression filed upstream, public reproducer repo)
 - **Upstream issue [#1781](https://github.com/NASA-AMMOS/3DTilesRendererJS/issues/1781) and PR
   [#1782](https://github.com/NASA-AMMOS/3DTilesRendererJS/pull/1782)** for the ADD-skip traversal

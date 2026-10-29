@@ -195,7 +195,10 @@ export async function handleStream(req, res, u) {
     const crs = u.searchParams.get('crs') || undefined;
     // curved: on|off overrides copc-live's extent rule for placing points on the ellipsoid (default auto).
     const curved = curvedParam(u.searchParams.get('curved'));
-    const ts = await adapter.tileset(url, { tiling: u.searchParams.get('tiling'), lazy, hierarchy, prefetch, centroids, crs, curved, ...geosplatsOpts });
+    // depth=0: the root tile only (no children, no hierarchy drain) — what /aggregate needs to place a
+    // child; honoured by copc-live's curved explicit tree, ignored where the root is already cheap.
+    const depth = u.searchParams.has('depth') ? Math.max(0, Math.trunc(Number(u.searchParams.get('depth')))) : undefined;
+    const ts = await adapter.tileset(url, { tiling: u.searchParams.get('tiling'), lazy, hierarchy, prefetch, centroids, crs, curved, depth, ...geosplatsOpts });
     // User-directed globe placement (&lon=&lat=[&alt=][&heading=][&scale=]): attach a LOCAL dataset to
     // a real location so ANY 3D Tiles client (Cesium for Unreal/Unity, QGIS, native CesiumJS) streams
     // it in place — no viewer-side reorientation needed. Composes ON TOP of the adapter's own
