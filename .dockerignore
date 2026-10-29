@@ -6,5 +6,5 @@ dist
 .github
 .claude
 *.md
-CHANGELOG.md
+!CHANGELOG.md
 docs-references
