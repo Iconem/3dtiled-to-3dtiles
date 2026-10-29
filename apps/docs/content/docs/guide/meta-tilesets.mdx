@@ -674,12 +674,36 @@ bilinear error by h²/4R = 1 cm) and interpolated, so a leaf tile costs 8 projec
 *transform:*) overrides the 20 km rule; a mosaic forwards it to every COPC child. Two consequences:
 - the tree is **explicit** for such a source, whatever `&tiling=` says: implicit tiling subdivides the
   root box, which curved content no longer fits, so each tile gets a box fitted to its placed corners
-  (a 5 × 5 grid of the sub-cube's top and bottom faces, plus the sag between samples);
-- the whole COPC hierarchy is read first, which the overviews make cheap (the France overview: 29 000
-  tiles, 8 s cold, 2 s warm).
+  (its 8 corners, plus the sag between them; tiles wider than 20 km sample a 5 × 5 grid of the top
+  and bottom faces instead);
+- the whole COPC hierarchy is read first (one coalesced range request for the pages, see
+  [range reads](/docs/guide/architecture-caching#parallel-hierarchy-build)) and the finished tree is
+  kept per source and CRS, so it is built once per process (the France overview: 29 000 tiles,
+  ~0.3 s locally). `/aggregate` never asks for it: it reads a child's root with `&depth=0`.
 
 `scripts/check-curved.mjs <stream url>` reads the farthest tile of a tileset and prints the heights of
 its points: 0–5 m for the Corsica tile of the IGN overview, where the plane gave 30 000.
+
+#### Why this shape, and what was not done
+
+The problem has one cause and several places to put the fix. Content local to a projected origin,
+placed by one root transform, is exact only on the tangent plane; the Earth leaves that plane as
+d²/2R, and the projection's own scale factor and convergence drift with distance. The options:
+
+| Approach | Where the curvature goes | Cost | Verdict |
+|---|---|---|---|
+| **One root transform, content as is** | Nowhere: the error is d²/2R | Free | What every site-scale source keeps. Wrong past ~20 km (8 m), absurd at 500 km (20 km). |
+| **One transform per tile** (each tile in its own tangent frame, as the 3D Tiles `transform` allows) | Into the tile transforms | Free at write time | Rejected: a tile is still flat across its own extent (a 50 km top-level tile is 50 m off at its edge), a per-tile frame breaks the "one frame per dataset" that the viewer's point sizing, picking and native Potree leaves rely on, and the tile content would no longer match the implicit tree's. |
+| **Per point, exact** (proj4 → ECEF → root frame for every point) | Into the vertex data | ~1 µs a point: a 10 M-point tile is 10 s | Correct but too slow on the event loop; kept only for the few sparse tiles wider than 32 km. |
+| **Per tile, sampled** (the exact placement on a grid over the tile, bilinear in x/y, linear in z) | Into the vertex data | 8 proj4 calls for a leaf, 8 450 for a 32 km tile; error ≤ h²/4R = 1 cm at a 505 m step | **Chosen.** Same output as the exact path to 1 cm, one root transform; the implicit tree only has to become explicit so each box can be fitted to the placed content. |
+| **Regions instead of boxes** (geographic `region` bounding volumes per tile) | Into the bounding volumes only | Free | Not needed once the boxes are fitted to the placed corners; regions would also stop the tree from sharing the root's local frame. |
+
+Two choices follow from the table. The root transform stays the trihedron of the origin, so a
+renderer sees one frame for the whole dataset and the points nearest the origin do not move at all.
+And the grid step is derived from the error budget (1 cm) rather than fixed, so small tiles are as
+cheap as before and only the wide, sparse top levels pay. What this does not fix: a cube inflated by
+outlier points puts the origin far from the data (Spain 2008–2015 below), and heights stay whatever the
+file says (orthometric heights need `&snap=`).
 
 Two flai files show what the fix does and does not cover. *Spain — CNIG 2008-2015 epsg25831* has a
 4 000 km cube from outlier points, so its origin sits over Tunisia at 1 000 km altitude: the tangent

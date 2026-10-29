@@ -5,6 +5,20 @@ Format loosely follows [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+### Docs — 2026-10-29c (changelog in the site, curved placement design, handoff)
+- **The changelog is now a page of the docs site** (`/docs/changelog`, first entry of the sidebar and
+  a card on the index): `apps/docs/scripts/sync-changelog.mjs` mirrors this file into
+  `content/docs/changelog.mdx` before every `dev` and `build` (MDX-escaped), and the output is
+  committed so a checkout without a build step has it too.
+- **Curved placement, the design behind it** (`meta-tilesets.mdx`, "Why this shape, and what was not
+  done"): the options table — one root transform, one transform per tile, exact per point, sampled per
+  tile (chosen), regions instead of boxes — with cost and verdict for each, and why the root frame is
+  kept for the whole dataset. The explicit-tree paragraph now states the 8-corner box fit under 20 km
+  and the per-source cache (2026-10-29b).
+- **Handoff note** (`planning/handoff-2026-10-29.mdx`) gained the table of exactly which vendored
+  files, local plugins, imports and docs paragraphs to delete or change when PR #1780, PR #1782 and
+  #1783 land upstream, and what to keep until each does.
+
 ### Fixed — 2026-10-29b (the prod stall: curved COPC trees built 113 times on the event loop)
 - **Root cause of "3dtiled stalls on the open mosaic", found after the hang-up fix landed and prod
   got slower, not faster:** curved placement (2026-10-26) builds an EXPLICIT tree for every
