@@ -333,6 +333,13 @@ hang-ups, timeouts and 429/5xx, and any other non-2xx throws instead of being pa
 failed page read puts the page back in the pending set, and a failed root load is cached for only
 60 s (`memoizeAsync` `failureTtlMs`), so one S3 hiccup no longer hides a dataset until restart.
 
+**Curved COPC trees are built once and `/aggregate` never asks for them.** A country-scale COPC gets
+an explicit tree (15–25 k tiles, each box fitted to placed corners); that build is CPU on the event
+loop, so it is cached per context and CRS, samples only the 8 corners of tiles under 20 km, and the
+aggregate's child-root fetch uses `/stream/tileset.json?…&depth=0`, which answers with the root tile
+alone from the header and root page. The `flai` set (113 COPCs) builds cold in ~2.4 s instead of
+minutes.
+
 All lazy paths verified to reach the **same node set as eager** after parallelization: Potree 2.0
 byte-identical (1624 nodes), RAD 765/765 reachable, I3S 5882/5882 content tiles.
 

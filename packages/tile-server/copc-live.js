@@ -162,11 +162,20 @@ function curvedFor(ctx, crsOverride, mode = null) {
   return curved;
 }
 
-/** A tile box fitted to a sub-cube's PLACED corners: a 5×5 grid of its top and bottom faces, plus the sag between samples. */
+/**
+ * A tile box fitted to a sub-cube's PLACED corners, plus the sag between samples. Tiles wider than
+ * 20 km (where the tangent plane is metres off) sample a 5×5 grid of the top and bottom faces; smaller
+ * ones only their 8 corners — the surface between corners of a 20 km tile dips 8 m below the chord,
+ * which the `sag` term already adds, and the projection is linear enough over that span. This is the
+ * whole cost of a curved tileset (one proj4 round-trip per sample over 15–25 k tiles): 50 samples per
+ * tile took ~1 s per national overview locally and ~8 s on prod, and the `flai` mosaic builds 113 of
+ * them back to back on the event loop.
+ */
+const CURVED_FINE_GRID = 20000;
 function curvedBox(sc, toLocal) {
   const p = new Float64Array(3);
   const min = [Infinity, Infinity, Infinity], max = [-Infinity, -Infinity, -Infinity];
-  const N = 4;
+  const N = Math.max(sc[3]-sc[0], sc[4]-sc[1]) > CURVED_FINE_GRID ? 4 : 1;
   for (let i = 0; i <= N; i++) for (let j = 0; j <= N; j++) for (const z of [sc[2], sc[5]]) {
     toLocal(sc[0] + (sc[3]-sc[0]) * i / N, sc[1] + (sc[4]-sc[1]) * j / N, z, p);
     for (let k = 0; k < 3; k++) { if (p[k] < min[k]) min[k] = p[k]; if (p[k] > max[k]) max[k] = p[k]; }
@@ -185,7 +194,7 @@ const subCube = (cube, level, x, y, z) => {
 
 // Explicit 3D Tiles tree from the COPC hierarchy. Boxes = octree sub-cube relative to the origin
 // (or, with a curved placement, fitted to the placed sub-cube).
-function buildTilesetExplicit(ctx, urlParam, curved = null) {
+function buildTilesetExplicit(ctx, urlParam, curved = null, maxDepth = Infinity) {
   const { nodeMap, origin, rootDiag, cube } = ctx;
   const transform = curved?.transform ?? ctx.transform;
   const enc = encodeURIComponent(urlParam);
@@ -199,7 +208,7 @@ function buildTilesetExplicit(ctx, urlParam, curved = null) {
     const tile = { boundingVolume: { box }, geometricError: rootDiag / (2**level), refine: 'ADD' };
     if (node && node.pointCount > 0) tile.content = { uri: `tile/${key}.glb?url=${enc}` };
     const kids = [];
-    for (let i = 0; i < 8; i++) {
+    if (level < maxDepth) for (let i = 0; i < 8; i++) {
       const ck = `${level+1}-${2*x+(i&1)}-${2*y+((i>>1)&1)}-${2*z+((i>>2)&1)}`;
       if (nodeMap.has(ck)) kids.push(tileFor(ck));
     }
@@ -254,6 +263,14 @@ async function serveTileGlb(ctx, key, curved = null) {
 export const copcTileRe = /^[0-9]+-[0-9]+-[0-9]+-[0-9]+$/;
 export async function copcTileset(url, opts = {}) {
   const ctx = await getCtx(url);
+  // depth=0 (the aggregate placing a child): the root tile alone, from the header and root page
+  // already in ctx — no hierarchy drain, no background prefetch, no 15–25 k-tile tree. A curved root
+  // box only needs the cube corners, so a 113-dataset mosaic costs 113 header reads, not 113 trees.
+  if (opts.depth === 0) {
+    const curved = curvedFor(ctx, opts.crs, opts.curved);
+    const ts = curved || opts.tiling === 'explicit' ? buildTilesetExplicit(ctx, url, curved, 0) : buildTilesetImplicit(ctx, url);
+    return withCrsOverride(ts, ctx, opts.crs, 'copc-live');
+  }
   if (opts.hierarchy === 'eager') {
     await ctx.drainAll();                                   // cache=hierarchy: full index resident now
   } else if (!ctx.warmed) {                                 // cache=none: background prefetch (once)
@@ -265,8 +282,15 @@ export async function copcTileset(url, opts = {}) {
     else if (pf > 0) (async () => { for (let L = 0; L < pf; L++) await ctx.ensureForSubtree(L, 0, 0, 0); })().catch(bg);
   }
   const curved = curvedFor(ctx, opts.crs, opts.curved);
-  if (curved) await ctx.drainAll();                         // per-tile boxes need the whole index
-  const ts = opts.tiling === 'explicit' || curved ? buildTilesetExplicit(ctx, url, curved) : buildTilesetImplicit(ctx, url);
+  if (curved) {
+    // per-tile boxes need the whole index, and the build is the expensive part (see curvedBox), so
+    // the finished tree is kept on the curved entry: the aggregate reads it once for the root
+    // bounds, then every client that opens the dataset gets the same object.
+    await ctx.drainAll();
+    curved.tileset ??= withCrsOverride(buildTilesetExplicit(ctx, url, curved), ctx, opts.crs, 'copc-live');
+    return curved.tileset;
+  }
+  const ts = opts.tiling === 'explicit' ? buildTilesetExplicit(ctx, url, curved) : buildTilesetImplicit(ctx, url);
   return withCrsOverride(ts, ctx, opts.crs, 'copc-live');
 }
 

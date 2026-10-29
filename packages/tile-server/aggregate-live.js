@@ -104,7 +104,11 @@ function sphereToParent(sphere, transform, isRegion) {
 
 // One child's meta entry: fetch its tileset.json (cached per URL), derive sphere + GE.
 const childInfo = ttlCache(async (url) => {
-  const r = await fetch(url);
+  // Only the root is read here, so ask our own /stream for just that (`depth=0`): a curved COPC
+  // child otherwise builds and serialises its whole 15–25 k-tile tree, ~1 s of CPU each (8 s on
+  // prod), 113 times for the flai set, on the event loop — the "server stalls on the open mosaic".
+  const infoUrl = /\/stream\/tileset\.json\?/.test(url) && !/[?&]depth=/.test(url) ? `${url}&depth=0` : url;
+  const r = await fetch(infoUrl);
   if (!r.ok) throw new Error(`fetch ${url} → ${r.status}`);
   const ts = await r.json();
   const root = ts.root || {};
