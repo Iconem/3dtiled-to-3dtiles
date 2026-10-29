@@ -325,6 +325,14 @@ concurrently, I3S loads each node-page level concurrently (then builds the fragm
 hundreds of simultaneous range requests. **Parallel tile fetch** is inherent — the renderer requests
 many tiles at once and Node serves them concurrently; a single tile is one range read + decode.
 
+**COPC range reads are coalesced and retried** (`tile-server/range-getter.js`, 2026-10-29): reads
+issued in the same tick are sorted by offset and merged when adjacent or less than 64 KB apart (COPC
+writers lay hierarchy pages out back-to-back, so draining DEFRA 2008's 96 pages is one request, not
+96), capped at 32 in flight per host (`TILED_RANGE_MAX_PER_HOST`), retried three times on resets,
+hang-ups, timeouts and 429/5xx, and any other non-2xx throws instead of being parsed as data. A
+failed page read puts the page back in the pending set, and a failed root load is cached for only
+60 s (`memoizeAsync` `failureTtlMs`), so one S3 hiccup no longer hides a dataset until restart.
+
 All lazy paths verified to reach the **same node set as eager** after parallelization: Potree 2.0
 byte-identical (1624 nodes), RAD 765/765 reachable, I3S 5882/5882 content tiles.
 

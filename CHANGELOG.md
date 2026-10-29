@@ -5,6 +5,32 @@ Format loosely follows [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+### Fixed — 2026-10-29 (tile-server: S3 "socket hang up" no longer sticks)
+- **Prod logs showed repeated `FetchError … socket hang up` from node-fetch inside the `copc` library**
+  while the `open` mosaic loaded the DEFRA / NOAA overview COPCs. The errors were caught per request,
+  so nothing crashed, but three things made one transient hang-up permanent until a restart:
+  `memoizeAsync` cached a failed root load forever (the dataset answered 500 for the life of the
+  process), `ensureForSubtree` / `drainAll` deleted a hierarchy page from `pendingPages` before
+  reading it (a failed read lost the page and every subtree under it came back empty, silently), and
+  a curved-placement tileset of a 900 km COPC drained its whole hierarchy with one unpooled,
+  un-retried request per page (96 pages for DEFRA 2008) while the aggregate fanned out 16 such loads.
+- **New `packages/tile-server/range-getter.js`** replaces the library's `Getter.http` for COPC: range
+  reads issued in the same tick are sorted and coalesced when adjacent or less than 64 KB apart
+  (capped at 8 MB per merged request), capped at 32 in flight per host (`TILED_RANGE_MAX_PER_HOST`),
+  retried three times with backoff on resets / hang-ups / timeouts / 429 / 5xx, and any other non-2xx
+  throws instead of being parsed as hierarchy or points. Measured: Liège overview, curved, 54 pages
+  → 4 requests total (was 57); DEFRA 2008, 96 pages → 4 requests (was 99); Autzen implicit → 3.
+- **`memoizeAsync` caches the promise** (concurrent first calls for one source share a single build)
+  and takes `{ failureTtlMs }`; `copc-live` and `potree-live` pass 60 s, so a broken source still
+  fails fast under polling but a hang-up during the root read heals by itself. Other adapters keep
+  the permanent failure cache.
+- **copc-live hierarchy pages are loaded through one in-flight map**: concurrent subtree requests
+  share a page read instead of one of them answering with an empty block, a failed read puts the
+  page back in `pendingPages`, and a failed `drainAll` resets so the next request finishes it.
+  Verified by failing the first drain read three times: all 54 pages restored, next request loads
+  them in one read. Background prefetches (`copc-live`, `potree-live`) now log failures instead of
+  surfacing as `unhandledRejection` (the old `try { return promise } catch {}` caught nothing).
+
 ### Changed — 2026-10-28b (3DTRjs point-cloud patches proposed upstream)
 - **Upstream [PR #1780](https://github.com/NASA-AMMOS/3DTilesRendererJS/pull/1780)** (branch `jo-chemla/3DTilesRendererJS:pointcloud-fixes`),
   off upstream master (which has not touched the Potree / point-cloud plugins since `0.5.3` shipped
