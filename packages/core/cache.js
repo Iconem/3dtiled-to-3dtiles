@@ -1,5 +1,5 @@
 /**
- * memoizeAsync — per-key cache for an async builder that also caches FAILURES.
+ * memoizeAsync — per-key cache for an async builder that also caches FAILURES (for a while).
  *
  * Every `*-live.js` adapter builds a per-URL "ctx" (parsed header/tree/etc.) once and reuses it for
  * every subsequent request against the same source — reasonable, since the source itself is treated
@@ -10,22 +10,27 @@
  * (RAD is the extreme case — a parallel range-fetch+decode pass per chunk), that repeated-work
  * pattern is enough to exhaust CPU/memory under retries. Caching the rejection too makes a broken
  * source fail fast on every subsequent call instead.
+ *
+ * Two refinements, both learnt from production:
+ *   • The PROMISE is cached, not the settled value, so concurrent first calls for one key (a mosaic
+ *     fanning out 16 `/stream` requests that all land on the same source) share ONE build instead of
+ *     each running the builder.
+ *   • `failureTtlMs` bounds how long a rejection is served. Default `Infinity` keeps the original
+ *     behaviour; network-backed adapters pass a minute or so, because one "socket hang up" during
+ *     the root read must not mark a perfectly good dataset broken until the process restarts.
  */
-export function memoizeAsync(builder) {
-  const cache = new Map();
-  return async (key) => {
-    if (cache.has(key)) {
-      const cached = cache.get(key);
-      if (cached instanceof Error) throw cached;
-      return cached;
+export function memoizeAsync(builder, { failureTtlMs = Infinity } = {}) {
+  const cache = new Map();                      // key → { promise } | { error, at }
+  return (key) => {
+    const hit = cache.get(key);
+    if (hit) {
+      if (!('error' in hit)) return hit.promise;
+      if (Date.now() - hit.at < failureTtlMs) return Promise.reject(hit.error);
+      cache.delete(key);                        // expired failure: try again
     }
-    try {
-      const result = await builder(key);
-      cache.set(key, result);
-      return result;
-    } catch (e) {
-      cache.set(key, e);
-      throw e;
-    }
+    const promise = Promise.resolve().then(() => builder(key));
+    cache.set(key, { promise });
+    promise.then(() => {}, (error) => { cache.set(key, { error, at: Date.now() }); });
+    return promise;
   };
 }

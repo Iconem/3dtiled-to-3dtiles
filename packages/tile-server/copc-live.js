@@ -9,7 +9,8 @@
  *   GET /copc/tileset.json?url=<COPC_URL>          → 3D Tiles 1.1 tileset (explicit tree, ADD refine)
  *   GET /copc/tile/<D-X-Y-Z>.glb?url=<COPC_URL>    → that node's points as a POINTS GLB
  */
-import { Copc, Getter } from 'copc';
+import { Copc } from 'copc';
+import { rangeGetter } from './range-getter.js';
 import { buildPointsGlb, keyToCoords, coordsToKey, buildSubtreeBuffer, georefFromCrs, curvedLocalizer, curvedTileLocalizer, buildImplicitTileset, memoizeAsync } from '../core/index.js';
 
 const SUBTREE_LEVELS = 3;
@@ -31,9 +32,14 @@ async function readWkt(getter, copc) {
 
 // Per-URL context (COPC header + full node hierarchy + georef), cached.
 // memoizeAsync caches FAILURES too — a broken source (bad LAS header, unreachable URL, ...) fails
-// fast on retry instead of redoing the full range-read pass every time (see cache.js's own comment).
+// fast on retry instead of redoing the range-read pass every time (see cache.js's own comment) — but
+// only for a minute: the first read is a network round-trip, and one S3 "socket hang up" there used
+// to mark the dataset broken until the process was restarted.
 const getCtx = memoizeAsync(async (url) => {
-  const rawGetter = Getter.http(url);
+  // Our own range getter (range-getter.js), not the library's `Getter.http`: coalesced reads, a
+  // per-host in-flight cap, retries on hang-ups, and a thrown error on non-2xx instead of parsing
+  // the error body as hierarchy or points.
+  const rawGetter = rangeGetter(url);
   // Cold-load latency fix: this used to do a SEPARATE 4-byte range request just to check the "LASF"
   // magic before handing off to Copc.create(), which then issues its OWN first range read (the LAS
   // header + VLR block, ~64KB) — two round-trips where one suffices. Fetch that head block ourselves,
@@ -47,6 +53,7 @@ const getCtx = memoizeAsync(async (url) => {
   const copc = await Copc.create(getter);
   const nodeMap = new Map();
   const pendingPages = new Map();    // key → pageRef (known but not yet loaded)
+  const inFlight = new Map();        // key → { ref, promise } (being loaded right now)
 
   // Load ONE hierarchy page: fold its nodes into nodeMap, its sub-pages into pendingPages.
   const loadOnePage = async (ref) => {
@@ -54,6 +61,21 @@ const getCtx = memoizeAsync(async (url) => {
     for (const k of Object.keys(pn)) nodeMap.set(k, pn[k]);
     for (const k of Object.keys(pp)) if (pp[k] && !nodeMap.has(k)) pendingPages.set(k, pp[k]);
   };
+  // Load a PENDING page once: concurrent subtree requests share the in-flight promise (a request
+  // that found the page neither pending nor loaded would otherwise answer with an empty block), and
+  // a failed read puts the page back in `pendingPages` so the next request retries it — the old
+  // `pendingPages.delete(k); await loadOnePage(ref)` dropped a page whose range read hung up, and
+  // every subtree under it came back empty for the life of the process, with no error anywhere.
+  const loadPage = (k, ref) => {
+    if (inFlight.has(k)) return inFlight.get(k).promise;
+    pendingPages.delete(k);
+    const promise = loadOnePage(ref)
+      .catch(e => { if (process.env.RANGE_DEBUG) console.log(`[copc-live] page ${k} failed, restored`); if (!nodeMap.has(k)) pendingPages.set(k, ref); throw e; })
+      .finally(() => inFlight.delete(k));
+    inFlight.set(k, { ref, promise });
+    return promise;
+  };
+  const candidates = () => [...pendingPages, ...[...inFlight].map(([k, v]) => [k, v.ref])];
   // Eagerly load only the root page (fast — small, contains the top levels).
   await loadOnePage(copc.info.rootHierarchyPage);
 
@@ -79,7 +101,7 @@ const getCtx = memoizeAsync(async (url) => {
     while (changed) {
       changed = false;
       const toLoad = [];
-      for (const [pageKey, pageRef] of pendingPages) {
+      for (const [pageKey, pageRef] of candidates()) {
         const { level: pl, x: px, y: py, z: pz } = keyToCoords(pageKey);
         if (pl > maxLvl) continue;
         const pCells = 2 ** pl;
@@ -90,24 +112,28 @@ const getCtx = memoizeAsync(async (url) => {
       }
       if (toLoad.length) {
         changed = true;
-        await Promise.all(toLoad.map(async ([k, ref]) => { pendingPages.delete(k); await loadOnePage(ref); }));
+        await Promise.all(toLoad.map(([k, ref]) => loadPage(k, ref)));
       }
     }
   };
 
   // cache=hierarchy: drain ALL pending pages into the shared ctx (whole index in RAM, warm forever).
   // Mutates the single cached ctx (like Potree's drainAll2) so later subtree requests reuse it.
-  let drained = false;
-  const drainAll = async () => {
-    if (drained) return; drained = true;
-    while (pendingPages.size) { const batch = [...pendingPages]; pendingPages.clear(); await Promise.all(batch.map(([, ref]) => loadOnePage(ref))); }
+  // Shared promise so concurrent callers wait for the same drain; a failed drain resets it (the
+  // unread pages are back in `pendingPages`) so the next request finishes the job.
+  let draining = null;
+  const drainAll = () => {
+    if (!draining) draining = (async () => {
+      while (pendingPages.size || inFlight.size) await Promise.all(candidates().map(([k, ref]) => loadPage(k, ref)));
+    })().catch(e => { draining = null; throw e; });
+    return draining;
   };
 
   let warmed = false;   // guard so background prefetch fires at most once per ctx
   console.log(`[copc-live] ${url} → root page loaded (${nodeMap.size} nodes), pending=${pendingPages.size} child pages, georef=${!!transform}`);
   return { getter, copc, nodeMap, origin, transform, crs, rootDiag, cube, curvedCache, ensureForSubtree, drainAll,
                 get warmed() { return warmed; }, set warmed(v) { warmed = v; } };
-});
+}, { failureTtlMs: 60_000 });
 
 // ── curved placement for country-scale sources ───────────────────────────────────────────────────
 //
@@ -233,8 +259,10 @@ export async function copcTileset(url, opts = {}) {
   } else if (!ctx.warmed) {                                 // cache=none: background prefetch (once)
     ctx.warmed = true;
     const pf = opts.prefetch ?? 1;                          // 0 = none · N = N levels · -1 = all
-    if (pf === -1) Promise.resolve().then(() => { try { return ctx.drainAll(); } catch {} });
-    else if (pf > 0) Promise.resolve().then(async () => { try { for (let L = 0; L < pf; L++) await ctx.ensureForSubtree(L, 0, 0, 0); } catch {} });
+    // background: a failed prefetch is retried by the next subtree request, so only log it
+    const bg = (e) => console.warn(`[copc-live] background prefetch failed for ${url.split('?')[0].slice(-80)}: ${e.message}`);
+    if (pf === -1) ctx.drainAll().catch(bg);
+    else if (pf > 0) (async () => { for (let L = 0; L < pf; L++) await ctx.ensureForSubtree(L, 0, 0, 0); })().catch(bg);
   }
   const curved = curvedFor(ctx, opts.crs, opts.curved);
   if (curved) await ctx.drainAll();                         // per-tile boxes need the whole index

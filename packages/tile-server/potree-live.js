@@ -58,7 +58,8 @@ const finishCtx = (nodes, rootBox, crs, spacingMeta, readTile) => {
 // Per-URL context (hierarchy + georef + a readTile(name) closure), cached. 2.0 → range reads of
 // octree.bin; 1.x → whole-file fetch per node through loadPotree1's injectable reader.
 // memoizeAsync caches FAILURES too — a broken source fails fast on retry instead of redoing the
-// full metadata/hierarchy read every time (see cache.js's own comment).
+// full metadata/hierarchy read every time (see cache.js's own comment) — for a minute, so a
+// transient network error on the first read does not pin the source as broken.
 const getCtx = memoizeAsync(async (url) => {
   const base = url.slice(0, url.lastIndexOf('/') + 1);
   let ctx;
@@ -252,7 +253,7 @@ const getCtx = memoizeAsync(async (url) => {
     console.log(`[potree-live] (2.0 lazy) ${url} → first chunk loaded (${nodes.size} nodes), pending=${pendingChunks2.size} proxy chunks`);
   }
   return ctx;
-});
+}, { failureTtlMs: 60_000 });   // a transient network failure must not pin the source as broken (see cache.js)
 
 // Explicit 3D Tiles tree from the Potree octree. Box = node AABB relative to the dataset origin
 // (≈ ENU near the origin); geometric error = point spacing at that depth; ADD refine (children densify).
@@ -370,10 +371,12 @@ async function potreeTilesetInner(url, opts) {
   else if (!eager) {                                        // cache=none: background prefetch
     const pf = opts.prefetch ?? 1;                          // 0 = none · N = N levels · -1 = all
     const drain = ctx.drainAll2 || ctx.drainAll;
-    if (pf === -1 && drain) Promise.resolve().then(() => { try { return drain(); } catch {} });
+    if (pf === -1 && drain) drain().catch(e => console.warn(`[potree-live] background drain failed: ${e.message}`));
     else if (pf > 0) {
-      if (ctx.ensureBlock2) Promise.resolve().then(() => { try { for (let L = 0; L < pf; L++) ctx.ensureBlock2(L * SUBTREE_LEVELS, 0, 0, 0); } catch {} }); // 2.0
-      else if (ctx.ensureBlock) Promise.resolve().then(() => { try { ctx.ensureBlock('r', 0, SUBTREE_LEVELS * pf); } catch {} });                          // 1.x
+      // background: a failed prefetch is retried by the next subtree request, so only log it
+      const bg = (e) => console.warn(`[potree-live] background prefetch failed for ${url.split('?')[0].slice(-80)}: ${e.message}`);
+      if (ctx.ensureBlock2) (async () => { for (let L = 0; L < pf; L++) await ctx.ensureBlock2(L * SUBTREE_LEVELS, 0, 0, 0); })().catch(bg); // 2.0
+      else if (ctx.ensureBlock) Promise.resolve().then(() => ctx.ensureBlock('r', 0, SUBTREE_LEVELS * pf)).catch(bg);                      // 1.x
     }
   }
   if (ctx.lazy)   // 1.x .hrc: implicit by default (lazy subtrees); explicit = full materialization (drains every chunk)
