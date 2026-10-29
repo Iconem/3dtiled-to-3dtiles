@@ -1,0 +1,83 @@
+---
+title: Handoff — 2026-10-29
+description: State of the work, what is open, and what a new agent needs, written at the end of the roadmap-2026-09 session
+---
+
+# Handoff — 2026-10-29
+
+Written for the agent taking over from here. `main` and `feat/roadmap-2026-09` have identical trees
+(every commit is cherry-picked onto `main`; `main` additionally has one squash commit from an earlier
+round). Prod (`3dtiled.iconem.com`, `demo.3dtiled.iconem.com`) auto-deploys from `main`. Start from
+remote `main` unless you need the machine-local files listed at the end.
+
+## Rules that are not in the code
+
+- **Never commit an Iconem share link** (`api.iconem.com/s/…`). They are bearer credentials. The
+  Angkor and iconem-open mosaics exist only as machine-local manifests in `.local/aggregate-sets/`.
+- Angkor and Geghard repos are private; do not worry about them in open-data work.
+- Commits end with `Co-Authored-By: Claude Fable 5.1 <noreply@anthropic.com>`.
+- On Windows, start Node servers with PowerShell `Start-Process`, not from the Bash tool (sandboxed
+  servers die); they take ~10 s to come up (canvas/GLib load). Screenshots via headless Chrome/CDP.
+- Memory for this project lives in `~/.claude/projects/C--Dev-Iconem-3d-tiles-converters/memory/`.
+
+## What happened today (see CHANGELOG 2026-10-29, 2026-10-29b)
+
+1. **Upstream (3DTilesRendererJS), all awaiting Garrett.** PR #1780 (Potree 1.8, LAZ/BROTLI error,
+   failed-download error, `maxPointSize`, `sizeAttenuation`, R3F JSDoc note; review items answered,
+   open question: default `maxPointSize` 0 or 50). Issue #1781 + PR #1782 (ADD-skip regression,
+   fork branch `fix-implicit-add-skip`, one commit). Issue #1783 (adaptive point size for implicit
+   ADD octrees; PR offered, ~200 lines, design in the issue). Public reproducer repo
+   `jo-chemla/3dtiles-samples` (GitHub Pages): `lion_takanawa/implicit-octree/tileset.json` and
+   `tileset-x100.json`. The local clone is `.local/3DTilesRendererJS` (remotes `origin`=NASA-AMMOS,
+   `fork`=jo-chemla); headless traversal harness `.local/addskip-harness.mjs` + `.local/src-loader.mjs`.
+2. **tile-server prod stall, fixed in two commits.** `range-getter.js` (coalesced, capped, retried
+   range reads; `memoizeAsync` failure TTL + promise dedupe; copc-live page restore), then the real
+   root cause: curved COPC explicit trees (15–25 k tiles, proj4 per corner) built 113 times for the
+   `flai`/`open` mosaics on the event loop. Now `/stream?depth=0` root-only for the aggregate,
+   8-corner sampling under 20 km, curved tree cached. Local cold `flai`: 2.4 s.
+
+## Open items, in priority order
+
+1. **Verify prod after the deploy of `25a7c55`.** `curl -w '%{time_total}'` on
+   `/aggregate/tileset.json?set=open&nest=geodetic` should be seconds, not minutes; the root page
+   under 1 s; Portainer logs should show `[range] … retrying` lines at most, no `FetchError`. If the
+   mosaic is still slow, the next suspect is `childInfo` on non-`/stream` children (cities, Esri,
+   Aerometrex through `/proxy`), which are fetched from third-party hosts.
+3. **When PR #1780 merges**, re-sync `apps/viewer/src/potree-lab/vendor/*` to the merged commits and
+   rewrite the `PR #1780, <sha>` links (vendored headers, `potree-lab.mdx`, `viewer.mdx`, CHANGELOG).
+   When a release ships #1782, delete `apps/viewer/src/lib/implicitAddFix.ts`. When #1783 lands,
+   drop the `LOCAL PATCH` child-box sizing in the vendored `PointCloudMaterial.js`.
+4. **Potree LAZ / BROTLI nodes** fail loudly on purpose (PotreeConverter 1.7 LAZ output, Potree 2.0).
+   Decoders exist (laz-perf WASM, brotli-wasm); an optional decoder hook was discussed, not started.
+5. **Lion quadtree sample** for `jo-chemla/3dtiles-samples` (Garrett's "implicit octree and
+   quadtree"): flatten the octree's z cells per level into one tile. Not started.
+6. **Iconem STAC** `/api/stac/search?collections=pointcloud` returns 500 at `offset≥80` and for
+   `limit>80` (platform bug, not ours); 45 of 94 items are Potree 1.8. Asset hrefs are day-long SAS
+   URLs whose query string must be forwarded on node requests.
+7. **Roadmap items untouched this session**: see `todo-future-work.mdx` Summary (fastest point-cloud
+   tiler research, native 3DTRjs plugin for the middleware, `potree-to-copc` blocked on a JS LAZ
+   encoder, SH colour for splats, WorkerPool wiring, browser runtime audit).
+
+## Machine-local files you may need (not in git)
+
+| Path | What | Needed for |
+|---|---|---|
+| `.local/aggregate-sets/angkor.json`, `iconem-open.json` | Set manifests with Iconem share links (`{label, provider, attribution, entries}`) | the Angkor / Iconem demo pills; regenerate with `scripts/iconem-share-links.mjs` (needs `ICONEM_EMAIL`/`ICONEM_PASSWORD`) |
+| `.local/aggregate-sets/iconem.json` (692 entries), `iconem-public.json` | Full platform manifest and the public subset | same |
+| `.local/tile-server.env` | `VEXCEL_API_KEY=…` | the Vexcel cities in `world` |
+| `.local/3DTilesRendererJS` | Upstream clone with the fork branches | upstream PR follow-ups |
+| `.local/addskip-harness.mjs`, `addskip-diag.mjs`, `addskip-tree.mjs`, `src-loader.mjs` | Headless 3DTRjs traversal checks | reproducing #1781 |
+| `C:\Users\jonathan\AppData\Local\Temp\3dtiles-samples-repo` | Working copy of the samples repo | adding samples (or re-clone from GitHub) |
+
+Copy `.local/` from this worktree (`C:\Users\jonathan\.t3\worktrees\3d-tiles-converters\t3code-44db18b4\.local`)
+into the new checkout; the server reads `.local/tile-server.env` and `.local/aggregate-sets/` relative
+to the repo root (`AGGREGATE_SETS_DIR` overrides).
+
+## Running
+
+```sh
+pnpm install
+npm run dev            # viewer + docs + tile server (port 3001)
+node packages/tile-server/server.js --port 3001
+node packages/convert/cli.js export <tileset-url> <outDir> --keep-implicit
+```
