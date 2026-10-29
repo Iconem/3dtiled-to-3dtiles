@@ -58,6 +58,23 @@ remote `main` unless you need the machine-local files listed at the end.
    tiler research, native 3DTRjs plugin for the middleware, `potree-to-copc` blocked on a JS LAZ
    encoder, SH colour for splats, WorkerPool wiring, browser runtime audit).
 
+## When the upstream PRs land: what to change in this repo
+
+The viewer runs the **release** of `3d-tiles-renderer` (`apps/viewer/package.json`, `0.5.2` today)
+plus vendored copies of three upstream files carrying our patches, plus three local plugins that work
+around upstream behaviour. Each upstream event retires a specific piece:
+
+| Upstream event | Delete / change here | Keep |
+|---|---|---|
+| **A release ≥ 0.5.4 ships PR #1780** (Potree 1.8 attributes, LAZ/BROTLI error, failed-download error, `maxPointSize`, `sizeAttenuation`) | Bump `3d-tiles-renderer` in `apps/viewer/package.json`. Delete `apps/viewer/src/potree-lab/vendor/potree/` (the loader is upstream verbatim once merged) and import `PotreePlugin` from `3d-tiles-renderer/plugins` in `lib/nativeLeaves.ts` (line 43) and `potree-lab/main.js` (line 34). In `vendor/pointcloud/` re-copy the four release files (`PointCloudEffectsPlugin.js`, `PointCloudMaterial.js`, both `.d.ts`), which drops every block marked `PATCH (PR #1780, <sha>)`, then re-apply only the `LOCAL PATCH` child-box block (next rows). Update the `PR #1780` links in `potree-lab.mdx` ("Why the plugins are vendored"), `viewer.mdx` and CHANGELOG. | The `LOCAL PATCH` child-box sizing in `PointCloudMaterial.js` (`CHILD_BOXES`, the `uChildInv/Min/Max/Size` uniforms, the shader branch), until #1783 lands. |
+| **Garrett changes the `maxPointSize` default to 50** | Nothing in code (the viewer sets it from its store); one line in `potree-lab.mdx`. | |
+| **A release ships PR #1782** (ADD-skip fix) | Delete `apps/viewer/src/lib/implicitAddFix.ts` and its registration in `components/Viewport/ThreeDTRjsViewer.tsx` (import line 35, `new ImplicitAddRefineFixPlugin()` near line 1147) and `potree-lab/main.js` (lines 37 and 197). Remove the ADD-skip paragraphs in `viewer.mdx` and `potree-lab.mdx`. | The reproducer repo `jo-chemla/3dtiles-samples`, useful for regression tests. |
+| **#1783 lands** (adaptive point size for implicit ADD octrees, in whatever form Garrett picks) | Delete `apps/viewer/src/lib/addRefinePointSize.ts` (`AddRefinePointSizePlugin`, imported in `ThreeDTRjsViewer.tsx` line 37) and the `LOCAL PATCH` child-box block in the vendored `PointCloudMaterial.js`. `vendor/pointcloud/` then has no local change left: delete it and import `PointCloudEffectsPlugin` from `3d-tiles-renderer/plugins` in `ThreeDTRjsViewer.tsx` (line 39) and `potree-lab/main.js` (line 35). If it ships as an option on `PointCloudEffectsPlugin`, pass it from the viewer store. | The `/stream` implicit octree output, which is exactly what the driver consumes. |
+| **PR #1780 is squashed or rebased on merge** | The `pull/1780/commits/<sha>` links in the vendored headers, `potree-lab.mdx`, `viewer.mdx` and CHANGELOG then point at commits that no longer exist on master; rewrite them to the merged commit with a `(from, to)` string-pair pass over those files, as was done when the PR opened. | |
+
+`potree-lab.mdx` ("Why the plugins are vendored") lists the same patches from the user's side and
+must agree with the vendored headers after every re-sync.
+
 ## Machine-local files you may need (not in git)
 
 | Path | What | Needed for |
