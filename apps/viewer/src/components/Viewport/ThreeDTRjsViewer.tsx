@@ -155,10 +155,10 @@ function makeClearDepthHook(): THREE.Mesh {
  * The original mesh material is kept on the object and restored by `default`.
  */
 type MaterialMode = 'default' | 'xray' | 'wireframe';
-type MaterialOpts = { mode: MaterialMode; opacity: number; points: 'rgb' | 'white' };
+type MaterialOpts = { mode: MaterialMode; opacity: number; points: 'rgb' | 'color'; color: string };
 const XRAY_MESH = new THREE.MeshBasicMaterial({ color: 0x9ad8ff, transparent: true, opacity: 0.22, blending: THREE.AdditiveBlending, depthWrite: false, side: THREE.DoubleSide });
 const WIRE_MESH = new THREE.MeshBasicMaterial({ color: 0xdddddd, wireframe: true, transparent: true, opacity: 0.6, depthWrite: false });
-function applyMaterialMode(o: any, { mode, opacity, points }: MaterialOpts) {
+function applyMaterialMode(o: any, { mode, opacity, points, color }: MaterialOpts) {
   if (o.isMesh && !o.isPoints) {
     if (mode === 'default') {
       if (o.userData.__origMaterial) { o.material = o.userData.__origMaterial; delete o.userData.__origMaterial; }
@@ -171,15 +171,16 @@ function applyMaterialMode(o: any, { mode, opacity, points }: MaterialOpts) {
     // PointCloudMaterial extends PointsMaterial: three's own opacity / blending / vertexColors apply
     const m = o.material;
     const xray = mode === 'xray';
-    const key = xray ? `${opacity}|${points}` : '';
+    const key = xray ? `${opacity}|${points}|${points === 'color' ? color : ''}` : '';
     if (m.userData.__xray === key) return;
     m.userData.__xray = key;
-    if (xray && m.userData.__vertexColors === undefined) m.userData.__vertexColors = m.vertexColors;
+    if (xray && m.userData.__vertexColors === undefined) { m.userData.__vertexColors = m.vertexColors; m.userData.__color = m.color.getHex(); }
     m.transparent = xray; m.opacity = xray ? opacity : 1; m.depthWrite = !xray;
     m.blending = xray ? THREE.AdditiveBlending : THREE.NormalBlending;
-    const white = xray && points === 'white';
-    m.vertexColors = white ? false : (m.userData.__vertexColors ?? m.vertexColors);
-    if (white) m.color.set(0xffffff);
+    const flat = xray && points === 'color';                   // one colour for every point (picker)
+    m.vertexColors = flat ? false : (m.userData.__vertexColors ?? m.vertexColors);
+    if (flat) m.color.set(color);
+    else if (m.userData.__color !== undefined) m.color.setHex(m.userData.__color);
     m.needsUpdate = true;                                       // vertexColors toggles the program
   }
 }
@@ -339,13 +340,16 @@ function TerrariumGlobe({ basemap, source, gl }: { basemap: BasemapId; source: R
     // per-tile fallback, so it stops at the globally complete level.
     const maxZoom = source === 'mapterhorn' ? 12 : src.maxZoom;
     return [
-      { url: src.url, rootUrl: src.rootUrl, maxZoom, tileDimension: src.tileSize, overlay, applyOverlayTexture: !!overlay },
+      // Imagery "None": unlit (no lighting, no bump-map normals) and painted black below, so the
+      // ground is a plain black silhouette rather than a white hillshade competing with the data.
+      { url: src.url, rootUrl: src.rootUrl, maxZoom, tileDimension: src.tileSize, overlay, applyOverlayTexture: !!overlay, unlit: !overlay },
       rest.length ? { renderer: gl, overlays: rest } : null,
     ];
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [basemap, source]);
   return (
-    <TilesRendererR3F key={`${basemap}|${source}`} ref={(t: any) => { terrariumTiles = t ?? null; useGlobeParseQueue(t); }}>
+    <TilesRendererR3F key={`${basemap}|${source}`} ref={(t: any) => { terrariumTiles = t ?? null; useGlobeParseQueue(t); }}
+      onLoadModel={args.overlay ? undefined : (e: any) => e.scene.traverse((o: any) => { if (o.isMesh && o.material?.color) o.material.color.setRGB(0, 0, 0); })}>
       <TilesPlugin plugin={TerrariumRootFallbackPlugin as any} args={args as any} />
       {extra && <TilesPlugin plugin={ImageOverlayPlugin as any} args={extra as any} />}
       <TilesPlugin plugin={StaleLoadAbortPlugin as any} />
@@ -1187,7 +1191,8 @@ const Scene = forwardRef<ViewerHandle, { loadArgs: LoadArgs; tooltip: TooltipCha
   const materialMode = useViewerStore((s) => s.materialMode);
   const xrayOpacity = useViewerStore((s) => s.xrayOpacity);
   const xrayPoints = useViewerStore((s) => s.xrayPoints);
-  const materialOpts = useMemo((): MaterialOpts => ({ mode: materialMode, opacity: xrayOpacity, points: xrayPoints }), [materialMode, xrayOpacity, xrayPoints]);
+  const xrayColor = useViewerStore((s) => s.xrayColor);
+  const materialOpts = useMemo((): MaterialOpts => ({ mode: materialMode, opacity: xrayOpacity, points: xrayPoints, color: xrayColor }), [materialMode, xrayOpacity, xrayPoints, xrayColor]);
   const materialModeRef = useRef(materialOpts);
   materialModeRef.current = materialOpts;
   /**

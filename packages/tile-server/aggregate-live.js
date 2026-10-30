@@ -54,7 +54,7 @@ const CACHE_DIR = process.env.AGGREGATE_CACHE_DIR || fileURLToPath(new URL('../.
  * and replaces it, so the mosaic is instant and a day old at worst, never blocked. Failures are never
  * persisted. Writes are debounced; a corrupt or missing file is an empty cache.
  */
-function ttlCache(builder, { persist = null } = {}) {
+function ttlCache(builder, { persist = null, normalize = null } = {}) {
   const cache = new Map();                       // key → { at, ttl, value | error, fromDisk? }
   const file = persist ? CACHE_DIR + persist : null;
   let loaded = !persist, saveTimer = null;
@@ -62,7 +62,7 @@ function ttlCache(builder, { persist = null } = {}) {
     if (loaded) return; loaded = true;
     try {
       const entries = JSON.parse(await readFile(file, 'utf8'));
-      for (const [key, e] of Object.entries(entries)) if (e && e.value !== undefined && !cache.has(key)) cache.set(key, { at: e.at, ttl: e.ttl, value: e.value, fromDisk: true });
+      for (const [k, e] of Object.entries(entries)) { const key = normalize ? normalize(k) : k; if (e && e.value !== undefined && !cache.has(key)) cache.set(key, { at: e.at, ttl: e.ttl, value: e.value, fromDisk: true }); }
       console.log(`[aggregate] ${persist}: ${Object.keys(entries).length} cached child roots from disk`);
     } catch { /* no cache yet */ }
   };
@@ -147,6 +147,18 @@ function sphereToParent(sphere, transform, isRegion) {
   return [cx, cy, cz, r * scale];
 }
 
+/**
+ * The child-root cache key, and the URL the probe fetches: the child URL without `cache=`. The root a
+ * mosaic places is the same whether the client later streams the hierarchy lazily or eagerly, and
+ * probing with cache=hierarchy would make /stream drain a child's WHOLE hierarchy before answering
+ * (measured cold on Iconem share links: 183 s for one cloud, over 300 s for the next) just to read
+ * one bounding volume. Without `cache=`, /stream is lazy.
+ */
+function infoKey(url) {
+  if (!/\/stream\/tileset\.json\?/.test(url)) return url;
+  return url.replace(/&cache=[^&]*/g, '').replace(/\?cache=[^&]*&?/, '?');
+}
+
 // One child's meta entry: fetch its tileset.json (cached per URL, persisted to disk), derive sphere + GE.
 const childInfo = ttlCache(async (url) => {
   // Only the root is read here, so ask our own /stream for just that (`depth=0`): a curved COPC
@@ -168,7 +180,7 @@ const childInfo = ttlCache(async (url) => {
   const declared = [ts.geometricError, root.geometricError].filter(Number.isFinite);
   const geometricError = Math.max(sphere[3] || 0, ...declared, declared.length ? 0 : 1e6);
   return { sphere, geometricError, native: nativeSource(url, root) };
-}, { persist: 'child-roots.json' });
+}, { persist: 'child-roots.json', normalize: infoKey });
 
 // ── &native=1: leaves a renderer may load in their SOURCE format ─────────────────────────────────
 //
@@ -538,13 +550,15 @@ const DATASET_SCHEMA = {
   },
 };
 
-export async function buildAggregate(urls, { nest = 'auto', ttlMs = DEFAULT_TTL_MS, bv = DEFAULT_BV, labels = {}, snap = null, native = false } = {}) {
+export async function buildAggregate(urls, { nest = 'auto', ttlMs = DEFAULT_TTL_MS, bv = DEFAULT_BV, labels = {}, snap = null, native = false, known = {} } = {}) {
   // Timings are part of the output because they are the whole cost story of a mosaic: fetching every
   // child root dominates a cold build by orders of magnitude, while the tree itself takes milliseconds.
   const t0 = performance.now();
   await childInfo.load();
-  const cold = urls.filter((u) => !childInfo.isWarm(u, ttlMs)).length;
-  const results = await pooledSettled(urls, (u) => childInfo(u, ttlMs));
+  // `known`: bounds baked into the manifest (scripts/aggregate-bake-bounds.mjs) — no probe at all.
+  const baked = urls.filter((u) => known[u]).length;
+  const cold = urls.filter((u) => !known[u] && !childInfo.isWarm(infoKey(u), ttlMs)).length;
+  const results = await pooledSettled(urls, (u) => known[u] ? Promise.resolve(known[u]) : childInfo(infoKey(u), ttlMs));
   const t1 = performance.now();
   const children = [], failed = [], unplaced = [];
   results.forEach((res, i) => {
@@ -662,7 +676,8 @@ export async function buildAggregate(urls, { nest = 'auto', ttlMs = DEFAULT_TTL_
         build: {
           builtAt: new Date().toISOString(),
           childRoots: urls.length,
-          childRootsFetched: cold,          // the rest came from the child-root cache
+          childRootsFetched: cold,          // the rest came from the child-root cache or the manifest
+          childRootsBaked: baked,           // bounds read from the manifest itself
           fetchConcurrency: FETCH_CONCURRENCY,
           fetchMs: Math.round(t1 - t0),
           treeMs: +(t2 - t1).toFixed(2),
@@ -766,8 +781,8 @@ export const DEMO_SETS = {
  * single tile — and a 3D Tiles client re-requests the root more than once per session.
  */
 const aggregateCached = ttlCache(async (key) => {
-  const { urls, nest, ttlMs, bv, labels, snap, native } = JSON.parse(key);
-  return buildAggregate(urls, { nest, ttlMs, bv, labels, snap, native });
+  const { urls, nest, ttlMs, bv, labels, snap, native, known } = JSON.parse(key);
+  return buildAggregate(urls, { nest, ttlMs, bv, labels, snap, native, known });
 });
 
 // ── local sets ───────────────────────────────────────────────────────────────────────────────────
@@ -814,7 +829,7 @@ async function loadLocalSets() {
  * a .copc.laz) are not 3D Tiles, so they are wrapped through THIS server's /stream — absolute, since
  * the child URI is resolved by the client, not by us.
  */
-function childUrlFor(entry, origin) {
+function childUrlFor(entry, origin, cache = 'none') {
   const fmt = entry.format || '3dtiles';
   // `proxy`: a host that sends no CORS (Aerometrex). /proxy is tileset-aware — it rewrites every child
   // content.uri to come back through itself — so the whole tree, not just the root, becomes readable.
@@ -824,7 +839,7 @@ function childUrlFor(entry, origin) {
   // scans) — /stream's own &lon=&lat= placement, which a real georeference always overrides.
   const place = Number.isFinite(entry.lon) && Number.isFinite(entry.lat)
     ? `&lon=${entry.lon}&lat=${entry.lat}` + (entry.alt != null ? `&alt=${entry.alt}` : '') + (entry.heading != null ? `&heading=${entry.heading}` : '') : '';
-  return `${origin}/stream/tileset.json?format=${encodeURIComponent(fmt)}&url=${encodeURIComponent(entry.url)}&cache=none`
+  return `${origin}/stream/tileset.json?format=${encodeURIComponent(fmt)}&url=${encodeURIComponent(entry.url)}&cache=${cache}`
     + (entry.crs ? `&crs=${encodeURIComponent(entry.crs)}` : '') + place;
 }
 
@@ -1027,7 +1042,9 @@ async function handleUpload(req, res, origin) {
   catch (e) { res.writeHead(e.status || 400, CORS); res.end(e.message); return; }
   const { set, error } = manifestToSet(m);
   if (error) { res.writeHead(400, CORS); res.end(error); return; }
-  const name = 'upload-' + createHash('sha256').update(JSON.stringify(set.entries)).digest('hex').slice(0, 32);
+  // `bounds` is left out of the hash: baking a manifest (scripts/aggregate-bake-bounds.mjs) keeps its
+  // set name, so links and the browser's stored copy keep working; the newest upload's bounds win.
+  const name = 'upload-' + createHash('sha256').update(JSON.stringify(set.entries.map(({ bounds, ...e }) => e))).digest('hex').slice(0, 32);
   const now = Date.now();
   for (const [k, d] of uploads) if (now - d.at > UPLOAD_TTL_MS) uploads.delete(k);
   uploads.delete(name);
@@ -1091,7 +1108,9 @@ export async function handleAggregate(req, res, u) {
     provider: it.provider, attribution: it.attribution, country: it.country ?? null,
   }]));
 
-  const key = JSON.stringify({ urls, nest, ttlMs, bv, labels, snap: sel.snap, native: sel.native });
+  // Baked bounds are trusted unless the request forces a re-read (&ttl=0) or changes placement (&curved=).
+  const known = ttlMs > 0 && !curved ? Object.fromEntries(items.filter((it) => it.bounds).map((it) => [it.url, it.bounds])) : {};
+  const key = JSON.stringify({ urls, nest, ttlMs, bv, labels, snap: sel.snap, native: sel.native, known });
   let ts;
   try {
     ts = await aggregateCached(key, ttlMs);
@@ -1173,7 +1192,7 @@ function dateSpan(d) {
  */
 async function keepLatest(items, ttlMs) {
   const dated = items.filter((it) => it.date);
-  const infos = await pooledSettled(dated, (it) => childInfo(it.url, ttlMs));
+  const infos = await pooledSettled(dated, (it) => it.bounds && ttlMs > 0 ? Promise.resolve(it.bounds) : childInfo(infoKey(it.url), ttlMs));
   const pts = dated.map((it, i) => ({ it, date: it.date, s: infos[i].status === 'fulfilled' ? infos[i].value.sphere : null })).filter((p) => p.s);
   const dropped = supersededSet(pts);
   return items.filter((it) => !dropped.has(it));
@@ -1223,6 +1242,15 @@ function selectChildren(req, u, sets) {
   if (setName && !sets[setName]) return { error: `unknown set "${setName}" — try one of: ${Object.keys(sets).join(', ')}` };
   const proto = (req.headers['x-forwarded-proto'] || 'http').split(',')[0].trim();
   const origin = `${proto}://${req.headers['x-forwarded-host'] || req.headers.host}`;
+  // &cache=none|hierarchy — what every /stream child of the mosaic is asked for. Default none (lazy):
+  // hierarchy makes each child's FIRST root request drain its whole hierarchy through the source
+  // (minutes per Iconem share link, cold) in exchange for instant subtrees afterwards; point tiles
+  // are built per request either way.
+  const cacheMode = u.searchParams.get('cache') === 'hierarchy' ? 'hierarchy' : 'none';
+  const childUrl = (e) => childUrlFor(e, origin, cacheMode);
+  // `bounds` ({ sphere, geometricError, native? }) baked into a manifest entry: the mosaic places the
+  // dataset without fetching its root (scripts/aggregate-bake-bounds.mjs writes them).
+  const boundsOf = (e) => (e.bounds && Array.isArray(e.bounds.sphere) && e.bounds.sphere.length === 4 ? e.bounds : null);
 
   // Each child carries the text filters match against. For share links that must include the dataset
   // NAME: a share URL is an opaque token (/s/<token>/cloud.js), so `only=_d2024` could never match it.
@@ -1230,20 +1258,20 @@ function selectChildren(req, u, sets) {
   // and a display NAME for the index.
   const set = setName ? sets[setName] : null;
   const labelByUrl = new Map((set && !set.manifest ? set.entries : []).map((e) => [e.url, e.label || e.id]));
-  const fromManifest = (entries, m) => entries.map((e) => ({ id: idOf(e.url), url: childUrlFor(e, origin), fmt: e.format || '3dtiles',
+  const fromManifest = (entries, m) => entries.map((e) => ({ id: idOf(e.url), url: childUrl(e), fmt: e.format || '3dtiles', bounds: boundsOf(e),
         name: e.name, project: e.project, scene: e.scene, date: e.date ?? null, licence: e.licence,
         provider: e.provider ?? m.provider ?? null, attribution: e.attribution ?? m.attribution ?? null, set: m.name, country: countryOf(e),
         group: e.sceneId != null ? `scene:${e.sceneId}` : e.scene ? `scene:${e.project ?? ''}/${e.scene}` : null,
         text: [e.url, e.name, e.project, e.scene, e.date, e.provider ?? m.provider].filter(Boolean).join(' ') }));
   const fromSet = !set ? [] : set.manifest
-    ? set.entries.map((e) => ({ id: idOf(e.url), url: childUrlFor(e, origin), fmt: e.format || '3dtiles',
+    ? set.entries.map((e) => ({ id: idOf(e.url), url: childUrl(e), fmt: e.format || '3dtiles', bounds: boundsOf(e),
         name: e.name, project: e.project, scene: e.scene, date: e.date ?? null, licence: e.licence,
         provider: e.provider ?? set.provider ?? null, attribution: e.attribution ?? set.attribution ?? null, set: setName, country: countryOf(e),
         group: e.sceneId != null ? `scene:${e.sceneId}` : e.scene ? `scene:${e.project ?? ''}/${e.scene}` : null,
         text: [e.url, e.name, e.project, e.scene, e.date, e.provider ?? set.provider].filter(Boolean).join(' ') }))
     : [
         // a code-set entry with a `format` is a point cloud: wrapped by /stream like a manifest entry
-        ...set.entries.map((e) => ({ id: idOf(e.url), url: e.format ? childUrlFor(e, origin) : e.url, fmt: e.format || '3dtiles', name: e.label || e.id,
+        ...set.entries.map((e) => ({ id: idOf(e.url), url: e.format ? childUrl(e) : e.url, fmt: e.format || '3dtiles', bounds: boundsOf(e), name: e.label || e.id,
           provider: e.provider ?? null, attribution: e.attribution ?? null, set: setName, country: countryOf(e),
           text: [e.url, e.label, e.provider].filter(Boolean).join(' ') })),
         // code sets may pull in public manifests (the world set includes Aerometrex, through /proxy)
@@ -1299,3 +1327,13 @@ function selectChildren(req, u, sets) {
 
 /** Internals exposed for scripts/debug-aggregate-nesting.mjs. */
 export const __test = { cellBounds, SCHEMES };
+
+/**
+ * For scripts/aggregate-bake-bounds.mjs: the bounds /aggregate would compute for a manifest entry, via
+ * a running server's /stream at `origin` (and the persisted child-root cache, so a warm cache bakes
+ * without a single request). `fresh` re-probes.
+ */
+export async function probeEntryBounds(entry, origin, { fresh = false } = {}) {
+  const url = (entry.format || '3dtiles') === '3dtiles' && !entry.proxy ? entry.url : childUrlFor(entry, origin);
+  return childInfo(infoKey(url), fresh ? 0 : DEFAULT_TTL_MS);
+}

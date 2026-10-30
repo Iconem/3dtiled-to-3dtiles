@@ -39,14 +39,20 @@ export default function MaterialSection({ activeHandleRef }: { activeHandleRef: 
             </div>
           </div>
           <div className="flex items-center justify-between">
-            <Label className="text-xs" title="Points keep their own colours, or every point is white: density alone reads as brightness.">X-ray points</Label>
-            <Select value={s.xrayPoints} onValueChange={(v) => s.setXrayPoints(v as any)}>
-              <SelectTrigger size="sm"><SelectValue /></SelectTrigger>
-              <SelectContent>
-                <SelectItem value="rgb">RGB colours</SelectItem>
-                <SelectItem value="white">White</SelectItem>
-              </SelectContent>
-            </Select>
+            <Label className="text-xs" title="Points keep their own colours, or every point takes one colour (white by default): density alone reads as brightness.">X-ray points</Label>
+            <div className="flex items-center gap-2">
+              {s.xrayPoints === 'color' && (
+                <input type="color" aria-label="X-ray point colour" value={s.xrayColor} onChange={(e) => s.setXrayColor(e.target.value)}
+                  className="h-7 w-8 cursor-pointer rounded border border-border bg-transparent p-0.5" />
+              )}
+              <Select value={s.xrayPoints} onValueChange={(v) => s.setXrayPoints(v as any)}>
+                <SelectTrigger size="sm"><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="rgb">RGB colours</SelectItem>
+                  <SelectItem value="color">One colour</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
           </div>
         </>
       )}

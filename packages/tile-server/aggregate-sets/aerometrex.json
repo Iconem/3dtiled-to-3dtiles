@@ -13,7 +13,11 @@
       "project": "Aerometrex",
       "scene": "New York",
       "date": "2021-10",
-      "url": "https://demo3d.aerometrex.com/USA/US0014_Brooklyn_50mm_Oct_2021/Scene/Cesium_Brooklyn.json"
+      "url": "https://demo3d.aerometrex.com/USA/US0014_Brooklyn_50mm_Oct_2021/Scene/Cesium_Brooklyn.json",
+      "bounds": {
+        "sphere": [1336541.345, -4655453.005, 4135958.684, 3099.716],
+        "geometricError": 6199.431
+      }
     },
     {
       "format": "3dtiles",
@@ -23,7 +27,11 @@
       "project": "Aerometrex",
       "scene": "New York",
       "date": "2021-10",
-      "url": "https://demo3d.aerometrex.com/USA/US0013_Hudson_Yards_Oct_2021/Scene/Cesium_Hudson_Yards.json"
+      "url": "https://demo3d.aerometrex.com/USA/US0013_Hudson_Yards_Oct_2021/Scene/Cesium_Hudson_Yards.json",
+      "bounds": {
+        "sphere": [1333744.508, -4650903.203, 4141900.058, 1105.814],
+        "geometricError": 2211.629
+      }
     },
     {
       "format": "3dtiles",
@@ -33,7 +41,11 @@
       "project": "Aerometrex",
       "scene": "New York",
       "date": "2021",
-      "url": "https://demo3d.aerometrex.com/USA/US0006_Manhattan_2021/Cesium_Sth_Gramercy/Scene/Cesium_Sth_Gramercy.json"
+      "url": "https://demo3d.aerometrex.com/USA/US0006_Manhattan_2021/Cesium_Sth_Gramercy/Scene/Cesium_Sth_Gramercy.json",
+      "bounds": {
+        "sphere": [1335760.32, -4652351.426, 4140202.591, 1532.515],
+        "geometricError": 3065.03
+      }
     },
     {
       "format": "3dtiles",
@@ -43,7 +55,11 @@
       "project": "Aerometrex",
       "scene": "Denver",
       "date": "2020-08",
-      "url": "https://demo3d.aerometrex.com/USA/US0001_Denver_20mm_and_SL_Combo_Aug2020/Scene/Cesium_Denver_HR_with_SL.json"
+      "url": "https://demo3d.aerometrex.com/USA/US0001_Denver_20mm_and_SL_Combo_Aug2020/Scene/Cesium_Denver_HR_with_SL.json",
+      "bounds": {
+        "sphere": [-1270903.571, -4744658.276, 4057517.538, 1851.423],
+        "geometricError": 3001.991
+      }
     },
     {
       "format": "3dtiles",
@@ -53,7 +69,11 @@
       "project": "Aerometrex",
       "scene": "Denver",
       "date": "2020-09",
-      "url": "https://demo3d.aerometrex.com/USA/US0001_Denver_50mm_Sept2020/Scene/Cesium_Denver_5cm.json"
+      "url": "https://demo3d.aerometrex.com/USA/US0001_Denver_50mm_Sept2020/Scene/Cesium_Denver_5cm.json",
+      "bounds": {
+        "sphere": [-1271179.773, -4744379.045, 4057718.62, 3598.119],
+        "geometricError": 4603.047
+      }
     },
     {
       "format": "3dtiles",
@@ -62,7 +82,11 @@
       "country": "USA",
       "project": "Aerometrex",
       "scene": "Las Vegas",
-      "url": "https://demo3d.aerometrex.com/USA/US0012_Las_Vegas/Cesium_5cm_minus_SL_Delivery/Scene/Cesium_5cm_minus_SL_Delivery.json"
+      "url": "https://demo3d.aerometrex.com/USA/US0012_Las_Vegas/Cesium_5cm_minus_SL_Delivery/Scene/Cesium_5cm_minus_SL_Delivery.json",
+      "bounds": {
+        "sphere": [-2194144.776, -4668945.256, 3739174.922, 2613.884],
+        "geometricError": 5227.768
+      }
     },
     {
       "format": "3dtiles",
@@ -71,7 +95,11 @@
       "country": "USA",
       "project": "Aerometrex",
       "scene": "Los Angeles",
-      "url": "https://demo3d.aerometrex.com/USA/US0007_Los_Angeles_50mm_/Scene/Cesium_LA_Downtown.json"
+      "url": "https://demo3d.aerometrex.com/USA/US0007_Los_Angeles_50mm_/Scene/Cesium_LA_Downtown.json",
+      "bounds": {
+        "sphere": [-2504390.107, -4659617.053, 3551138.94, 4658.056],
+        "geometricError": 9316.112
+      }
     },
     {
       "format": "3dtiles",
@@ -81,7 +109,11 @@
       "project": "Aerometrex",
       "scene": "San Diego",
       "date": "2022-03",
-      "url": "https://demo3d.aerometrex.com/USA/US0016_San_Diego_Mar_2022/Scene/Cesium_San_Diego.json"
+      "url": "https://demo3d.aerometrex.com/USA/US0016_San_Diego_Mar_2022/Scene/Cesium_San_Diego.json",
+      "bounds": {
+        "sphere": [-2452100.232, -4779440.326, 3427092.885, 2038.659],
+        "geometricError": 4077.317
+      }
     },
     {
       "format": "3dtiles",
@@ -90,7 +122,11 @@
       "country": "USA",
       "project": "Aerometrex",
       "scene": "Miami",
-      "url": "https://demo3d.aerometrex.com/USA/US0004_Miami/Cesium_Miami_Beach/Scene/Cesium_Miami_Beach_Delivery.json"
+      "url": "https://demo3d.aerometrex.com/USA/US0004_Miami/Cesium_Miami_Beach/Scene/Cesium_Miami_Beach_Delivery.json",
+      "bounds": {
+        "sphere": [984800.56, -5661428.087, 2757976.52, 2957.619],
+        "geometricError": 5915.237
+      }
     },
     {
       "format": "3dtiles",
@@ -99,7 +135,11 @@
       "country": "USA",
       "project": "Aerometrex",
       "scene": "San Francisco",
-      "url": "https://demo3d.aerometrex.com/USA/US0005_San_Francisco/San_Francisco_2cm_SL_split/Scene/Cesium_SF_2cm_mSL.json"
+      "url": "https://demo3d.aerometrex.com/USA/US0005_San_Francisco/San_Francisco_2cm_SL_split/Scene/Cesium_SF_2cm_mSL.json",
+      "bounds": {
+        "sphere": [-2704310.956, -4261304.366, 3886819.96, 2075.49],
+        "geometricError": 4150.979
+      }
     },
     {
       "format": "3dtiles",
@@ -108,7 +148,11 @@
       "country": "USA",
       "project": "Aerometrex",
       "scene": "San Francisco",
-      "url": "https://demo3d.aerometrex.com/USA/US0005_San_Francisco/San_Francisco_5cm_Scene/Cesium_SF_5cm.json"
+      "url": "https://demo3d.aerometrex.com/USA/US0005_San_Francisco/San_Francisco_5cm_Scene/Cesium_SF_5cm.json",
+      "bounds": {
+        "sphere": [-2705174.277, -4260771.935, 3886892.413, 3782.925],
+        "geometricError": 7565.851
+      }
     },
     {
       "format": "3dtiles",
@@ -118,7 +162,12 @@
       "project": "Aerometrex",
       "scene": "Tampa",
       "date": "2021-09",
-      "url": "https://demo3d.aerometrex.com/USA/US0011_Tampa_50mm_Sept_2021/Scene/Cesium_Tampa_FL.json"
+      "url": "https://demo3d.aerometrex.com/USA/US0011_Tampa_50mm_Sept_2021/Scene/Cesium_Tampa_FL.json",
+      "bounds": {
+        "sphere": [740339.952, -5589515.641, 2971509.578, 1573.469],
+        "geometricError": 3146.939
+      }
     }
-  ]
+  ],
+  "boundsBakedAt": "2026-10-30T09:54:46.937Z"
 }

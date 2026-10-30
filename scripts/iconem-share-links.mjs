@@ -191,6 +191,14 @@ for (const p of projects) {
   }
 }
 
+// Keep the bounds scripts/aggregate-bake-bounds.mjs baked into the previous manifest (same share URL =
+// same dataset), so a regenerated manifest still places its mosaic without probing a child root.
+try {
+  const prev = JSON.parse(await fs.readFile(OUT, 'utf8'));
+  const boundsByUrl = new Map((prev.entries || []).filter((e) => e.bounds).map((e) => [e.url, e.bounds]));
+  for (const e of entries) if (boundsByUrl.has(e.url)) e.bounds = boundsByUrl.get(e.url);
+} catch { /* no previous manifest */ }
+
 // The manifest is exactly the shape /aggregate's local sets read: { label, entries: [{url, format}] }.
 await fs.mkdir(path.dirname(OUT), { recursive: true });
 await fs.writeFile(OUT, JSON.stringify({ label: `Iconem — ${NAME} (${entries.length} datasets)`,

@@ -99,14 +99,7 @@ async function writePlainTile(view, start, end, origin, outPath) {
       colors[i*4+2] = getB(j) * scale;
       colors[i*4+3] = 1.0;
     }
-  } else if (dims.Intensity) {
-    const getI = view.getter('Intensity');
-    colors = new Float32Array(count * 4);
-    for (let i = 0; i < count; i++) {
-      const g = getI(start + i) / 65535;
-      colors[i*4] = g; colors[i*4+1] = g; colors[i*4+2] = g; colors[i*4+3] = 1.0;
-    }
-  } // else null → buildPointsGlb fills white
+  } // no RGB: null → buildPointsGlb fills white (intensity as grey rendered near-black)
 
   const glb = await buildPointsGlb(local, colors, count);
   await fs.mkdir(path.dirname(outPath), { recursive: true });

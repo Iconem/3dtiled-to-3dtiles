@@ -412,19 +412,41 @@ fine imagery of a 400 m view finished 8-10 s after the camera got there while ea
 Those two renderers now have their own parse queue of 32 jobs (`GLOBE_PARSE_QUEUE`); the data
 renderers keep the shared one.
 
-How many tiles a view really takes: the terrain plugin's tree is a web-mercator quadtree of
-*meshes*, one 32×32-segment skirted grid (about 1,200 vertices) per tile at every level, and the
-overlay image is fetched per tile at that tile's own level, so terrain tiles and imagery tiles are the
-same thing, one to one. The elevation is coarser: each mesh samples a sub-window of an elevation grid
-two levels up (and never finer than the DEM's last zoom), so a z17 mesh displaces 33×33 vertices from
-an 8×8-texel patch of a z14 grid — the fine mesh exists for the imagery, not for the relief. Measured
-at 400 m over Ghent (1440×900, 60° FOV, `errorTarget` 1): nadir shows 20 tiles (18 at z17, 2 at z16)
-with 79 resident, a 45° pitch 26 shown / 91 resident, a 70° pitch 65 shown / 121 resident spanning z7
-to z17. The resident surplus is the ancestor chain (three tiles per level up to the root) plus
-siblings, kept by 3DTRjs's `loadAncestors` and `loadSiblings` (both on by default) so a REPLACE level
-can swap in whole; turning both off made the arrival slower, not faster. The 300 "parsing" tiles seen
-on arrival were transient: a teleport from a 300 km view walks the tree down through every level, and
-each level's tiles pass through the parse queue on the way — which is why the queue width mattered.
+#### How many terrain and imagery tiles a view takes
+
+The terrain plugin's tree is a web-mercator quadtree of *meshes*: one 32×32-segment skirted grid
+(about 1,200 vertices, 2,300 triangles) per tile at every level, textured with the overlay image of
+that same tile at that same level. **Terrain tiles and imagery tiles are therefore one to one**: the
+counts below are both. The relief is coarser than the mesh: each mesh samples a sub-window of an
+elevation grid two levels up, and never finer than the DEM's last zoom (Mapterhorn: z14), so a z17
+mesh displaces its 33×33 vertices from an 8×8-texel patch of a z14 grid. The fine mesh exists to
+carry the imagery texel for texel, which avoids atlasing many images onto one coarse mesh.
+
+Measured steady state, camera fixed 400 m above Ghent, tilted from nadir toward north, 1440×900,
+60° vertical FOV, `errorTarget` 1, Mapterhorn + Mapbox Satellite (`.local/check-tilecount.js`):
+
+| Pitch from nadir | Tiles drawn | Tiles resident | Levels drawn | Triangles drawn | Elevation grids |
+|---|---|---|---|---|---|
+| 0° (straight down) | 20 | 79 | z16–z17 | 46 k | 33 |
+| 45° | 28 | 94 | z15–z17 | 65 k | 37 |
+| 70° | 62 | 124 | z7–z17 | 143 k | 67 |
+| 80° | 58 | 124 | z7–z17 | 134 k | 67 |
+| 85° | 58 | 124 | z7–z17 | 134 k | 67 |
+| 90° (horizon centred) | 68 | 127 | z7–z16 | 157 k | 83 |
+| 95° (looking up) | 69 | 130 | z7–z16 | 159 k | 86 |
+| 110° (looking up) | 61 | 136 | z7–z15 | 141 k | 98 |
+
+- **Drawn** tiles are the ones on screen. **Resident** adds the ancestor chain (about three tiles per
+  level up to the root) and siblings, kept by 3DTRjs's `loadAncestors` and `loadSiblings` (both on by
+  default) so a level can swap in whole. Turning both off made the arrival slower, not faster.
+- **Past 70°** the count plateaus around 60–70: the near field shrinks as fast as the far field grows,
+  and distant tiles are coarse (z7–z12 toward the horizon).
+- **Looking up** still loads terrain as long as the ground is in the frame: with a 60° vertical FOV
+  the bottom edge of the view is at pitch − 30°, so the ground leaves the frame only past 120°. At
+  110° it fills the bottom strip and draws 61 tiles.
+- **The "300 tiles" seen on arrival** were transient: a teleport from a 300 km view walks the tree
+  down through every level, and each level's tiles pass through the parse queue on the way, which
+  is why the queue width mattered.
 
 The planar (EPSG:3857) projection that 3DTRjs offers is for its generated image surface only
 (`GeneratedSurfacePlugin({ shape: 'planar' })`): 3D Tiles content stays in ECEF, and a true Web
@@ -456,9 +478,16 @@ Extract** and **Local Frame**.
 **Material** (3DTRjs): *Default* keeps the content's own materials; *X-ray* draws meshes as an additive
 tint that writes no depth and points additive, so a scan's interior shows through its walls and
 overlapping datasets read through each other — with an **opacity** slider (points; meshes draw at 60 %
-of it) and **RGB / white** points (white: density alone reads as brightness); *Wireframe* draws mesh
-edges only. The original mesh material is kept and restored by *Default*; applied to every loaded tile,
-native Potree leaves included.
+of it) and **RGB / one colour** points (a colour picker, white by default: density alone reads as
+brightness); *Wireframe* draws mesh edges only. The original mesh material is kept and restored by
+*Default*; applied to every loaded tile, native Potree leaves included.
+
+**Imagery None** (3DTRjs) draws the terrain unlit and black: a silhouette that hides what is behind
+it, with no hillshade competing with the data.
+
+**Points without colour** are white, in streaming and in the offline converters alike, which reads
+well under eye-dome lighting. Sources with intensity but no RGB used to show intensity as grey; most
+scanners store small intensity values in a 16-bit field, so that grey came out near black.
 
 **Controls mode** (3DTRjs) offers, besides Globe, Orbit and Environment, **Trackball** (free rotation
 about the target with no up vector, like a model viewer) and **Fly** (W A S D move, R F up and down,

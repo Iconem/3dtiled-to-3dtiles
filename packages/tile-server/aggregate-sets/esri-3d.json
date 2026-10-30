@@ -12,7 +12,11 @@
       "project": "Esri Living Atlas",
       "scene": "Utrecht",
       "attribution": "© Kavel10 / Esri Nederland",
-      "url": "https://tiles.arcgis.com/tiles/V6ZHFr6zdgNZuVG0/arcgis/rest/services/Utrecht_3D_Tiles_Integrated_Mesh/3DTilesServer/tileset.json"
+      "url": "https://tiles.arcgis.com/tiles/V6ZHFr6zdgNZuVG0/arcgis/rest/services/Utrecht_3D_Tiles_Integrated_Mesh/3DTilesServer/tileset.json",
+      "bounds": {
+        "sphere": [3911518.458, 350321.828, 5008993.318, 1334.865],
+        "geometricError": 11599.873
+      }
     },
     {
       "format": "3dtiles",
@@ -21,7 +25,11 @@
       "project": "Esri Living Atlas",
       "scene": "Zürich",
       "attribution": "© Wingtra / Esri",
-      "url": "https://tiles.arcgis.com/tiles/z2tnIkrLQ2BRzr6P/arcgis/rest/services/Zurich_Integrated_Mesh_3D_Tiles/3DTilesServer/tileset.json"
+      "url": "https://tiles.arcgis.com/tiles/z2tnIkrLQ2BRzr6P/arcgis/rest/services/Zurich_Integrated_Mesh_3D_Tiles/3DTilesServer/tileset.json",
+      "bounds": {
+        "sphere": [4279737.391, 642693.176, 4670179.389, 2455.643],
+        "geometricError": 3352.167
+      }
     },
     {
       "format": "3dtiles",
@@ -30,7 +38,11 @@
       "project": "Esri Living Atlas",
       "scene": "Vienna",
       "attribution": "© AVT-ZT GmbH / Esri",
-      "url": "https://tiles.arcgis.com/tiles/z2tnIkrLQ2BRzr6P/arcgis/rest/services/Vienna__Integrated_Mesh_3D_Tiles_WGS84/3DTilesServer/tileset.json"
+      "url": "https://tiles.arcgis.com/tiles/z2tnIkrLQ2BRzr6P/arcgis/rest/services/Vienna__Integrated_Mesh_3D_Tiles_WGS84/3DTilesServer/tileset.json",
+      "bounds": {
+        "sphere": [4085136.203, 1200941.463, 4733475.485, 22039.344],
+        "geometricError": 786432
+      }
     },
     {
       "format": "3dtiles",
@@ -39,7 +51,11 @@
       "project": "Esri Living Atlas",
       "scene": "Munich",
       "attribution": "© Hexagon / Esri",
-      "url": "https://tiles.arcgis.com/tiles/z2tnIkrLQ2BRzr6P/arcgis/rest/services/Munich__Integrated_Mesh_3D_Tiles_WGS84/3DTilesServer/tileset.json"
+      "url": "https://tiles.arcgis.com/tiles/z2tnIkrLQ2BRzr6P/arcgis/rest/services/Munich__Integrated_Mesh_3D_Tiles_WGS84/3DTilesServer/tileset.json",
+      "bounds": {
+        "sphere": [4178045.915, 857120.956, 4727180.513, 2508.643],
+        "geometricError": 24576
+      }
     },
     {
       "format": "3dtiles",
@@ -48,7 +64,11 @@
       "project": "Esri Living Atlas",
       "scene": "Stuttgart",
       "attribution": "© Esri and the data owner",
-      "url": "https://tiles.arcgis.com/tiles/z2tnIkrLQ2BRzr6P/arcgis/rest/services/Stuttgart__Integrated_Mesh_3D_Tiles_WGS84/3DTilesServer/tileset.json"
+      "url": "https://tiles.arcgis.com/tiles/z2tnIkrLQ2BRzr6P/arcgis/rest/services/Stuttgart__Integrated_Mesh_3D_Tiles_WGS84/3DTilesServer/tileset.json",
+      "bounds": {
+        "sphere": [4150518.335, 671683.28, 4780487.033, 6291.441],
+        "geometricError": 408944.625
+      }
     },
     {
       "format": "3dtiles",
@@ -57,7 +77,11 @@
       "project": "Esri Living Atlas",
       "scene": "Boston",
       "attribution": "© Esri and the data owner",
-      "url": "https://tiles.arcgis.com/tiles/z2tnIkrLQ2BRzr6P/arcgis/rest/services/Boston__Integrated_Mesh_3D_Tiles_WGS84/3DTilesServer/tileset.json"
+      "url": "https://tiles.arcgis.com/tiles/z2tnIkrLQ2BRzr6P/arcgis/rest/services/Boston__Integrated_Mesh_3D_Tiles_WGS84/3DTilesServer/tileset.json",
+      "bounds": {
+        "sphere": [1530767.929, -4464993.736, 4275162.387, 7063.901],
+        "geometricError": 67633.164
+      }
     },
     {
       "format": "3dtiles",
@@ -66,7 +90,11 @@
       "project": "Esri Living Atlas",
       "scene": "Jena",
       "attribution": "© Esri and the data owner",
-      "url": "https://tiles.arcgis.com/tiles/z2tnIkrLQ2BRzr6P/arcgis/rest/services/Jena__Integrated_Mesh_3DTiles_WGS84/3DTilesServer/tileset.json"
+      "url": "https://tiles.arcgis.com/tiles/z2tnIkrLQ2BRzr6P/arcgis/rest/services/Jena__Integrated_Mesh_3DTiles_WGS84/3DTilesServer/tileset.json",
+      "bounds": {
+        "sphere": [3946584.71, 809159.407, 4928457.544, 4582.776],
+        "geometricError": 16711.682
+      }
     },
     {
       "format": "3dtiles",
@@ -75,7 +103,11 @@
       "project": "Esri Living Atlas",
       "scene": "Linz",
       "attribution": "© Esri and the data owner",
-      "url": "https://tiles.arcgis.com/tiles/z2tnIkrLQ2BRzr6P/arcgis/rest/services/Linz__Integrated_Mesh_3DTiles_WGS84/3DTilesServer/tileset.json"
+      "url": "https://tiles.arcgis.com/tiles/z2tnIkrLQ2BRzr6P/arcgis/rest/services/Linz__Integrated_Mesh_3DTiles_WGS84/3DTilesServer/tileset.json",
+      "bounds": {
+        "sphere": [4119301.302, 1050834.314, 4739267.23, 6053.847],
+        "geometricError": 70778.891
+      }
     },
     {
       "format": "3dtiles",
@@ -84,7 +116,11 @@
       "project": "Esri Living Atlas",
       "scene": "Cambridge, MA",
       "attribution": "© Esri and the data owner",
-      "url": "https://tiles.arcgis.com/tiles/z2tnIkrLQ2BRzr6P/arcgis/rest/services/Cambridge_Massachusetts__Integrated_Mesh_3DTiles_WGS84/3DTilesServer/tileset.json"
+      "url": "https://tiles.arcgis.com/tiles/z2tnIkrLQ2BRzr6P/arcgis/rest/services/Cambridge_Massachusetts__Integrated_Mesh_3DTiles_WGS84/3DTilesServer/tileset.json",
+      "bounds": {
+        "sphere": [1528063.257, -4464722.883, 4276546.312, 6897.12],
+        "geometricError": 66846.727
+      }
     },
     {
       "format": "i3s",
@@ -93,7 +129,12 @@
       "project": "Esri Living Atlas",
       "scene": "Frankfurt",
       "attribution": "© Aerowest GmbH / Esri",
-      "url": "https://tiles.arcgis.com/tiles/cFEFS0EWrhfDeVw9/arcgis/rest/services/Buildings_Frankfurt_2021/SceneServer"
+      "url": "https://tiles.arcgis.com/tiles/cFEFS0EWrhfDeVw9/arcgis/rest/services/Buildings_Frankfurt_2021/SceneServer",
+      "bounds": {
+        "sphere": [4051686.478, 618358.916, 4870709.818, 2818.444],
+        "geometricError": 1000000
+      }
     }
-  ]
+  ],
+  "boundsBakedAt": "2026-10-30T09:54:56.379Z"
 }

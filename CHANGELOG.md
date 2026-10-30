@@ -5,6 +5,32 @@ Format loosely follows [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+### Added — 2026-10-30 (baked mosaic bounds, `&cache=` on mosaics, tile-count table)
+- **Docs: "What a mosaic costs"** in the meta-tilesets guide: where a dataset's sphere comes from
+  (baked, cached, or probed), what the client fetches and when, what a lazy `/stream` open reads,
+  what `cache=hierarchy` drains (one 2.45-billion-point Iconem cloud: 46,993 `.hrc` files, 210 s
+  before the first answer, against 0.2 s lazy), and a table of every cache with its lifetime.
+- **Aggregate presets wait for the server's set list**: `?preset=agg-iconem-all` used to load the
+  open-data mosaic when the list arrived after the first render, and stay there.
+- **Uploaded manifests keep their set name when baked**: the upload hash ignores `bounds`.
+- **Points without RGB are white** (streaming and offline), not intensity-as-grey, which came out
+  near black for the usual small 16-bit intensity values.
+- **Imagery None** draws the 3DTRjs terrain unlit and black instead of a white hillshade.
+- **X-ray points**: *RGB* or *one colour* with a colour picker (white by default).
+- **`scripts/aggregate-bake-bounds.mjs`** writes each manifest entry's placement
+  (`bounds: { sphere, geometricError, native? }`) into the manifest; `/aggregate` then builds the
+  mosaic and its index without fetching any child root. The Iconem index (692 datasets) answers in
+  60 ms on a cold server with no cache. Every committed manifest is baked; `iconem-share-links.mjs`
+  and `openheritage3d-manifest.mjs` keep bounds across regenerations. `&ttl=0` and `&curved=` ignore
+  them.
+- **`&cache=none|hierarchy` on `/aggregate`**, passed to every `/stream` child, and the viewer's
+  top-bar cache pill reaches the aggregate presets. Default stays `none`: measured cold on Iconem
+  share links, `hierarchy` took 183 s and over 300 s for a cloud's first root (it drains the whole
+  hierarchy), against 0.1–0.2 s lazy, and point tiles are built per request either way.
+- The child-root cache key ignores `cache=`, so probing never drains a hierarchy and both modes
+  share one cache.
+- **Docs**: measured terrain and imagery tile counts per camera pitch, nadir to 110°.
+
 ### Fixed — 2026-10-29d (COPC geometric error was the node diagonal: everything refined to 2 px)
 - **`/stream` COPC tilesets declared `geometricError = cube diagonal / 2^level`** (explicit and
   implicit trees alike), 100–200× the point spacing a tile actually carries, where Potree streams

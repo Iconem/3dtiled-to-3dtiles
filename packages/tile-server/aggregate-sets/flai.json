@@ -16,7 +16,11 @@
       "density": 14.75,
       "licence": "SPW, LIDAR point cloud 2021-2022 [License](https://creativecommons.org/licenses/by/4.0/deed.fr)",
       "provider": "SPW",
-      "attribution": "SPW — via flai open LiDAR"
+      "attribution": "SPW — via flai open LiDAR",
+      "bounds": {
+        "sphere": [4069245.518, 408012.766, 4941559.7, 86285.949],
+        "geometricError": 170141.949
+      }
     },
     {
       "format": "copc",
@@ -29,7 +33,11 @@
       "density": 11.35,
       "licence": "SPW, LIDAR point cloud 2021-2022 [License](https://creativecommons.org/licenses/by/4.0/deed.fr)",
       "provider": "SPW",
-      "attribution": "SPW — via flai open LiDAR"
+      "attribution": "SPW — via flai open LiDAR",
+      "bounds": {
+        "sphere": [4048391.561, 310290.558, 4929338.76, 36596.305],
+        "geometricError": 72746.117
+      }
     },
     {
       "format": "copc",
@@ -42,7 +50,11 @@
       "density": 14.55,
       "licence": "SPW, LIDAR point cloud 2021-2022 [License](https://creativecommons.org/licenses/by/4.0/deed.fr)",
       "provider": "SPW",
-      "attribution": "SPW — via flai open LiDAR"
+      "attribution": "SPW — via flai open LiDAR",
+      "bounds": {
+        "sphere": [4108658.813, 340571.408, 4886246.525, 48013.647],
+        "geometricError": 95262.777
+      }
     },
     {
       "format": "copc",
@@ -55,7 +67,11 @@
       "density": 11,
       "licence": "SPW, LIDAR point cloud 2021-2022 [License](https://creativecommons.org/licenses/by/4.0/deed.fr)",
       "provider": "SPW",
-      "attribution": "SPW — via flai open LiDAR"
+      "attribution": "SPW — via flai open LiDAR",
+      "bounds": {
+        "sphere": [4095655.767, 267414.163, 4946921.404, 110941.075],
+        "geometricError": 217907.13
+      }
     },
     {
       "format": "copc",
@@ -68,7 +84,11 @@
       "density": 13.49,
       "licence": "SPW, LIDAR point cloud 2021-2022 [License](https://creativecommons.org/licenses/by/4.0/deed.fr)",
       "provider": "SPW",
-      "attribution": "SPW — via flai open LiDAR"
+      "attribution": "SPW — via flai open LiDAR",
+      "bounds": {
+        "sphere": [4127803.406, 393086.791, 4874625.768, 59673.578],
+        "geometricError": 118180.061
+      }
     },
     {
       "format": "copc",
@@ -81,7 +101,11 @@
       "density": 30.93,
       "licence": "EODaS Openlidar [License](https://assets.vlaanderen.be/image/upload/v1679331485/GratisopendatalicentieVlaanderenv12_bqxu2t.pdf)",
       "provider": "EODaS",
-      "attribution": "EODaS Openlidar — via flai open LiDAR"
+      "attribution": "EODaS Openlidar — via flai open LiDAR",
+      "bounds": {
+        "sphere": [4021554.385, 297528.362, 5081660.756, 221714.537],
+        "geometricError": 428162.942
+      }
     },
     {
       "format": "copc",
@@ -94,7 +118,11 @@
       "density": 18.57,
       "licence": "Danish Agency for Data Supply and Infrastructure, Denmark's height model - Point cloud, March 2024 [License](https://dataforsyningen.dk/asset/PDF/rettigheder_vilkaar/Vilk%C3%A5r%20for%20brug%20af%20frie%20geografiske%20data.pdf)",
       "provider": "SDFI",
-      "attribution": "Danish Agency for Data Supply and Infrastructure — via flai open LiDAR"
+      "attribution": "Danish Agency for Data Supply and Infrastructure — via flai open LiDAR",
+      "bounds": {
+        "sphere": [3563886.169, 739987.757, 5483944.734, 417563.498],
+        "geometricError": 784090.411
+      }
     },
     {
       "format": "copc",
@@ -107,7 +135,11 @@
       "density": 208.7,
       "licence": "[License](https://creativecommons.org/licenses/by/4.0/)",
       "provider": "NYU_EDU",
-      "attribution": " — via flai open LiDAR"
+      "attribution": " — via flai open LiDAR",
+      "bounds": {
+        "sphere": [3794010.67, -416180.752, 5094860.545, 2813.526],
+        "geometricError": 5626.823
+      }
     },
     {
       "format": "copc",
@@ -120,7 +152,11 @@
       "density": 30.6,
       "licence": "Estonian Land Board, Elevation data 2017-2020 [License](https://geoportaal.maaamet.ee/docs/Avaandmed/Licence-of-open-data-of-Estonian-Land-Board.pdf)",
       "provider": "Maa_amet",
-      "attribution": "Estonian Land Board — via flai open LiDAR"
+      "attribution": "Estonian Land Board — via flai open LiDAR",
+      "bounds": {
+        "sphere": [2992137.237, 1449315.939, 5535105.748, 169881.357],
+        "geometricError": 330643.545
+      }
     },
     {
       "format": "copc",
@@ -133,7 +169,11 @@
       "density": 29.51,
       "licence": "Estonian Land Board, Elevation data 2017-2020 [License](https://geoportaal.maaamet.ee/docs/Avaandmed/Licence-of-open-data-of-Estonian-Land-Board.pdf)",
       "provider": "Maa_amet",
-      "attribution": "Estonian Land Board — via flai open LiDAR"
+      "attribution": "Estonian Land Board — via flai open LiDAR",
+      "bounds": {
+        "sphere": [3052578.939, 1415795.317, 5593852.593, 305159.913],
+        "geometricError": 582058.185
+      }
     },
     {
       "format": "copc",
@@ -146,7 +186,11 @@
       "density": 30.63,
       "licence": "Estonian Land Board, Elevation data 2017-2020 [License](https://geoportaal.maaamet.ee/docs/Avaandmed/Licence-of-open-data-of-Estonian-Land-Board.pdf)",
       "provider": "Maa_amet",
-      "attribution": "Estonian Land Board — via flai open LiDAR"
+      "attribution": "Estonian Land Board — via flai open LiDAR",
+      "bounds": {
+        "sphere": [2979997.029, 1418524.277, 5620487.951, 286076.912],
+        "geometricError": 547223.855
+      }
     },
     {
       "format": "copc",
@@ -159,7 +203,11 @@
       "density": 28.79,
       "licence": "Estonian Land Board, Elevation data 2017-2020 [License](https://geoportaal.maaamet.ee/docs/Avaandmed/Licence-of-open-data-of-Estonian-Land-Board.pdf)",
       "provider": "Maa_amet",
-      "attribution": "Estonian Land Board — via flai open LiDAR"
+      "attribution": "Estonian Land Board — via flai open LiDAR",
+      "bounds": {
+        "sphere": [3042938.369, 1420220.15, 5577380.151, 270646.78],
+        "geometricError": 518826.778
+      }
     },
     {
       "format": "copc",
@@ -172,7 +220,11 @@
       "density": 28.12,
       "licence": "Estonian Land Board, Elevation data 2017-2020 [License](https://geoportaal.maaamet.ee/docs/Avaandmed/Licence-of-open-data-of-Estonian-Land-Board.pdf)",
       "provider": "Maa_amet",
-      "attribution": "Estonian Land Board — via flai open LiDAR"
+      "attribution": "Estonian Land Board — via flai open LiDAR",
+      "bounds": {
+        "sphere": [2980002.11, 1418631.46, 5620788.864, 286287.993],
+        "geometricError": 547596.488
+      }
     },
     {
       "format": "copc",
@@ -185,7 +237,11 @@
       "density": 26.48,
       "licence": "Estonian Land Board, Elevation data 2017-2020 [License](https://geoportaal.maaamet.ee/docs/Avaandmed/Licence-of-open-data-of-Estonian-Land-Board.pdf)",
       "provider": "Maa_amet",
-      "attribution": "Estonian Land Board — via flai open LiDAR"
+      "attribution": "Estonian Land Board — via flai open LiDAR",
+      "bounds": {
+        "sphere": [-547675.436, 3221790.379, 7890422.791, 8436024.156],
+        "geometricError": 9501949.965
+      }
     },
     {
       "format": "copc",
@@ -198,7 +254,11 @@
       "density": 16.14,
       "licence": "Estonian Land Board, Elevation data 2017-2020 [License](https://geoportaal.maaamet.ee/docs/Avaandmed/Licence-of-open-data-of-Estonian-Land-Board.pdf)",
       "provider": "Maa_amet",
-      "attribution": "Estonian Land Board — via flai open LiDAR"
+      "attribution": "Estonian Land Board — via flai open LiDAR",
+      "bounds": {
+        "sphere": [2981352.984, 1419526.642, 5619073.044, 285371.834],
+        "geometricError": 545931.537
+      }
     },
     {
       "format": "copc",
@@ -211,7 +271,11 @@
       "density": 0.97,
       "licence": "Estonian Land Board, Elevation data 2017-2020 [License](https://geoportaal.maaamet.ee/docs/Avaandmed/Licence-of-open-data-of-Estonian-Land-Board.pdf)",
       "provider": "Maa_amet",
-      "attribution": "Estonian Land Board — via flai open LiDAR"
+      "attribution": "Estonian Land Board — via flai open LiDAR",
+      "bounds": {
+        "sphere": [3043819.907, 1418244.931, 5577529.19, 271408.734],
+        "geometricError": 520251.234
+      }
     },
     {
       "format": "copc",
@@ -224,7 +288,11 @@
       "density": 2.64,
       "licence": "Estonian Land Board, Elevation data 2017-2020 [License](https://geoportaal.maaamet.ee/docs/Avaandmed/Licence-of-open-data-of-Estonian-Land-Board.pdf)",
       "provider": "Maa_amet",
-      "attribution": "Estonian Land Board — via flai open LiDAR"
+      "attribution": "Estonian Land Board — via flai open LiDAR",
+      "bounds": {
+        "sphere": [3057896.485, 1399764.993, 5576048.377, 273436.099],
+        "geometricError": 523960.3
+      }
     },
     {
       "format": "copc",
@@ -237,7 +305,11 @@
       "density": 2.7,
       "licence": "Estonian Land Board, Elevation data 2017-2020 [License](https://geoportaal.maaamet.ee/docs/Avaandmed/Licence-of-open-data-of-Estonian-Land-Board.pdf)",
       "provider": "Maa_amet",
-      "attribution": "Estonian Land Board — via flai open LiDAR"
+      "attribution": "Estonian Land Board — via flai open LiDAR",
+      "bounds": {
+        "sphere": [2999003.359, 1403103.504, 5613737.066, 284891.65],
+        "geometricError": 545028.862
+      }
     },
     {
       "format": "copc",
@@ -250,7 +322,11 @@
       "density": 2.76,
       "licence": "Estonian Land Board, Elevation data 2017-2020 [License](https://geoportaal.maaamet.ee/docs/Avaandmed/Licence-of-open-data-of-Estonian-Land-Board.pdf)",
       "provider": "Maa_amet",
-      "attribution": "Estonian Land Board — via flai open LiDAR"
+      "attribution": "Estonian Land Board — via flai open LiDAR",
+      "bounds": {
+        "sphere": [3059570.449, 1421019.002, 5562555.107, 261621.225],
+        "geometricError": 502196.129
+      }
     },
     {
       "format": "copc",
@@ -263,7 +339,11 @@
       "density": 2.4,
       "licence": "Estonian Land Board, Elevation data 2017-2020 [License](https://geoportaal.maaamet.ee/docs/Avaandmed/Licence-of-open-data-of-Estonian-Land-Board.pdf)",
       "provider": "Maa_amet",
-      "attribution": "Estonian Land Board — via flai open LiDAR"
+      "attribution": "Estonian Land Board — via flai open LiDAR",
+      "bounds": {
+        "sphere": [3025855.598, 1480881.868, 5511637.408, 174638.86],
+        "geometricError": 339644.442
+      }
     },
     {
       "format": "copc",
@@ -276,7 +356,11 @@
       "density": 1.57,
       "licence": "Estonian Land Board, Elevation data 2017-2020 [License](https://geoportaal.maaamet.ee/docs/Avaandmed/Licence-of-open-data-of-Estonian-Land-Board.pdf)",
       "provider": "Maa_amet",
-      "attribution": "Estonian Land Board — via flai open LiDAR"
+      "attribution": "Estonian Land Board — via flai open LiDAR",
+      "bounds": {
+        "sphere": [3026388.295, 1449285.566, 5409473.205, 5199.734],
+        "geometricError": 10394.02
+      }
     },
     {
       "format": "copc",
@@ -289,7 +373,11 @@
       "density": 2.13,
       "licence": "Estonian Land Board, Elevation data 2017-2020 [License](https://geoportaal.maaamet.ee/docs/Avaandmed/Licence-of-open-data-of-Estonian-Land-Board.pdf)",
       "provider": "Maa_amet",
-      "attribution": "Estonian Land Board — via flai open LiDAR"
+      "attribution": "Estonian Land Board — via flai open LiDAR",
+      "bounds": {
+        "sphere": [2922143.973, 1448319.659, 5466938.677, 6065.472],
+        "geometricError": 12124.338
+      }
     },
     {
       "format": "copc",
@@ -302,7 +390,11 @@
       "density": 1.5,
       "licence": "Estonian Land Board, Elevation data 2017-2020 [License](https://geoportaal.maaamet.ee/docs/Avaandmed/Licence-of-open-data-of-Estonian-Land-Board.pdf)",
       "provider": "Maa_amet",
-      "attribution": "Estonian Land Board — via flai open LiDAR"
+      "attribution": "Estonian Land Board — via flai open LiDAR",
+      "bounds": {
+        "sphere": [2986580.105, 1461620.216, 5534188.037, 168635.065],
+        "geometricError": 328276.438
+      }
     },
     {
       "format": "copc",
@@ -315,7 +407,11 @@
       "density": 1.35,
       "licence": "Estonian Land Board, Elevation data 2017-2020 [License](https://geoportaal.maaamet.ee/docs/Avaandmed/Licence-of-open-data-of-Estonian-Land-Board.pdf)",
       "provider": "Maa_amet",
-      "attribution": "Estonian Land Board — via flai open LiDAR"
+      "attribution": "Estonian Land Board — via flai open LiDAR",
+      "bounds": {
+        "sphere": [3083686.814, 1357342.127, 5533389.371, 209512.605],
+        "geometricError": 405299.854
+      }
     },
     {
       "format": "copc",
@@ -328,7 +424,11 @@
       "density": 1.38,
       "licence": "Estonian Land Board, Elevation data 2017-2020 [License](https://geoportaal.maaamet.ee/docs/Avaandmed/Licence-of-open-data-of-Estonian-Land-Board.pdf)",
       "provider": "Maa_amet",
-      "attribution": "Estonian Land Board — via flai open LiDAR"
+      "attribution": "Estonian Land Board — via flai open LiDAR",
+      "bounds": {
+        "sphere": [3006401.953, 1327415.945, 5566685.586, 183708.149],
+        "geometricError": 356802.432
+      }
     },
     {
       "format": "copc",
@@ -341,7 +441,11 @@
       "density": 1.35,
       "licence": "Estonian Land Board, Elevation data 2017-2020 [License](https://geoportaal.maaamet.ee/docs/Avaandmed/Licence-of-open-data-of-Estonian-Land-Board.pdf)",
       "provider": "Maa_amet",
-      "attribution": "Estonian Land Board — via flai open LiDAR"
+      "attribution": "Estonian Land Board — via flai open LiDAR",
+      "bounds": {
+        "sphere": [3048457.058, 1536907.312, 5445164.383, 113803.255],
+        "geometricError": 223434.502
+      }
     },
     {
       "format": "copc",
@@ -354,7 +458,11 @@
       "density": 1.51,
       "licence": "Estonian Land Board, Elevation data 2017-2020 [License](https://geoportaal.maaamet.ee/docs/Avaandmed/Licence-of-open-data-of-Estonian-Land-Board.pdf)",
       "provider": "Maa_amet",
-      "attribution": "Estonian Land Board — via flai open LiDAR"
+      "attribution": "Estonian Land Board — via flai open LiDAR",
+      "bounds": {
+        "sphere": [3010175.395, 1563608.649, 5518162.549, 212203.398],
+        "geometricError": 410496.007
+      }
     },
     {
       "format": "copc",
@@ -367,7 +475,11 @@
       "density": 1.31,
       "licence": "Estonian Land Board, Elevation data 2017-2020 [License](https://geoportaal.maaamet.ee/docs/Avaandmed/Licence-of-open-data-of-Estonian-Land-Board.pdf)",
       "provider": "Maa_amet",
-      "attribution": "Estonian Land Board — via flai open LiDAR"
+      "attribution": "Estonian Land Board — via flai open LiDAR",
+      "bounds": {
+        "sphere": [3084780.623, 1356161.61, 5531168.724, 206735.021],
+        "geometricError": 400103.702
+      }
     },
     {
       "format": "copc",
@@ -380,7 +492,11 @@
       "density": 1.07,
       "licence": "Estonian Land Board, Elevation data 2017-2020 [License](https://geoportaal.maaamet.ee/docs/Avaandmed/Licence-of-open-data-of-Estonian-Land-Board.pdf)",
       "provider": "Maa_amet",
-      "attribution": "Estonian Land Board — via flai open LiDAR"
+      "attribution": "Estonian Land Board — via flai open LiDAR",
+      "bounds": {
+        "sphere": [3007526.092, 1326251.283, 5564618.011, 180956.29],
+        "geometricError": 351606.279
+      }
     },
     {
       "format": "copc",
@@ -393,7 +509,11 @@
       "density": 1,
       "licence": "Estonian Land Board, Elevation data 2017-2020 [License](https://geoportaal.maaamet.ee/docs/Avaandmed/Licence-of-open-data-of-Estonian-Land-Board.pdf)",
       "provider": "Maa_amet",
-      "attribution": "Estonian Land Board — via flai open LiDAR"
+      "attribution": "Estonian Land Board — via flai open LiDAR",
+      "bounds": {
+        "sphere": [3048847.32, 1536515.809, 5444526.15, 112906.094],
+        "geometricError": 221703.092
+      }
     },
     {
       "format": "copc",
@@ -406,7 +526,11 @@
       "density": 0.22,
       "licence": "Estonian Land Board, Elevation data 2017-2020 [License](https://geoportaal.maaamet.ee/docs/Avaandmed/Licence-of-open-data-of-Estonian-Land-Board.pdf)",
       "provider": "Maa_amet",
-      "attribution": "Estonian Land Board — via flai open LiDAR"
+      "attribution": "Estonian Land Board — via flai open LiDAR",
+      "bounds": {
+        "sphere": [2942834.762, 1490759.101, 5529025.242, 136331.52],
+        "geometricError": 266741.471
+      }
     },
     {
       "format": "copc",
@@ -419,7 +543,11 @@
       "density": 0.17,
       "licence": "Estonian Land Board, Elevation data 2017-2020 [License](https://geoportaal.maaamet.ee/docs/Avaandmed/Licence-of-open-data-of-Estonian-Land-Board.pdf)",
       "provider": "Maa_amet",
-      "attribution": "Estonian Land Board — via flai open LiDAR"
+      "attribution": "Estonian Land Board — via flai open LiDAR",
+      "bounds": {
+        "sphere": [3098507.29, 1341661.028, 5505194.51, 172538.781],
+        "geometricError": 335687.347
+      }
     },
     {
       "format": "copc",
@@ -432,7 +560,11 @@
       "density": 0.18,
       "licence": "Estonian Land Board, Elevation data 2017-2020 [License](https://geoportaal.maaamet.ee/docs/Avaandmed/Licence-of-open-data-of-Estonian-Land-Board.pdf)",
       "provider": "Maa_amet",
-      "attribution": "Estonian Land Board — via flai open LiDAR"
+      "attribution": "Estonian Land Board — via flai open LiDAR",
+      "bounds": {
+        "sphere": [3041249.429, 1525681.87, 5488729.739, 171796.582],
+        "geometricError": 334285.789
+      }
     },
     {
       "format": "copc",
@@ -445,7 +577,11 @@
       "density": 0.19,
       "licence": "Estonian Land Board, Elevation data 2017-2020 [License](https://geoportaal.maaamet.ee/docs/Avaandmed/Licence-of-open-data-of-Estonian-Land-Board.pdf)",
       "provider": "Maa_amet",
-      "attribution": "Estonian Land Board — via flai open LiDAR"
+      "attribution": "Estonian Land Board — via flai open LiDAR",
+      "bounds": {
+        "sphere": [2916940.448, 1463697.642, 5565360.619, 161157.978],
+        "geometricError": 314127.696
+      }
     },
     {
       "format": "copc",
@@ -458,7 +594,11 @@
       "density": 3.87,
       "licence": "Estonian Land Board, Elevation data 2017-2020 [License](https://geoportaal.maaamet.ee/docs/Avaandmed/Licence-of-open-data-of-Estonian-Land-Board.pdf)",
       "provider": "Maa_amet",
-      "attribution": "Estonian Land Board — via flai open LiDAR"
+      "attribution": "Estonian Land Board — via flai open LiDAR",
+      "bounds": {
+        "sphere": [3047502.452, 1538144.616, 5445526.957, 114695.705],
+        "geometricError": 225166.588
+      }
     },
     {
       "format": "copc",
@@ -471,7 +611,11 @@
       "density": 4.16,
       "licence": "Estonian Land Board, Elevation data 2017-2020 [License](https://geoportaal.maaamet.ee/docs/Avaandmed/Licence-of-open-data-of-Estonian-Land-Board.pdf)",
       "provider": "Maa_amet",
-      "attribution": "Estonian Land Board — via flai open LiDAR"
+      "attribution": "Estonian Land Board — via flai open LiDAR",
+      "bounds": {
+        "sphere": [2943841.643, 1489052.295, 5531389.761, 139951.152],
+        "geometricError": 273663.958
+      }
     },
     {
       "format": "copc",
@@ -484,7 +628,11 @@
       "density": 3.57,
       "licence": "Estonian Land Board, Elevation data 2017-2020 [License](https://geoportaal.maaamet.ee/docs/Avaandmed/Licence-of-open-data-of-Estonian-Land-Board.pdf)",
       "provider": "Maa_amet",
-      "attribution": "Estonian Land Board — via flai open LiDAR"
+      "attribution": "Estonian Land Board — via flai open LiDAR",
+      "bounds": {
+        "sphere": [3082219.822, 1358914.702, 5535743.178, 213202.775],
+        "geometricError": 412228.058
+      }
     },
     {
       "format": "copc",
@@ -497,7 +645,11 @@
       "density": 3.66,
       "licence": "Estonian Land Board, Elevation data 2017-2020 [License](https://geoportaal.maaamet.ee/docs/Avaandmed/Licence-of-open-data-of-Estonian-Land-Board.pdf)",
       "provider": "Maa_amet",
-      "attribution": "Estonian Land Board — via flai open LiDAR"
+      "attribution": "Estonian Land Board — via flai open LiDAR",
+      "bounds": {
+        "sphere": [2990441.788, 1348729.763, 5597913.791, 230785.435],
+        "geometricError": 445136.988
+      }
     },
     {
       "format": "copc",
@@ -510,7 +662,11 @@
       "density": 3.85,
       "licence": "Estonian Land Board, Elevation data 2017-2020 [License](https://geoportaal.maaamet.ee/docs/Avaandmed/Licence-of-open-data-of-Estonian-Land-Board.pdf)",
       "provider": "Maa_amet",
-      "attribution": "Estonian Land Board — via flai open LiDAR"
+      "attribution": "Estonian Land Board — via flai open LiDAR",
+      "bounds": {
+        "sphere": [3047177.802, 1537933.873, 5443000.501, 112875.349],
+        "geometricError": 221702.486
+      }
     },
     {
       "format": "copc",
@@ -523,7 +679,11 @@
       "density": 2.91,
       "licence": "Estonian Land Board, Elevation data 2017-2020 [License](https://geoportaal.maaamet.ee/docs/Avaandmed/Licence-of-open-data-of-Estonian-Land-Board.pdf)",
       "provider": "Maa_amet",
-      "attribution": "Estonian Land Board — via flai open LiDAR"
+      "attribution": "Estonian Land Board — via flai open LiDAR",
+      "bounds": {
+        "sphere": [2994758.884, 1555032.191, 5527467.217, 205803.961],
+        "geometricError": 398371.547
+      }
     },
     {
       "format": "copc",
@@ -536,7 +696,11 @@
       "density": 2.37,
       "licence": "Estonian Land Board, Elevation data 2017-2020 [License](https://geoportaal.maaamet.ee/docs/Avaandmed/Licence-of-open-data-of-Estonian-Land-Board.pdf)",
       "provider": "Maa_amet",
-      "attribution": "Estonian Land Board — via flai open LiDAR"
+      "attribution": "Estonian Land Board — via flai open LiDAR",
+      "bounds": {
+        "sphere": [3053950.861, 1413662.722, 5601098.471, 325863.668],
+        "geometricError": 620074.189
+      }
     },
     {
       "format": "copc",
@@ -549,7 +713,11 @@
       "density": 0.21,
       "licence": "Estonian Land Board, Elevation data 2017-2020 [License](https://geoportaal.maaamet.ee/docs/Avaandmed/Licence-of-open-data-of-Estonian-Land-Board.pdf)",
       "provider": "Maa_amet",
-      "attribution": "Estonian Land Board — via flai open LiDAR"
+      "attribution": "Estonian Land Board — via flai open LiDAR",
+      "bounds": {
+        "sphere": [3004587.167, 1328830.658, 5568856.556, 187362.032],
+        "geometricError": 363731.899
+      }
     },
     {
       "format": "copc",
@@ -562,7 +730,11 @@
       "density": 0.43,
       "licence": "Estonian Land Board, Elevation data 2017-2020 [License](https://geoportaal.maaamet.ee/docs/Avaandmed/Licence-of-open-data-of-Estonian-Land-Board.pdf)",
       "provider": "Maa_amet",
-      "attribution": "Estonian Land Board — via flai open LiDAR"
+      "attribution": "Estonian Land Board — via flai open LiDAR",
+      "bounds": {
+        "sphere": [3043517.992, 1505460.043, 5514667.267, 205803.317],
+        "geometricError": 398368.447
+      }
     },
     {
       "format": "copc",
@@ -575,7 +747,11 @@
       "density": 0.47,
       "licence": "Estonian Land Board, Elevation data 2017-2020 [License](https://geoportaal.maaamet.ee/docs/Avaandmed/Licence-of-open-data-of-Estonian-Land-Board.pdf)",
       "provider": "Maa_amet",
-      "attribution": "Estonian Land Board — via flai open LiDAR"
+      "attribution": "Estonian Land Board — via flai open LiDAR",
+      "bounds": {
+        "sphere": [2989914.08, 1457775.968, 5531195.771, 165407.909],
+        "geometricError": 322161.433
+      }
     },
     {
       "format": "copc",
@@ -588,7 +764,11 @@
       "density": 0.48,
       "licence": "Estonian Land Board, Elevation data 2017-2020 [License](https://geoportaal.maaamet.ee/docs/Avaandmed/Licence-of-open-data-of-Estonian-Land-Board.pdf)",
       "provider": "Maa_amet",
-      "attribution": "Estonian Land Board — via flai open LiDAR"
+      "attribution": "Estonian Land Board — via flai open LiDAR",
+      "bounds": {
+        "sphere": [2918173.565, 1443155.754, 5592559.412, 197091.146],
+        "geometricError": 382062.47
+      }
     },
     {
       "format": "copc",
@@ -601,7 +781,11 @@
       "density": 0.43,
       "licence": "Estonian Land Board, Elevation data 2017-2020 [License](https://geoportaal.maaamet.ee/docs/Avaandmed/Licence-of-open-data-of-Estonian-Land-Board.pdf)",
       "provider": "Maa_amet",
-      "attribution": "Estonian Land Board — via flai open LiDAR"
+      "attribution": "Estonian Land Board — via flai open LiDAR",
+      "bounds": {
+        "sphere": [3045844.718, 1416540.07, 5616115.422, 336963.748],
+        "geometricError": 639790.938
+      }
     },
     {
       "format": "copc",
@@ -614,7 +798,11 @@
       "density": 0.47,
       "licence": "Estonian Land Board, Elevation data 2017-2020 [License](https://geoportaal.maaamet.ee/docs/Avaandmed/Licence-of-open-data-of-Estonian-Land-Board.pdf)",
       "provider": "Maa_amet",
-      "attribution": "Estonian Land Board — via flai open LiDAR"
+      "attribution": "Estonian Land Board — via flai open LiDAR",
+      "bounds": {
+        "sphere": [3054979.571, 1493477.44, 5494482.786, 178088.817],
+        "geometricError": 346170.047
+      }
     },
     {
       "format": "copc",
@@ -627,7 +815,11 @@
       "density": 0.47,
       "licence": "Estonian Land Board, Elevation data 2017-2020 [License](https://geoportaal.maaamet.ee/docs/Avaandmed/Licence-of-open-data-of-Estonian-Land-Board.pdf)",
       "provider": "Maa_amet",
-      "attribution": "Estonian Land Board — via flai open LiDAR"
+      "attribution": "Estonian Land Board — via flai open LiDAR",
+      "bounds": {
+        "sphere": [3012694.427, 1452618.501, 5536752.426, 191069.509],
+        "geometricError": 370658.63
+      }
     },
     {
       "format": "copc",
@@ -640,7 +832,11 @@
       "density": 0.46,
       "licence": "Estonian Land Board, Elevation data 2017-2020 [License](https://geoportaal.maaamet.ee/docs/Avaandmed/Licence-of-open-data-of-Estonian-Land-Board.pdf)",
       "provider": "Maa_amet",
-      "attribution": "Estonian Land Board — via flai open LiDAR"
+      "attribution": "Estonian Land Board — via flai open LiDAR",
+      "bounds": {
+        "sphere": [2918892.094, 1416359.476, 5626333.757, 242067.597],
+        "geometricError": 466114.86
+      }
     },
     {
       "format": "copc",
@@ -653,7 +849,11 @@
       "density": 0.42,
       "licence": "Estonian Land Board, Elevation data 2017-2020 [License](https://geoportaal.maaamet.ee/docs/Avaandmed/Licence-of-open-data-of-Estonian-Land-Board.pdf)",
       "provider": "Maa_amet",
-      "attribution": "Estonian Land Board — via flai open LiDAR"
+      "attribution": "Estonian Land Board — via flai open LiDAR",
+      "bounds": {
+        "sphere": [3068465.53, 1373435.419, 5561039.481, 247622.793],
+        "geometricError": 476313.885
+      }
     },
     {
       "format": "copc",
@@ -666,7 +866,11 @@
       "density": 0.78,
       "licence": "[License](https://creativecommons.org/licenses/by/4.0/)",
       "provider": "NLS",
-      "attribution": " — via flai open LiDAR"
+      "attribution": " — via flai open LiDAR",
+      "bounds": {
+        "sphere": [2522477.493, 1480118.926, 6170092.734, 960139.046],
+        "geometricError": 1683553.385
+      }
     },
     {
       "format": "copc",
@@ -679,7 +883,11 @@
       "density": 0.72,
       "licence": "[License](https://creativecommons.org/licenses/by/4.0/)",
       "provider": "NLS",
-      "attribution": " — via flai open LiDAR"
+      "attribution": " — via flai open LiDAR",
+      "bounds": {
+        "sphere": [2577336.516, 1427534.823, 6204231.199, 1057646.711],
+        "geometricError": 1834241.338
+      }
     },
     {
       "format": "copc",
@@ -692,7 +900,11 @@
       "density": 0.7,
       "licence": "[License](https://creativecommons.org/licenses/by/4.0/)",
       "provider": "NLS",
-      "attribution": " — via flai open LiDAR"
+      "attribution": " — via flai open LiDAR",
+      "bounds": {
+        "sphere": [2530672.558, 1557632.78, 6184436.662, 1040543.3],
+        "geometricError": 1808260.956
+      }
     },
     {
       "format": "copc",
@@ -705,7 +917,11 @@
       "density": 0.8,
       "licence": "[License](https://creativecommons.org/licenses/by/4.0/)",
       "provider": "NLS",
-      "attribution": " — via flai open LiDAR"
+      "attribution": " — via flai open LiDAR",
+      "bounds": {
+        "sphere": [2467802.397, 1617303.272, 6221791.616, 1101517.332],
+        "geometricError": 1901791.631
+      }
     },
     {
       "format": "copc",
@@ -718,7 +934,11 @@
       "density": 1.18,
       "licence": "[License](https://creativecommons.org/licenses/by/4.0/)",
       "provider": "NLS",
-      "attribution": " — via flai open LiDAR"
+      "attribution": " — via flai open LiDAR",
+      "bounds": {
+        "sphere": [2504065.541, 1564997.228, 6228086.337, 1118413.493],
+        "geometricError": 1927100.219
+      }
     },
     {
       "format": "copc",
@@ -731,7 +951,11 @@
       "density": 1.42,
       "licence": "[License](https://creativecommons.org/licenses/by/4.0/)",
       "provider": "NLS",
-      "attribution": " — via flai open LiDAR"
+      "attribution": " — via flai open LiDAR",
+      "bounds": {
+        "sphere": [2610543.787, 1451982.699, 6084442.851, 841837.96],
+        "geometricError": 1496491.898
+      }
     },
     {
       "format": "copc",
@@ -744,7 +968,11 @@
       "density": 2.2,
       "licence": "[License](https://creativecommons.org/licenses/by/4.0/)",
       "provider": "NLS",
-      "attribution": " — via flai open LiDAR"
+      "attribution": " — via flai open LiDAR",
+      "bounds": {
+        "sphere": [2663904.757, 1414808.524, 6088833.346, 881005.049],
+        "geometricError": 1558845.692
+      }
     },
     {
       "format": "copc",
@@ -757,7 +985,11 @@
       "density": 1.83,
       "licence": "[License](https://creativecommons.org/licenses/by/4.0/)",
       "provider": "NLS",
-      "attribution": " — via flai open LiDAR"
+      "attribution": " — via flai open LiDAR",
+      "bounds": {
+        "sphere": [2543623.517, 1493527.974, 6196258.629, 1043806.882],
+        "geometricError": 1813155.94
+      }
     },
     {
       "format": "copc",
@@ -770,7 +1002,11 @@
       "density": 1.54,
       "licence": "[License](https://creativecommons.org/licenses/by/4.0/)",
       "provider": "NLS",
-      "attribution": " — via flai open LiDAR"
+      "attribution": " — via flai open LiDAR",
+      "bounds": {
+        "sphere": [2507323.625, 1543017.589, 6224969.822, 1101782.956],
+        "geometricError": 1901792.583
+      }
     },
     {
       "format": "copc",
@@ -783,7 +1019,11 @@
       "density": 1.48,
       "licence": "[License](https://creativecommons.org/licenses/by/4.0/)",
       "provider": "NLS",
-      "attribution": " — via flai open LiDAR"
+      "attribution": " — via flai open LiDAR",
+      "bounds": {
+        "sphere": [2470885.275, 1497832.425, 6210862.809, 1013599.992],
+        "geometricError": 1766691.806
+      }
     },
     {
       "format": "copc",
@@ -796,7 +1036,11 @@
       "density": 1.04,
       "licence": "[License](https://creativecommons.org/licenses/by/4.0/)",
       "provider": "NLS",
-      "attribution": " — via flai open LiDAR"
+      "attribution": " — via flai open LiDAR",
+      "bounds": {
+        "sphere": [2602951.142, 1409307.422, 6155789.38, 966804.296],
+        "geometricError": 1693945.672
+      }
     },
     {
       "format": "copc",
@@ -809,7 +1053,11 @@
       "density": 1.24,
       "licence": "[License](https://creativecommons.org/licenses/by/4.0/)",
       "provider": "NLS",
-      "attribution": " — via flai open LiDAR"
+      "attribution": " — via flai open LiDAR",
+      "bounds": {
+        "sphere": [2532597.393, 1455672.266, 6134860.548, 880988.956],
+        "geometricError": 1558917.051
+      }
     },
     {
       "format": "copc",
@@ -822,7 +1070,11 @@
       "density": 1.12,
       "licence": "[License](https://creativecommons.org/licenses/by/4.0/)",
       "provider": "NLS",
-      "attribution": " — via flai open LiDAR"
+      "attribution": " — via flai open LiDAR",
+      "bounds": {
+        "sphere": [2667426.827, 1448397.77, 6032437.168, 783778.385],
+        "geometricError": 1402961.137
+      }
     },
     {
       "format": "copc",
@@ -835,7 +1087,11 @@
       "density": 1.17,
       "licence": "[License](https://creativecommons.org/licenses/by/4.0/)",
       "provider": "NLS",
-      "attribution": " — via flai open LiDAR"
+      "attribution": " — via flai open LiDAR",
+      "bounds": {
+        "sphere": [2698704.946, 1403311.147, 5941618.103, 613752.905],
+        "geometricError": 1122368.906
+      }
     },
     {
       "format": "copc",
@@ -848,7 +1104,11 @@
       "density": 1.07,
       "licence": "[License](https://creativecommons.org/licenses/by/4.0/)",
       "provider": "NLS",
-      "attribution": " — via flai open LiDAR"
+      "attribution": " — via flai open LiDAR",
+      "bounds": {
+        "sphere": [2637465.967, 1489184.976, 6047168.547, 807166.229],
+        "geometricError": 1440800.915
+      }
     },
     {
       "format": "copc",
@@ -861,7 +1121,11 @@
       "density": 0.92,
       "licence": "[License](https://creativecommons.org/licenses/by/4.0/)",
       "provider": "NLS",
-      "attribution": " — via flai open LiDAR"
+      "attribution": " — via flai open LiDAR",
+      "bounds": {
+        "sphere": [2907268.254, 1258808.936, 5639929.592, 192912.04],
+        "geometricError": 374122.974
+      }
     },
     {
       "format": "copc",
@@ -874,7 +1138,11 @@
       "density": 29.9,
       "licence": "IGN, [License](https://geoservices.ign.fr/cgu-licences)",
       "provider": "IGN",
-      "attribution": "IGN — via flai open LiDAR"
+      "attribution": "IGN — via flai open LiDAR",
+      "bounds": {
+        "sphere": [4757096.241, 269325.579, 4956173.747, 1065043.044],
+        "geometricError": 1844633.435
+      }
     },
     {
       "format": "copc",
@@ -887,7 +1155,11 @@
       "density": 13.25,
       "licence": "GeoSN, [dl-de/by-2-0](https://www.govdata.de/dl-de/by-2-0)",
       "provider": "GeoSN",
-      "attribution": "GeoSN — via flai open LiDAR"
+      "attribution": "GeoSN — via flai open LiDAR",
+      "bounds": {
+        "sphere": [3962980.457, 946590.576, 5034430.485, 201165.155],
+        "geometricError": 389532.024
+      }
     },
     {
       "format": "copc",
@@ -900,7 +1172,11 @@
       "density": 8.24,
       "licence": "The Latvian Geospatial Information Agency [License](https://www.lgia.gov.lv/sites/lgia/files/document/Atverto%20datu%20licence%20CC%20BY_0.pdf)",
       "provider": "LGIA",
-      "attribution": "The Latvian Geospatial Information Agency — via flai open LiDAR"
+      "attribution": "The Latvian Geospatial Information Agency — via flai open LiDAR",
+      "bounds": {
+        "sphere": [3211116.667, 1471892.973, 5555460.506, 415698.98],
+        "geometricError": 780369.793
+      }
     },
     {
       "format": "copc",
@@ -913,7 +1189,11 @@
       "density": 29.98,
       "licence": "[License](https://creativecommons.org/publicdomain/zero/1.0/)",
       "provider": "Gouvernement_LUX",
-      "attribution": " — via flai open LiDAR"
+      "attribution": " — via flai open LiDAR",
+      "bounds": {
+        "sphere": [4123598.862, 455503.145, 4879132.809, 71715.148],
+        "geometricError": 141796.747
+      }
     },
     {
       "format": "copc",
@@ -926,7 +1206,11 @@
       "density": 23.36,
       "licence": "The government has shared the AHN publicly in the form of open data in full and without any conditions",
       "provider": "AHN",
-      "attribution": "The government has shared the AHN publicly in the form of open data in full and without any conditions — via flai open LiDAR"
+      "attribution": "The government has shared the AHN publicly in the form of open data in full and without any conditions — via flai open LiDAR",
+      "bounds": {
+        "sphere": [3997301.226, 390343.52, 5132644.85, 279202.727],
+        "geometricError": 534509.634
+      }
     },
     {
       "format": "copc",
@@ -939,7 +1223,11 @@
       "density": 21.3,
       "licence": "The user can download any required data, without any limitations.",
       "provider": "GUGiK",
-      "attribution": "The user can download any required data — via flai open LiDAR"
+      "attribution": "The user can download any required data — via flai open LiDAR",
+      "bounds": {
+        "sphere": [3804737.831, 1636833.484, 5207613.334, 556181.071],
+        "geometricError": 1024545.967
+      }
     },
     {
       "format": "copc",
@@ -952,7 +1240,11 @@
       "density": 18.51,
       "licence": "The user can download any required data, without any limitations.",
       "provider": "GUGiK",
-      "attribution": "The user can download any required data — via flai open LiDAR"
+      "attribution": "The user can download any required data — via flai open LiDAR",
+      "bounds": {
+        "sphere": [3871428.401, 1292114.665, 5243744.009, 551179.344],
+        "geometricError": 1016409.728
+      }
     },
     {
       "format": "copc",
@@ -965,7 +1257,11 @@
       "density": 19.77,
       "licence": "The user can download any required data, without any limitations.",
       "provider": "GUGiK",
-      "attribution": "The user can download any required data — via flai open LiDAR"
+      "attribution": "The user can download any required data — via flai open LiDAR",
+      "bounds": {
+        "sphere": [3901609.022, 1304690.844, 5198405.318, 505647.065],
+        "geometricError": 937306.361
+      }
     },
     {
       "format": "copc",
@@ -978,7 +1274,11 @@
       "density": 37.97,
       "licence": "The user can download any required data, without any limitations.",
       "provider": "GUGiK",
-      "attribution": "The user can download any required data — via flai open LiDAR"
+      "attribution": "The user can download any required data — via flai open LiDAR",
+      "bounds": {
+        "sphere": [3856729.912, 1274126.459, 5219666.225, 475153.516],
+        "geometricError": 884503.597
+      }
     },
     {
       "format": "copc",
@@ -991,7 +1291,11 @@
       "density": 17.45,
       "licence": "The user can download any required data, without any limitations.",
       "provider": "GUGiK",
-      "attribution": "The user can download any required data — via flai open LiDAR"
+      "attribution": "The user can download any required data — via flai open LiDAR",
+      "bounds": {
+        "sphere": [3877826.614, 1285870.753, 5204983.902, 481066.082],
+        "geometricError": 894776.91
+      }
     },
     {
       "format": "copc",
@@ -1004,7 +1308,11 @@
       "density": 36.54,
       "licence": "The user can download any required data, without any limitations.",
       "provider": "GUGiK",
-      "attribution": "The user can download any required data — via flai open LiDAR"
+      "attribution": "The user can download any required data — via flai open LiDAR",
+      "bounds": {
+        "sphere": [3872710.307, 1307670.463, 4890750.046, 14439.115],
+        "geometricError": 28806.101
+      }
     },
     {
       "format": "copc",
@@ -1017,7 +1325,11 @@
       "density": 33.66,
       "licence": "GURS, CLSS 2024 [License](https://creativecommons.org/licenses/by/4.0/deed.sl)",
       "provider": "GURS",
-      "attribution": "GURS — via flai open LiDAR"
+      "attribution": "GURS — via flai open LiDAR",
+      "bounds": {
+        "sphere": [4267219.199, 1197854.262, 4672745.296, 130927.078],
+        "geometricError": 256343.919
+      }
     },
     {
       "format": "copc",
@@ -1030,7 +1342,11 @@
       "density": 29.87,
       "licence": "GURS, CLS 2023 [License](https://creativecommons.org/licenses/by/4.0/deed.sl)",
       "provider": "GURS",
-      "attribution": "GURS — via flai open LiDAR"
+      "attribution": "GURS — via flai open LiDAR",
+      "bounds": {
+        "sphere": [4331471.876, 1155387.801, 4607683.818, 109322.381],
+        "geometricError": 214775.071
+      }
     },
     {
       "format": "copc",
@@ -1043,7 +1359,11 @@
       "density": 20.22,
       "licence": "Slovenian Environment Agency, LIDAR data 2011 - 2015 [License](https://creativecommons.org/licenses/by/4.0/deed.sl)",
       "provider": "GURS",
-      "attribution": "Slovenian Environment Agency — via flai open LiDAR"
+      "attribution": "Slovenian Environment Agency — via flai open LiDAR",
+      "bounds": {
+        "sphere": [4327376.093, 1157933.995, 4695950.812, 223422.153],
+        "geometricError": 431280.755
+      }
     },
     {
       "format": "copc",
@@ -1056,7 +1376,11 @@
       "density": 54.29,
       "licence": "GURS, CLS 2023 [License](https://creativecommons.org/licenses/by/4.0/deed.sl)",
       "provider": "GURS",
-      "attribution": "GURS — via flai open LiDAR"
+      "attribution": "GURS — via flai open LiDAR",
+      "bounds": {
+        "sphere": [4296541.598, 1110105.044, 4620738.652, 69206.898],
+        "geometricError": 136832.454
+      }
     },
     {
       "format": "copc",
@@ -1069,7 +1393,11 @@
       "density": 80.03,
       "licence": "GURS, PLS 2023 [License](https://creativecommons.org/licenses/by/4.0/deed.sl)",
       "provider": "GURS",
-      "attribution": "GURS — via flai open LiDAR"
+      "attribution": "GURS — via flai open LiDAR",
+      "bounds": {
+        "sphere": [4296779.722, 1112115.906, 4651151.051, 109775.602],
+        "geometricError": 215640.387
+      }
     },
     {
       "format": "copc",
@@ -1082,7 +1410,11 @@
       "density": 1.61,
       "licence": "[License](https://creativecommons.org/licenses/by/4.0/)",
       "provider": "CNIG",
-      "attribution": " — via flai open LiDAR"
+      "attribution": " — via flai open LiDAR",
+      "bounds": {
+        "sphere": [4770366.076, 178872.139, 4216983.599, 1732.853],
+        "geometricError": 3464.084
+      }
     },
     {
       "format": "copc",
@@ -1095,7 +1427,11 @@
       "density": 2.8,
       "licence": "[License](https://creativecommons.org/licenses/by/4.0/)",
       "provider": "CNIG",
-      "attribution": " — via flai open LiDAR"
+      "attribution": " — via flai open LiDAR",
+      "bounds": {
+        "sphere": [5203679.734, -392722.543, 4330788.047, 829469.376],
+        "geometricError": 1477412.437
+      }
     },
     {
       "format": "copc",
@@ -1108,7 +1444,11 @@
       "density": 0.99,
       "licence": "[License](https://creativecommons.org/licenses/by/4.0/)",
       "provider": "CNIG",
-      "attribution": " — via flai open LiDAR"
+      "attribution": " — via flai open LiDAR",
+      "bounds": {
+        "sphere": [5212605.342, -245071.092, 4329786.819, 829974.782],
+        "geometricError": 1477051.498
+      }
     },
     {
       "format": "copc",
@@ -1121,7 +1461,11 @@
       "density": 0.9,
       "licence": "[License](https://creativecommons.org/licenses/by/4.0/)",
       "provider": "CNIG",
-      "attribution": " — via flai open LiDAR"
+      "attribution": " — via flai open LiDAR",
+      "bounds": {
+        "sphere": [5145562.791, -422434.575, 4332837.723, 756664.397],
+        "geometricError": 1361212.529
+      }
     },
     {
       "format": "copc",
@@ -1134,7 +1478,11 @@
       "density": 1.14,
       "licence": "[License](https://creativecommons.org/licenses/by/4.0/)",
       "provider": "CNIG",
-      "attribution": " — via flai open LiDAR"
+      "attribution": " — via flai open LiDAR",
+      "bounds": {
+        "sphere": [6186822.64, 1075361.862, 3952553.697, 2655270.515],
+        "geometricError": 3991615.023
+      }
     },
     {
       "format": "copc",
@@ -1147,7 +1495,11 @@
       "density": 8.6,
       "licence": "[License](https://creativecommons.org/licenses/by/4.0/)",
       "provider": "CNIG",
-      "attribution": " — via flai open LiDAR"
+      "attribution": " — via flai open LiDAR",
+      "bounds": {
+        "sphere": [5521802.828, -1563736.562, 3261428.318, 430014.812],
+        "geometricError": 805403.617
+      }
     },
     {
       "format": "copc",
@@ -1160,7 +1512,11 @@
       "density": 1.74,
       "licence": "[License](https://creativecommons.org/licenses/by/4.0/)",
       "provider": "CNIG",
-      "attribution": " — via flai open LiDAR"
+      "attribution": " — via flai open LiDAR",
+      "bounds": {
+        "sphere": [5437145.719, -1515923.552, 2962669.185, 1733.019],
+        "geometricError": 3464.084
+      }
     },
     {
       "format": "copc",
@@ -1173,7 +1529,11 @@
       "density": 1.5,
       "licence": "[License](https://creativecommons.org/licenses/by/4.0/)",
       "provider": "CNIG",
-      "attribution": " — via flai open LiDAR"
+      "attribution": " — via flai open LiDAR",
+      "bounds": {
+        "sphere": [5524546.934, -1560769.383, 3266686.07, 438865.566],
+        "geometricError": 820991.91
+      }
     },
     {
       "format": "copc",
@@ -1186,7 +1546,11 @@
       "density": 14.98,
       "licence": "Federal Office of Topography swisstopo [License](https://www.swisstopo.admin.ch/en/terms-of-use-free-geodata-and-geoservices)",
       "provider": "Swiss_federal_authorities",
-      "attribution": "Federal Office of Topography swisstopo — via flai open LiDAR"
+      "attribution": "Federal Office of Topography swisstopo — via flai open LiDAR",
+      "bounds": {
+        "sphere": [4339943.276, 564605.571, 4681971.26, 73634.474],
+        "geometricError": 145492.251
+      }
     },
     {
       "format": "copc",
@@ -1199,7 +1563,11 @@
       "density": 19.56,
       "licence": "Federal Office of Topography swisstopo [License](https://www.swisstopo.admin.ch/en/terms-of-use-free-geodata-and-geoservices)",
       "provider": "Swiss_federal_authorities",
-      "attribution": "Federal Office of Topography swisstopo — via flai open LiDAR"
+      "attribution": "Federal Office of Topography swisstopo — via flai open LiDAR",
+      "bounds": {
+        "sphere": [4396519.691, 635642.225, 4798314.501, 317508.086],
+        "geometricError": 604485.645
+      }
     },
     {
       "format": "copc",
@@ -1212,7 +1580,11 @@
       "density": 3.45,
       "licence": "© Environment Agency [License](https://www.nationalarchives.gov.uk/doc/open-government-licence/version/3/)",
       "provider": "DEFRA",
-      "attribution": "© Environment Agency — via flai open LiDAR"
+      "attribution": "© Environment Agency — via flai open LiDAR",
+      "bounds": {
+        "sphere": [4043271.508, -86802.327, 5307484.318, 597602.573],
+        "geometricError": 1094746.194
+      }
     },
     {
       "format": "copc",
@@ -1225,7 +1597,11 @@
       "density": 2.22,
       "licence": "© Environment Agency [License](https://www.nationalarchives.gov.uk/doc/open-government-licence/version/3/)",
       "provider": "DEFRA",
-      "attribution": "© Environment Agency — via flai open LiDAR"
+      "attribution": "© Environment Agency — via flai open LiDAR",
+      "bounds": {
+        "sphere": [4045498.279, -64183.399, 5315557.324, 613775.582],
+        "geometricError": 1122044.683
+      }
     },
     {
       "format": "copc",
@@ -1238,7 +1614,11 @@
       "density": 2.25,
       "licence": "© Environment Agency [License](https://www.nationalarchives.gov.uk/doc/open-government-licence/version/3/)",
       "provider": "DEFRA",
-      "attribution": "© Environment Agency — via flai open LiDAR"
+      "attribution": "© Environment Agency — via flai open LiDAR",
+      "bounds": {
+        "sphere": [4051678.467, -148270.526, 5297928.193, 594379.473],
+        "geometricError": 1089287.757
+      }
     },
     {
       "format": "copc",
@@ -1251,7 +1631,11 @@
       "density": 2.83,
       "licence": "© Environment Agency [License](https://www.nationalarchives.gov.uk/doc/open-government-licence/version/3/)",
       "provider": "DEFRA",
-      "attribution": "© Environment Agency — via flai open LiDAR"
+      "attribution": "© Environment Agency — via flai open LiDAR",
+      "bounds": {
+        "sphere": [4041555.775, -80614.556, 5319653.687, 616060.816],
+        "geometricError": 1125874.733
+      }
     },
     {
       "format": "copc",
@@ -1264,7 +1648,11 @@
       "density": 2.69,
       "licence": "© Environment Agency [License](https://www.nationalarchives.gov.uk/doc/open-government-licence/version/3/)",
       "provider": "DEFRA",
-      "attribution": "© Environment Agency — via flai open LiDAR"
+      "attribution": "© Environment Agency — via flai open LiDAR",
+      "bounds": {
+        "sphere": [4055792.723, -167293.651, 5270754.097, 554446.445],
+        "geometricError": 1021401.152
+      }
     },
     {
       "format": "copc",
@@ -1277,7 +1665,11 @@
       "density": 3.28,
       "licence": "© Environment Agency [License](https://www.nationalarchives.gov.uk/doc/open-government-licence/version/3/)",
       "provider": "DEFRA",
-      "attribution": "© Environment Agency — via flai open LiDAR"
+      "attribution": "© Environment Agency — via flai open LiDAR",
+      "bounds": {
+        "sphere": [4028033.958, -72208.189, 5318323.567, 595945.544],
+        "geometricError": 1091946.785
+      }
     },
     {
       "format": "copc",
@@ -1290,7 +1682,11 @@
       "density": 4.38,
       "licence": "© Environment Agency [License](https://www.nationalarchives.gov.uk/doc/open-government-licence/version/3/)",
       "provider": "DEFRA",
-      "attribution": "© Environment Agency — via flai open LiDAR"
+      "attribution": "© Environment Agency — via flai open LiDAR",
+      "bounds": {
+        "sphere": [4046086.096, -96100.055, 5264978.754, 529230.256],
+        "geometricError": 978198.816
+      }
     },
     {
       "format": "copc",
@@ -1303,7 +1699,11 @@
       "density": 3.15,
       "licence": "© Environment Agency [License](https://www.nationalarchives.gov.uk/doc/open-government-licence/version/3/)",
       "provider": "DEFRA",
-      "attribution": "© Environment Agency — via flai open LiDAR"
+      "attribution": "© Environment Agency — via flai open LiDAR",
+      "bounds": {
+        "sphere": [4047687.869, -217186.58, 5314648.242, 621981.617],
+        "geometricError": 1135843.898
+      }
     },
     {
       "format": "copc",
@@ -1316,7 +1716,11 @@
       "density": 1.91,
       "licence": "© Environment Agency [License](https://www.nationalarchives.gov.uk/doc/open-government-licence/version/3/)",
       "provider": "DEFRA",
-      "attribution": "© Environment Agency — via flai open LiDAR"
+      "attribution": "© Environment Agency — via flai open LiDAR",
+      "bounds": {
+        "sphere": [4056490.655, -174601.447, 5261253.493, 539729.96],
+        "geometricError": 996218.467
+      }
     },
     {
       "format": "copc",
@@ -1329,7 +1733,11 @@
       "density": 1.58,
       "licence": "© Environment Agency [License](https://www.nationalarchives.gov.uk/doc/open-government-licence/version/3/)",
       "provider": "DEFRA",
-      "attribution": "© Environment Agency — via flai open LiDAR"
+      "attribution": "© Environment Agency — via flai open LiDAR",
+      "bounds": {
+        "sphere": [4041271.716, -66481.243, 5312363.622, 602751.764],
+        "geometricError": 1103451.742
+      }
     },
     {
       "format": "copc",
@@ -1342,7 +1750,11 @@
       "density": 2.01,
       "licence": "© Environment Agency [License](https://www.nationalarchives.gov.uk/doc/open-government-licence/version/3/)",
       "provider": "DEFRA",
-      "attribution": "© Environment Agency — via flai open LiDAR"
+      "attribution": "© Environment Agency — via flai open LiDAR",
+      "bounds": {
+        "sphere": [4042595.066, -82541.383, 5315490.885, 610263.315],
+        "geometricError": 1116108.703
+      }
     },
     {
       "format": "copc",
@@ -1355,7 +1767,11 @@
       "density": 1.65,
       "licence": "© Environment Agency [License](https://www.nationalarchives.gov.uk/doc/open-government-licence/version/3/)",
       "provider": "DEFRA",
-      "attribution": "© Environment Agency — via flai open LiDAR"
+      "attribution": "© Environment Agency — via flai open LiDAR",
+      "bounds": {
+        "sphere": [4056386.202, -171047.189, 5265821.817, 547049.029],
+        "geometricError": 1008751.136
+      }
     },
     {
       "format": "copc",
@@ -1368,7 +1784,11 @@
       "density": 2.33,
       "licence": "© Environment Agency [License](https://www.nationalarchives.gov.uk/doc/open-government-licence/version/3/)",
       "provider": "DEFRA",
-      "attribution": "© Environment Agency — via flai open LiDAR"
+      "attribution": "© Environment Agency — via flai open LiDAR",
+      "bounds": {
+        "sphere": [4055872.279, -104764.012, 5257390.229, 529336.957],
+        "geometricError": 978378.603
+      }
     },
     {
       "format": "copc",
@@ -1381,7 +1801,11 @@
       "density": 1.69,
       "licence": "© Environment Agency [License](https://www.nationalarchives.gov.uk/doc/open-government-licence/version/3/)",
       "provider": "DEFRA",
-      "attribution": "© Environment Agency — via flai open LiDAR"
+      "attribution": "© Environment Agency — via flai open LiDAR",
+      "bounds": {
+        "sphere": [4042116.12, -73623.388, 5312680.368, 604562.224],
+        "geometricError": 1106500.896
+      }
     },
     {
       "format": "copc",
@@ -1394,7 +1818,11 @@
       "density": 1.72,
       "licence": "© Environment Agency [License](https://www.nationalarchives.gov.uk/doc/open-government-licence/version/3/)",
       "provider": "DEFRA",
-      "attribution": "© Environment Agency — via flai open LiDAR"
+      "attribution": "© Environment Agency — via flai open LiDAR",
+      "bounds": {
+        "sphere": [4047728.191, -136539.611, 5248111.323, 504683.361],
+        "geometricError": 935883.967
+      }
     },
     {
       "format": "copc",
@@ -1407,7 +1835,11 @@
       "density": 1.22,
       "licence": "© Environment Agency [License](https://www.nationalarchives.gov.uk/doc/open-government-licence/version/3/)",
       "provider": "DEFRA",
-      "attribution": "© Environment Agency — via flai open LiDAR"
+      "attribution": "© Environment Agency — via flai open LiDAR",
+      "bounds": {
+        "sphere": [4057413.192, -175603.779, 5259108.663, 537339.328],
+        "geometricError": 992117.057
+      }
     },
     {
       "format": "copc",
@@ -1420,7 +1852,11 @@
       "density": 1.35,
       "licence": "© Environment Agency [License](https://www.nationalarchives.gov.uk/doc/open-government-licence/version/3/)",
       "provider": "DEFRA",
-      "attribution": "© Environment Agency — via flai open LiDAR"
+      "attribution": "© Environment Agency — via flai open LiDAR",
+      "bounds": {
+        "sphere": [4036376.864, -113788.212, 5228947.715, 457891.951],
+        "geometricError": 854494.345
+      }
     },
     {
       "format": "copc",
@@ -1433,7 +1869,11 @@
       "density": 0.85,
       "licence": "© Environment Agency [License](https://www.nationalarchives.gov.uk/doc/open-government-licence/version/3/)",
       "provider": "DEFRA",
-      "attribution": "© Environment Agency — via flai open LiDAR"
+      "attribution": "© Environment Agency — via flai open LiDAR",
+      "bounds": {
+        "sphere": [4003767.203, 32578.092, 5304819.727, 541021.752],
+        "geometricError": 998555.454
+      }
     },
     {
       "format": "copc",
@@ -1446,7 +1886,11 @@
       "density": 16.9,
       "licence": "NOAA, [License](https://nauticalcharts.noaa.gov/data/data-licensing.html)",
       "provider": "NOAA",
-      "attribution": "NOAA — via flai open LiDAR"
+      "attribution": "NOAA — via flai open LiDAR",
+      "bounds": {
+        "sphere": [992556.143, -5624630.05, 3080040.864, 209468.521],
+        "geometricError": 405055.93
+      }
     },
     {
       "format": "copc",
@@ -1459,7 +1903,11 @@
       "density": 16.14,
       "licence": "NOAA, [License](https://nauticalcharts.noaa.gov/data/data-licensing.html)",
       "provider": "NOAA",
-      "attribution": "NOAA — via flai open LiDAR"
+      "attribution": "NOAA — via flai open LiDAR",
+      "bounds": {
+        "sphere": [735923.947, -5623051.448, 2951416.891, 34353.869],
+        "geometricError": 68308.135
+      }
     },
     {
       "format": "copc",
@@ -1472,7 +1920,12 @@
       "density": 42.83,
       "licence": "NOAA, [License](https://nauticalcharts.noaa.gov/data/data-licensing.html)",
       "provider": "NOAA",
-      "attribution": "NOAA — via flai open LiDAR"
+      "attribution": "NOAA — via flai open LiDAR",
+      "bounds": {
+        "sphere": [1195030.323, -5256534.859, 3760590.836, 376652.932],
+        "geometricError": 710921.553
+      }
     }
-  ]
+  ],
+  "boundsBakedAt": "2026-10-30T09:55:02.604Z"
 }

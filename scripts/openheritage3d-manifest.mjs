@@ -110,6 +110,8 @@ const results = await mapLimit(dois, CONCURRENCY, async (doi, k) => {
       };
       // keep a hand-placed position / altitude from the previous manifest
       if (prev) { if (prev.alt != null) e.alt = prev.alt; if (prev.lon != null && prev.lat != null && prev.handPlaced) { e.lon = prev.lon; e.lat = prev.lat; e.handPlaced = true; } }
+      // keep baked bounds (scripts/aggregate-bake-bounds.mjs) while the placement they were baked for holds
+      if (prev?.bounds && prev.lon === e.lon && prev.lat === e.lat && prev.alt === e.alt && prev.heading === e.heading) e.bounds = prev.bounds;
       return e;
     });
   } catch (err) { failed.push(`${doi}: ${err.message}`); return []; }
@@ -125,7 +127,9 @@ const manifest = {
   built: new Date().toISOString().slice(0, 10),
   entries,
 };
-await writeFile(OUT, JSON.stringify(manifest, null, 2) + '\n');
+// number arrays (bounds spheres, transforms) on one line: the layout aggregate-bake-bounds.mjs writes
+const oneLineArrays = (t) => t.replace(/\[\s*(-?[\d.eE+-]+(?:,\s*-?[\d.eE+-]+)*)\s*\]/g, (_, b) => `[${b.split(/,\s*/).join(', ')}]`);
+await writeFile(OUT, oneLineArrays(JSON.stringify(manifest, null, 2)) + '\n');
 console.log(`wrote ${entries.length} entries from ${dois.length - noConfig.length - noData.length} projects → ${OUT}`);
 if (noData.length) console.log(`config names clouds that do not exist (404): ${noData.length} (${noData.slice(0, 10).join(", ")}…)`);
 if (noConfig.length) console.log(`no Potree config: ${noConfig.length} (${noConfig.slice(0, 10).join(', ')}…)`);

@@ -74,18 +74,8 @@ export async function writeTileGlb(view, tileCenter, outputPath) {
         colors[i * 4 + 2] = getB(i) * scale;
         colors[i * 4 + 3] = 1.0;
       }
-    } else if (dims.Intensity) {
-      const getI = view.getter('Intensity');
-      // Uint16 intensity → normalised grey  [0,1]
-      for (let i = 0; i < count; i++) {
-        const g = getI(i) / 65535;
-        colors[i * 4]     = g;
-        colors[i * 4 + 1] = g;
-        colors[i * 4 + 2] = g;
-        colors[i * 4 + 3] = 1.0;
-      }
     } else {
-      colors.fill(1.0); // white
+      colors.fill(1.0); // no RGB: white (intensity as grey rendered near-black)
     }
     // glTF COLOR_0 is linear; LAS RGB (and the intensity-as-grey display mapping) is sRGB-encoded.
     // Same fix as core/points-glb.js — without it every spec-following client renders washed out.

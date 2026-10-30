@@ -209,6 +209,29 @@ share one selection function and one cached mosaic.
   used to happen again after every restart or deploy and every 24 h. The cache now survives restarts;
   an entry older than its TTL is still served and refreshed in the background (stale-while-revalidate),
   so the mosaic is instant and at worst a day old, never blocked. Failures are not persisted.
+  The key ignores the child URL's `cache=`, so a mosaic opened with `&cache=hierarchy` reuses it.
+- **Bounds baked into the manifest**: `scripts/aggregate-bake-bounds.mjs <manifest.json>` writes
+  each entry's placement into the manifest as
+  `bounds: { sphere: [x, y, z, r], geometricError, native? }`, exactly what the server would derive
+  from the child's root. With it, a mosaic and its `index.json` (the picker's circles) build without
+  fetching any child root, even on a fresh server with no cache: the 692-dataset Iconem index
+  answered in 60 ms cold with zero root fetches. The bake reuses the persisted cache, so it takes
+  under a second when the cache is warm. Every committed manifest is baked, and the Iconem and Open
+  Heritage 3D generators carry bounds over when they regenerate. `&ttl=0` and `&curved=` ignore baked
+  bounds and probe. Re-bake after re-georeferencing a dataset.
+- **`&cache=none|hierarchy`** sets what every `/stream` child of the mosaic asks for, and the viewer's
+  cache pill in the top bar passes it on. The default stays `none`, which is lazy. `hierarchy` makes
+  each child's first root request drain its whole hierarchy through the source before answering, in
+  exchange for instant subtrees afterwards. Point tiles are built per request in both modes, so
+  `hierarchy` does not speed up content. Measured cold on Iconem share links:
+
+  | Mode | Root, first open | Root subtree | Level-1 point tiles |
+  |---|---|---|---|
+  | `none` | 0.09–0.23 s | 0.03–0.7 s | 0.03–0.24 s |
+  | `hierarchy` | 183 s, then over 300 s for the next cloud | 0.1 s | 0.04–0.29 s |
+
+  The server's `/stream` context is memoized per source URL in both modes, so a lazy hierarchy is
+  not re-read on each request either.
 - **Open Heritage 3D, the whole catalogue**: `packages/tile-server/aggregate-sets/openheritage3d.json`
   is built by `scripts/openheritage3d-manifest.mjs` from openheritage3d.org itself — the ~460 project
   DOIs on its data page, each project's Potree `config.js` (every point cloud it loads), its title /
@@ -414,6 +437,87 @@ session. But a mosaic that can *never* notice a child moved is a stale-data bug 
 which is why the TTL is a day rather than forever. Failures get a much shorter TTL (60 s) so one dead
 host cannot pin a degraded mosaic for a day. `&ttl=0` bypasses the cache **in both directions** — use
 it while a dataset is actively being re-tiled.
+
+## What a mosaic costs: caches, upfront work, per-dataset fetches
+
+A mosaic is cheap to describe and expensive only where it touches the sources. This section lists
+every step from opening a mosaic to drawing points, what each one fetches, and what is kept.
+
+### 1. Building the mosaic: one sphere per dataset, and nothing else
+
+To place a dataset in the tree the server needs exactly two numbers per dataset: its bounding sphere
+in Earth-centred coordinates and the geometric error of its reference tile (its radius, see below).
+It takes them from the first of these that has them:
+
+| Source of a dataset's sphere | Cost | Kept |
+|---|---|---|
+| `bounds` baked into the manifest (`scripts/aggregate-bake-bounds.mjs`) | none | in the manifest, until re-baked |
+| child-root cache, in memory | none | 24 h per entry |
+| child-root cache on disk, `.local/aggregate-cache/child-roots.json` | one file read at start-up | across restarts; a stale entry is served and refreshed in the background |
+| **probe**: `GET /stream/tileset.json?…&depth=0` on this server | one source round trip or two per dataset, 16 in parallel | then in both caches above |
+
+Only the probe is slow, and it is paid per dataset, so it accumulates: 692 Iconem share links took
+9 s locally and about a minute on prod when nothing was cached. A probe of a Potree 1.x cloud reads
+its `cloud.js` and nothing else up front, whatever `cache=` the mosaic asks for (the probe drops
+`cache=`); the default prefetch then loads its first subtree's `.hrc` chunks in the background. Every committed manifest and the Iconem one are baked, so a cold
+server builds them with no probe at all: the Iconem index answered in 60 ms with the cache deleted.
+
+Then the tree itself is built in memory in milliseconds and kept 24 h per selection (the query
+string). `index.json`, which draws the picker's circles, is the same tree flattened: it costs what the
+tree costs, and the viewer fetches it about a second after the page loads.
+
+### 2. What the client fetches, and when
+
+The mosaic's own tiles are inline in `tileset.json`: no request per group. A dataset is a reference
+tile whose content is the dataset's own `/stream/tileset.json`. A 3D Tiles client requests that
+content only when it refines the reference tile, i.e. when the reference tile's geometric error,
+projected on screen, exceeds the error target. Its geometric error is the dataset's radius, so from
+far away no dataset is opened at all, and zooming opens only the datasets you get close to. The
+dataset's root is never needed "at the lowest zoom level": before baking, only the *server* needed
+it, to know where the sphere goes.
+
+### 3. Opening one dataset through `/stream`, lazy (`cache=none`, the default)
+
+| Request | What the server does | Cold cost (Iconem share links) | Kept |
+|---|---|---|---|
+| `tileset.json` | reads `cloud.js`, answers an implicit-tiling root, starts loading the first subtree's `.hrc` chunks in the background | 0.09–0.23 s | the source's context, in memory |
+| a `.subtree` (3 levels) | loads only the `.hrc` chunks covering those 3 levels under that node | 0.03–0.7 s | added to the same context |
+| a point tile | fetches that node's points from the source, encodes a glb | 0.03–0.24 s each | **not kept**: built on every request |
+
+"`cache=none`" means *nothing read ahead*, not *nothing kept*: the hierarchy chunks a client has asked
+for stay in memory so the next subtree request under them costs nothing. Dropping them would make
+every subtree request re-read its `.hrc` chunks through the share link. The context is per source URL,
+lives as long as the process, and has **no eviction yet**: a long-running server that has opened
+many clouds holds every chunk it ever read until it restarts. 
+### 4. `cache=hierarchy`: the whole hierarchy before the first answer
+
+`cache=hierarchy` makes the first `tileset.json` request walk **every** `.hrc` chunk of the cloud,
+16 at a time through the source, before answering. Subtrees are then free, and point tiles cost the
+same as in lazy mode. It is only as slow as the cloud is big:
+
+| Cloud | Points | Hierarchy files (`.hrc`, step 5) | First `tileset.json` with `cache=hierarchy` | Same request lazy |
+|---|---|---|---|---|
+| Iconem share link, Potree 1.8 | 2.45 billion | 46,993 | 210 s (about 225 files/s) | 0.2 s |
+
+A lazy client viewing that cloud reads only the hierarchy files under the subtrees it refines into.
+
+That is why the default stays lazy, and why the mosaic build never probes with `cache=hierarchy`.
+`&cache=hierarchy` on an `/aggregate` URL, or the top bar's cache pill, still passes it to every
+dataset, for a server that will serve the same few clouds many times.
+
+### 5. Summary of what is kept
+
+| What | Where | Lifetime | Key |
+|---|---|---|---|
+| Manifests | `packages/tile-server/aggregate-sets/`, `.local/aggregate-sets/` | read on every request | set name |
+| Baked bounds | inside each manifest entry | until re-baked | entry |
+| Child roots (sphere, error, native source) | memory and `.local/aggregate-cache/child-roots.json` | 24 h, then refreshed in the background | child URL without `cache=` |
+| Mosaic tree and index | memory | 24 h | full query string |
+| `/stream` source context (Potree hierarchy read so far) | memory | process lifetime, no eviction | source URL |
+| Point tiles | not kept on the server | per request | — |
+| Uploaded manifests | memory (20 max, 24 h sliding) and the browser's localStorage | until evicted; the browser re-sends | hash of the entries without `bounds` |
+
+`&ttl=0` bypasses the mosaic, the child-root cache and baked bounds for one request.
 
 ## Local sets: mosaicking every Iconem dataset
 

@@ -133,6 +133,7 @@ export default function TopBar({ activeHandleRef }: { activeHandleRef: React.Ref
   };
 
   const availableSets = useAvailableSets();
+  const setsKnown = availableSets != null;
   const uploads = useUploadedSets();
   // Uploaded manifests come first in the Aggregate row, before the server's own sets.
   const uploadPresets: Preset[] = url.format === 'aggregate' ? uploads.map((u) => {
@@ -253,11 +254,15 @@ export default function TopBar({ activeHandleRef }: { activeHandleRef: React.Ref
       doLoad(START_LOAD, START_TYPE, START_FLY);
       return;
     }
+    // Aggregate presets backed by a server set are hidden until /aggregate/demo.json answers. Picking
+    // a fallback before that loaded the open-data mosaic for an ?preset=agg-iconem-all link (and then
+    // stayed there): wait for the list, this effect re-runs when it arrives.
+    if (url.format === 'aggregate' && !setsKnown) return;
     const wanted = url.preset && presets.find((p) => p.id === url.preset && p.url);
     const target = wanted || presets.find((p) => p.url);
     if (target) selectPreset(target);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [url.mode, url.format, url.tool, url.tilesetOp, url.cache, url.tiling, url.centroids, url.transform, url.curved]);
+  }, [url.mode, url.format, url.tool, url.tilesetOp, url.cache, url.tiling, url.centroids, url.transform, url.curved, setsKnown]);
 
   const manifestButton = (
     <>

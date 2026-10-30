@@ -83,8 +83,11 @@ interface ViewerStore {
   /** X-ray: opacity of the points (meshes draw at 60 % of it) and whether points keep their colours or go white. */
   xrayOpacity: number;
   setXrayOpacity: (v: number) => void;
-  xrayPoints: 'rgb' | 'white';
+  xrayPoints: 'rgb' | 'color';
   setXrayPoints: (v: ViewerStore['xrayPoints']) => void;
+  /** X-ray points in one colour (`xrayPoints: 'color'`), CSS hex. */
+  xrayColor: string;
+  setXrayColor: (v: string) => void;
   edl: boolean;
   edlStrength: number;
   setPointAdaptive: (v: boolean) => void;
@@ -203,6 +206,8 @@ export const useViewerStore = create<ViewerStore>((set, get) => ({
   setXrayOpacity: (v) => set({ xrayOpacity: v }),
   xrayPoints: 'rgb',
   setXrayPoints: (v) => set({ xrayPoints: v }),
+  xrayColor: '#ffffff',
+  setXrayColor: (v) => set({ xrayColor: v }),
   edl: true,
   edlStrength: 1,
   shadeless: false,
