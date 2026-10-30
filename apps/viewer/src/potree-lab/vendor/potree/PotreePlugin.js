@@ -294,6 +294,13 @@ export class PotreePlugin extends PointCloudEffectsPlugin {
 
 		const { loader } = this;
 		const node = loader.hierarchy.get( key );
+		if ( ! node ) {
+
+			// no hierarchy entry for this node (its chunk never finished loading): a leaf for now
+			return;
+
+		}
+
 		const [ parentMin, parentMax ] = boxToMinMax( tile.boundingVolume.box );
 		const childError = tile.geometricError / 2;
 

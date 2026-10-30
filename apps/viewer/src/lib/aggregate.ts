@@ -29,6 +29,9 @@ export interface DatasetMarker {
   attribution?: string | null;
   /** The server set the row came from. */
   set?: string | null;
+  /** ISO 3166-1 alpha-3 of the country the dataset is in, when the server knows it, and its name. */
+  country?: string | null;
+  countryName?: string | null;
   /** The quadtree cell the dataset's external root hangs under, and its depth in the mosaic tree. */
   cell?: { scheme: string; key: string; morton?: string; level: number };
   depth?: number;

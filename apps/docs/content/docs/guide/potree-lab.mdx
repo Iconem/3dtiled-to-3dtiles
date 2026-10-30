@@ -48,9 +48,14 @@ A **controls** select switches the camera scheme without reloading (`?controls=`
 |---|---|
 | `EnvironmentControls (3DTRjs)` (default) | 3DTRjs's local-scene controls: pivot on the picked point, a fallback ground plane under the data |
 | `GlobeControls (3DTRjs)` | 3DTRjs's globe controls, bound to the loaded tileset's group. The lab recentres content at the origin, so this is for comparing feel, not for real geography |
-| `OrbitControls (three)` | three.js's own orbit around a fixed target (the dataset's centre) |
+| `OrbitControls (three)` | three.js's own orbit around a fixed target |
 
-**Double-click** pivots on the picked point and moves halfway to it, with every scheme. **inertia (s)**
+Switching schemes keeps the camera where it is: the new scheme adopts the current focus (the orbit
+target or the 3DTRjs pivot when one is active, else the point of the dataset under the screen centre,
+else a point on the view axis), so OrbitControls' first update does not swing the view. **Double-click**
+pivots on the picked point and moves halfway to it, **middle-drag** dollies toward the point under the
+cursor (drag down = in), with every scheme. Picks go through the viewer's rule (`lib/picking.ts`):
+never a hidden object, a wireframe, a transparent material or a back face. **inertia (s)**
 is the damping half-life — 3DTRjs's `dampingFactor` is literally that time constant (their default
 0.15 s glides long after the pointer stops; the lab uses 0.05 s), and the same half-life is mapped onto
 OrbitControls' per-frame factor.

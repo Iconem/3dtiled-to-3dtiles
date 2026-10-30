@@ -8,6 +8,118 @@ Format loosely follows [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+### Fixed — 2026-10-29d (COPC geometric error was the node diagonal: everything refined to 2 px)
+- **`/stream` COPC tilesets declared `geometricError = cube diagonal / 2^level`** (explicit and
+  implicit trees alike), 100–200× the point spacing a tile actually carries, where Potree streams
+  declare the spacing. With a 2 px error target that refines every node until it is two pixels wide:
+  the `open` mosaic seen from orbit marked **14 829** tiles used and queued **7 591** downloads in
+  3DTRjs — the national flai overviews (one with a 5 486 km cube) traversed to depth 13 — which is the
+  "seeing the whole of France is slow" cost, in Cesium as much as in 3DTRjs. COPC tiles now declare
+  `spacing / 2^level` from the COPC info VLR (fallback cube/128, the Potree convention): same view,
+  **146** used, **39** queued. The mosaic's leaf error is unchanged (it takes the larger of the dataset's
+  tileset-level error and sphere radius), and the viewer's adaptive point size now reads COPC tiles'
+  spacing from the error directly, as it does for Potree.
+
+### Added — 2026-10-29d (3DTRjs navigation, picking, loading and marker styling)
+- **One picking rule** (`apps/viewer/src/lib/picking.ts`) for double-click, middle-drag and the
+  controls' own drag/rotate/zoom pivots (GlobeControls/EnvironmentControls `_raycast` is wrapped per
+  instance): never a hidden object (a picker-hidden dataset, the inactive native/stream variant),
+  a wireframe (the reference sphere with imagery off), a transparent material or a back face; the data
+  wins over the terrain when both are under the cursor, the nearest terrain hit otherwise.
+- **Footprint gate** (`lib/footprintGate.ts`, a `calculateTileViewError` plugin): a mosaic dataset
+  root is not requested until its bounding sphere spans 24 px on screen — the marker stands for it —
+  so a national mosaic from orbit no longer fetches 100+ external roots and their root content
+  (native Potree leaves included: the child renderer never mounts for a 5 px dataset).
+- **Stale download abort** (`lib/staleLoads.ts`): 3DTRjs only cancels tiles still QUEUED; tiles
+  downloading or parsing while unused for 12 updates are now removed from the cache (fetch aborted,
+  parse discarded) on the mosaic, its native-leaf children and every globe renderer — the "loads every
+  tile along the camera path" stall on a fast fly-to. The imagery globe refines to 2 px, not the
+  plugin's recommended 1 px.
+- **Terrain behind data** (on): terrain first, depth cleared, then the data (a render-order 0.5 hook;
+  content models get render order 1), so datasets under the DEM stay visible. The camera roll is left
+  to the controls (GlobeControls: local vertical near the surface, north only from far away).
+- **Controls freeze**: two causes handled — a gizmo unmounted mid-drag leaving drei's
+  `controls.enabled = false` (re-enabled whenever no gizmo is shown), and EnvironmentControls' stale
+  `up` refusing near-parallel drags after the camera travelled (its up follows the ellipsoid normal at
+  the camera every frame).
+- **Motion LOD** (`lib/motionLod.ts`): for the duration of a scripted fly-to (`flight.active`) the
+  globe renderers' error target is multiplied by 6, so the frames of the flight request only coarse
+  imagery and terrain and the frame after arrival requests the destination at the normal target.
+  Globe renderers only, flights only: a first version boosted every renderer from the camera's speed,
+  which made the points and the terrain flicker between levels while panning or orbiting.
+- **Picker**: the in-view list is a tree — country (ISO 3166-1 alpha-3) → agency / project → site —
+  with one checkbox per level for everything under it and single-child levels collapsed; the
+  provider "markers" pills are now **source pills** (the mosaic's server sets, or its providers when it
+  has one) that hide the datasets themselves, tiles and markers. A hidden dataset is masked in the
+  traversal too (`FootprintGatePlugin.isHidden`): its tiles stop loading and leave the cache instead
+  of merely being drawn invisible. `/aggregate/index.json` rows carry `country` / `countryName` (from
+  the manifest entry's `country`, else the "(XX)" alpha-2 in its project or name); the committed
+  manifests (flai, cities, Esri, Open Heritage 3D, Aerometrex, Vexcel) and RESOURCES.md entries are
+  tagged.
+- **Z offset**: **Auto (follow the terrain)** keeps a tileset snapped to the ground — the dataset's own
+  low bins against the selected terrain source (Mapterhorn/Terrarium sampled, World Terrain / Re:Earth /
+  Google 3D by ray, WGS84 as 0), re-measured when the terrain under it refines, when the terrain mode
+  changes and when a new tileset loads; on a mosaic it toggles the server-side per-dataset `&snap=`.
+  **Undo** after a snap restores the previous offset (or removes the mosaic's `&snap=`): there was no
+  way back before. **Clearance above ground** (10 m default) is added by Snap and Auto, so a scan lies
+  above most of the terrain rather than half inside it.
+- **Child-root cache persisted** (`.local/aggregate-cache/child-roots.json`, `AGGREGATE_CACHE_DIR`):
+  a mosaic's child roots survive restarts and deploys, and a stale entry is served while it refreshes
+  in the background — the Iconem mosaic no longer re-fetches 692 roots from the share-link API (9 s
+  locally, a minute on prod) after every restart or 24 h.
+- **Controls**: **Trackball** (free rotation about the target) and **Fly** (W A S D / R F / Q E, drag
+  to look, speed from the height above ground; runs the frame loop while active) join Globe, Orbit and
+  Environment. Bare `controls.update()` calls skip FlyControls (its update needs the frame delta; an
+  undefined delta turned the camera to NaN).
+- **X-ray** has an **opacity** slider (points; meshes at 60 % of it) and **RGB / white** points.
+- **Sidebar regrouped** into six foldable sections that remember their state (localStorage): Basemap &
+  Terrain, Camera & Controls, Tileset & LOD, Material & Points, and Crop & Extract / Local Frame, which
+  start folded. **Material** (3DTRjs): Default / X-ray (additive, no depth write: meshes as a tint,
+  points at 35 %) / Wireframe, applied to every loaded tile and native Potree leaf.
+- **Open Heritage 3D manifest rebuilt from the source** (`scripts/openheritage3d-manifest.mjs`): 441
+  point clouds from 243 projects (was 10 hand-picked), with title, country, licence and the project
+  map's coordinates; 146 projects have no Potree viewer yet and 70 name clouds that were never
+  uploaded (every URL is probed). **Terrain behind data** is now on by
+  default.
+- **Globe parse queue** (`GLOBE_PARSE_QUEUE`, 32 jobs) for the imagery and Terrarium globes: their
+  `parseToMesh` is a network wait (elevation grid, then overlay image) and 3DTRjs ran it through the
+  shared 5-job parse queue sized for Draco/glTF decoding, so a close view's ~300 terrain tiles drained
+  five round-trips at a time — measured headless, fine imagery finished 8-10 s after arrival at a
+  400 m view while each fetch took ~10 ms. The data renderers keep the shared queue. (The camera
+  tween never held requests back; the parse queue did.)
+- **Fixed: Orbit controls crashed the 3DTRjs viewer** (`installFilteredRaycast`: drei's OrbitControls
+  has no `_raycast` to wrap — skipped now).
+- **Fixed: native Potree leaf "Cannot read properties of undefined (reading 'childMask')"** after a
+  fast camera move (a controls switch): the vendored loader marked a v1 hierarchy chunk as loaded
+  before its fetch finished, so an aborted chunk (the tile left the cache) was never re-requested and
+  the node's children were later expanded against a hierarchy that did not know them. The chunk is
+  marked loaded once parsed, and a node without a hierarchy entry is a leaf.
+- **Fixed: middle-drag zoom "did not react" on a point cloud**, especially right after flying to a
+  marker: the points pick tolerance was one world radius for the whole ray, sized at the dataset's
+  distance, so a stray point two metres in front of the lens matched and, being nearest, became the
+  pivot. A point now counts only within 15 px at its own distance (`pickPoint`, also for the controls'
+  own pivots).
+- **Basemap**: Mapbox Satellite is the default when the build has `VITE_MAPBOX_TOKEN` (a git-ignored
+  `apps/viewer/.env.local`), Esri World Imagery otherwise; Esri tiles are requested with
+  `blankTile=false`, so a level with no imagery answers 404 and the parent's imagery stays instead of
+  the grey placeholder.
+- **Markers**: 13 px pastel discs with a bold dark anti-aliased ring (8 px grey when picker-hidden), the
+  same in Cesium (outline 2.5); one colour for every format by default (new `uniform` colour mode, the
+  per-format palette is pastel too). A marker now hides only when its dataset spans more than 10 % of
+  the viewport **and** has tiles on screen (sampled every 10 frames from `visibleTiles`), or fills
+  60 %: a nearby cloud that has not loaded keeps a clickable marker. Hover card redesigned (header with
+  format badge, key/value grid: extent, captured, provider, licence; mosaic cell and snap in a quiet
+  row).
+- **Basemaps**: *Esri World Imagery* without labels is the default (both renderers); *Esri + labels*
+  stays; *Mapbox Satellite* is listed when `VITE_MAPBOX_TOKEN` is set at build time.
+- **Potree lab**: switching control schemes keeps the camera in place (the new scheme adopts the
+  current focus: orbit target / pivot, else the dataset point under the screen centre, else the view
+  axis); middle-drag dolly and filtered picks as in the viewer. Fixes a `tiles` temporal-dead-zone
+  error when the page opened with `?controls=globe`.
+- Not done: a Web Mercator / planar view. 3DTRjs's planar mode is for its generated image surface
+  only; 3D Tiles content stays ECEF and would need per-vertex reprojection plus matching bounding
+  volumes (see viewer.mdx, "Navigating in 3DTRjs").
+
 ### Docs — 2026-10-29c (changelog in the site, curved placement design, handoff)
 - **The changelog is now a page of the docs site** (`/docs/changelog`, first entry of the sidebar and
   a card on the index): `apps/docs/scripts/sync-changelog.mjs` mirrors this file into

@@ -9,3 +9,7 @@ sample-data
 screens/
 # machine-local state: generated aggregate manifests hold share-link URLs, which are bearer credentials
 .local/
+
+# per-machine Vite env (API tokens): never committed
+.env.local
+.env.*.local

@@ -62,7 +62,7 @@ export interface ViewerHandle {
    */
   snapToGround?(): Promise<string>;
   // 3DTRJS-only — no-ops on CesiumViewer.
-  setControlMode?(mode: 'globe' | 'orbit' | 'env'): void;
+  setControlMode?(mode: 'globe' | 'orbit' | 'env' | 'trackball' | 'fly'): void;
   setPointSize?(px: number): void;
   showCropGizmo?(): boolean;
   hideCropGizmo?(): void;

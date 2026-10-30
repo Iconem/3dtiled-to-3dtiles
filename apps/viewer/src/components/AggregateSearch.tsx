@@ -12,6 +12,7 @@
  * and the snap to ground change the tree itself, and reload it.
  */
 import { useEffect, useMemo, useRef, useState } from 'react';
+import { ChevronDown, ChevronRight } from 'lucide-react';
 import { Input } from '@/components/ui/input';
 import { Checkbox } from '@/components/ui/checkbox';
 import { Slider } from '@/components/ui/slider';
@@ -54,6 +55,19 @@ const BV_HELP = 'Bounding volume of the mosaic\'s group tiles. cell: the quadtre
 
 const cellLabel = (d: DatasetMarker) => (d.cell ? ` · cell ${d.cell.key || '(root)'} z${d.cell.level}, depth ${d.depth}` : '');
 
+/** Short names for the server sets a mosaic can be made of (the pills); unknown sets show their id. */
+const SOURCE_LABELS: Record<string, string> = {
+  flai: 'flai open LiDAR', vexcel: 'Vexcel', 'esri-3d': 'Esri Living Atlas', openheritage3d: 'Open Heritage 3D',
+  aerometrex: 'Aerometrex', cities: 'City & national 3D Tiles', open: 'RESOURCES.md', opendata: 'RESOURCES.md',
+  iconem: 'Iconem', 'iconem-public': 'Iconem', 'iconem-open': 'Iconem', angkor: 'Iconem — Angkor',
+};
+
+/** A site on screen: the datasets of one platform scene, and where it sits in the country → agency tree. */
+type Site = { key: string; title: string; items: DatasetMarker[]; country: string | null; countryName: string | null; project: string };
+/** A level of the in-view tree: a country, or an agency / project; `all` is every dataset under it, on screen or not. */
+type TreeNode = { key: string; title: string; all: DatasetMarker[]; sites: Site[]; children: TreeNode[] };
+const siteCount = (n: TreeNode): number => n.sites.length + n.children.reduce((k, c) => k + siteCount(c), 0);
+
 export default function AggregateSearch({ activeHandleRef, renderer }: {
   activeHandleRef: React.RefObject<ViewerHandle | null>;
   renderer: string;
@@ -75,9 +89,7 @@ export default function AggregateSearch({ activeHandleRef, renderer }: {
   const [panel, setPanel] = useState(true);
   const [inView, setInView] = useState<string[]>([]);
   const [years, setYears] = useState<number[] | null>(null);
-  const [colorMode, setColorMode] = useState<ColorMode>('format');
-  // providers whose MARKERS are hidden (the data itself is the picker's business)
-  const [mutedProviders, setMutedProviders] = useState<Set<string>>(new Set());
+  const [colorMode, setColorMode] = useState<ColorMode>('uniform');
   const boxRef = useRef<HTMLDivElement>(null);
   const terrainMode = useViewerStore((s) => s.terrainMode);
 
@@ -120,6 +132,25 @@ export default function AggregateSearch({ activeHandleRef, renderer }: {
 
   const colors = useMemo(() => markerColors(full?.datasets ?? [], colorMode), [full, colorMode]);
 
+  // The mosaic's SOURCES, one pill each: its server sets when it is made of several (the open mosaic:
+  // flai, Vexcel, Esri, Open Heritage 3D …), else its providers. A pill hides every dataset of the
+  // source — tiles and markers — not just the markers.
+  const sources = useMemo(() => {
+    const ds = full?.datasets ?? [];
+    const useSet = new Set(ds.map((d) => d.set ?? '')).size > 1;
+    const keyOf = (d: DatasetMarker) => (useSet ? d.set ?? '' : d.provider ?? '');
+    const m = new Map<string, DatasetMarker[]>();
+    for (const d of ds) { const k = keyOf(d); if (!m.has(k)) m.set(k, []); m.get(k)!.push(d); }
+    const list = [...m].map(([key, all]) => {
+      const providers = new Set(all.map((d) => d.provider ?? ''));
+      return { key, all, label: useSet ? (SOURCE_LABELS[key] ?? key ?? 'other') : key || 'unknown', provider: providers.size === 1 ? [...providers][0] : null };
+    }).sort((a, b) => b.all.length - a.all.length);
+    return { list, keyOf };
+  }, [full]);
+  const sourceKeyOf = sources.keyOf;
+  // a source is off once every one of its datasets is hidden by hand: its markers go with them
+  const offSources = useMemo(() => new Set(sources.list.filter((src) => picker && src.all.every((d) => picker.hide.has(d.id))).map((src) => src.key)), [sources, picker]);
+
   /**
    * Markers: datasets of a type that is filtered out, or of a muted provider, are not shown at all;
    * those hidden by hand, by date or by "latest only" stay as grey dots, so they can be found again.
@@ -129,9 +160,9 @@ export default function AggregateSearch({ activeHandleRef, renderer }: {
     if (filtered && !current) return null;                      // wait, rather than flash everything as hidden
     return full.datasets
       .filter((d) => !(picker.formats.length && !picker.formats.includes(d.format)))
-      .filter((d) => !mutedProviders.has(d.provider ?? ''))
+      .filter((d) => !offSources.has(sourceKeyOf(d)))
       .map((d) => ({ ...d, color: colors.get(d.id), ...(activeIds.has(d.id) ? {} : { inactive: true }) }));
-  }, [full, current, filtered, activeIds, picker, mutedProviders, colors]);
+  }, [full, current, filtered, activeIds, picker, offSources, sourceKeyOf, colors]);
 
   // Push markers to the renderer. Re-run on renderer switch: the handle behind the ref changes.
   useEffect(() => {
@@ -203,6 +234,7 @@ export default function AggregateSearch({ activeHandleRef, renderer }: {
   }, [full]);
   const providerNames = useMemo(() => providerCounts.map(([p]) => p), [providerCounts]);
 
+
   // Year span of the dated datasets, for the timeline.
   const yearSpan = useMemo(() => {
     const dated = (full?.datasets ?? []).filter((d) => d.date);
@@ -226,7 +258,7 @@ export default function AggregateSearch({ activeHandleRef, renderer }: {
       byGroup.get(k)!.push(d);
     }
     const seen = new Set<string>();
-    const out: { key: string; title: string; items: DatasetMarker[] }[] = [];
+    const out: Site[] = [];
     for (const id of inView) {
       const d = full.datasets.find((x) => x.id === id);
       if (!d) continue;
@@ -234,10 +266,41 @@ export default function AggregateSearch({ activeHandleRef, renderer }: {
       if (seen.has(k)) continue;
       seen.add(k);
       const items = [...byGroup.get(k)!].sort((a, b) => (a.date ?? '').localeCompare(b.date ?? '') || a.name.localeCompare(b.name));
-      out.push({ key: k, title: d.group ? (d.scene || d.project || d.name) : d.name, items });
+      out.push({ key: k, title: d.group ? (d.scene || d.project || d.name) : d.name, items,
+        country: d.country ?? null, countryName: d.countryName ?? null, project: d.project ?? d.provider ?? '' });
     }
     return out;
   }, [full, inView]);
+
+  // The sites on screen, as a tree: country (ISO 3166-1 alpha-3, when the server knows it) → agency
+  // or project → site — the way a national catalogue is laid out, so a continent-wide LiDAR mosaic
+  // seen from orbit reads "Estonia · EST 42 · Maa_amet · 3 sites" rather than 22 province rows. Each
+  // level has one checkbox for everything under it, on screen or not. Single-child levels collapse:
+  // one site under one agency under one country is listed as that site.
+  const tree = useMemo((): TreeNode[] => {
+    if (!full) return [];
+    const ds = full.datasets;
+    const projectOf = (d: DatasetMarker) => d.project ?? d.provider ?? '';
+    const top: TreeNode[] = [];
+    const nodeIn = (list: TreeNode[], key: string, title: string, all: () => DatasetMarker[]) => {
+      let n = list.find((x) => x.key === key);
+      if (!n) { n = { key, title, all: all(), sites: [], children: [] }; list.push(n); }
+      return n;
+    };
+    for (const g of groups) {
+      if (g.country) {
+        const c = g.country;
+        const cn = nodeIn(top, `c:${c}`, `${g.countryName ?? c} · ${c}`, () => ds.filter((d) => d.country === c));
+        nodeIn(cn.children, `c:${c}/p:${g.project}`, g.project || 'other', () => ds.filter((d) => d.country === c && projectOf(d) === g.project)).sites.push(g);
+      } else {
+        nodeIn(top, `p:${g.project}`, g.project || 'other', () => ds.filter((d) => !d.country && projectOf(d) === g.project)).sites.push(g);
+      }
+    }
+    return top;
+  }, [groups, full]);
+  // folded by default, except the only top-level node; a click flips a node
+  const [toggledNodes, setToggledNodes] = useState<Set<string>>(() => new Set());
+  const flipNode = (k: string) => setToggledNodes((prev) => { const next = new Set(prev); if (next.has(k)) next.delete(k); else next.add(k); return next; });
 
   // Credits for what is on screen — a mosaic mixes providers, and each one's attribution must be
   // shown while its data is visible (Aerometrex's previews, the national agencies' LiDAR …).
@@ -281,6 +344,12 @@ export default function AggregateSearch({ activeHandleRef, renderer }: {
   function toggleDataset(d: DatasetMarker, show: boolean) {
     const hide = new Set(picker!.hide);
     if (show) hide.delete(d.id); else hide.add(d.id);
+    patch({ hide });
+  }
+  /** Many at once (a source pill, a country or agency row): every dataset under it, on screen or not. */
+  function toggleMany(items: DatasetMarker[], show: boolean) {
+    const hide = new Set(picker!.hide);
+    for (const d of items) { if (show) hide.delete(d.id); else hide.add(d.id); }
     patch({ hide });
   }
   /**
@@ -427,17 +496,18 @@ export default function AggregateSearch({ activeHandleRef, renderer }: {
               latest only
             </label>
           </div>
-          {providerCounts.length > 1 && (
-            <div className="flex flex-wrap items-center gap-1" title="Show or hide the markers of a provider's datasets (not the datasets)">
-              <span className="text-muted-foreground">markers</span>
-              {providerCounts.map(([p, n]) => {
-                const on = !mutedProviders.has(p);
+          {sources.list.length > 1 && (
+            <div className="flex flex-wrap items-center gap-1" title="The mosaic's sources: its server sets (flai, Vexcel, Esri …), or its providers when it has one set. A source switched off hides every one of its datasets — their tiles stop loading — and their markers.">
+              <span className="text-muted-foreground">sources</span>
+              {sources.list.map((src) => {
+                const on = !offSources.has(src.key);
+                const shown = src.all.filter((d) => activeIds.has(d.id)).length;
                 return (
-                  <button key={p || '-'} type="button"
-                    onClick={() => setMutedProviders((m) => { const x = new Set(m); if (on) x.add(p); else x.delete(p); return x; })}
+                  <button key={src.key || '-'} type="button" onClick={() => toggleMany(src.all, !on)}
+                    title={`${src.label}: ${src.all.length} datasets, ${shown} shown — click to ${on ? 'hide' : 'show'} them all`}
                     className={`flex items-center gap-1 rounded-full border px-2 py-0.5 ${on ? 'bg-accent' : 'opacity-50'}`}>
-                    <Dot color={colorMode === 'provider' ? providerColor(p, providerNames) : undefined} dim={!on} />
-                    {p || 'unknown'} <span className="text-muted-foreground">{n}</span>
+                    <Dot color={colorMode === 'provider' && src.provider ? providerColor(src.provider, providerNames) : undefined} dim={!on} />
+                    {src.label} <span className="text-muted-foreground">{shown}/{src.all.length}</span>
                   </button>
                 );
               })}
@@ -446,8 +516,8 @@ export default function AggregateSearch({ activeHandleRef, renderer }: {
           <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
             <span className="flex items-center gap-1">
               <span className="text-muted-foreground">colour</span>
-              <Segmented value={colorMode} options={['format', 'provider', 'dataset'] as const} onChange={setColorMode}
-                title="Colour the markers by format, provider or dataset" />
+              <Segmented value={colorMode} options={['uniform', 'format', 'provider', 'dataset'] as const} onChange={setColorMode}
+                title="Colour the markers: one colour for all, or by format, provider or dataset" />
             </span>
             <span className="flex items-center gap-1">
               <span className="text-muted-foreground">bounds</span>
@@ -484,39 +554,75 @@ export default function AggregateSearch({ activeHandleRef, renderer }: {
           {/* what is on screen, by site */}
           <div className="max-h-[300px] space-y-1.5 overflow-y-auto border-t pt-1.5">
             {groups.length === 0 && <div className="text-muted-foreground">Nothing large enough on screen — zoom towards a marker.</div>}
-            {groups.map((g) => (
-              <div key={g.key}>
-                <div className="flex items-center gap-1.5 font-medium">
-                  <span className="min-w-0 flex-1 truncate" title={g.title}>{g.title}</span>
-                  {g.items.length > 1 && (
-                    <>
-                      <button type="button" className="rounded border px-1 font-normal" onClick={() => groupMode(g.items, 'all')}
-                        title="Show every dataset of this site (pieces of one site, e.g. an airborne scan with detail captures)">all</button>
-                      <button type="button" className="rounded border px-1 font-normal" onClick={() => groupMode(g.items, 'latest')}
-                        title="Show only the newest dated capture of this site (a diachronic series)">latest</button>
-                    </>
-                  )}
+            {(() => {
+              const renderSite = (g: Site) => (
+                <div key={g.key}>
+                  <div className="flex items-center gap-1.5 font-medium">
+                    <span className="min-w-0 flex-1 truncate" title={g.title}>{g.title}</span>
+                    {g.items.length > 1 && (
+                      <>
+                        <button type="button" className="rounded border px-1 font-normal" onClick={() => groupMode(g.items, 'all')}
+                          title="Show every dataset of this site (pieces of one site, e.g. an airborne scan with detail captures)">all</button>
+                        <button type="button" className="rounded border px-1 font-normal" onClick={() => groupMode(g.items, 'latest')}
+                          title="Show only the newest dated capture of this site (a diachronic series)">latest</button>
+                      </>
+                    )}
+                  </div>
+                  {g.items.map((d) => {
+                    const on = activeIds.has(d.id);
+                    const lockedOff = !on && !picker.hide.has(d.id);
+                    return (
+                      <label key={d.id} className={`flex items-center gap-1.5 py-0.5 pl-1 ${lockedOff ? 'opacity-50' : ''}`}
+                        title={(on ? d.name : `${d.name} — ${reasonOf(d)}`) + cellLabel(d)
+                          + (d.snap?.dz != null ? ` · snapped ${d.snap.dz} m` : '')}>
+                        <Checkbox checked={on} disabled={lockedOff} onCheckedChange={(v) => toggleDataset(d, v === true)} />
+                        <Dot color={colorOf(d)} dim={!on} />
+                        <span className="min-w-0 flex-1 truncate">{d.name}</span>
+                        <span className="shrink-0 text-muted-foreground">{d.date ? d.date.replace(/-\d\d(?=\/|$)/g, '').replace('/', '→') : '—'}</span>
+                        <button type="button" className="shrink-0 text-muted-foreground hover:text-foreground" title="fly to"
+                          onClick={(e) => { e.preventDefault(); pick({ kind: 'dataset', d }); }}>↗</button>
+                        <a className="shrink-0 text-muted-foreground hover:text-foreground" title={`${externalViewerUrl(d).label} (new tab)`}
+                          href={externalViewerUrl(d).href} target="_blank" rel="noopener" onClick={(e) => e.stopPropagation()}>⧉</a>
+                      </label>
+                    );
+                  })}
                 </div>
-                {g.items.map((d) => {
-                  const on = activeIds.has(d.id);
-                  const lockedOff = !on && !picker.hide.has(d.id);
-                  return (
-                    <label key={d.id} className={`flex items-center gap-1.5 py-0.5 pl-1 ${lockedOff ? 'opacity-50' : ''}`}
-                      title={(on ? d.name : `${d.name} — ${reasonOf(d)}`) + cellLabel(d)
-                        + (d.snap?.dz != null ? ` · snapped ${d.snap.dz} m` : '')}>
-                      <Checkbox checked={on} disabled={lockedOff} onCheckedChange={(v) => toggleDataset(d, v === true)} />
-                      <Dot color={colorOf(d)} dim={!on} />
-                      <span className="min-w-0 flex-1 truncate">{d.name}</span>
-                      <span className="shrink-0 text-muted-foreground">{d.date ? d.date.replace(/-\d\d(?=\/|$)/g, '').replace('/', '→') : '—'}</span>
-                      <button type="button" className="shrink-0 text-muted-foreground hover:text-foreground" title="fly to"
-                        onClick={(e) => { e.preventDefault(); pick({ kind: 'dataset', d }); }}>↗</button>
-                      <a className="shrink-0 text-muted-foreground hover:text-foreground" title={`${externalViewerUrl(d).label} (new tab)`}
-                        href={externalViewerUrl(d).href} target="_blank" rel="noopener" onClick={(e) => e.stopPropagation()}>⧉</a>
-                    </label>
-                  );
-                })}
-              </div>
-            ))}
+              );
+              const renderNode = (n: TreeNode, only: boolean): React.ReactNode => {
+                // a chain of single children reads as its leaf: "India" with one site is that site, and a
+                // country with one agency is one row titled with both ("Estonia · EST · Maa_amet (EE)")
+                if (n.children.length === 0 && n.sites.length === 1) return renderSite(n.sites[0]);
+                if (n.children.length === 1 && n.sites.length === 0) {
+                  const c = n.children[0];
+                  return renderNode(c.children.length === 0 && c.sites.length === 1 ? c : { ...c, title: `${n.title} · ${c.title}` }, only);
+                }
+                const onCount = n.all.filter((d) => activeIds.has(d.id)).length;
+                const state = onCount === 0 ? false : onCount === n.all.length ? true : 'indeterminate';
+                const open = toggledNodes.has(n.key) ? !only : only;
+                const sites = siteCount(n);
+                return (
+                  <div key={n.key}>
+                    <div className="flex items-center gap-1.5 font-medium">
+                      <Checkbox checked={state} onCheckedChange={(v) => toggleMany(n.all, v === true)}
+                        title={`Show or hide every dataset under this row (${n.all.length}, on screen or not)`} />
+                      <button type="button" className="flex min-w-0 flex-1 items-center gap-1 truncate text-left" onClick={() => flipNode(n.key)}
+                        title={`${sites} site${sites === 1 ? '' : 's'} on screen, ${onCount} of ${n.all.length} datasets shown — click to ${open ? 'fold' : 'list'}`}>
+                        {open ? <ChevronDown className="size-3 shrink-0" /> : <ChevronRight className="size-3 shrink-0" />}
+                        <span className="truncate">{n.title}</span>
+                        <span className="shrink-0 font-normal text-muted-foreground">{onCount}/{n.all.length} · {sites} site{sites === 1 ? '' : 's'}</span>
+                      </button>
+                    </div>
+                    {open && (
+                      <div className="ml-1.5 border-l pl-2">
+                        {n.children.map((c) => renderNode(c, false))}
+                        {n.sites.map(renderSite)}
+                      </div>
+                    )}
+                  </div>
+                );
+              };
+              return tree.map((n) => renderNode(n, tree.length === 1));
+            })()}
           </div>
         </div>
       )}

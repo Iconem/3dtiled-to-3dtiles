@@ -57,6 +57,12 @@ canonical source exists); formats with no public spec (reverse-engineered/undocu
 | **[COPC](https://copc.io)** (Cloud Optimized Pointcloud) · [spec repo](https://github.com/copcio/copcio.github.io) | **octree** (EPT-style) | LAZ-compressed LAS points | ADD | octree nodes (accumulate) | COPC VLR + hierarchy pages | ✅ designed for range reads |
 | **[Potree](https://github.com/potree/PotreeConverter)** (v1 and v2) · [2.0 format](https://github.com/potree/potree/blob/develop/docs/) | **octree** (named `r`/`r0`..`r7`) | points: position int32×3·scale+offset + rgb (2.0 `octree.bin` / 1.x per-node `.bin`) | ADD | octree nodes (accumulate) | 2.0 `metadata.json`+`hierarchy.bin` (22 B/node) · 1.x `cloud.js`+`.hrc` | ✅ (2.0 single octree.bin; 1.x per-node files) |
 
+For both, a tile's `geometricError` is the **point spacing at its depth**: Potree's declared spacing
+and COPC's info-VLR `spacing`, halved per level (fallback: the root cube / 128). A 2 px error target
+then stops refining where points are two pixels apart, and the viewers' adaptive point size reads the
+spacing straight from the error. (Until 2026-10-29 COPC tiles declared their cube *diagonal* / 2^level,
+100–200× too much, which refined every node to two pixels wide — see the changelog.)
+
 ### Generic tiled formats → 3D Tiles
 
 Formats that carry (or wrap) a general node/mesh hierarchy rather than a point- or splat-specific one.

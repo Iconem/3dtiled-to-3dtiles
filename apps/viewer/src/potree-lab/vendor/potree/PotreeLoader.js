@@ -400,11 +400,14 @@ export class PotreeLoader {
 			const path = v1HierarchyPath( key, hierarchyStepSize );
 
 			// a chunk boundary node carries the hierarchy chunk below it in its own .hrc file
+			// Marked loaded only once parsed: an aborted request (the camera left, the tile was dropped
+			// from the cache) must not leave the chunk "loaded" with no entries, or the node's children
+			// would later be expanded against a hierarchy that does not know them.
 			if ( level % hierarchyStepSize === 0 && ! this._loadedChunks.has( key ) ) {
 
-				this._loadedChunks.add( key );
 				const hierBuf = await this._fetchBuffer( `${ this._dataDirUrl }${ path }/${ key }.hrc`, fetchOptions );
 				v1ParseHierarchy( hierBuf, key, this.hierarchy );
+				this._loadedChunks.add( key );
 
 			}
 

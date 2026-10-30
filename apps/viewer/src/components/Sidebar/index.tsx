@@ -5,7 +5,9 @@ import { ToggleGroup, ToggleGroupItem } from '@/components/ui/toggle-group';
 import { useViewerStore } from '@/state/store';
 import { useUrlState } from '@/state/urlState';
 import BasemapSection from './BasemapSection';
+import CameraSection from './CameraSection';
 import TilesetLodSection from './TilesetLodSection';
+import MaterialSection from './MaterialSection';
 import CropExtractSection from './CropExtractSection';
 import LocalFrameSection from './LocalFrameSection';
 import type { ViewerHandle } from '@/lib/viewer-handle';
@@ -54,8 +56,12 @@ export default function Sidebar({ activeHandleRef }: { activeHandleRef: React.Re
       </div>
       <ScrollArea className="min-h-0 flex-1">
         <div className="flex flex-col divide-y divide-border">
+          {/* every section folds and remembers its state (SidebarSection.tsx); the two occasional
+              ones, Crop & Extract and Local Frame, start folded */}
           <BasemapSection activeHandleRef={activeHandleRef} />
+          <CameraSection activeHandleRef={activeHandleRef} />
           <TilesetLodSection activeHandleRef={activeHandleRef} />
+          <MaterialSection activeHandleRef={activeHandleRef} />
           <CropExtractSection activeHandleRef={activeHandleRef} />
           <LocalFrameSection activeHandleRef={activeHandleRef} />
         </div>

@@ -7,7 +7,7 @@
  * the same way (walk `parent`), and cache it on the tile.
  */
 import type { DatasetMarker } from './aggregate';
-import { MARKER_COLORS } from '@/components/Viewport/DatasetTooltip';
+import { MARKER_COLORS, UNIFORM_COLOR } from '@/components/Viewport/DatasetTooltip';
 
 export interface DatasetStyle {
   /** Dataset ids not to draw. */
@@ -16,8 +16,8 @@ export interface DatasetStyle {
   colors: Map<string, string> | null;
 }
 
-/** How markers (and, for provider/dataset, the data itself) are coloured. */
-export type ColorMode = 'format' | 'provider' | 'dataset';
+/** How markers (and, for provider/dataset, the data itself) are coloured. 'uniform': one colour for all. */
+export type ColorMode = 'uniform' | 'format' | 'provider' | 'dataset';
 
 const DS_ID = Symbol('datasetId');
 
@@ -31,16 +31,20 @@ export function tileDatasetId(tile: any, idOf: (t: any) => string | undefined): 
   return id;
 }
 
-/** Distinct, stable hues: golden-angle steps around the wheel. Comma syntax — Cesium and three both parse it. */
-export const paletteColor = (i: number) => `hsl(${Math.round((i * 137.508) % 360)}, 80%, 58%)`;
+/** Distinct, stable pastel hues: golden-angle steps around the wheel. Comma syntax — Cesium and three both parse it. */
+export const paletteColor = (i: number) => `hsl(${Math.round((i * 137.508) % 360)}, 70%, 72%)`;
 
 const PROVIDER_COLORS: Record<string, string> = {
-  Iconem: '#ef4444', Aerometrex: '#22c55e', Vexcel: '#3b82f6', Cesium: '#a78bfa',
+  Iconem: '#f4a6a6', Aerometrex: '#a8e0b4', Vexcel: '#a6c8f4', Cesium: '#cdb8f0',
 };
 
 /** Marker colour per dataset for a mode (providers without a fixed colour get palette hues, by name). */
 export function markerColors(list: DatasetMarker[], mode: ColorMode): Map<string, string> {
   const out = new Map<string, string>();
+  if (mode === 'uniform') {
+    for (const d of list) out.set(d.id, UNIFORM_COLOR);
+    return out;
+  }
   if (mode === 'format') {
     for (const d of list) out.set(d.id, MARKER_COLORS[d.format] ?? '#94a3b8');
     return out;

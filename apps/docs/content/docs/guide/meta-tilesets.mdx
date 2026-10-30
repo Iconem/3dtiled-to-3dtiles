@@ -189,13 +189,36 @@ share one selection function and one cached mosaic.
   viewport tall — the ones rendering or about to — **grouped by platform scene**, each with a
   checkbox and its capture date. A group's **latest** button hides that site's older dated captures
   (a diachronic series such as Mes Aynak 2010 → 2022); **all** shows every piece (Venice: the airborne
-  scan plus San Marco, Rialto and the palazzi, all 2021-06, meant to be seen together). Above the
-  list: **format chips** derived from the index with their counts, a global **latest only** switch
+  scan plus San Marco, Rialto and the palazzi, all 2021-06, meant to be seen together). When several
+  sites of one **server set** are in view (a national LiDAR set from orbit: 22 provinces, 113
+  datasets) the list is a tree — **country** (ISO 3166-1 alpha-3, when the server knows it) →
+  **agency or project** → site — each level with one checkbox for everything under it, a shown/total
+  count and the sites folded under it; single-child levels collapse, so one site under one agency is
+  listed as that site. Hiding a dataset also takes it out of the 3DTRjs traversal: its tiles stop
+  loading and leave the cache. Above the list: **format chips** derived from the index with their counts, a global **latest only** switch
   and a **capture-date range**. Datasets hidden by hand, by date or by *latest only* keep a small grey
   marker so they can be found and brought back; a **format** that is switched off takes its markers
   with it.
-- **Marker pills per provider** (Iconem, Aerometrex, Vexcel, CRAIG …) show or hide the *markers* of a
-  provider's datasets, not the datasets.
+- **Source pills** — the mosaic's server sets (flai open LiDAR, Vexcel, Esri Living Atlas, Open
+  Heritage 3D, Aerometrex, the city 3D Tiles …), or its providers when it has one set — hide every
+  dataset of a source *and* its markers (the datasets go into `&hide=`, so their tiles stop loading);
+  the pill shows shown/total.
+- **Child roots persist on disk** (`.local/aggregate-cache/child-roots.json`, git-ignored — the keys are
+  share-link URLs; `AGGREGATE_CACHE_DIR` overrides). A mosaic's first build fetches every child's root
+  through `/stream` (`depth=0`): 9 s for the 692 Iconem datasets locally, a minute on prod, and it
+  used to happen again after every restart or deploy and every 24 h. The cache now survives restarts;
+  an entry older than its TTL is still served and refreshed in the background (stale-while-revalidate),
+  so the mosaic is instant and at worst a day old, never blocked. Failures are not persisted.
+- **Open Heritage 3D, the whole catalogue**: `packages/tile-server/aggregate-sets/openheritage3d.json`
+  is built by `scripts/openheritage3d-manifest.mjs` from openheritage3d.org itself — the ~460 project
+  DOIs on its data page, each project's Potree `config.js` (every point cloud it loads), its title /
+  country / licence API and the coordinates of its project-page map (the scans are in local frames;
+  the mosaic places each at those coordinates through `/stream`'s `&lon=&lat=`). 441 point clouds
+  from 243 projects at the time of writing; the others have no Potree viewer yet, or a config that
+  names clouds never uploaded (each URL is probed, the 404s dropped).
+- **Country** on each index row (`country`: ISO alpha-3, `countryName`), from an explicit `country`
+  on the manifest entry or the "(XX)" alpha-2 in its project or name (`Maa_amet (EE)`,
+  `Soest 3D mesh (DE)`); the committed manifests carry it for every entry.
 - **colour** `format | provider | dataset`: colours the **markers** (and the picker's dots) by format,
   provider or dataset; the data keeps its own colours. (Both renderers can tint the data in place —
   `setDatasetStyle`'s `colors` — but the picker no longer asks them to.)

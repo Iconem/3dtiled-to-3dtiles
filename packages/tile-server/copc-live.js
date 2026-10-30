@@ -88,6 +88,12 @@ const getCtx = memoizeAsync(async (url) => {
     else console.warn(`[copc-live] no WKT CRS in ${url} — local-origin (not geo-referenced)`);
   } catch (e) { console.warn('[copc-live] georef failed:', e.message); }
   const rootDiag = Math.hypot(cube[3]-cube[0], cube[4]-cube[1], cube[5]-cube[2]);
+  // Point spacing of the root node (COPC info VLR), halving per level: the geometric error of a tile,
+  // as for Potree streams. It used to be the node's cube DIAGONAL / 2^level — 100–200× the spacing —
+  // so a 2 px error target refined every COPC node until it was two pixels wide: a national overview
+  // seen from orbit marked its whole 5–15 k-tile tree used and queued it all ("the whole of France is
+  // slow"). Files without a usable spacing fall back to the Potree convention, cube / 128.
+  const spacing = copc.info.spacing > 0 && Number.isFinite(copc.info.spacing) ? copc.info.spacing : rootDiag / 128;
   const curvedCache = new Map();                   // crs → curved placement (see curvedFor)
 
   // For subtree (L,x,y,z): load pending pages whose cells overlap the [L, L+SUBTREE_LEVELS] block.
@@ -131,7 +137,7 @@ const getCtx = memoizeAsync(async (url) => {
 
   let warmed = false;   // guard so background prefetch fires at most once per ctx
   console.log(`[copc-live] ${url} → root page loaded (${nodeMap.size} nodes), pending=${pendingPages.size} child pages, georef=${!!transform}`);
-  return { getter, copc, nodeMap, origin, transform, crs, rootDiag, cube, curvedCache, ensureForSubtree, drainAll,
+  return { getter, copc, nodeMap, origin, transform, crs, rootDiag, spacing, cube, curvedCache, ensureForSubtree, drainAll,
                 get warmed() { return warmed; }, set warmed(v) { warmed = v; } };
 }, { failureTtlMs: 60_000 });
 
@@ -195,7 +201,7 @@ const subCube = (cube, level, x, y, z) => {
 // Explicit 3D Tiles tree from the COPC hierarchy. Boxes = octree sub-cube relative to the origin
 // (or, with a curved placement, fitted to the placed sub-cube).
 function buildTilesetExplicit(ctx, urlParam, curved = null, maxDepth = Infinity) {
-  const { nodeMap, origin, rootDiag, cube } = ctx;
+  const { nodeMap, origin, rootDiag, spacing, cube } = ctx;
   const transform = curved?.transform ?? ctx.transform;
   const enc = encodeURIComponent(urlParam);
   const tileFor = (key) => {
@@ -205,7 +211,7 @@ function buildTilesetExplicit(ctx, urlParam, curved = null, maxDepth = Infinity)
     const h = [Math.max((sc[3]-sc[0])/2,0.01), Math.max((sc[4]-sc[1])/2,0.01), Math.max((sc[5]-sc[2])/2,0.01)];
     const node = nodeMap.get(key);
     const box = curved ? curvedBox(sc, curved.toLocal) : [c[0],c[1],c[2], h[0],0,0, 0,h[1],0, 0,0,h[2]];
-    const tile = { boundingVolume: { box }, geometricError: rootDiag / (2**level), refine: 'ADD' };
+    const tile = { boundingVolume: { box }, geometricError: spacing / (2**level), refine: 'ADD' };
     if (node && node.pointCount > 0) tile.content = { uri: `tile/${key}.glb?url=${enc}` };
     const kids = [];
     if (level < maxDepth) for (let i = 0; i < 8; i++) {
@@ -222,12 +228,12 @@ function buildTilesetExplicit(ctx, urlParam, curved = null, maxDepth = Infinity)
 
 // Implicit octree: one root with implicitTiling + content/subtree templates (subtrees built on the fly).
 function buildTilesetImplicit(ctx, urlParam) {
-  const { transform, rootDiag, cube } = ctx;
+  const { transform, rootDiag, spacing, cube } = ctx;
   let maxLevel = 0;
   for (const key of ctx.nodeMap.keys()) { const l = keyToCoords(key).level; if (l > maxLevel) maxLevel = l; }
   if (maxLevel < 8) maxLevel = 8;   // generous floor: lazy root page may cover only a few levels
   const box = [0,0,0, (cube[3]-cube[0])/2,0,0, 0,(cube[4]-cube[1])/2,0, 0,0,(cube[5]-cube[2])/2];
-  return buildImplicitTileset({ box, rootGeometricError: rootDiag, contentGeometricError: rootDiag,
+  return buildImplicitTileset({ box, rootGeometricError: rootDiag, contentGeometricError: spacing,
     maxLevel, subtreeLevels: SUBTREE_LEVELS, transform, urlParam });
 }
 

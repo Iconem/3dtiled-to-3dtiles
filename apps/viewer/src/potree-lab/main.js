@@ -26,7 +26,9 @@
  * Dataset list = built-in public samples + (dev server only) the Iconem share-link manifest at
  * .local/aggregate-sets/iconem.json, served loopback-only by vite.config.ts.
  */
-import { Scene, WebGLRenderer, PerspectiveCamera, Box3, Sphere, Vector2, Raycaster } from 'three';
+import { Scene, WebGLRenderer, PerspectiveCamera, Box3, Sphere, Vector2, Vector3, Raycaster } from 'three';
+import { PivotPointMesh } from '3d-tiles-renderer/src/three/renderer/controls/PivotPointMesh.js';
+import { installFilteredRaycast, pickPoint, pointerNdc } from '@/lib/picking';
 import { TilesRenderer, EnvironmentControls, GlobeControls } from '3d-tiles-renderer';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { DebugTilesPlugin, ImplicitTilingPlugin, ReorientationPlugin } from '3d-tiles-renderer/plugins';
@@ -96,19 +98,94 @@ camera.position.set(4, 2, 8);
  */
 let controls = null;
 let radius = 10;                                 // of the loaded dataset's bounding sphere
+let tiles = null, effects = null;                // declared before the first makeControls() below reads them
+
+/** A raycaster with the lab's point tolerance, aimed through a screen point (NDC). */
+function rayAt(ndc) {
+  const ray = new Raycaster();
+  ray.params.Points.threshold = radius / 200;
+  ray.setFromCamera(ndc, camera);
+  return ray;
+}
+
+/**
+ * Where the user is looking, for handing one control scheme's focus to the next: the orbit target or
+ * the 3DTRjs pivot when one is active, else the point of the dataset under the screen centre, else a
+ * point on the view axis at the distance of the dataset (recentred at the origin).
+ */
+function currentPivot() {
+  const p = new Vector3();
+  if (controls?.target) return p.copy(controls.target);
+  if (controls?.getPivotPoint && controls.getPivotPoint(p)) return p;
+  if (tiles) {
+    const hit = pickPoint(rayAt(new Vector2(0, 0)), tiles.group, null);
+    if (hit) return p.copy(hit.point);
+  }
+  const dir = camera.getWorldDirection(new Vector3());
+  return p.copy(camera.position).addScaledVector(dir, Math.max(camera.position.length(), radius / 10));
+}
+
+/** Switch control schemes in place: the camera stays where it is and the new scheme adopts the current focus. */
 function makeControls(kind) {
+  const pivot = currentPivot();
   controls?.dispose();
   if (kind === 'orbit') {
     controls = new OrbitControls(camera, renderer.domElement);
-    controls.target.set(0, 0, 0);
+    // the target on the current view axis: OrbitControls' first update then re-aims at a point the
+    // camera already looks at, so the view does not jump
+    controls.target.copy(pivot);
   } else {
     controls = kind === 'globe' ? new GlobeControls(scene, camera, renderer.domElement) : new EnvironmentControls(scene, camera, renderer.domElement);
     controls.cameraRadius = 0;
     if (kind !== 'globe') controls.useFallbackPlane = true;
     if (kind === 'globe' && tiles) controls.setEllipsoid(controls.ellipsoid, tiles.group);
+    controls.pivotPoint.copy(pivot);
+    // the lab is Y-up and the camera's up is already right: do not let the controls re-derive it
+    controls.up.copy(camera.up);
+    installFilteredRaycast(controls, () => tiles?.group ?? null, () => scene);
   }
   applyControlsRange();
   applyDamping();
+}
+
+/**
+ * Middle-drag: dolly toward the point under the cursor at drag start (drag down = in). Pointer
+ * events, not mouse events: the 3DTRjs controls preventDefault() their pointerdown, which suppresses
+ * the compatibility mouse events. The controls themselves ignore the middle button.
+ */
+{
+  let dragging = false, lastY = 0;
+  const pivot = new Vector3();
+  const pivotMesh = new PivotPointMesh();
+  pivotMesh.raycast = () => {};
+  renderer.domElement.addEventListener('pointerdown', (e) => {
+    if (e.button !== 1) return;
+    const hit = tiles ? pickPoint(rayAt(pointerNdc(e, renderer.domElement)), tiles.group, null) : null;
+    pivot.copy(hit ? hit.point : currentPivot());
+    if (controls.pivotPoint) controls.pivotPoint.copy(pivot);
+    pivotMesh.position.copy(pivot);
+    pivotMesh.scale.setScalar(radius / 400);
+    pivotMesh.updateMatrixWorld();
+    scene.add(pivotMesh);
+    dragging = true; lastY = e.clientY;
+    e.preventDefault();
+  });
+  window.addEventListener('pointermove', (e) => {
+    if (!dragging) return;
+    const dy = e.clientY - lastY;
+    lastY = e.clientY;
+    const toCam = camera.position.clone().sub(pivot);
+    const scale = Math.exp(-dy * 0.005);
+    if (scale < 1 && toCam.length() * scale < radius / 1000) return;
+    const delta = toCam.multiplyScalar(scale - 1);
+    camera.position.add(delta);
+    if (controls.target) controls.target.add(delta);       // OrbitControls: keep the view direction
+  });
+  window.addEventListener('pointerup', (e) => {
+    if (e.button !== 1 || !dragging) return;
+    dragging = false;
+    pivotMesh.removeFromParent();
+  });
 }
 /**
  * 3DTRjs controls damp with factor = 2^(−dt / dampingFactor), so dampingFactor is a half-life in
@@ -121,16 +198,12 @@ function applyDamping() {
   controls.enableDamping = t > 0;
   controls.dampingFactor = controls.isOrbitControls ? Math.min(1, 1 - Math.pow(2, -1 / 60 / Math.max(t, 1e-3))) : t;
 }
-/** Double-click: pivot on the picked point and move halfway to it — every control scheme. */
+/** Double-click: pivot on the picked point (lib/picking: no hidden or back-facing surface) and move halfway to it — every control scheme. */
 renderer.domElement.addEventListener('dblclick', (e) => {
   if (!tiles) return;
-  const r = renderer.domElement.getBoundingClientRect();
-  const ndc = new Vector2(((e.clientX - r.left) / r.width) * 2 - 1, -((e.clientY - r.top) / r.height) * 2 + 1);
-  const ray = new Raycaster();
-  ray.params.Points.threshold = radius / 200;
-  ray.setFromCamera(ndc, camera);
-  const hit = ray.intersectObject(tiles.group, true)[0];
+  const hit = pickPoint(rayAt(pointerNdc(e, renderer.domElement)), tiles.group, null);
   if (!hit) return;
+  if (controls.pivotPoint) controls.pivotPoint.copy(hit.point);           // 3DTRjs controls
   const from = camera.position.clone(), to = camera.position.clone().lerp(hit.point, 0.5);
   const t0 = performance.now();
   const step = () => {
@@ -150,8 +223,6 @@ function applyControlsRange() {
   if (controls.raycaster) controls.raycaster.params.Points.threshold = radius / 200;
 }
 makeControls(params.controls);
-
-let tiles = null, effects = null;
 
 function streamUrl(src) {
   if (params.mode === 'tileset') return src;

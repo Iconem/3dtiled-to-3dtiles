@@ -3,7 +3,7 @@
 // for the shareable slice. Mirrors viewer.html's remaining module-level `let`s.
 import { create } from 'zustand';
 import type { AssetType } from '@/lib/formats';
-import type { BasemapId } from '@/lib/basemaps';
+import { DEFAULT_BASEMAP, type BasemapId } from '@/lib/basemaps';
 import type { TerrainMode } from '@/lib/terrainModes';
 
 export interface CropBbox {
@@ -62,7 +62,11 @@ interface ViewerStore {
   shadeless: boolean;
   brightness: number;
   fov: number;
-  controlMode: 'globe' | 'orbit' | 'env'; // 3DTRJS only
+  controlMode: 'globe' | 'orbit' | 'env' | 'trackball' | 'fly'; // 3DTRJS only
+  // 3DTRJS globe/env controls: roll the camera back to north-up whenever the user is not rotating.
+  // 3DTRJS: draw the globe/terrain first and clear the depth buffer before the data, so datasets
+  // under the DEM stay visible (the terrain then never occludes the data).
+  terrainBehind: boolean;
   pointSize: number; // 3DTRJS only
   setMaxSSE: (v: number | null) => void;
   setAssetVisible: (v: boolean) => void;
@@ -73,6 +77,14 @@ interface ViewerStore {
   // (PointCloudEffectsPlugin), Cesium draws squares.
   pointAdaptive: boolean;
   pointShape: 'square' | 'round' | 'sphere';
+  /** 3DTRjs: how the content is drawn — its own materials, see-through (x-ray) or wireframe. */
+  materialMode: 'default' | 'xray' | 'wireframe';
+  setMaterialMode: (v: ViewerStore['materialMode']) => void;
+  /** X-ray: opacity of the points (meshes draw at 60 % of it) and whether points keep their colours or go white. */
+  xrayOpacity: number;
+  setXrayOpacity: (v: number) => void;
+  xrayPoints: 'rgb' | 'white';
+  setXrayPoints: (v: ViewerStore['xrayPoints']) => void;
   edl: boolean;
   edlStrength: number;
   setPointAdaptive: (v: boolean) => void;
@@ -83,6 +95,7 @@ interface ViewerStore {
   setBrightness: (v: number) => void;
   setFov: (v: number) => void;
   setControlMode: (v: ViewerStore['controlMode']) => void;
+  setTerrainBehind: (v: boolean) => void;
   setPointSize: (v: number) => void;
 
   // Crop & extract
@@ -114,6 +127,15 @@ interface ViewerStore {
   // Local frame
   localFrame: { lon: number; lat: number; alt: number; range: number; zOffset: number };
   setLocalFrame: (v: Partial<ViewerStore['localFrame']>) => void;
+  /** Keep the Z offset snapped to the ground, re-measured as the terrain under the tileset refines. */
+  zOffsetAuto: boolean;
+  /** Metres added above the measured ground by Snap and Auto, so a scan sits above most of the terrain. */
+  zOffsetClearance: number;
+  setZOffsetClearance: (v: number) => void;
+  setZOffsetAuto: (v: boolean) => void;
+  /** The Z offset before the last snap (3DTRjs single tileset), so a snap can be undone. */
+  zOffsetUndo: number | null;
+  setZOffsetUndo: (v: number | null) => void;
   // 3DTRJS only — shows a translate/rotate/scale gizmo (drag, or W/E/R keys) on the loaded tileset's
   // own transform, for manually positioning non-georeferenced content instead of typing lon/lat/alt.
   tilesetGizmoOn: boolean;
@@ -157,11 +179,12 @@ export const useViewerStore = create<ViewerStore>((set, get) => ({
   lastLoadUrl: '',
   setLastLoadUrl: (v) => set({ lastLoadUrl: v }),
 
-  // Esri imagery + labels (not 'google'): mt1.google.com's raw tile endpoint is an unofficial hotlink
+  // Esri imagery alone (not 'google'): mt1.google.com's raw tile endpoint is an unofficial hotlink
   // that sometimes answers with an HTML error page instead of image bytes — Cesium's imagery pipeline
   // doesn't gracefully skip that ("InvalidStateError: the source image could not be decoded"). Esri's
-  // tile service is public, keyless and sends CORS headers (lib/basemaps.ts).
-  basemap: 'esri',
+  // tile service is public, keyless and sends CORS headers (lib/basemaps.ts). No label layer by
+  // default: a plain satellite ground reads best under point clouds; 'esri' adds the labels.
+  basemap: DEFAULT_BASEMAP,
   terrainMode: 'auto',
   setBasemap: (v) => set({ basemap: v }),
   setTerrainMode: (v) => set({ terrainMode: v }),
@@ -174,12 +197,19 @@ export const useViewerStore = create<ViewerStore>((set, get) => ({
   debugMode: 'off',
   pointAdaptive: true,
   pointShape: 'round',
+  materialMode: 'default',
+  setMaterialMode: (v) => set({ materialMode: v }),
+  xrayOpacity: 0.35,
+  setXrayOpacity: (v) => set({ xrayOpacity: v }),
+  xrayPoints: 'rgb',
+  setXrayPoints: (v) => set({ xrayPoints: v }),
   edl: true,
   edlStrength: 1,
   shadeless: false,
   brightness: 1.6,
   fov: 60,
   controlMode: 'globe',
+  terrainBehind: true,
   pointSize: 2,
   setMaxSSE: (v) => set({ maxSSE: v }),
   setAssetVisible: (v) => set({ assetVisible: v }),
@@ -193,6 +223,7 @@ export const useViewerStore = create<ViewerStore>((set, get) => ({
   setBrightness: (v) => set({ brightness: v }),
   setFov: (v) => set({ fov: v }),
   setControlMode: (v) => set({ controlMode: v }),
+  setTerrainBehind: (v) => set({ terrainBehind: v }),
   setPointSize: (v) => set({ pointSize: v }),
 
   crop: { w: NaN, s: NaN, minH: -50, e: NaN, n: NaN, maxH: 800 },
@@ -217,6 +248,12 @@ export const useViewerStore = create<ViewerStore>((set, get) => ({
 
   localFrame: { lon: -122.4194, lat: 37.7749, alt: 0, range: 200, zOffset: 0 },
   setLocalFrame: (v) => set((s) => ({ localFrame: { ...s.localFrame, ...v } })),
+  zOffsetAuto: false,
+  setZOffsetAuto: (v) => set({ zOffsetAuto: v }),
+  zOffsetClearance: 10,
+  setZOffsetClearance: (v) => set({ zOffsetClearance: v }),
+  zOffsetUndo: null,
+  setZOffsetUndo: (v) => set({ zOffsetUndo: v }),
   tilesetGizmoOn: false,
   setTilesetGizmoOn: (v) => set({ tilesetGizmoOn: v }),
 

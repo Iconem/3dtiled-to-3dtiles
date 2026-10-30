@@ -8,6 +8,7 @@
     {
       "format": "3dtiles",
       "name": "Utrecht integrated mesh",
+      "country": "NLD",
       "project": "Esri Living Atlas",
       "scene": "Utrecht",
       "attribution": "© Kavel10 / Esri Nederland",
@@ -16,6 +17,7 @@
     {
       "format": "3dtiles",
       "name": "Zürich integrated mesh",
+      "country": "CHE",
       "project": "Esri Living Atlas",
       "scene": "Zürich",
       "attribution": "© Wingtra / Esri",
@@ -24,6 +26,7 @@
     {
       "format": "3dtiles",
       "name": "Vienna integrated mesh",
+      "country": "AUT",
       "project": "Esri Living Atlas",
       "scene": "Vienna",
       "attribution": "© AVT-ZT GmbH / Esri",
@@ -32,6 +35,7 @@
     {
       "format": "3dtiles",
       "name": "Munich integrated mesh",
+      "country": "DEU",
       "project": "Esri Living Atlas",
       "scene": "Munich",
       "attribution": "© Hexagon / Esri",
@@ -40,6 +44,7 @@
     {
       "format": "3dtiles",
       "name": "Stuttgart integrated mesh",
+      "country": "DEU",
       "project": "Esri Living Atlas",
       "scene": "Stuttgart",
       "attribution": "© Esri and the data owner",
@@ -48,6 +53,7 @@
     {
       "format": "3dtiles",
       "name": "Boston integrated mesh",
+      "country": "USA",
       "project": "Esri Living Atlas",
       "scene": "Boston",
       "attribution": "© Esri and the data owner",
@@ -56,6 +62,7 @@
     {
       "format": "3dtiles",
       "name": "Jena integrated mesh",
+      "country": "DEU",
       "project": "Esri Living Atlas",
       "scene": "Jena",
       "attribution": "© Esri and the data owner",
@@ -64,6 +71,7 @@
     {
       "format": "3dtiles",
       "name": "Linz integrated mesh",
+      "country": "AUT",
       "project": "Esri Living Atlas",
       "scene": "Linz",
       "attribution": "© Esri and the data owner",
@@ -72,6 +80,7 @@
     {
       "format": "3dtiles",
       "name": "Cambridge MA integrated mesh",
+      "country": "USA",
       "project": "Esri Living Atlas",
       "scene": "Cambridge, MA",
       "attribution": "© Esri and the data owner",
@@ -80,6 +89,7 @@
     {
       "format": "i3s",
       "name": "Frankfurt buildings 2021 (I3S)",
+      "country": "DEU",
       "project": "Esri Living Atlas",
       "scene": "Frankfurt",
       "attribution": "© Aerowest GmbH / Esri",

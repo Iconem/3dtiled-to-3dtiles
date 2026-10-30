@@ -5,8 +5,9 @@ import { Label } from '@/components/ui/label';
 import { Button } from '@/components/ui/button';
 import { useViewerStore } from '@/state/store';
 import type { ViewerHandle } from '@/lib/viewer-handle';
-import { SidebarSection } from './SidebarSection';
+import { SidebarCollapsibleSection } from './SidebarSection';
 import { BASEMAPS } from '@/lib/basemaps';
+import { useUrlState } from '@/state/urlState';
 
 export default function BasemapSection({ activeHandleRef }: { activeHandleRef: React.RefObject<ViewerHandle | null> }) {
   const basemap = useViewerStore((s) => s.basemap);
@@ -17,18 +18,21 @@ export default function BasemapSection({ activeHandleRef }: { activeHandleRef: R
   const setGlobeVisible = useViewerStore((s) => s.setGlobeVisible);
   const collisionEnabled = useViewerStore((s) => s.collisionEnabled);
   const setCollisionEnabled = useViewerStore((s) => s.setCollisionEnabled);
+  const terrainBehind = useViewerStore((s) => s.terrainBehind);
+  const setTerrainBehind = useViewerStore((s) => s.setTerrainBehind);
+  const [url] = useUrlState();
 
   useEffect(() => { activeHandleRef.current?.setBasemap(basemap); }, [basemap, activeHandleRef]);
   useEffect(() => { activeHandleRef.current?.setTerrainMode(terrainMode); }, [terrainMode, activeHandleRef]);
 
   return (
-    <SidebarSection title="Basemap & Navigation">
+    <SidebarCollapsibleSection title="Basemap & Terrain" defaultOpen>
       <div className="flex items-center justify-between">
         <Label className="text-xs">Imagery</Label>
         <Select value={basemap} onValueChange={(v) => setBasemap(v as any)}>
           <SelectTrigger size="sm"><SelectValue /></SelectTrigger>
           <SelectContent>
-            {Object.entries(BASEMAPS).map(([id, b]) => <SelectItem key={id} value={id}>{b.label}</SelectItem>)}
+            {Object.entries(BASEMAPS).map(([id, b]) => b && <SelectItem key={id} value={id}>{b.label}</SelectItem>)}
             <SelectItem value="none">None</SelectItem>
           </SelectContent>
         </Select>
@@ -56,7 +60,13 @@ export default function BasemapSection({ activeHandleRef }: { activeHandleRef: R
         <Checkbox checked={!collisionEnabled} onCheckedChange={(v) => { const disable = !!v; setCollisionEnabled(!disable); activeHandleRef.current?.toggleCollision(!disable); }} />
         Disable collision
       </Label>
+      {url.renderer === '3dtrjs' && (
+        <Label className="text-xs" title="Draw the globe and terrain first, then the data on a cleared depth buffer: datasets below the DEM (a cloud not yet snapped to ground, a tunnel) stay visible. The terrain then never hides the data, so the data also shows through hills in front of it.">
+          <Checkbox checked={terrainBehind} onCheckedChange={(v) => setTerrainBehind(!!v)} />
+          Terrain behind data
+        </Label>
+      )}
       <Button size="sm" variant="outline" onClick={() => activeHandleRef.current?.autoZoomToTileset()}>⊙ Auto-zoom to tileset</Button>
-    </SidebarSection>
+    </SidebarCollapsibleSection>
   );
 }

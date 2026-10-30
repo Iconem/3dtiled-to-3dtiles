@@ -2,121 +2,45 @@ import { Checkbox } from '@/components/ui/checkbox';
 import { Label } from '@/components/ui/label';
 import { Input } from '@/components/ui/input';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { Slider } from '@/components/ui/slider';
 import { useViewerStore } from '@/state/store';
 import { useUrlState } from '@/state/urlState';
 import type { ViewerHandle } from '@/lib/viewer-handle';
-import { SidebarSection } from './SidebarSection';
+import { SidebarCollapsibleSection } from './SidebarSection';
 
+/** The loaded tileset: refinement target, visibility, debug bounds, how mosaics read Potree sources. */
 export default function TilesetLodSection({ activeHandleRef }: { activeHandleRef: React.RefObject<ViewerHandle | null> }) {
   const [url, setUrl] = useUrlState();
   const s = useViewerStore();
   const h = () => activeHandleRef.current;
 
   return (
-    <SidebarSection title="Tileset & LOD">
-        <div className="flex items-center justify-between">
-          <Label className="text-xs">Max SSE (px)</Label>
-          <Input type="number" className="h-7 w-20" value={s.maxSSE ?? ''} placeholder="auto"
-            onChange={(e) => { const v = e.target.value === '' ? null : Number(e.target.value); s.setMaxSSE(v); h()?.setMaxSSE(v); }} />
-        </div>
-        <Label className="text-xs" title="Show/hide the loaded asset without unloading it">
-          <Checkbox checked={s.assetVisible} onCheckedChange={(v) => { s.setAssetVisible(!!v); h()?.toggleAssetVisible(!!v); }} />
-          Show asset
+    <SidebarCollapsibleSection title="Tileset & LOD" defaultOpen>
+      <div className="flex items-center justify-between">
+        <Label className="text-xs" title="Screen-space error target: CesiumJS maximumScreenSpaceError, 3DTRjs errorTarget. Empty = the format's default (2 px for points, 16 for meshes, 0.5 for splats).">Max SSE (px)</Label>
+        <Input type="number" className="h-7 w-20" value={s.maxSSE ?? ''} placeholder="auto"
+          onChange={(e) => { const v = e.target.value === '' ? null : Number(e.target.value); s.setMaxSSE(v); h()?.setMaxSSE(v); }} />
+      </div>
+      <Label className="text-xs" title="Show/hide the loaded asset without unloading it">
+        <Checkbox checked={s.assetVisible} onCheckedChange={(v) => { s.setAssetVisible(!!v); h()?.toggleAssetVisible(!!v); }} />
+        Show asset
+      </Label>
+      <div className="flex items-center justify-between">
+        <Label className="text-xs" title="cells: the loaded tileset's own tiles — a mosaic's quadtree cells (colour by depth) and its dataset roots (white). tiles: every tile the renderer holds, bounds + depth colour.">Debug</Label>
+        <Select value={s.debugMode} onValueChange={(v) => { s.setDebugMode(v as any); h()?.setDebugMode(v as any); }}>
+          <SelectTrigger size="sm"><SelectValue /></SelectTrigger>
+          <SelectContent>
+            <SelectItem value="off">Off</SelectItem>
+            <SelectItem value="cells">Cells + dataset roots</SelectItem>
+            <SelectItem value="tiles">All tiles (bounds + depth)</SelectItem>
+          </SelectContent>
+        </Select>
+      </div>
+      {url.renderer === '3dtrjs' && (
+        <Label className="text-xs" title="Mosaics only. Each Potree dataset in an /aggregate mosaic is read directly by 3DTRjs's PotreePlugin (adaptive point size, Potree's own octree) instead of through /stream's 3D Tiles. Switches in place: both readers stay mounted per dataset and only the chosen one draws and loads, so toggling back is instant. The mosaic still carries the /stream link, so CesiumJS and other clients are unaffected. Potree 1.x .bin and 2.0 DEFAULT only; COPC, Brotli and LAS/LAZ-node clouds stay on /stream.">
+          <Checkbox checked={url.native} onCheckedChange={(v) => setUrl({ native: !!v })} />
+          Native Potree leaves
         </Label>
-        <Label className="text-xs" title="Orthographic vs perspective camera">
-          <Checkbox checked={s.ortho} onCheckedChange={(v) => { s.setOrtho(!!v); h()?.setOrtho(!!v); }} />
-          Orthographic camera
-        </Label>
-        <div className="flex items-center justify-between">
-          <Label className="text-xs" title="cells: the loaded tileset's own tiles — a mosaic's quadtree cells (colour by depth) and its dataset roots (white). tiles: every tile the renderer holds, bounds + depth colour.">Debug</Label>
-          <Select value={s.debugMode} onValueChange={(v) => { s.setDebugMode(v as any); h()?.setDebugMode(v as any); }}>
-            <SelectTrigger size="sm"><SelectValue /></SelectTrigger>
-            <SelectContent>
-              <SelectItem value="off">Off</SelectItem>
-              <SelectItem value="cells">Cells + dataset roots</SelectItem>
-              <SelectItem value="tiles">All tiles (bounds + depth)</SelectItem>
-            </SelectContent>
-          </Select>
-        </div>
-        {s.currentType !== 'splat' && (
-          <>
-            <div className="flex items-center justify-between">
-              <Label className="text-xs" title="Point clouds (any tileset that holds points, a mixed mosaic included). Fixed size in pixels; with adaptive sizing, the minimum, and 2× it the cap.">Point size (px)</Label>
-              <div className="flex w-32 items-center gap-2">
-                <Slider min={0.5} max={10} step={0.5} value={[s.pointSize]} onValueChange={([v]) => { s.setPointSize(v); h()?.setPointSize?.(v); h()?.applyPointShading(); }} />
-                <span className="w-8 text-right text-xs text-muted-foreground">{s.pointSize}</span>
-              </div>
-            </div>
-            <Label className="text-xs" title="Size each point from its tile's point spacing (geometric error), so coarse tiles close the gaps and fine tiles stay sharp. Cesium: pointCloudShading.attenuation; 3DTRjs: world-space size = spacing × the px size / 2.">
-              <Checkbox checked={s.pointAdaptive} onCheckedChange={(v) => { s.setPointAdaptive(!!v); h()?.applyPointShading(); }} />
-              Adaptive point size
-            </Label>
-            {url.renderer === '3dtrjs' && (
-              <div className="flex items-center justify-between">
-                <Label className="text-xs" title="Sprite shape (3DTRjs PointCloudEffectsPlugin, applied to 3D Tiles points and native Potree leaves alike). Spheres write bulged depth so overlapping points intersect, at a fill-rate cost. Cesium always draws squares.">Point shape</Label>
-                <Select value={s.pointShape} onValueChange={(v) => { s.setPointShape(v as any); h()?.applyPointShading(); }}>
-                  <SelectTrigger size="sm"><SelectValue /></SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="round">Round</SelectItem>
-                    <SelectItem value="square">Square</SelectItem>
-                    <SelectItem value="sphere">Sphere</SelectItem>
-                  </SelectContent>
-                </Select>
-              </div>
-            )}
-            <Label className="text-xs" title="Eye-dome lighting: Cesium pointCloudShading.eyeDomeLighting; 3DTRjs PointCloudEffectsPlugin (a depth pre-pass per renderer, then each point is shaded by how far it sits behind its neighbours).">
-              <Checkbox checked={s.edl} onCheckedChange={(v) => { s.setEdl(!!v); h()?.applyPointShading(); }} />
-              Eye-dome lighting
-            </Label>
-            {s.edl && (
-              <div className="flex items-center justify-between">
-                <Label className="text-xs">EDL strength</Label>
-                <div className="flex w-32 items-center gap-2">
-                  <Slider min={0.1} max={3} step={0.1} value={[s.edlStrength]} onValueChange={([v]) => { s.setEdlStrength(v); h()?.applyPointShading(); }} />
-                  <span className="w-8 text-right text-xs text-muted-foreground">{s.edlStrength}</span>
-                </div>
-              </div>
-            )}
-          </>
-        )}
-        {url.renderer === 'cesium' && (
-          <>
-            <Label className="text-xs" title="Unlit rendering — avoids dark results on baked-lighting photogrammetry">
-              <Checkbox checked={s.shadeless} onCheckedChange={(v) => { s.setShadeless(!!v); h()?.applyShading(!!v, s.brightness); }} />
-              Shadeless (unlit)
-            </Label>
-            <div className="flex items-center justify-between">
-              <Label className="text-xs">Brightness</Label>
-              <Input type="number" step={0.1} className="h-7 w-20" value={s.brightness}
-                onChange={(e) => { const v = Number(e.target.value) || 1; s.setBrightness(v); h()?.applyShading(s.shadeless, v); }} />
-            </div>
-          </>
-        )}
-        <div className="flex items-center justify-between">
-          <Label className="text-xs">FOV (°)</Label>
-          <Input type="number" className="h-7 w-20" value={s.fov} onChange={(e) => { const v = Number(e.target.value) || 60; s.setFov(v); h()?.setFov(v); }} />
-        </div>
-
-        {url.renderer === '3dtrjs' && (
-          <>
-            <div className="flex items-center justify-between">
-              <Label className="text-xs">Controls mode</Label>
-              <Select value={s.controlMode} onValueChange={(v) => { s.setControlMode(v as any); h()?.setControlMode?.(v as any); }}>
-                <SelectTrigger size="sm"><SelectValue /></SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="globe">Globe</SelectItem>
-                  <SelectItem value="orbit">Orbit</SelectItem>
-                  <SelectItem value="env">Environment</SelectItem>
-                </SelectContent>
-              </Select>
-            </div>
-            <Label className="text-xs" title="Mosaics only. Each Potree dataset in an /aggregate mosaic is read directly by 3DTRjs's PotreePlugin (adaptive point size, Potree's own octree) instead of through /stream's 3D Tiles. Switches in place: both readers stay mounted per dataset and only the chosen one draws and loads, so toggling back is instant. The mosaic still carries the /stream link, so CesiumJS and other clients are unaffected. Potree 1.x .bin and 2.0 DEFAULT only; COPC, Brotli and LAS/LAZ-node clouds stay on /stream.">
-              <Checkbox checked={url.native} onCheckedChange={(v) => setUrl({ native: !!v })} />
-              Native Potree leaves
-            </Label>
-          </>
-        )}
-    </SidebarSection>
+      )}
+    </SidebarCollapsibleSection>
   );
 }

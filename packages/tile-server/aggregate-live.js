@@ -18,7 +18,7 @@
  * Child fetch failures don't kill the aggregate: failed children are skipped and listed in
  * `asset.extras.failed` (with the error), so a mosaic of 40 datasets survives one dead host.
  */
-import { readdir, readFile } from 'node:fs/promises';
+import { readdir, readFile, writeFile, mkdir } from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createHash, randomUUID } from 'node:crypto';
@@ -40,9 +40,55 @@ const CORS = { 'Access-Control-Allow-Origin': '*', 'Access-Control-Allow-Headers
 const DEFAULT_TTL_MS = 24 * 3600 * 1000;
 const FAILURE_TTL_MS = 60 * 1000;
 
-function ttlCache(builder) {
-  const cache = new Map();                       // key → { at, ttl, value | error }
+// Where persisted caches live: next to the local manifests, git-ignored (the keys are share-link
+// URLs, i.e. credentials). Override with AGGREGATE_CACHE_DIR.
+const CACHE_DIR = process.env.AGGREGATE_CACHE_DIR || fileURLToPath(new URL('../../.local/aggregate-cache/', import.meta.url));
+
+/**
+ * In-memory TTL cache, optionally mirrored to disk (`persist`: a file name under CACHE_DIR).
+ *
+ * A persisted cache survives restarts and deploys: the child roots of a 700-dataset mosaic no longer
+ * have to be re-fetched from the share-link API before the first client sees a tree (60+ s cold on
+ * prod, and the "server stalls on the open mosaic" family of reports). An entry older than its TTL is
+ * still served when it comes from disk — stale-while-revalidate: the builder runs in the background
+ * and replaces it, so the mosaic is instant and a day old at worst, never blocked. Failures are never
+ * persisted. Writes are debounced; a corrupt or missing file is an empty cache.
+ */
+function ttlCache(builder, { persist = null } = {}) {
+  const cache = new Map();                       // key → { at, ttl, value | error, fromDisk? }
+  const file = persist ? CACHE_DIR + persist : null;
+  let loaded = !persist, saveTimer = null;
+  const load = async () => {
+    if (loaded) return; loaded = true;
+    try {
+      const entries = JSON.parse(await readFile(file, 'utf8'));
+      for (const [key, e] of Object.entries(entries)) if (e && e.value !== undefined && !cache.has(key)) cache.set(key, { at: e.at, ttl: e.ttl, value: e.value, fromDisk: true });
+      console.log(`[aggregate] ${persist}: ${Object.keys(entries).length} cached child roots from disk`);
+    } catch { /* no cache yet */ }
+  };
+  const save = () => {
+    if (!file || saveTimer) return;
+    saveTimer = setTimeout(async () => {
+      saveTimer = null;
+      const entries = {};
+      for (const [key, e] of cache) if (e.value !== undefined && !e.error) entries[key] = { at: e.at, ttl: e.ttl, value: e.value };
+      try { await mkdir(CACHE_DIR, { recursive: true }); await writeFile(file, JSON.stringify(entries)); }
+      catch (err) { console.warn(`[aggregate] could not write ${file}: ${err.message}`); }
+    }, 2000);
+  };
+  const refreshing = new Set();
+  const build = async (key, ttlMs) => {
+    try {
+      const value = await builder(key);
+      if (ttlMs > 0) { cache.set(key, { at: Date.now(), ttl: ttlMs, value }); save(); }
+      return value;
+    } catch (error) {
+      if (ttlMs > 0) cache.set(key, { at: Date.now(), ttl: Math.min(ttlMs, FAILURE_TTL_MS), error });
+      throw error;
+    }
+  };
   const get = async (key, ttlMs = DEFAULT_TTL_MS) => {
+    await load();
     // ttl=0 must bypass the cache in BOTH directions. Skipping only the write would still serve a
     // previously-cached mosaic, which defeats the one thing `&ttl=0` exists for: forcing a re-read
     // while a dataset is being re-tiled underneath you.
@@ -51,19 +97,18 @@ function ttlCache(builder) {
       if (hit.error) throw hit.error;
       return hit.value;
     }
-    try {
-      const value = await builder(key);
-      if (ttlMs > 0) cache.set(key, { at: Date.now(), ttl: ttlMs, value });
-      return value;
-    } catch (error) {
-      if (ttlMs > 0) cache.set(key, { at: Date.now(), ttl: Math.min(ttlMs, FAILURE_TTL_MS), error });
-      throw error;
+    if (hit && hit.fromDisk && !hit.error) {
+      // stale from disk: serve it, refresh behind
+      if (!refreshing.has(key)) { refreshing.add(key); build(key, ttlMs).catch(() => {}).finally(() => refreshing.delete(key)); }
+      return hit.value;
     }
+    return build(key, ttlMs);
   };
   get.isWarm = (key, ttlMs = DEFAULT_TTL_MS) => {
     const hit = ttlMs > 0 ? cache.get(key) : undefined;
-    return !!hit && Date.now() - hit.at < hit.ttl;
+    return !!hit && (Date.now() - hit.at < hit.ttl || (hit.fromDisk && !hit.error));
   };
+  get.load = load;
   return get;
 }
 
@@ -102,7 +147,7 @@ function sphereToParent(sphere, transform, isRegion) {
   return [cx, cy, cz, r * scale];
 }
 
-// One child's meta entry: fetch its tileset.json (cached per URL), derive sphere + GE.
+// One child's meta entry: fetch its tileset.json (cached per URL, persisted to disk), derive sphere + GE.
 const childInfo = ttlCache(async (url) => {
   // Only the root is read here, so ask our own /stream for just that (`depth=0`): a curved COPC
   // child otherwise builds and serialises its whole 15–25 k-tile tree, ~1 s of CPU each (8 s on
@@ -123,7 +168,7 @@ const childInfo = ttlCache(async (url) => {
   const declared = [ts.geometricError, root.geometricError].filter(Number.isFinite);
   const geometricError = Math.max(sphere[3] || 0, ...declared, declared.length ? 0 : 1e6);
   return { sphere, geometricError, native: nativeSource(url, root) };
-});
+}, { persist: 'child-roots.json' });
 
 // ── &native=1: leaves a renderer may load in their SOURCE format ─────────────────────────────────
 //
@@ -487,7 +532,7 @@ const DATASET_SCHEMA = {
   classes: {
     dataset: {
       description: 'One source dataset referenced by an /aggregate mosaic',
-      properties: Object.fromEntries(['id', 'name', 'project', 'scene', 'date', 'format', 'licence', 'provider', 'attribution']
+      properties: Object.fromEntries(['id', 'name', 'project', 'scene', 'date', 'format', 'licence', 'provider', 'attribution', 'country']
         .map((k) => [k, { type: 'STRING' }])),
     },
   },
@@ -497,6 +542,7 @@ export async function buildAggregate(urls, { nest = 'auto', ttlMs = DEFAULT_TTL_
   // Timings are part of the output because they are the whole cost story of a mosaic: fetching every
   // child root dominates a cold build by orders of magnitude, while the tree itself takes milliseconds.
   const t0 = performance.now();
+  await childInfo.load();
   const cold = urls.filter((u) => !childInfo.isWarm(u, ttlMs)).length;
   const results = await pooledSettled(urls, (u) => childInfo(u, ttlMs));
   const t1 = performance.now();
@@ -642,18 +688,47 @@ export async function buildAggregate(urls, { nest = 'auto', ttlMs = DEFAULT_TTL_
 //
 // Every entry is a real, public, key-less tileset.json that was probed before being added.
 
+// ── countries ────────────────────────────────────────────────────────────────────────────────────
+//
+// Every dataset row carries the ISO 3166-1 alpha-3 of its country when it can be known: from an
+// explicit `country` on the manifest entry, else from an "(XX)" alpha-2 in its project or name (the
+// flai manifest's "Maa_amet (EE)", RESOURCES.md's "Soest 3D mesh (DE)"). The viewer's picker groups
+// by it — country → agency → site, the way a national catalogue (STAC, Terria) is laid out.
+const ISO2_TO_3 = {
+  AT: 'AUT', AU: 'AUS', BE: 'BEL', CA: 'CAN', CH: 'CHE', DE: 'DEU', DK: 'DNK', EE: 'EST', ES: 'ESP', FI: 'FIN',
+  FR: 'FRA', GB: 'GBR', UK: 'GBR', IE: 'IRL', IT: 'ITA', JP: 'JPN', KH: 'KHM', LU: 'LUX', LV: 'LVA', MM: 'MMR',
+  MX: 'MEX', NL: 'NLD', NO: 'NOR', PL: 'POL', PT: 'PRT', RU: 'RUS', SE: 'SWE', SI: 'SVN', US: 'USA', AM: 'ARM', IN: 'IND',
+};
+export const COUNTRY_NAMES = {
+  AUT: 'Austria', AUS: 'Australia', BEL: 'Belgium', CAN: 'Canada', CHE: 'Switzerland', DEU: 'Germany', DNK: 'Denmark',
+  EST: 'Estonia', ESP: 'Spain', FIN: 'Finland', FRA: 'France', GBR: 'United Kingdom', IRL: 'Ireland', ITA: 'Italy',
+  JPN: 'Japan', KHM: 'Cambodia', LUX: 'Luxembourg', LVA: 'Latvia', MMR: 'Myanmar', MEX: 'Mexico', NLD: 'Netherlands',
+  NOR: 'Norway', POL: 'Poland', PRT: 'Portugal', RUS: 'Russia', SWE: 'Sweden', SVN: 'Slovenia', USA: 'United States',
+  ARM: 'Armenia', IND: 'India',
+};
+/** ISO alpha-3 of a manifest / code-set entry, or null. */
+export function countryOf(e) {
+  if (!e) return null;
+  const c = String(e.country ?? '').trim().toUpperCase();
+  if (c.length === 3) return c;
+  if (c.length === 2 && ISO2_TO_3[c]) return ISO2_TO_3[c];
+  const m = /\(([A-Z]{2})\)/.exec(`${e.project ?? ''} ${e.name ?? e.label ?? ''}`);
+  return m && ISO2_TO_3[m[1]] ? ISO2_TO_3[m[1]] : null;
+}
+const countryFields = (iso) => (iso ? { country: iso, countryName: COUNTRY_NAMES[iso] ?? null } : {});
+
 /** Open data from the 3D Tiles spec's own RESOURCES.md — nine cities on four continents. */
 const OPEN_DATA = [
-  { id: 'strasbourg', provider: "Eurométropole de Strasbourg", attribution: "© Eurométropole de Strasbourg, Od@CiT", label: 'Strasbourg Od@CiT (FR)', url: 'https://s3.eu-west-2.wasabisys.com/ems-sgct-photomaillage/ODACIT/EMS_PM2022/tileset.json' },
-  { id: 'clermont', provider: "CRAIG", attribution: "© CRAIG / Clermont Auvergne Métropole", label: 'Clermont-Ferrand (FR)', url: 'https://3d.craig.fr/datasets/Clermont/3dtiles/tileset.json' },
-  { id: 'st-etienne', provider: "CRAIG", attribution: "© CRAIG / Saint-Étienne Métropole", label: 'Saint-Étienne (FR)', url: 'https://3d.craig.fr/datasets/St-Etienne/3dtiles/tileset.json' },
-  { id: 'lille', provider: "Métropole Européenne de Lille", attribution: "© Métropole Européenne de Lille", label: 'Métropole de Lille (FR)', url: 'https://webimaging.lillemetropole.fr/externe/maillage/2016_mel_10cm/3dtiles/tileset.json' },
-  { id: 'angkor-planet', provider: "Planet", attribution: "© Planet Labs PBC, SkySat; 3D by geofox.ai", label: 'Angkor Wat — Planet SkySat (KH)', url: 'https://storage.googleapis.com/open-cogs/planet-stac/angkor-wat/3d-geofox.ai/3DTiles/tileset.json' },
-  { id: 'utrecht', provider: "Gemeente Utrecht", attribution: "© Gemeente Utrecht, hosted by Esri", label: 'Utrecht integrated mesh (NL)', url: 'https://tiles.arcgis.com/tiles/V6ZHFr6zdgNZuVG0/arcgis/rest/services/Utrecht_3D_Tiles_Integrated_Mesh/3DTilesServer/tileset.json' },
-  { id: 'soest', provider: "Stadt Soest", attribution: "© Stadt Soest, virtualcitySYSTEMS", label: 'Soest 3D mesh (DE)', url: 'https://soest.virtualcitymap.de/datasource-data/HOSTING-Soest/3D-Mesh_2023/tileset.json' },
-  { id: 'aarhus', provider: "SDFI", attribution: "© Klimadatastyrelsen (SDFI) / Aarhus Kommune", label: 'Aarhus mesh (DK)', url: 'https://sdfe-hosting.virtualcitymap.de/Aarhus/datasource-data/Aarhus_Mesh/tileset.json' },
-  { id: 'agi-hq', provider: "Cesium", attribution: "© Cesium (AGI)", label: 'AGI Headquarters (US)', url: 'https://pelican-public.s3.amazonaws.com/3dtiles/agi-hq/tileset.json' },
-  { id: 'minato', provider: "Project PLATEAU", attribution: "© MLIT Japan, Project PLATEAU", label: 'Tokyo Minato-ku LOD4 — PLATEAU (JP)', url: 'https://assets.cms.plateau.reearth.io/assets/99/e2a800-7d75-4d11-94e1-bef604c39d01/13103_minato-ku_pref_2023_citygml_1_op_bldg_3dtiles_13103_minato-ku_lod4/tileset.json' },
+  { id: 'strasbourg', provider: "Eurométropole de Strasbourg", country: 'FRA', attribution: "© Eurométropole de Strasbourg, Od@CiT", label: 'Strasbourg Od@CiT (FR)', url: 'https://s3.eu-west-2.wasabisys.com/ems-sgct-photomaillage/ODACIT/EMS_PM2022/tileset.json' },
+  { id: 'clermont', provider: "CRAIG", country: 'FRA', attribution: "© CRAIG / Clermont Auvergne Métropole", label: 'Clermont-Ferrand (FR)', url: 'https://3d.craig.fr/datasets/Clermont/3dtiles/tileset.json' },
+  { id: 'st-etienne', provider: "CRAIG", country: 'FRA', attribution: "© CRAIG / Saint-Étienne Métropole", label: 'Saint-Étienne (FR)', url: 'https://3d.craig.fr/datasets/St-Etienne/3dtiles/tileset.json' },
+  { id: 'lille', provider: "Métropole Européenne de Lille", country: 'FRA', attribution: "© Métropole Européenne de Lille", label: 'Métropole de Lille (FR)', url: 'https://webimaging.lillemetropole.fr/externe/maillage/2016_mel_10cm/3dtiles/tileset.json' },
+  { id: 'angkor-planet', provider: "Planet", country: 'KHM', attribution: "© Planet Labs PBC, SkySat; 3D by geofox.ai", label: 'Angkor Wat — Planet SkySat (KH)', url: 'https://storage.googleapis.com/open-cogs/planet-stac/angkor-wat/3d-geofox.ai/3DTiles/tileset.json' },
+  { id: 'utrecht', provider: "Gemeente Utrecht", country: 'NLD', attribution: "© Gemeente Utrecht, hosted by Esri", label: 'Utrecht integrated mesh (NL)', url: 'https://tiles.arcgis.com/tiles/V6ZHFr6zdgNZuVG0/arcgis/rest/services/Utrecht_3D_Tiles_Integrated_Mesh/3DTilesServer/tileset.json' },
+  { id: 'soest', provider: "Stadt Soest", country: 'DEU', attribution: "© Stadt Soest, virtualcitySYSTEMS", label: 'Soest 3D mesh (DE)', url: 'https://soest.virtualcitymap.de/datasource-data/HOSTING-Soest/3D-Mesh_2023/tileset.json' },
+  { id: 'aarhus', provider: "SDFI", country: 'DNK', attribution: "© Klimadatastyrelsen (SDFI) / Aarhus Kommune", label: 'Aarhus mesh (DK)', url: 'https://sdfe-hosting.virtualcitymap.de/Aarhus/datasource-data/Aarhus_Mesh/tileset.json' },
+  { id: 'agi-hq', provider: "Cesium", country: 'USA', attribution: "© Cesium (AGI)", label: 'AGI Headquarters (US)', url: 'https://pelican-public.s3.amazonaws.com/3dtiles/agi-hq/tileset.json' },
+  { id: 'minato', provider: "Project PLATEAU", country: 'JPN', attribution: "© MLIT Japan, Project PLATEAU", label: 'Tokyo Minato-ku LOD4 — PLATEAU (JP)', url: 'https://assets.cms.plateau.reearth.io/assets/99/e2a800-7d75-4d11-94e1-bef604c39d01/13103_minato-ku_pref_2023_citygml_1_op_bldg_3dtiles_13103_minato-ku_lod4/tileset.json' },
 ];
 
 // Iconem's own demo sets (`angkor`: the 23 Angkor sites as individual tilesets; `iconem-open`: those
@@ -830,6 +905,7 @@ function draftRows(ts) {
         project: props.project, scene: props.scene, group: groupPath || null, date: props.date || null,
         ...(props.licence ? { licence: props.licence } : {}), format: props.format || formatOfUrl(t.content.uri),
         provider: props.provider ?? null, ...(props.attribution ? { attribution: props.attribution } : {}),
+        ...countryFields(props.country || null),
         url: t.content.uri, lon: +lon.toFixed(6), lat: +lat.toFixed(6), height: +height.toFixed(1), radius: +r.toFixed(1),
       } });
     }
@@ -1012,7 +1088,7 @@ export async function handleAggregate(req, res, u) {
   const urls = items.map((it) => it.url);
   const labels = Object.fromEntries(items.map((it) => [it.url, {
     id: it.id, name: it.name, project: it.project, scene: it.scene, date: it.date, format: it.fmt, licence: it.licence,
-    provider: it.provider, attribution: it.attribution,
+    provider: it.provider, attribution: it.attribution, country: it.country ?? null,
   }]));
 
   const key = JSON.stringify({ urls, nest, ttlMs, bv, labels, snap: sel.snap, native: sel.native });
@@ -1048,6 +1124,7 @@ export async function handleAggregate(req, res, u) {
           group: it.group ?? null, date: it.date ?? null, ...(it.licence ? { licence: it.licence } : {}),
           // who the data comes from — the library/picker filter on it, and viewers show `attribution`
           provider: it.provider ?? null, set: it.set ?? null, ...(it.attribution ? { attribution: it.attribution } : {}),
+          ...countryFields(it.country ?? null),
           // where the dataset's external root sits in the mosaic: its quadtree cell, and its depth
           ...(t.extras?.cell ? { cell: t.extras.cell } : {}), depth,
           ...(t.extras?.snap ? { snap: t.extras.snap } : {}),
@@ -1155,19 +1232,19 @@ function selectChildren(req, u, sets) {
   const labelByUrl = new Map((set && !set.manifest ? set.entries : []).map((e) => [e.url, e.label || e.id]));
   const fromManifest = (entries, m) => entries.map((e) => ({ id: idOf(e.url), url: childUrlFor(e, origin), fmt: e.format || '3dtiles',
         name: e.name, project: e.project, scene: e.scene, date: e.date ?? null, licence: e.licence,
-        provider: e.provider ?? m.provider ?? null, attribution: e.attribution ?? m.attribution ?? null, set: m.name,
+        provider: e.provider ?? m.provider ?? null, attribution: e.attribution ?? m.attribution ?? null, set: m.name, country: countryOf(e),
         group: e.sceneId != null ? `scene:${e.sceneId}` : e.scene ? `scene:${e.project ?? ''}/${e.scene}` : null,
         text: [e.url, e.name, e.project, e.scene, e.date, e.provider ?? m.provider].filter(Boolean).join(' ') }));
   const fromSet = !set ? [] : set.manifest
     ? set.entries.map((e) => ({ id: idOf(e.url), url: childUrlFor(e, origin), fmt: e.format || '3dtiles',
         name: e.name, project: e.project, scene: e.scene, date: e.date ?? null, licence: e.licence,
-        provider: e.provider ?? set.provider ?? null, attribution: e.attribution ?? set.attribution ?? null, set: setName,
+        provider: e.provider ?? set.provider ?? null, attribution: e.attribution ?? set.attribution ?? null, set: setName, country: countryOf(e),
         group: e.sceneId != null ? `scene:${e.sceneId}` : e.scene ? `scene:${e.project ?? ''}/${e.scene}` : null,
         text: [e.url, e.name, e.project, e.scene, e.date, e.provider ?? set.provider].filter(Boolean).join(' ') }))
     : [
         // a code-set entry with a `format` is a point cloud: wrapped by /stream like a manifest entry
         ...set.entries.map((e) => ({ id: idOf(e.url), url: e.format ? childUrlFor(e, origin) : e.url, fmt: e.format || '3dtiles', name: e.label || e.id,
-          provider: e.provider ?? null, attribution: e.attribution ?? null, set: setName,
+          provider: e.provider ?? null, attribution: e.attribution ?? null, set: setName, country: countryOf(e),
           text: [e.url, e.label, e.provider].filter(Boolean).join(' ') })),
         // code sets may pull in public manifests (the world set includes Aerometrex, through /proxy)
         ...(set.include || []).flatMap((name) => (sets[name]?.manifest ? fromManifest(sets[name].entries, { ...sets[name], name }) : [])),

@@ -2,10 +2,16 @@
  * "There is data here" markers for /aggregate mosaics in the 3DTRjs renderer — the counterpart of
  * CesiumViewer's PointPrimitiveCollection.
  *
- * One THREE.Points draw call: a fixed-pixel dot per dataset, a few metres above the WGS84 ellipsoid.
- * The "hide once the dataset spans more than 10% of the viewport" rule runs in the vertex shader
- * (radius / (distance·tan(fov/2)) — the same formula Cesium's DistanceDisplayCondition encodes), so
- * ~700 markers cost no per-frame JavaScript.
+ * One THREE.Points draw call: a fixed-pixel disc per dataset, a few metres above the WGS84 ellipsoid.
+ * The hand-off rule runs in the vertex shader (radius / (distance·tan(fov/2)) — the same formula
+ * Cesium's DistanceDisplayCondition encodes), so ~700 markers cost no per-frame JavaScript:
+ *   - a dataset that spans more than 10 % of the viewport AND has tiles on screen drops its marker
+ *     (the data speaks for itself);
+ *   - a dataset that spans more than 60 % keeps no marker either (the camera is in or over it);
+ *   - everything else keeps its marker — a cloud a kilometre away that has not loaded yet (or that
+ *     the footprint gate is still holding back) stays clickable ("I see the points but not their pill").
+ * Which datasets have tiles on screen is told by the viewer through `loadedRef` (a set of ids and a
+ * version counter), sampled from `tiles.visibleTiles` every few frames.
  *
  * Why not a 3DTRjs plugin: MVTAnnotationsPlugin / GeoJSONOverlay / ImageOverlayPlugin all drape
  * features onto tile SURFACES (so they need loaded geometry under them and scale with the ground),
@@ -21,11 +27,18 @@ import * as THREE from 'three';
 import { WGS84_ELLIPSOID } from '3d-tiles-renderer';
 import type { TilesRenderer as TilesRendererImpl } from '3d-tiles-renderer';
 import type { DatasetMarker } from '@/lib/aggregate';
-import { MARKER_COLORS, type TooltipChannel } from './DatasetTooltip';
+import { MARKER_RING_COLOR, markerColor, type TooltipChannel } from './DatasetTooltip';
 
 export const MARKER_HIDE_FRACTION = 0.1;
+/** Past this fraction of the viewport the marker goes whether or not the data has loaded. */
+export const MARKER_HIDE_ALWAYS_FRACTION = 0.6;
 const MARKER_LIFT_M = 30;
-const PICK_RADIUS_PX = 8;
+const PICK_RADIUS_PX = 10;
+export const MARKER_PX = 13;
+export const MARKER_INACTIVE_PX = 8;
+
+/** Which datasets currently have tiles on screen; `version` changes whenever the set does. */
+export interface LoadedDatasets { ids: Set<string>; version: number }
 
 const vertexShader = /* glsl */ `
   #include <common>
@@ -33,15 +46,19 @@ const vertexShader = /* glsl */ `
   attribute vec3 aColor;
   attribute float aRadius;
   attribute float aSize;
+  attribute float aLoaded;
   uniform float uTanHalf;
   uniform float uHideFraction;
+  uniform float uHideAlwaysFraction;
   uniform float uPixelRatio;
   varying vec3 vColor;
   void main() {
     vec4 mv = modelViewMatrix * vec4(position, 1.0);
     gl_Position = projectionMatrix * mv;
-    // The dataset is big enough on screen to speak for itself: drop the marker (outside clip space).
-    if (aRadius / (length(mv.xyz) * uTanHalf) > uHideFraction) gl_Position = vec4(2.0, 2.0, 2.0, 1.0);
+    // Big enough on screen to speak for itself (and actually drawing), or filling the view: drop the
+    // marker (outside clip space).
+    float frac = aRadius / (length(mv.xyz) * uTanHalf);
+    if (frac > uHideAlwaysFraction || (aLoaded > 0.5 && frac > uHideFraction)) gl_Position = vec4(2.0, 2.0, 2.0, 1.0);
     // Drawn without a depth test (so terrain and clouds never z-fight them), the far side of the globe
     // must be culled here instead: the camera is below the marker's tangent plane.
     vec3 wp = (modelMatrix * vec4(position, 1.0)).xyz;
@@ -55,11 +72,16 @@ const vertexShader = /* glsl */ `
 const fragmentShader = /* glsl */ `
   #include <common>
   #include <logdepthbuf_pars_fragment>
+  uniform vec3 uRing;
   varying vec3 vColor;
   void main() {
+    // anti-aliased disc with a bold dark ring (outer ~17 % of the radius)
     float r = length(gl_PointCoord - 0.5);
-    if (r > 0.5) discard;
-    gl_FragColor = vec4(r > 0.34 ? vec3(0.043, 0.043, 0.059) : vColor, 1.0);   // dark outline ring
+    float aa = fwidth(r);
+    float alpha = 1.0 - smoothstep(0.5 - aa, 0.5, r);
+    if (alpha <= 0.001) discard;
+    float fill = 1.0 - smoothstep(0.33 - aa, 0.33 + aa, r);
+    gl_FragColor = vec4(mix(uRing, vColor, fill), alpha);
     #include <colorspace_fragment>
     #include <logdepthbuf_fragment>
   }
@@ -83,11 +105,18 @@ export function screenFraction(camera: THREE.Camera, center: THREE.Vector3, radi
   return radius / (dist * Math.tan(THREE.MathUtils.degToRad(fov) / 2));
 }
 
-export default function ThreeDatasetMarkers({ list, tilesRef, tooltip, onPick }: {
+/** The shader's visibility rule, for picking. */
+export function markerHidden(frac: number, loaded: boolean): boolean {
+  return frac > MARKER_HIDE_ALWAYS_FRACTION || (loaded && frac > MARKER_HIDE_FRACTION);
+}
+
+export default function ThreeDatasetMarkers({ list, tilesRef, tooltip, onPick, loadedRef }: {
   list: DatasetMarker[];
   tilesRef: React.MutableRefObject<TilesRendererImpl | null>;
   tooltip: TooltipChannel;
   onPick: (d: DatasetMarker) => void;
+  /** Datasets with tiles on screen (see the file comment); absent = treat none as loaded. */
+  loadedRef?: React.MutableRefObject<LoadedDatasets>;
 }) {
   const camera = useThree((s) => s.camera);
   const gl = useThree((s) => s.gl);
@@ -102,18 +131,22 @@ export default function ThreeDatasetMarkers({ list, tilesRef, tooltip, onPick }:
     list.forEach((d, i) => {
       localPosition(d, v).toArray(pos, i * 3);
       // Picker-hidden datasets stay as small grey dots so they can be found and re-shown.
-      c.set(d.inactive ? '#6b7280' : d.color ?? MARKER_COLORS[d.format] ?? '#94a3b8').toArray(col, i * 3);
+      c.set(markerColor(d)).toArray(col, i * 3);
       rad[i] = d.radius;
-      size[i] = d.inactive ? 6 : 9;
+      size[i] = d.inactive ? MARKER_INACTIVE_PX : MARKER_PX;
     });
     const g = new THREE.BufferGeometry();
     g.setAttribute('position', new THREE.BufferAttribute(pos, 3));
     g.setAttribute('aColor', new THREE.BufferAttribute(col, 3));
     g.setAttribute('aRadius', new THREE.BufferAttribute(rad, 1));
     g.setAttribute('aSize', new THREE.BufferAttribute(size, 1));
+    g.setAttribute('aLoaded', new THREE.BufferAttribute(new Float32Array(n), 1));
     const m = new THREE.ShaderMaterial({
       vertexShader, fragmentShader,
-      uniforms: { uTanHalf: { value: 0.577 }, uHideFraction: { value: MARKER_HIDE_FRACTION }, uPixelRatio: { value: 1 } },
+      uniforms: {
+        uTanHalf: { value: 0.577 }, uHideFraction: { value: MARKER_HIDE_FRACTION }, uHideAlwaysFraction: { value: MARKER_HIDE_ALWAYS_FRACTION },
+        uPixelRatio: { value: 1 }, uRing: { value: new THREE.Color(MARKER_RING_COLOR) },
+      },
       depthTest: false, depthWrite: false, transparent: true,   // composited on top: no z-fighting with the ground
     });
     const p = new THREE.Points(g, m);
@@ -127,8 +160,10 @@ export default function ThreeDatasetMarkers({ list, tilesRef, tooltip, onPick }:
   useEffect(() => () => { points.geometry.dispose(); (points.material as THREE.Material).dispose(); }, [points]);
   useEffect(() => { invalidate(); }, [points, invalidate]);
 
-  // Follow the tileset group's transform and the camera's FOV. useFrame only runs when something
-  // is being drawn anyway (frameloop="demand").
+  // Follow the tileset group's transform, the camera's FOV and the loaded set. useFrame only runs
+  // when something is being drawn anyway (frameloop="demand").
+  const appliedVersion = useRef(-1);
+  useEffect(() => { appliedVersion.current = -1; }, [points]);
   useFrame(() => {
     const g = tilesRef.current?.group;
     if (g) points.matrix.copy(g.matrixWorld);
@@ -138,6 +173,14 @@ export default function ThreeDatasetMarkers({ list, tilesRef, tooltip, onPick }:
     const fov = (camera as THREE.PerspectiveCamera).fov ?? 60;
     u.uTanHalf.value = Math.tan(THREE.MathUtils.degToRad(fov) / 2);
     u.uPixelRatio.value = gl.getPixelRatio();
+    const loaded = loadedRef?.current;
+    if (loaded && loaded.version !== appliedVersion.current) {
+      appliedVersion.current = loaded.version;
+      const attr = points.geometry.getAttribute('aLoaded') as THREE.BufferAttribute;
+      const arr = attr.array as Float32Array;
+      for (let i = 0; i < list.length; i++) arr[i] = loaded.ids.has(list[i].id) ? 1 : 0;
+      attr.needsUpdate = true;
+    }
   });
 
   // Hover + click by projecting the markers to screen space: cheaper and more forgiving than raycasting
@@ -151,10 +194,11 @@ export default function ThreeDatasetMarkers({ list, tilesRef, tooltip, onPick }:
     function markerAt(x: number, y: number, w: number, h: number): DatasetMarker | null {
       const m = points.matrix;
       centre.setFromMatrixPosition(m);                    // the Earth's centre in world space
+      const loaded = loadedRef?.current.ids;
       let best: DatasetMarker | null = null, bestD = PICK_RADIUS_PX;
       for (let i = 0; i < list.length; i++) {
         tmp.copy(world[i]).applyMatrix4(m);
-        if (screenFraction(camera, tmp, list[i].radius) > MARKER_HIDE_FRACTION) continue;
+        if (markerHidden(screenFraction(camera, tmp, list[i].radius), !!loaded?.has(list[i].id))) continue;
         // behind the horizon: the camera is on the far side of the marker's tangent plane
         toCam.subVectors(camera.position, tmp);
         if (toCam.dot(tmp.clone().sub(centre)) < 0) continue;
@@ -194,7 +238,7 @@ export default function ThreeDatasetMarkers({ list, tilesRef, tooltip, onPick }:
       dom.removeEventListener('pointerleave', onLeave);
       onLeave();
     };
-  }, [list, points, camera, gl, tooltip]);
+  }, [list, points, camera, gl, tooltip, loadedRef]);
 
   return <primitive object={points} />;
 }

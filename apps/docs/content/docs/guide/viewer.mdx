@@ -278,6 +278,17 @@ data*: see
 A loaded mosaic gets a search box, hover cards on its markers and a dataset picker (show/hide, latest
 only, dates, formats) in both renderers; see
 [Search, markers and the dataset picker](/docs/guide/meta-tilesets#search-markers-and-the-dataset-picker-in-the-demo-app).
+Markers are 13 px pastel discs with a dark ring, one colour for every format by default (the picker's
+*colour* control switches to per-format, per-provider or per-dataset hues). A marker goes away only when
+its dataset spans more than 10 % of the viewport **and** has tiles on screen, or fills more than 60 % of
+it: a cloud a kilometre away that has not loaded yet keeps its marker, so it can still be clicked to fly
+there. In 3DTRjs, a dataset root is not even requested until its bounds span 24 px on screen
+(`lib/footprintGate.ts`): at country scale the markers stand for the data, and the 100+ root fetches of
+a national mosaic do not happen. The same mask covers a dataset you hide in the picker: its tiles stop
+loading and leave the cache rather than being drawn invisible. In the picker's on-screen list, a server
+set with several sites in view (a national LiDAR set seen from orbit: 22 provinces, 113 datasets) is one
+row — one checkbox for the whole set, a count, and the sites folded under it; a set with a single site
+in view is listed as that site.
 
 ### Renderer version and the Potree lab
 
@@ -346,6 +357,76 @@ pitched 45°, so it looked `height` m north of the point. It now looks **at** th
 m up, 45° down, as 3DTRjs does. A builder preview of 660 datasets now opens on its first dataset.
 </Callout>
 
+### Navigating in 3DTRjs
+
+Three control schemes (*Controls mode*): **Globe** (3DTRjs GlobeControls, the default), **Orbit**
+(three's OrbitControls) and **Environment** (3DTRjs EnvironmentControls). With every scheme:
+
+- **double-click** pivots on the picked point and moves halfway to it (animated);
+- **middle-drag** dollies toward the point under the cursor at drag start, drag down = in;
+- **right-drag** rotates around the point under the cursor (globe / environment), **left-drag** pans.
+
+Every pick — the two above and the controls' own drag, rotate and zoom pivots — goes through one rule
+(`lib/picking.ts`): hidden objects (a dataset hidden by the picker, the inactive native/stream variant
+of a leaf), wireframes (the reference sphere with imagery off), transparent materials and back faces
+are never candidates; when both the data and the terrain are under the cursor only the data counts, so
+a cloud a few metres above the DEM wins over the ground behind it and data below the terrain stays
+reachable; when only the terrain is hit, the nearest terrain hit is used, so zooming toward bare ground
+works with no data around.
+
+The camera's roll is left to the controls themselves: GlobeControls keeps the camera up on the local
+vertical when close to the surface and only nudges it toward north from far away, so orbiting a
+country keeps north at the top of the screen while a facade view keeps its horizon level. Far out,
+between zoom steps, the controls leave the roll alone, so a drag in circles slowly turns the view off
+north; that is upstream's behaviour and the viewer leaves it alone (a per-frame re-alignment was tried
+and dropped: it fought the drag).
+**Terrain behind data** (on by default) draws the globe and terrain first and clears the depth buffer
+before the data, so datasets below the DEM (a cloud not yet snapped to ground, a tunnel) stay visible;
+the terrain then never occludes the data.
+
+Two things that used to read as "the controls froze until I switched them" are handled: the
+crop/tileset gizmo disables the controls for a drag and could leave them disabled if it unmounted
+mid-drag (they are re-enabled whenever no gizmo is shown), and EnvironmentControls refused a drag
+whose ray was near-parallel to its stale `up` after the camera had travelled (its up now follows the
+ellipsoid normal at the camera).
+
+**Loading while flying.** 3DTRjs only cancels a tile that is no longer needed while it is still
+queued; downloads and parses already in flight run to completion, so a fast fly from a country view to
+a site first finished every intermediate view's imagery, terrain and point tiles. `lib/staleLoads.ts`
+drops a tile that has been downloading or parsing while unused for 12 updates, on the mosaic, its
+native-leaf children and the globe renderers. The imagery globe also refines to a 2 px error instead
+of the plugin's recommended 1 px (four times fewer tiles while moving).
+
+The views a scripted flight passes through are also loaded coarser (`lib/motionLod.ts`): for the
+duration of a fly-to tween (double-click, a marker, a search hit — `flight.active`), the globe
+renderers' error target is multiplied by six, so the frames of the flight request only coarse imagery
+and terrain, and the frame after arrival requests the destination at the normal target. It never
+applies to the data, and never to user input (a drag, an orbit, a wheel step): an earlier version
+boosted from the camera's speed and made the points and the terrain visibly flicker between levels
+while panning. The camera tween itself does not hold any request back; what did was the **parse queue**. The imagery
+and Terrarium globes download no content: each tile's `parseToMesh` fetches its elevation grid, then
+its overlay image, then builds the mesh, and 3DTRjs runs every parse through one shared queue of five
+jobs sized for Draco and glTF decoding. A close view needs some 300 terrain tiles (the leaves, their
+ancestors and siblings), so they drained five network round-trips at a time: measured headless, the
+fine imagery of a 400 m view finished 8-10 s after the camera got there while each fetch took ~10 ms.
+Those two renderers now have their own parse queue of 32 jobs (`GLOBE_PARSE_QUEUE`); the data
+renderers keep the shared one.
+
+Why 300 tiles rather than the dozen a flat map shows: the terrain plugin's tree is a web-mercator
+quadtree of *meshes*, one per tile at every level, and the overlay image of a tile is fetched at that
+tile's level, so the tree subdivides past the DEM's own resolution (Mapterhorn stops at z12-14; each
+elevation grid then serves two more levels of mesh) down to the imagery's: z19-22 in the foreground of
+a 400 m view. A perspective view spans the foreground to the horizon, i.e. six to eight levels at
+once (the measured run had 28 tiles at z17, 16 at z16, a dozen deeper, and a few per level up to z8),
+and 3DTRjs's `loadAncestors` and `loadSiblings` (both on by default) keep every ancestor and all
+siblings loaded so a REPLACE level can swap in whole and zooming out is seamless. Turning both off was
+tried: the tree refined deeper (37 tiles at z19 and z22 each), the arrival took longer, not shorter.
+
+The planar (EPSG:3857) projection that 3DTRjs offers is for its generated image surface only
+(`GeneratedSurfacePlugin({ shape: 'planar' })`): 3D Tiles content stays in ECEF, and a true Web
+Mercator view would need every loaded tile reprojected per vertex, with the bounding volumes to match.
+Not exposed.
+
 ### Debug: cells, or every tile
 
 The **Debug** select has two views:
@@ -361,7 +442,27 @@ declared tree without its external children.
 
 ### Point clouds
 
-The Tileset & LOD section exposes, in both renderers, for any tileset that holds points (a mixed
+**Sidebar sections.** Six foldable sections, each remembering whether it was left open: **Basemap &
+Terrain** (imagery, terrain source, collision, terrain behind data, auto-zoom), **Camera & Controls**
+(controls scheme, field of view, orthographic), **Tileset & LOD** (error target, show asset, debug
+bounds, native Potree leaves), **Material & Points** (material mode, point size and shape, eye-dome
+lighting; Cesium's shadeless and brightness), and the two occasional ones that start folded, **Crop &
+Extract** and **Local Frame**.
+
+**Material** (3DTRjs): *Default* keeps the content's own materials; *X-ray* draws meshes as an additive
+tint that writes no depth and points additive, so a scan's interior shows through its walls and
+overlapping datasets read through each other — with an **opacity** slider (points; meshes draw at 60 %
+of it) and **RGB / white** points (white: density alone reads as brightness); *Wireframe* draws mesh
+edges only. The original mesh material is kept and restored by *Default*; applied to every loaded tile,
+native Potree leaves included.
+
+**Controls mode** (3DTRjs) offers, besides Globe, Orbit and Environment, **Trackball** (free rotation
+about the target with no up vector, like a model viewer) and **Fly** (W A S D move, R F up and down,
+Q E roll, arrows turn, drag to look; the speed follows the height above ground, so a city passes in a
+few seconds from 2 km up and a facade at walking pace). Fly keeps the frame loop running while it is
+active — the only mode that does — since it moves the camera from its own per-frame update.
+
+The Material & Points section exposes, in both renderers, for any tileset that holds points (a mixed
 mosaic included — *Open data* is typed `mesh` but carries 113 COPC clouds):
 
 | Control | Cesium | 3DTRjs |
@@ -444,9 +545,19 @@ sea level, but it is only seen at planet scale.
 
 **⤓ Snap to ground** (Local Frame section, both renderers) moves the loaded tileset vertically onto
 the active terrain. On an `/aggregate` mosaic it instead reloads it with `&snap=`, which snaps **each
-dataset separately**, server-side (see [Meta-tilesets](/docs/guide/meta-tilesets#snap-each-dataset-to-the-ground-snap)). It runs **once, when you press it**. It sets the tileset-level Z offset: it does
-not follow the camera, and does not re-run on entering the dataset (an "auto-snap on load" option
-would be a small addition).
+dataset separately**, server-side (see [Meta-tilesets](/docs/guide/meta-tilesets#snap-each-dataset-to-the-ground-snap)). The button runs **once, when you press it**, and sets the tileset-level Z offset
+(an ENU shift along the local vertical). **↶ Undo** beside it restores the offset from before the snap,
+or removes a mosaic's `&snap=`. **Auto (follow the terrain)** keeps the tileset on the ground instead:
+the offset is re-measured when the terrain under it refines (World Terrain, Re:Earth QM and Google 3D
+load finer tiles as you approach; raster terrains are sampled at a fixed zoom, so one measurement is
+final), when the terrain mode changes and when a new tileset loads — the dataset's own low bins against
+the terrain, so a scan of a basilica sits on its forecourt, not on its dome. Both measure against the
+**terrain source selected** in the Basemap section: Mapterhorn or Terrarium tiles sampled directly,
+World Terrain / Re:Earth / Google 3D by a ray against the loaded geometry, the bare WGS84 ellipsoid as
+height 0. **Clearance above ground** (10 m by default) is added on top, so the dataset's ground bins
+land that far above the terrain and the scan lies above most of it instead of half inside it; 0 puts
+it exactly on the terrain. On a mosaic the same checkbox turns the server-side per-dataset snap on and
+off.
 
 **Where the samples come from** (`packages/core/dataset-ground.js`, shared with the server): not from
 picks, but from the dataset's **own top geometry**.

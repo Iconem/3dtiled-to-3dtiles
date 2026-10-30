@@ -88,6 +88,8 @@ export interface NativeLeavesOptions {
   errorTarget?: number | null;
   /** Fresh plugin instances for every /stream child renderer (implicit tiling, glTF extensions…). */
   createStreamPlugins?: (() => any[]) | null;
+  /** Fresh plugin instances for EVERY child renderer, native and /stream alike (load scheduling…). */
+  extraPlugins?: (() => any[]) | null;
   /** PointCloudEffectsPlugin options (shape, min/max size, EDL) for every native PotreePlugin. */
   effectOptions?: (() => Record<string, unknown>) | null;
   /**
@@ -105,17 +107,19 @@ export class NativeLeavesPlugin {
   private _pointScale: number;
   errorTarget: number | null;
   createStreamPlugins: NativeLeavesOptions['createStreamPlugins'];
+  extraPlugins: NativeLeavesOptions['extraPlugins'];
   effectOptions: NativeLeavesOptions['effectOptions'];
   onChildModel: NativeLeavesOptions['onChildModel'];
   private _seq = 0;
   private _onUpdateAfter = () => this._updateChildren();
   private _forward = (e: any) => this.tiles?.dispatchEvent({ type: e.type });
 
-  constructor({ mode = 'native', pointScale = 1, errorTarget = null, createStreamPlugins = null, effectOptions = null, onChildModel = null }: NativeLeavesOptions = {}) {
+  constructor({ mode = 'native', pointScale = 1, errorTarget = null, createStreamPlugins = null, extraPlugins = null, effectOptions = null, onChildModel = null }: NativeLeavesOptions = {}) {
     this._mode = mode;
     this._pointScale = pointScale;
     this.errorTarget = errorTarget;
     this.createStreamPlugins = createStreamPlugins;
+    this.extraPlugins = extraPlugins;
     this.effectOptions = effectOptions;
     this.onChildModel = onChildModel;
   }
@@ -227,6 +231,7 @@ export class NativeLeavesPlugin {
     child.addEventListener('needs-render', this._forward);
     child.addEventListener('load-error', (e: any) => console.warn('[native leaf]', url ?? m.src.uri, e.error));
     child.addEventListener('load-model', (e: any) => this.onChildModel?.(e.scene, m.tile, e.tile));
+    for (const p of this.extraPlugins?.() ?? []) child.registerPlugin(p);
     return child;
   }
 

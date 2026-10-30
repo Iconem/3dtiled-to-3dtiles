@@ -11,7 +11,7 @@ import { extractCrop, type ExtractKind } from '@/lib/extract';
 import { buildMiddlewareUrl, type MiddlewareParams } from '@/lib/middleware';
 import { MW, type AssetType } from '@/lib/formats';
 import type { ViewerHandle } from '@/lib/viewer-handle';
-import { SidebarSection } from './SidebarSection';
+import { SidebarCollapsibleSection } from './SidebarSection';
 
 export default function CropExtractSection({ activeHandleRef }: { activeHandleRef: React.RefObject<ViewerHandle | null> }) {
   const [url] = useUrlState();
@@ -61,7 +61,7 @@ export default function CropExtractSection({ activeHandleRef }: { activeHandleRe
   }
 
   return (
-    <SidebarSection title="Crop & Extract">
+    <SidebarCollapsibleSection title="Crop & Extract" defaultOpen={false}>
         <Button size="sm" variant="outline" onClick={setToView}>⬚ Set box to view (80%)</Button>
         <div className="flex items-center justify-between">
           <Label className="text-xs">max GE (m)</Label>
@@ -149,6 +149,6 @@ export default function CropExtractSection({ activeHandleRef }: { activeHandleRe
           </div>
         )}
         <p className="text-xs text-muted-foreground">Extracts the loaded tileset within the box. Octree sources are fetched as explicit tiling.</p>
-    </SidebarSection>
+    </SidebarCollapsibleSection>
   );
 }

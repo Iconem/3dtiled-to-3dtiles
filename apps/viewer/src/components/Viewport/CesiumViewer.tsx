@@ -5,9 +5,10 @@ import type { DatasetMarker } from '@/lib/aggregate';
 import type { AssetType } from '@/lib/formats';
 import { CESIUM_ION_TOKEN } from '@/lib/ion';
 import { useViewerStore } from '@/state/store';
-import DatasetTooltip, { MARKER_COLORS, type TooltipChannel } from './DatasetTooltip';
+import DatasetTooltip, { MARKER_RING_COLOR, markerColor, type TooltipChannel } from './DatasetTooltip';
+import { MARKER_INACTIVE_PX, MARKER_PX } from './ThreeDatasetMarkers';
 import { createRasterTerrainProvider, RASTER_TERRAINS, REEARTH_QM_URL, resolveTerrainMode, sampleRasterTerrain, snapRasterFor } from '@/lib/terrarium';
-import { BASEMAPS, type BasemapId } from '@/lib/basemaps';
+import { basemapLayers, type BasemapId } from '@/lib/basemaps';
 import { tileDatasetId, type DatasetStyle } from '@/lib/datasetStyle';
 import { fetchOutlines, outlineColor } from '@/lib/mosaicOutlines';
 import { datasetGroundSamples, offsetFromSamples } from '@/lib/datasetGround';
@@ -42,7 +43,7 @@ const MARKER_HIDE_FRACTION = 0.1;
 function setImagery(v: Cesium.Viewer, id: BasemapId) {
   v.imageryLayers.removeAll();
   if (id === 'none') return;
-  for (const l of BASEMAPS[id].layers) {
+  for (const l of basemapLayers(id)) {
     v.imageryLayers.addImageryProvider(new Cesium.UrlTemplateImageryProvider({ url: l.url, maximumLevel: l.maxZoom, credit: l.credit }));
   }
 }
@@ -251,18 +252,19 @@ const CesiumViewer = forwardRef<ViewerHandle, Props>(function CesiumViewer({ vis
     const fovy: number = fr?.fovy ?? 1.047;
     const hideBelow = 1 / (MARKER_HIDE_FRACTION * Math.tan(fovy / 2));
     const pts = new Cesium.PointPrimitiveCollection();
-    const outline = Cesium.Color.fromCssColorString('#0b0b0f');
+    const outline = Cesium.Color.fromCssColorString(MARKER_RING_COLOR);
     for (const d of list) {
       pts.add({
         // A few metres above the ellipsoid so the sprite doesn't z-fight with the globe surface.
         position: Cesium.Cartesian3.fromDegrees(d.lon, d.lat, 30),
         // Hidden-by-the-picker datasets stay as small grey dots, so they can still be found and re-shown.
-        pixelSize: d.inactive ? 6 : 9,
+        // Same disc and ring as ThreeDatasetMarkers (13 px, bold dark ring, pastel fill).
+        pixelSize: d.inactive ? MARKER_INACTIVE_PX : MARKER_PX,
         color: d.inactive
-          ? Cesium.Color.fromCssColorString('#9ca3af').withAlpha(0.55)
-          : cssColor(d.color ?? MARKER_COLORS[d.format] ?? '#94a3b8'),
+          ? Cesium.Color.fromCssColorString(markerColor(d)).withAlpha(0.55)
+          : cssColor(markerColor(d)),
         outlineColor: outline,
-        outlineWidth: 1.5,
+        outlineWidth: 2.5,
         distanceDisplayCondition: new Cesium.DistanceDisplayCondition(d.radius * hideBelow, Number.MAX_VALUE),
         // Depth-tested from far away (so the far side of the globe hides its markers), but never hidden
         // by terrain once the camera is within 50 km.
