@@ -412,15 +412,19 @@ fine imagery of a 400 m view finished 8-10 s after the camera got there while ea
 Those two renderers now have their own parse queue of 32 jobs (`GLOBE_PARSE_QUEUE`); the data
 renderers keep the shared one.
 
-Why 300 tiles rather than the dozen a flat map shows: the terrain plugin's tree is a web-mercator
-quadtree of *meshes*, one per tile at every level, and the overlay image of a tile is fetched at that
-tile's level, so the tree subdivides past the DEM's own resolution (Mapterhorn stops at z12-14; each
-elevation grid then serves two more levels of mesh) down to the imagery's: z19-22 in the foreground of
-a 400 m view. A perspective view spans the foreground to the horizon, i.e. six to eight levels at
-once (the measured run had 28 tiles at z17, 16 at z16, a dozen deeper, and a few per level up to z8),
-and 3DTRjs's `loadAncestors` and `loadSiblings` (both on by default) keep every ancestor and all
-siblings loaded so a REPLACE level can swap in whole and zooming out is seamless. Turning both off was
-tried: the tree refined deeper (37 tiles at z19 and z22 each), the arrival took longer, not shorter.
+How many tiles a view really takes: the terrain plugin's tree is a web-mercator quadtree of
+*meshes*, one 32×32-segment skirted grid (about 1,200 vertices) per tile at every level, and the
+overlay image is fetched per tile at that tile's own level, so terrain tiles and imagery tiles are the
+same thing, one to one. The elevation is coarser: each mesh samples a sub-window of an elevation grid
+two levels up (and never finer than the DEM's last zoom), so a z17 mesh displaces 33×33 vertices from
+an 8×8-texel patch of a z14 grid — the fine mesh exists for the imagery, not for the relief. Measured
+at 400 m over Ghent (1440×900, 60° FOV, `errorTarget` 1): nadir shows 20 tiles (18 at z17, 2 at z16)
+with 79 resident, a 45° pitch 26 shown / 91 resident, a 70° pitch 65 shown / 121 resident spanning z7
+to z17. The resident surplus is the ancestor chain (three tiles per level up to the root) plus
+siblings, kept by 3DTRjs's `loadAncestors` and `loadSiblings` (both on by default) so a REPLACE level
+can swap in whole; turning both off made the arrival slower, not faster. The 300 "parsing" tiles seen
+on arrival were transient: a teleport from a 300 km view walks the tree down through every level, and
+each level's tiles pass through the parse queue on the way — which is why the queue width mattered.
 
 The planar (EPSG:3857) projection that 3DTRjs offers is for its generated image surface only
 (`GeneratedSurfacePlugin({ shape: 'planar' })`): 3D Tiles content stays in ECEF, and a true Web
