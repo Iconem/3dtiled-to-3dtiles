@@ -38,7 +38,7 @@ remote `main` unless you need the machine-local files listed at the end.
 
 ## Open items, in priority order
 
-1. **Verify prod after the deploy of `25a7c55`.** `curl -w '%{time_total}'` on
+1. **Verify prod after the deploy of `e4939d7`.** `curl -w '%{time_total}'` on
    `/aggregate/tileset.json?set=open&nest=geodetic` should be seconds, not minutes; the root page
    under 1 s; Portainer logs should show `[range] … retrying` lines at most, no `FetchError`. If the
    mosaic is still slow, the next suspect is `childInfo` on non-`/stream` children (cities, Esri,

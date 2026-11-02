@@ -16,7 +16,7 @@ Format loosely follows [Keep a Changelog](https://keepachangelog.com/).
 
 ### Fixed — 2026-11-02 (Terrarium globes, follow the terrain, crop box)
 - **Mapterhorn and AWS terrain failed tile by tile in 3DTRjs** whenever imagery was on: since
-  `e879906` the globe registered an undefined `load-model` listener, and three's event dispatch threw on
+  `fd46d51` the globe registered an undefined `load-model` listener, and three's event dispatch threw on
   every loaded tile. AWS Terrain Tiles work again.
 - **Mapterhorn 404s** left holes in the globe. Open ocean now reads as sea level, and a deep tile without
   a regional DEM is cut out of its nearest ancestor.
@@ -937,7 +937,7 @@ Format loosely follows [Keep a Changelog](https://keepachangelog.com/).
   enabled on the repo, so its push trigger failed every run.
 - **Repo hygiene:** `main` fast-forwarded to `origin/main`; `t3code/feature-roadmap-exploration`
   merged with main (the `openapi.json` overlap auto-resolved — the roadmap branch expanded `paths`
-  while `809f5f4` touched only `info.description`) and pushed as a tracked remote branch. Five local
+  while `423f963` touched only `info.description`) and pushed as a tracked remote branch. Five local
   branches plus the remote `stream-cache` were deleted after verifying each held **zero** commits not
   already reachable from `origin/main`.
 
