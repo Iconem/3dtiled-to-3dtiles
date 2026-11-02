@@ -11,5 +11,6 @@ screens/
 .local/
 
 # per-machine Vite env (API tokens): never committed
+.env
 .env.local
 .env.*.local

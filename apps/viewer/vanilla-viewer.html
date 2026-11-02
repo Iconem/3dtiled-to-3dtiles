@@ -4,6 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>3D Tiles Viewer</title>
+<script src="/env-config.js"></script>
 <style>
   * { margin: 0; padding: 0; box-sizing: border-box; }
 
@@ -681,9 +682,9 @@ const DIRECT = [
   { id: 'lille', icon: '🏙', label: '3DT · Lille', type: 'mesh', url: 'https://webimaging.lillemetropole.fr/externe/maillage/2016_mel_10cm/3dtiles/tileset.json' },
   { id: 'marseille',    icon: '🏙', label: '3DT · Marseille (root.json)',   type: 'mesh', url: 'https://d3h9zulrmcj1j6.cloudfront.net/Marseille_Cesium/root.json' },
   { id: 'cgs-lod',      icon: '◈', label: '3DT · CesiumGS discrete-LOD',   type: 'mesh', url: 'https://raw.githubusercontent.com/CesiumGS/3d-tiles-samples/main/1.0/TilesetWithDiscreteLOD/tileset.json' },
-  // Google Photorealistic 3D Tiles — public demo key from Google's own docs (origin-unrestricted demo
-  // quota). Root quadtree covers the whole globe; navigate/zoom to any city like the Bing 3D pill.
-  { id: 'google-3dtiles', icon: '🌍', label: '3DT · Google Photorealistic', type: 'mesh', url: 'https://tile.googleapis.com/v1/3dtiles/root.json?key=REMOVED_GOOGLE_API_KEY' },
+  // Google Photorealistic 3D Tiles, with the key from the environment (see src/lib/google.ts).
+  // Root quadtree covers the whole globe; navigate/zoom to any city like the Bing 3D pill.
+  { id: 'google-3dtiles', icon: '🌍', label: '3DT · Google Photorealistic', type: 'mesh', url: `https://tile.googleapis.com/v1/3dtiles/root.json?key=${window.__GOOGLE_MAPS_API_KEY__ || '%VITE_GOOGLE_MAPS_API_KEY%'}` },
   // ArcGIS 3D Tiles Server (ESRI's own 3D Tiles publishing service, not I3S) — real public examples.
   { id: 'esri-portcoast', icon: '🌍', label: '3DT · ESRI Portcoast (mesh)', type: 'mesh', url: 'https://tiles.arcgis.com/tiles/V6ZHFr6zdgNZuVG0/arcgis/rest/services/Portcoast_industrial/3DTilesServer/tileset.json' },
   { id: 'esri-mantes', icon: '🌍', label: '3DT · ESRI Mantes-la-Jolie (splat)', type: 'splat', url: 'https://tiles.arcgis.com/tiles/uujCiiEZAflDbdxE/arcgis/rest/services/Coll%C3%A9giale_Mantes_la_Jolie_Drone_3D_Gaussian_Splat/3DTilesServer/tileset.json' },

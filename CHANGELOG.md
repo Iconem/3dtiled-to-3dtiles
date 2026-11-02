@@ -5,6 +5,12 @@ Format loosely follows [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+### Security — 2026-11-02 (API keys out of the repository)
+- **Google and Cesium ion keys are no longer in the source or in git history.** Set them in
+  `apps/viewer/.env.local` (see `.env.example`), or as `GOOGLE_MAPS_API_KEY` and `CESIUM_ION_TOKEN` on the
+  viewer container, which keeps them out of published images. Without them, Google 3D and Cesium World
+  Terrain are greyed out. History was rewritten, so existing clones must be reset to the new `main`.
+
 ### Fixed — 2026-11-02 (Terrarium globes, follow the terrain, crop box)
 - **Mapterhorn and AWS terrain failed tile by tile in 3DTRjs** whenever imagery was on: since
   `e879906` the globe registered an undefined `load-model` listener, and three's event dispatch threw on

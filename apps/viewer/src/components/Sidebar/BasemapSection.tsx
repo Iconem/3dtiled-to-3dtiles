@@ -8,6 +8,10 @@ import type { ViewerHandle } from '@/lib/viewer-handle';
 import { SidebarCollapsibleSection } from './SidebarSection';
 import { BASEMAPS } from '@/lib/basemaps';
 import { useUrlState } from '@/state/urlState';
+import { CESIUM_ION_TOKEN } from '@/lib/ion';
+import { GOOGLE_MAPS_API_KEY } from '@/lib/google';
+
+const NEEDS_KEY = 'Needs VITE_GOOGLE_MAPS_API_KEY or VITE_CESIUM_ION_TOKEN, see apps/viewer/.env.example';
 
 export default function BasemapSection({ activeHandleRef }: { activeHandleRef: React.RefObject<ViewerHandle | null> }) {
   const basemap = useViewerStore((s) => s.basemap);
@@ -46,10 +50,10 @@ export default function BasemapSection({ activeHandleRef }: { activeHandleRef: R
           <SelectTrigger size="sm"><SelectValue /></SelectTrigger>
           <SelectContent>
             <SelectItem value="wgs84">WGS84 ellipsoid (flat)</SelectItem>
-            <SelectItem value="google">Google 3D</SelectItem>
+            <SelectItem value="google" disabled={!(url.renderer === 'cesium' ? CESIUM_ION_TOKEN : GOOGLE_MAPS_API_KEY)} title={NEEDS_KEY}>Google 3D</SelectItem>
             <SelectItem value="auto" title="3DTRjs: mapterhorn.com's Terrarium webp tiles, heights above sea level. Cesium: the same DEM on the ellipsoid, as a quantized mesh.">Mapterhorn</SelectItem>
             <SelectItem value="terrarium" title="Mapzen / AWS Open Data Terrarium tiles, heights above sea level">AWS Terrain Tiles</SelectItem>
-            <SelectItem value="cesium">Cesium World Terrain</SelectItem>
+            <SelectItem value="cesium" disabled={!CESIUM_ION_TOKEN} title={NEEDS_KEY}>Cesium World Terrain</SelectItem>
           </SelectContent>
         </Select>
       </div>

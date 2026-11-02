@@ -6,3 +6,5 @@
 // falls back to VITE_TILE_SERVER_URL/VITE_DOCS_URL, then a same-origin-port guess, in that order.
 window.__TILE_SERVER_URL__ = '';
 window.__DOCS_URL__ = '';
+window.__GOOGLE_MAPS_API_KEY__ = '';
+window.__CESIUM_ION_TOKEN__ = '';

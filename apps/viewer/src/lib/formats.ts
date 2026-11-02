@@ -1,3 +1,5 @@
+import { GOOGLE_MAPS_API_KEY } from './google';
+
 // Ported verbatim (same ids/labels/urls) from viewer.html's FORMATS/DIRECT/TOOLS_DATASETS/SNIPPETS —
 // see C:\Dev\Iconem\3d-tiles-converters\viewer.html lines ~578-834.
 
@@ -194,7 +196,7 @@ export const DIRECT: DirectAsset[] = [
   { id: 'lille', icon: '🏙', label: '3DT · Lille', type: 'mesh', url: 'https://webimaging.lillemetropole.fr/externe/maillage/2016_mel_10cm/3dtiles/tileset.json' },
   { id: 'marseille', icon: '🏙', label: '3DT · Marseille (root.json)', type: 'mesh', url: 'https://d3h9zulrmcj1j6.cloudfront.net/Marseille_Cesium/root.json' },
   { id: 'cgs-lod', icon: '◈', label: '3DT · CesiumGS discrete-LOD', type: 'mesh', url: 'https://raw.githubusercontent.com/CesiumGS/3d-tiles-samples/main/1.0/TilesetWithDiscreteLOD/tileset.json' },
-  { id: 'google-3dtiles', icon: '🌍', label: '3DT · Google Photorealistic', type: 'mesh', url: 'https://tile.googleapis.com/v1/3dtiles/root.json?key=REMOVED_GOOGLE_API_KEY' },
+  { id: 'google-3dtiles', icon: '🌍', label: '3DT · Google Photorealistic', type: 'mesh', url: `https://tile.googleapis.com/v1/3dtiles/root.json?key=${GOOGLE_MAPS_API_KEY}` },
   { id: 'esri-portcoast', icon: '🌍', label: '3DT · ESRI Portcoast (mesh)', type: 'mesh', url: 'https://tiles.arcgis.com/tiles/V6ZHFr6zdgNZuVG0/arcgis/rest/services/Portcoast_industrial/3DTilesServer/tileset.json' },
   { id: 'esri-mantes', icon: '🌍', label: '3DT · ESRI Mantes-la-Jolie (splat)', type: 'splat', url: 'https://tiles.arcgis.com/tiles/uujCiiEZAflDbdxE/arcgis/rest/services/Coll%C3%A9giale_Mantes_la_Jolie_Drone_3D_Gaussian_Splat/3DTilesServer/tileset.json' },
   { id: 'agisoft-jam', icon: '☁', label: '3DT · Agisoft Jam (Cloud)', type: 'mesh', url: `${MW}/proxy?url=${encodeURIComponent('https://cloud.agisoft.com/api/teams/b9910e8d-6a0a-4e99-b389-d0a4e1939ce7/projects/2dfa164c-b36b-457f-83a2-488a3f158fa0/datasets/4dbe0ec8-f38e-4fc4-b136-b54f2d52c225/tilesets/aa1dd5c4-6c78-4a82-83ab-86e51c02f3d9/tileset.json?access=3c0b69cf-b7bf-44d0-9662-b3b016b8ba82')}` },

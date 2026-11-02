@@ -9,5 +9,7 @@ set -e
 cat > /app/dist/env-config.js <<EOF
 window.__TILE_SERVER_URL__ = '${TILE_SERVER_URL:-}';
 window.__DOCS_URL__ = '${DOCS_URL:-}';
+window.__GOOGLE_MAPS_API_KEY__ = '${GOOGLE_MAPS_API_KEY:-}';
+window.__CESIUM_ION_TOKEN__ = '${CESIUM_ION_TOKEN:-}';
 EOF
 exec "$@"

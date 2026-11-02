@@ -578,7 +578,9 @@ shapes, EDL, adaptive size per point from the active octree nodes) is the lab's.
 
 ### Terrain and snap to ground
 
-**Terrain** — every open source is keyless and CORS-open. The list is the same in both renderers;
+**Terrain** — every open source is keyless and CORS-open; Google 3D and Cesium World Terrain need a key
+(`apps/viewer/.env.example`, or `GOOGLE_MAPS_API_KEY` and `CESIUM_ION_TOKEN` on the Docker container).
+The list is the same in both renderers;
 **Mapterhorn**, the default, is drawn in each renderer's native form.
 
 | Mode | Source | Encoding | Max z | Heights |

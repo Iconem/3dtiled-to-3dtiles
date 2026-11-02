@@ -19,6 +19,10 @@ services:
       - tile-server
     ports:
       - "3000:3000"
+    # Optional keys for Google 3D and Cesium World Terrain, written to env-config.js at container start.
+    environment:
+      - GOOGLE_MAPS_API_KEY=${GOOGLE_MAPS_API_KEY:-}
+      - CESIUM_ION_TOKEN=${CESIUM_ION_TOKEN:-}
     # Optional: drop your own datasets in ./sample-data on the host to reach them from the viewer's
     # format pills (they build /sample-data/... URLs) — the image ships with none (gitignored, local-only).
     volumes:

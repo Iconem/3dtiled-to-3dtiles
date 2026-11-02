@@ -289,9 +289,8 @@ const CesiumViewer = forwardRef<ViewerHandle, Props>(function CesiumViewer({ vis
 
   function initViewer(container: HTMLDivElement) {
     // A personal Cesium Ion token — required for Cesium World Terrain and Google Photorealistic 3D
-    // Tiles (see setTerrainMode below). Ships client-side like any Ion demo token; rotate it in the
-    // Cesium ion console if this repo's exposure of it in a public history becomes a concern.
-    Cesium.Ion.defaultAccessToken = CESIUM_ION_TOKEN;
+    // Tiles (see setTerrainMode below). Ships client-side like any Ion demo token.
+    if (CESIUM_ION_TOKEN) Cesium.Ion.defaultAccessToken = CESIUM_ION_TOKEN;
     const v = new Cesium.Viewer(container, {
       animation: false,
       baseLayerPicker: false,
