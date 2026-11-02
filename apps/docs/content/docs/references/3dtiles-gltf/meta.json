@@ -5,6 +5,7 @@
     "3d-tiles-format",
     "KHR_gaussian_splatting",
     "gltf-2.1",
+    "gltf-2.1-3dtiles-2.0",
     "3dgs-extension-lineage",
     "3tz-3dtiles-packages",
     "usd-gaussian-splats"

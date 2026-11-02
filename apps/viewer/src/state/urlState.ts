@@ -28,11 +28,11 @@ const urlStateParsers = {
   tilesetOp: parseAsString.withDefault(''),
   centroids: parseAsBoolean.withDefault(false),
   tiling: parseAsStringEnum<TilingMode>(['implicit', 'explicit']).withDefault('implicit'),
-  renderer: parseAsStringEnum<ActiveRenderer>(['cesium', '3dtrjs']).withDefault('cesium'),
+  renderer: parseAsStringEnum<ActiveRenderer>(['cesium', '3dtrjs']).withDefault('3dtrjs'),
   tool: parseAsStringEnum<ToolName>(['implicit-to-explicit', 'upgrade', 'packages']).withDefault('implicit-to-explicit'),
   preset: parseAsString.withDefault(''),
   // 3DTRjs only: mosaic leaves in their source format (Potree via PotreePlugin) instead of /stream.
-  native: parseAsBoolean.withDefault(false),
+  native: parseAsBoolean.withDefault(true),
   // COPC on /stream (also every COPC child of a mosaic): points on the ellipsoid (proj4 → ECEF per
   // tile grid) instead of the tangent plane. auto = on past a 20 km extent.
   curved: parseAsStringEnum<'auto' | 'on' | 'off'>(['auto', 'on', 'off']).withDefault('auto'),

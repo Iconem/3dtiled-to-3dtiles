@@ -1,3 +1,4 @@
+import { Button } from '@/components/ui/button';
 import { Checkbox } from '@/components/ui/checkbox';
 import { Label } from '@/components/ui/label';
 import { Input } from '@/components/ui/input';
@@ -18,7 +19,7 @@ export default function MaterialSection({ activeHandleRef }: { activeHandleRef: 
     <SidebarCollapsibleSection title="Material & Points" defaultOpen>
       {url.renderer === '3dtrjs' && (
         <div className="flex items-center justify-between">
-          <Label className="text-xs" title="Default: the content's own materials. X-ray: see-through — meshes as an additive tint that does not write depth, points additive at 35 %, so a scan's interior shows through its walls and overlapping datasets read through each other. Wireframe: mesh edges only.">Material</Label>
+          <Label className="text-xs" title="Default: the content's own materials. Point colours are set below, in every mode. X-ray: see-through — meshes as an additive tint that does not write depth, points additive at 35 %, so a scan's interior shows through its walls and overlapping datasets read through each other. Wireframe: mesh edges only.">Material</Label>
           <Select value={s.materialMode} onValueChange={(v) => s.setMaterialMode(v as any)}>
             <SelectTrigger size="sm"><SelectValue /></SelectTrigger>
             <SelectContent>
@@ -38,22 +39,37 @@ export default function MaterialSection({ activeHandleRef }: { activeHandleRef: 
               <span className="w-8 text-right text-xs text-muted-foreground">{s.xrayOpacity.toFixed(2)}</span>
             </div>
           </div>
+        </>
+      )}
+      {url.renderer === '3dtrjs' && s.currentType !== 'splat' && (
+        <>
           <div className="flex items-center justify-between">
-            <Label className="text-xs" title="Points keep their own colours, or every point takes one colour (white by default): density alone reads as brightness.">X-ray points</Label>
+            <Label className="text-xs" title="Points only; meshes keep their textures. RGB: their own colours. One colour: every point the same (white by default; in X-ray, density alone reads as brightness). Height: a blue-to-red ramp over the range below.">Point colour</Label>
             <div className="flex items-center gap-2">
-              {s.xrayPoints === 'color' && (
-                <input type="color" aria-label="X-ray point colour" value={s.xrayColor} onChange={(e) => s.setXrayColor(e.target.value)}
+              {s.pointColorMode === 'color' && (
+                <input type="color" aria-label="Point colour" value={s.pointColor} onChange={(e) => s.setPointColor(e.target.value)}
                   className="h-7 w-8 cursor-pointer rounded border border-border bg-transparent p-0.5" />
               )}
-              <Select value={s.xrayPoints} onValueChange={(v) => s.setXrayPoints(v as any)}>
+              <Select value={s.pointColorMode} onValueChange={(v) => s.setPointColorMode(v as any)}>
                 <SelectTrigger size="sm"><SelectValue /></SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="rgb">RGB colours</SelectItem>
+                  <SelectItem value="rgb">RGB</SelectItem>
                   <SelectItem value="color">One colour</SelectItem>
+                  <SelectItem value="height">Height</SelectItem>
                 </SelectContent>
               </Select>
             </div>
           </div>
+          {s.pointColorMode === 'height' && (
+            <div className="flex items-center justify-between gap-1" title="Heights (m) at the two ends of the ramp, in the tileset's own frame. Fit reads them from the points loaded now, ignoring the top and bottom 2 %.">
+              <Label className="w-14 shrink-0 text-xs">Range (m)</Label>
+              <Input type="number" aria-label="Lowest height" className="h-7" value={s.pointHeightRange?.[0] ?? ''}
+                onChange={(e) => { const v = Number(e.target.value); if (e.target.value !== '' && Number.isFinite(v)) s.setPointHeightRange([v, s.pointHeightRange?.[1] ?? v + 1]); }} />
+              <Input type="number" aria-label="Highest height" className="h-7" value={s.pointHeightRange?.[1] ?? ''}
+                onChange={(e) => { const v = Number(e.target.value); if (e.target.value !== '' && Number.isFinite(v)) s.setPointHeightRange([s.pointHeightRange?.[0] ?? v - 1, v]); }} />
+              <Button size="sm" variant="outline" className="h-7" onClick={() => { if (!h()?.fitPointHeights?.()) s.setStatus('No points loaded yet to fit the range to.'); }}>Fit</Button>
+            </div>
+          )}
         </>
       )}
       {s.currentType !== 'splat' && (

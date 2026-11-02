@@ -1,0 +1,118 @@
+---
+title: "Directions: 3D Tiles 2.0 on glTF 2.1"
+description: "Where the 3D Tiles 2.0 drafts and cesium-native stand, what they mean for 3dtiled's output, and when to act."
+---
+
+# Directions: 3D Tiles 2.0 on glTF 2.1
+
+> Read on **2026-11-02**. Every spec below is a draft and the streaming work in cesium-native is
+> not merged, so names and details may change. For glTF 2.1 core, see
+> [glTF 2.1 — Complex Scenes](/docs/references/3dtiles-gltf/gltf-2.1).
+
+**Nothing needs to change in 3dtiled today.** Its 3D Tiles 1.1 output is the format to keep writing,
+and a 2.0 writer should wait until cesium-native's loader leaves draft.
+
+## What 3D Tiles 2.0 is
+
+A tileset becomes a glTF 2.1 file. Tiles are nodes carrying `3DTILES_tileset`, and subtrees are glTF
+too, through `3DTILES_subtree`. The entry file should be named `root.tileset.gltf` or
+`root.tileset.glb`, must have one scene with one root node, and every node carries the extension.
+
+The drafts are on [CesiumGS/glTF, branch `3d-tiles-2.0`](https://github.com/CesiumGS/glTF/tree/3d-tiles-2.0),
+under `extensions/2.1/Vendor`:
+
+| Area | Extensions |
+|---|---|
+| Hierarchy | `3DTILES_tileset`, `3DTILES_subtree`, `3DTILES_implicit_tiling`, `3DTILES_layers`, `3DTILES_horizon_occlusion_point` |
+| Bounding volumes | `3DTILES_shape_cylinder_region`, `3DTILES_shape_ellipsoid_region`, `3DTILES_shape_s2` |
+| Other tile content | `3DTILES_tileset_vectors`, `3DTILES_tileset_voxels`, `EXT_voxels` |
+| Placement | `EXT_georeference`, `EXT_geospatial_crs`, `EXT_geospatial_crs_wkid`, `EXT_geospatial_crs_wkt2` |
+| Visibility | `EXT_node_visibility_conditions`, `EXT_node_visibility_volume` |
+
+glTF 2.1 core is tracked in [KhronosGroup/glTF#2585](https://github.com/KhronosGroup/glTF/issues/2585).
+
+## State of cesium-native
+
+[v0.66.0](https://github.com/CesiumGS/cesium-native/blob/v0.66.0/CHANGES.md) (2026-11-02) can read
+and write these extensions through generated classes
+([#1451](https://github.com/CesiumGS/cesium-native/pull/1451)), but it cannot stream such a tileset yet.
+
+Streaming is tracked in [#1453](https://github.com/CesiumGS/cesium-native/issues/1453), as a stack of
+open pull requests:
+
+| PR | Change |
+|---|---|
+| [#1464](https://github.com/CesiumGS/cesium-native/pull/1464) | Renames the `Cesium3DTiles` libraries to `CesiumTilesetJson` |
+| [#1467](https://github.com/CesiumGS/cesium-native/pull/1467) | Subtrees on `3DTILES_subtree`; 1.1 subtrees converted through `SubtreeInterop` |
+| [#1473](https://github.com/CesiumGS/cesium-native/pull/1473) | Splits `Cesium3DTilesContent` into two libraries |
+| [#1477](https://github.com/CesiumGS/cesium-native/pull/1477) | Bounding volumes from glTF shapes |
+| [#1478](https://github.com/CesiumGS/cesium-native/pull/1478) | Draft: loads glTF 2.1 models as tilesets |
+
+External assets are tracked separately in [#1465](https://github.com/CesiumGS/cesium-native/issues/1465).
+
+This page only covers cesium-native. Support in CesiumJS and 3DTilesRendererJS has not been checked.
+
+## What it means for 3dtiled
+
+**1.1 output.** Every converter and live endpoint writes `asset.version: '1.1'`, and `core/tiling.js`
+writes binary `.subtree` files. #1467 replaces cesium-native's subtree class and converts the old
+format on the way in, so regressions there would hit implicit tilesets first. COPC and Potree output
+would make good test cases once it lands.
+
+**Where each draft would land:**
+
+| Upstream | In 3dtiled | Position |
+|---|---|---|
+| `3DTILES_tileset` | Hierarchy builders: `core/octree.js`, `tile-server/*-live.js` | Wait for #1478 to leave draft |
+| `3DTILES_subtree` | `core/tiling.js` (`buildSubtreeBuffer` and its parser) | Wait for #1467 |
+| External assets, external tilesets | Mosaics in `tile-server/aggregate-live.js` | Keep the hierarchy format-agnostic |
+| Packaging | `.3tz` and `.3dtiles` in `tile-server/package-live.js`, `/extract/zip` | Watch |
+| 64-bit GLB | Merged GLB exports, bounded by 4 GiB today | Watch |
+| `EXT_georeference` | The `&lon=&lat=&alt=&heading=` placement of `/stream`, `core/geo.js` | Candidate first step, see below |
+| `EXT_geospatial_crs` | Local-CRS sources: `copc-to-3dtiles/src/georef.js`, the Potree readers | Watch |
+
+`packages/3dtiles-tools/upgrade.js` may look like the natural home for a 1.1 → 2.0 step, but it is
+mostly per-tile conversion (b3dm and pnts to GLB), while 2.0 restructures the tileset itself.
+
+**`EXT_georeference`** supersedes the `3DTILES_georeference` draft noted in
+[Future work](/docs/guide/todo-future-work). It places a node at a longitude, latitude and height
+on the ellipsoid, with local `-x` east, `+y` up and `+z` north. The node's own transform is applied
+first, so a heading goes there. That maps closely onto `/stream`'s placement parameters, and the
+extension is optional, so it could be added alongside the tile transform without affecting other readers.
+
+**Compression passes the stricter decoding in v0.66.** These were memory-safety fixes for malformed
+files ([#1446](https://github.com/CesiumGS/cesium-native/pull/1446),
+[#1447](https://github.com/CesiumGS/cesium-native/pull/1447),
+[#1460](https://github.com/CesiumGS/cesium-native/pull/1460)). A one-off check ran `compressGlb` on
+12 synthetic cases, Draco and meshopt across meshes and points, with RGB and RGBA colours in 8 and
+16 bits, tangents and 16- and 32-bit indices:
+
+| Rule | Result |
+|---|---|
+| Draco attribute component count equals its accessor's | No violations |
+| Index accessors are unsigned `SCALAR` and not normalized | No violations |
+| Meshopt `count × byteStride` equals the decoded size | No violations |
+
+This checks the format only. The output was not loaded in cesium-native, and no real tiles were used.
+
+**Splats stay as they are.** cesium-native's classes cover `KHR_gaussian_splatting` and
+`KHR_gaussian_splatting_compression_spz_2`, which is what 3dtiled writes. `CESIUM_DISABLE_SPZ`
+([#1438](https://github.com/CesiumGS/cesium-native/pull/1438)) is a build option that removes the SPZ
+decoder, for applications that don't want it. No converter writes `EXT_splat_opacity`.
+
+**Clipping.** [cesium-native#1486](https://github.com/CesiumGS/cesium-native/issues/1486) requests
+clipping geometry by box or polygon. Crop and extract here are server-side and don't depend on it.
+
+## Open question
+
+The Blender add-on built on cesium-native selected 0 tiles on two local, non-georeferenced 3dtiled
+tilesets (clipping off, view pivot at the origin, 60 m), where the same output had selected 26 tiles
+the day before. So it may depend on the view, and the add-on's local-placement camera conversion is the
+first suspect. One lead on this side, not confirmed: `rad-to-3dtiles` gives its root an `RX(180°)`
+transform, which a camera conversion could mishandle.
+
+## When to act
+
+- [ ] **#1467 merges:** test COPC and Potree implicit output against it.
+- [ ] **#1478 leaves draft:** design the `.tileset.gltf` writer.
+- [ ] **`EXT_georeference` stabilises:** emit it on `/stream` tiles alongside the transform.

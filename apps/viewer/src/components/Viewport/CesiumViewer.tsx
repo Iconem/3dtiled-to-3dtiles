@@ -481,12 +481,12 @@ const CesiumViewer = forwardRef<ViewerHandle, Props>(function CesiumViewer({ vis
   }
 
   /** 'tiles' = Cesium's own debug view of every loaded tile; 'cells' = the tileset's declared tiles only. */
-  function applyDebugMode(mode: 'off' | 'cells' | 'tiles', url = store.getState().lastLoadUrl) {
+  function applyDebugMode(mode: 'off' | 'cells' | 'cells-only' | 'tiles', url = store.getState().lastLoadUrl) {
     const v = getViewer();
     const ts: any = currentTilesetRef.current;
     if (ts) { ts.debugShowBoundingVolume = mode === 'tiles'; ts.debugColorizeTiles = mode === 'tiles'; }
     clearOutlines();
-    if (!v || mode !== 'cells' || !url) return;
+    if (!v || (mode !== 'cells' && mode !== 'cells-only') || !url) return;
     const ac = new AbortController();
     outlinesAbortRef.current = ac;
     fetchOutlines(url, ac.signal).then((outlines) => {
@@ -494,6 +494,7 @@ const CesiumViewer = forwardRef<ViewerHandle, Props>(function CesiumViewer({ vis
       const pl = new Cesium.PolylineCollection();
       if (ts) pl.modelMatrix = ts.modelMatrix;
       for (const o of outlines) {
+        if (mode === 'cells-only' && o.leaf) continue;
         const color = Cesium.Color.fromCssColorString(outlineColor(o));
         for (const line of o.lines) {
           pl.add({ positions: Cesium.Cartesian3.unpackArray(line), width: o.leaf ? 1.5 : 2, material: Cesium.Material.fromType('Color', { color }) });

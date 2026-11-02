@@ -1,3 +1,4 @@
+import { useEffect } from 'react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Checkbox } from '@/components/ui/checkbox';
@@ -8,7 +9,8 @@ import { ChevronDown } from 'lucide-react';
 import { useViewerStore } from '@/state/store';
 import type { ViewerHandle } from '@/lib/viewer-handle';
 import { SidebarCollapsibleSection } from './SidebarSection';
-import { isAggregateUrl, readSnap, withSnap } from '@/lib/aggregate';
+import { isAggregateUrl, readSnap, snapParamFor, withSnap } from '@/lib/aggregate';
+import { useUrlState } from '@/state/urlState';
 
 export default function LocalFrameSection({ activeHandleRef }: { activeHandleRef: React.RefObject<ViewerHandle | null> }) {
   const lf = useViewerStore((s) => s.localFrame);
@@ -16,6 +18,7 @@ export default function LocalFrameSection({ activeHandleRef }: { activeHandleRef
   const gizmoOn = useViewerStore((s) => s.tilesetGizmoOn);
   const setGizmoOn = useViewerStore((s) => s.setTilesetGizmoOn);
   const h = () => activeHandleRef.current;
+  const [{ renderer }] = useUrlState();
   const terrainMode = useViewerStore((s) => s.terrainMode);
   const zOffsetAuto = useViewerStore((s) => s.zOffsetAuto);
   const zOffsetClearance = useViewerStore((s) => s.zOffsetClearance);
@@ -28,11 +31,17 @@ export default function LocalFrameSection({ activeHandleRef }: { activeHandleRef
   /** A mosaic snaps server-side, per dataset: `&snap=` on or off, the tree reloads in place. */
   function setMosaicSnap(on: boolean) {
     const st = useViewerStore.getState();
-    const url = withSnap(st.lastLoadUrl, on ? st.terrainMode : null);
+    const url = withSnap(st.lastLoadUrl, on ? st.terrainMode : null, renderer);
     st.setLastLoadUrl(url); st.setUrlField(url);
     h()?.load(url, st.currentType, { skipAutoFrame: true });
     st.setStatus(on ? 'Snapping every dataset of the mosaic to the ground (server-side, per dataset)…' : 'Mosaic back at its own heights (snap removed).');
   }
+  // A snapped mosaic follows the terrain on screen: its &snap= changes when the terrain does (and only
+  // then, so a shared link keeps the snap it was shared with).
+  useEffect(() => {
+    if (mosaicSnapped && readSnap(lastLoadUrl) !== snapParamFor(terrainMode, renderer)) setMosaicSnap(true);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [terrainMode, renderer]);
   const terrainLabel = {
     auto: 'Mapterhorn', wgs84: 'ellipsoid', cesium: 'World Terrain', 'reearth-qm': 'Mapterhorn', 'mapterhorn-ellipsoid': 'Mapterhorn',
     mapterhorn: 'Mapterhorn, sea level', terrarium: 'AWS, sea level', google: 'Google 3D',
@@ -45,6 +54,16 @@ export default function LocalFrameSection({ activeHandleRef }: { activeHandleRef
 
   return (
     <SidebarCollapsibleSection title="Local Frame" defaultOpen={false}>
+      <Label className="text-xs" title="Keep the tileset on the ground, on whichever terrain is selected: the Z offset is re-measured when the terrain mode changes, when a new tileset loads and, on Google 3D or World Terrain, whenever the terrain under it refines — the dataset's own low bins against the terrain, so a scan of a building sits on its ground, not on its roof. On an /aggregate mosaic this turns the server-side per-dataset snap (&snap=) on, and it follows the terrain the same way.">
+        <Checkbox checked={mosaic ? mosaicSnapped : zOffsetAuto} onCheckedChange={(v) => {
+          const on = !!v;
+          if (mosaic) { setZOffsetAuto(on); if (on !== mosaicSnapped) setMosaicSnap(on); return; }
+          const st = useViewerStore.getState();
+          if (on && st.zOffsetUndo == null) st.setZOffsetUndo(st.localFrame.zOffset);
+          setZOffsetAuto(on);
+        }} />
+        Auto (follow the terrain)
+      </Label>
       <div className="flex items-center justify-between">
         <Label className="text-xs">Z offset (m)</Label>
         <Input type="number" className="h-7 w-28" value={lf.zOffset} onChange={(e) => { const v = Number(e.target.value); setLocalFrame({ zOffset: v }); h()?.applyZOffset(v); }} />
@@ -77,16 +96,6 @@ export default function LocalFrameSection({ activeHandleRef }: { activeHandleRef
           </Button>
         )}
       </div>
-      <Label className="text-xs" title="Keep the tileset on the ground: the Z offset is re-measured whenever the terrain under it refines (a terrain tile arrives), when the terrain mode changes and when a new tileset loads — the dataset's own low bins against the terrain, so a scan of a building sits on its ground, not on its roof. On an /aggregate mosaic this turns the server-side per-dataset snap (&snap=) on.">
-        <Checkbox checked={mosaic ? mosaicSnapped : zOffsetAuto} onCheckedChange={(v) => {
-          const on = !!v;
-          if (mosaic) { setZOffsetAuto(on); if (on !== mosaicSnapped) setMosaicSnap(on); return; }
-          const st = useViewerStore.getState();
-          if (on && st.zOffsetUndo == null) st.setZOffsetUndo(st.localFrame.zOffset);
-          setZOffsetAuto(on);
-        }} />
-        Auto (follow the terrain)
-      </Label>
       <div className="flex items-center justify-between" title="Added above the measured ground by Snap and Auto: the dataset's ground bins land this far above the terrain, so a scan lies above most of it instead of half inside it. 0 = exactly on the terrain.">
         <Label className="text-xs">Clearance above ground (m)</Label>
         <Input type="number" className="h-7 w-20" value={zOffsetClearance} step={1}

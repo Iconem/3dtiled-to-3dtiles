@@ -45,14 +45,11 @@ export default function BasemapSection({ activeHandleRef }: { activeHandleRef: R
         <Select value={terrainMode} onValueChange={(v) => setTerrainMode(v as any)} disabled={!globeVisible}>
           <SelectTrigger size="sm"><SelectValue /></SelectTrigger>
           <SelectContent>
-            <SelectItem value="auto" title="Quantized mesh in Cesium, Terrarium tiles in 3DTRjs — the same ellipsoidal DEM">Mapterhorn (auto)</SelectItem>
             <SelectItem value="wgs84">WGS84 ellipsoid (flat)</SelectItem>
-            <SelectItem value="cesium">Cesium World Terrain</SelectItem>
-            <SelectItem value="reearth-qm">Mapterhorn · quantized mesh (ellipsoid)</SelectItem>
-            <SelectItem value="mapterhorn-ellipsoid">Mapterhorn · Terrarium (ellipsoid)</SelectItem>
-            <SelectItem value="mapterhorn">Mapterhorn · Terrarium (sea level)</SelectItem>
-            <SelectItem value="terrarium">AWS Terrain Tiles (sea level)</SelectItem>
             <SelectItem value="google">Google 3D</SelectItem>
+            <SelectItem value="auto" title="3DTRjs: mapterhorn.com's Terrarium webp tiles, heights above sea level. Cesium: the same DEM on the ellipsoid, as a quantized mesh.">Mapterhorn</SelectItem>
+            <SelectItem value="terrarium" title="Mapzen / AWS Open Data Terrarium tiles, heights above sea level">AWS Terrain Tiles</SelectItem>
+            <SelectItem value="cesium">Cesium World Terrain</SelectItem>
           </SelectContent>
         </Select>
       </div>

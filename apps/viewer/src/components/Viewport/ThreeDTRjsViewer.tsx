@@ -54,7 +54,7 @@ import { CESIUM_ION_TOKEN } from '@/lib/ion';
 import { GOOGLE_MAPS_API_KEY } from '@/lib/google';
 import { installB3dmClientFixes } from '@/lib/b3dmClientFix';
 import { useViewerStore } from '@/state/store';
-import { RASTER_TERRAINS, REEARTH_QM_URL, resolveTerrainMode, sampleRasterTerrain, snapRasterFor, type RasterTerrainId } from '@/lib/terrarium';
+import { RASTER_TERRAINS, resolveTerrainMode, sampleRasterTerrain, snapRasterFor, terrariumFromAncestor, type RasterTerrainId } from '@/lib/terrarium';
 import { basemapLayers, type BasemapId } from '@/lib/basemaps';
 import { tileDatasetId, type DatasetStyle } from '@/lib/datasetStyle';
 import { applyPointsPickTolerance, installFilteredRaycast, pickPoint, pointerNdc } from '@/lib/picking';
@@ -63,6 +63,7 @@ import { StaleLoadAbortPlugin } from '@/lib/staleLoads';
 import { MotionLodPlugin, flight, motionLodPlugins, setMotionLodInvalidate } from '@/lib/motionLod';
 import { fetchOutlines, outlineColor, type TileOutline } from '@/lib/mosaicOutlines';
 import { datasetGroundSamples, offsetFromSamples, type GroundSample } from '@/lib/datasetGround';
+import { applyHeightColors, fitHeightRange, restoreHeightColors, type HeightRange } from '@/lib/pointColors';
 import { ImplicitAddRefineFixPlugin } from '@/lib/implicitAddFix';
 import { NativeLeavesPlugin, withNativeLeaves } from '@/lib/nativeLeaves';
 import { AddRefinePointSizePlugin } from '@/lib/addRefinePointSize';
@@ -127,6 +128,12 @@ class PrioritizedCesiumIonAuthPlugin extends CesiumIonAuthPlugin {
   }
 }
 
+// Controls "Auto": camera height above the ground (m) at which it changes scheme, and how long after
+// the last wheel step.
+const AUTO_ORBIT_BELOW = 3000;
+const AUTO_GLOBE_ABOVE = 6000;
+const AUTO_SETTLE_MS = 180;
+
 // Where the globe is looked at when nothing says otherwise: most Iconem projects are in Europe and
 // MENA. (The Canvas camera default sits on +Z, i.e. straight above the north pole; a world-sized
 // mosaic root was framed from there: "globe controls start centred on the north pole".)
@@ -165,13 +172,14 @@ function makeClearDepthHook(): THREE.Mesh {
  *   xray       see-through: meshes as an additive, non-depth-writing tint (the structure reads through
  *              itself, a scan's interior shows through its walls), points additive at 35 %;
  *   wireframe  meshes as wireframe, points unchanged.
- * The original mesh material is kept on the object and restored by `default`.
+ * The original mesh material is kept on the object and restored by `default`. Points take their colour
+ * independently, in every mode: their own (`rgb`), one colour, or by height (lib/pointColors.ts).
  */
 type MaterialMode = 'default' | 'xray' | 'wireframe';
-type MaterialOpts = { mode: MaterialMode; opacity: number; points: 'rgb' | 'color'; color: string };
+type MaterialOpts = { mode: MaterialMode; opacity: number; points: 'rgb' | 'color' | 'height'; color: string; range: HeightRange | null; stop: THREE.Object3D | null };
 const XRAY_MESH = new THREE.MeshBasicMaterial({ color: 0x9ad8ff, transparent: true, opacity: 0.22, blending: THREE.AdditiveBlending, depthWrite: false, side: THREE.DoubleSide });
 const WIRE_MESH = new THREE.MeshBasicMaterial({ color: 0xdddddd, wireframe: true, transparent: true, opacity: 0.6, depthWrite: false });
-function applyMaterialMode(o: any, { mode, opacity, points, color }: MaterialOpts) {
+function applyMaterialMode(o: any, { mode, opacity, points, color, range, stop }: MaterialOpts) {
   if (o.isMesh && !o.isPoints) {
     if (mode === 'default') {
       if (o.userData.__origMaterial) { o.material = o.userData.__origMaterial; delete o.userData.__origMaterial; }
@@ -184,15 +192,20 @@ function applyMaterialMode(o: any, { mode, opacity, points, color }: MaterialOpt
     // PointCloudMaterial extends PointsMaterial: three's own opacity / blending / vertexColors apply
     const m = o.material;
     const xray = mode === 'xray';
-    const key = xray ? `${opacity}|${points}|${points === 'color' ? color : ''}` : '';
-    if (m.userData.__xray === key) return;
+    // per object, unlike the rest: the colours live on the geometry, and a material can be shared
+    const byHeight = points === 'height' && !!range;
+    if (byHeight) applyHeightColors(o, range!, stop);
+    else restoreHeightColors(o);
+    const key = `${xray ? opacity : ''}|${byHeight ? 'height+' : points}|${points === 'color' ? color : ''}`;
+    if ((m.userData.__xray ?? '|rgb|') === key) return;
     m.userData.__xray = key;
-    if (xray && m.userData.__vertexColors === undefined) { m.userData.__vertexColors = m.vertexColors; m.userData.__color = m.color.getHex(); }
+    if (m.userData.__vertexColors === undefined) { m.userData.__vertexColors = m.vertexColors; m.userData.__color = m.color.getHex(); }
     m.transparent = xray; m.opacity = xray ? opacity : 1; m.depthWrite = !xray;
     m.blending = xray ? THREE.AdditiveBlending : THREE.NormalBlending;
-    const flat = xray && points === 'color';                   // one colour for every point (picker)
-    m.vertexColors = flat ? false : (m.userData.__vertexColors ?? m.vertexColors);
+    const flat = points === 'color';                           // one colour for every point (picker)
+    m.vertexColors = flat ? false : byHeight ? true : (m.userData.__vertexColors ?? m.vertexColors);
     if (flat) m.color.set(color);
+    else if (byHeight) m.color.setHex(0xffffff);
     else if (m.userData.__color !== undefined) m.color.setHex(m.userData.__color);
     m.needsUpdate = true;                                       // vertexColors toggles the program
   }
@@ -295,14 +308,13 @@ function Globe({ basemap, gl }: { basemap: BasemapId; gl: THREE.WebGLRenderer })
 // fight with QuantizedMeshPlugin's real one) drapes the SAME basemap imagery on top of that real
 // geometry when a basemap is selected; terrain itself still renders (bare, Cesium's own material) with
 // basemap 'none'. This is the 3DTRJS equivalent of CesiumViewer's terrainMode==='cesium'.
-function TerrainGlobe({ basemap, gl, url }: { basemap: BasemapId; gl: THREE.WebGLRenderer; url?: string }) {
+function TerrainGlobe({ basemap, gl }: { basemap: BasemapId; gl: THREE.WebGLRenderer }) {
   const overlays = useMemo(() => makeBasemapOverlays(basemap),
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [basemap]);
-  // `url` = an open quantized-mesh base (its layer.json is resolved against it); else Cesium ion asset 1.
   return (
-    <TilesRendererR3F key={`${url ?? 'ion'}|${basemap}`} url={url} ref={(t: any) => { terrainTiles = t ?? null; useGlobeCache(t); }} onLoadModel={(e: any) => buildBoundsTrees(e.scene)}>
-      {!url && <TilesPlugin plugin={PrioritizedCesiumIonAuthPlugin as any} args={{ apiToken: CESIUM_ION_TOKEN, assetId: '1', autoRefreshToken: true } as any} />}
+    <TilesRendererR3F key={basemap} ref={(t: any) => { terrainTiles = t ?? null; useGlobeCache(t); }} onLoadModel={(e: any) => buildBoundsTrees(e.scene)}>
+      <TilesPlugin plugin={PrioritizedCesiumIonAuthPlugin as any} args={{ apiToken: CESIUM_ION_TOKEN, assetId: '1', autoRefreshToken: true } as any} />
       <TilesPlugin plugin={QuantizedMeshPlugin as any} />
       {overlays.length > 0 && <TilesPlugin plugin={ImageOverlayPlugin as any} args={{ renderer: gl, overlays } as any} />}
       <TilesPlugin plugin={StaleLoadAbortPlugin as any} />
@@ -316,54 +328,62 @@ function TerrainGlobe({ basemap, gl, url }: { basemap: BasemapId; gl: THREE.WebG
 // a module variable so "snap to ground" can ask the plugin for heights (sampleCartographicElevation) —
 // GPU-displaced geometry is invisible to a plain raycast.
 let terrariumTiles: TilesRendererImpl | null = null;
-/** The real-geometry terrain renderer on screen (World Terrain, Re:Earth QM, Google 3D), if any. */
+/** The real-geometry terrain renderer on screen (World Terrain, Google 3D), if any. */
 let terrainTiles: TilesRendererImpl | null = null;
 
+/** One tile of Terrarium at 0 m (R 128, G 0, B 0), as PNG bytes. */
+const flatTerrarium = new Map<number, Promise<ArrayBuffer>>();
+function flatTerrariumTile(size: number) {
+  let p = flatTerrarium.get(size);
+  if (!p) {
+    const c = new OffscreenCanvas(size, size), ctx = c.getContext('2d')!;
+    ctx.fillStyle = 'rgb(128,0,0)';
+    ctx.fillRect(0, 0, size, size);
+    p = c.convertToBlob({ type: 'image/png' }).then((b) => b.arrayBuffer());
+    flatTerrarium.set(size, p);
+  }
+  return p;
+}
 /**
- * Re:Earth's ellipsoidal Terrarium set answers its z0 tile with HTTP 500 ("Invalid typed array
- * length"; z1+ are fine), and TerrariumMeshPlugin cannot start without a root. The root is only ever
- * seen at planet scale, so it comes from the source's `rootUrl` instead (Mapterhorn's own sea-level
- * z0 — the ~±100 m geoid difference is invisible there, and every deeper level is the real thing).
+ * The plugin decodes whatever comes back and has no per-tile fallback, so a missing tile failed and left
+ * a hole. mapterhorn.com answers 404 in two cases, told apart by its complete level (z12): above it,
+ * open ocean, which reads as sea level; below it, no regional DEM here (Geghard stops at z12, Rome at
+ * z13, Tokyo at z16, Chamonix at z17), so the tile is cut out of the nearest ancestor that exists.
  */
-class TerrariumRootFallbackPlugin extends TerrariumMeshPlugin {
-  constructor(opts: any) {
-    super(opts);
-    const rootUrl: string | undefined = opts.rootUrl;
-    if (!rootUrl) return;
-    // The plugin builds its XYZ image source in loadRootTileset and asks IT for every tile URL (for
-    // tile content and for the texture fetch alike), so the substitution goes on the source.
-    let source: any = (this as any)._source;
-    Object.defineProperty(this, '_source', {
-      configurable: true,
-      get: () => source,
-      set: (v: any) => {
-        source = v;
-        if (!v) return;
-        const getUrl = v.getUrl.bind(v);
-        v.getUrl = (x: number, y: number, level: number) => (level === 0 ? rootUrl : getUrl(x, y, level));
-      },
-    });
+class TerrariumFallbackPlugin extends TerrariumMeshPlugin {
+  terrainId: RasterTerrainId;
+  constructor(options: any) { super(options); this.terrainId = options.terrainId; }
+  async loadRootTileset() {
+    const tileset = await super.loadRootTileset();
+    const source = this._source, fetchData = source.fetchData;
+    source.fetchData = async (url: string, options: RequestInit) => {
+      const res = await fetchData(url, options);
+      if (res.status !== 404) return res;
+      const m = /(\d+)\/(\d+)\/(\d+)\.\w+$/.exec(url);
+      const cut = m && await terrariumFromAncestor(this.terrainId, +m[1], +m[2], +m[3]);
+      return new Response(cut ?? await flatTerrariumTile(this.tileDimension));
+    };
+    return tileset;
   }
 }
 function TerrariumGlobe({ basemap, source, gl }: { basemap: BasemapId; source: RasterTerrainId; gl: THREE.WebGLRenderer }) {
   const [args, extra] = useMemo(() => {
     const [overlay = null, ...rest] = makeBasemapOverlays(basemap);
     const src = RASTER_TERRAINS[source];
-    // Mapterhorn is z12 everywhere and deeper only where regional DEMs exist; the plugin has no
-    // per-tile fallback, so it stops at the globally complete level.
-    const maxZoom = source === 'mapterhorn' ? 12 : src.maxZoom;
     return [
       // Imagery "None": unlit (no lighting, no bump-map normals) and painted black below, so the
       // ground is a plain black silhouette rather than a white hillshade competing with the data.
-      { url: src.url, rootUrl: src.rootUrl, maxZoom, tileDimension: src.tileSize, overlay, applyOverlayTexture: !!overlay, unlit: !overlay },
+      { url: src.url, maxZoom: src.maxZoom, terrainId: source, tileDimension: src.tileSize, overlay, applyOverlayTexture: !!overlay, unlit: !overlay },
       rest.length ? { renderer: gl, overlays: rest } : null,
     ];
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [basemap, source]);
   return (
+    // onLoadModel is always a function: the component registers whatever it is given as a listener, and
+    // an undefined one throws at every dispatch, which failed each terrain tile as it loaded.
     <TilesRendererR3F key={`${basemap}|${source}`} ref={(t: any) => { terrariumTiles = t ?? null; useGlobeQueues(t); }}
-      onLoadModel={args.overlay ? undefined : (e: any) => e.scene.traverse((o: any) => { if (o.isMesh && o.material?.color) o.material.color.setRGB(0, 0, 0); })}>
-      <TilesPlugin plugin={TerrariumRootFallbackPlugin as any} args={args as any} />
+      onLoadModel={(e: any) => { if (!args.overlay) e.scene.traverse((o: any) => { if (o.isMesh && o.material?.color) o.material.color.setRGB(0, 0, 0); }); }}>
+      <TilesPlugin plugin={TerrariumFallbackPlugin as any} args={args as any} />
       {extra && <TilesPlugin plugin={ImageOverlayPlugin as any} args={extra as any} />}
       <TilesPlugin plugin={StaleLoadAbortPlugin as any} />
       <TilesPlugin plugin={MotionLodPlugin as any} />
@@ -462,54 +482,70 @@ function TilesetGizmo({ tilesRef, pickScene }: { tilesRef: React.MutableRefObjec
   );
 }
 
+// East and north at a lat/lon, true geographic axes (radians).
+function enuAxes(lat: number, lon: number) {
+  return {
+    east: new THREE.Vector3(-Math.sin(lon), Math.cos(lon), 0),
+    north: new THREE.Vector3(-Math.sin(lat) * Math.cos(lon), -Math.sin(lat) * Math.sin(lon), Math.cos(lat)),
+  };
+}
+
+/**
+ * The crop box in 3D, two-way with the sidebar's numbers (store.crop): it follows them, and a drag
+ * writes back on release, so what is extracted is what is drawn. The box is a lon/lat box, so a
+ * rotation has no meaning for it and snaps back on release.
+ */
 function CropGizmo({ tilesRef, pickScene }: { tilesRef: React.MutableRefObject<TilesRendererImpl | null>; pickScene: THREE.Object3D | null }) {
-  const boxRef = useRef<THREE.Mesh>(null);
-  const store = useViewerStore;
+  // state, not a ref: TransformControls needs the mesh on the render it mounts, and the placement
+  // below must re-run once the mesh exists
+  const [box, setBox] = useState<THREE.Mesh | null>(null);
+  const invalidate = useThree((s) => s.invalidate);
   const on = useViewerStore((s) => s.cropGizmoOn);
   const mode = useViewerStore((s) => s.gizmoMode);
+  const crop = useViewerStore((s) => s.crop);
 
-  useEffect(() => {
-    const box = boxRef.current;
+  const place = useCallback(() => {
     if (!box) return;
-    const { w, s, e, n, minH, maxH } = store.getState().crop;
-    const tiles = tilesRef.current;
-    const ellipsoid = (tiles as any)?.ellipsoid;
-    if (ellipsoid && [w, s, e, n].every((v) => !Number.isNaN(v))) {
-      const centerCarto = { lat: THREE.MathUtils.degToRad((s + n) / 2), lon: THREE.MathUtils.degToRad((w + e) / 2), height: (minH + maxH) / 2 };
-      const pos = new THREE.Vector3();
-      ellipsoid.getCartographicToPosition(centerCarto.lat, centerCarto.lon, centerCarto.height, pos);
-      box.position.copy(pos);
-      // Orient the box to the LOCAL East/North/Up frame at its own position, not left at world/ECEF
-      // identity — TransformControls' `space="local"` (below) then draws its arrows along this
-      // rotation, so dragging actually moves the box east/north/up instead of along whatever direction
-      // ECEF's global X/Y/Z axes happen to point at that spot on the globe ("only lets me translate
-      // along weird axes"). A quick, correct-enough basis: ellipsoid "up" from the normal, then two
-      // vectors perpendicular to it for east/north (exact heading doesn't matter for a crop box).
-      const up = ellipsoid.getPositionToNormal(pos, new THREE.Vector3());
-      const helper = Math.abs(up.y) < 0.99 ? new THREE.Vector3(0, 1, 0) : new THREE.Vector3(1, 0, 0);
-      const east = new THREE.Vector3().crossVectors(helper, up).normalize();
-      // (east, north, up) is the standard right-handed ENU triad (up = east × north), so (east, up,
-      // north) — swapping the last two columns — is a LEFT-handed / mirrored basis: feeding that to
-      // setFromRotationMatrix() below produced a reflection, not a rotation, which quaternions can't
-      // represent correctly. The third column needs to be south (= east × up = -north) to keep the
-      // basis proper — matching the "(E,U,-N)" convention this app's glTF content is already built in
-      // (see potree-live.js's serveTileGlb comment).
-      const south = new THREE.Vector3().crossVectors(east, up).normalize();
-      box.quaternion.setFromRotationMatrix(new THREE.Matrix4().makeBasis(east, up, south));
-      const dLat = THREE.MathUtils.degToRad(n - s), dLon = THREE.MathUtils.degToRad(e - w);
-      const R = 6378137;
-      box.scale.set(Math.max(1, dLon * R * Math.cos(centerCarto.lat)), Math.max(1, maxH - minH), Math.max(1, dLat * R));
-    }
-  }, [on]); // eslint-disable-line react-hooks/exhaustive-deps
+    const { w, s, e, n, minH, maxH } = useViewerStore.getState().crop;
+    if ([w, s, e, n, minH, maxH].some((v) => Number.isNaN(v))) return;
+    const lat = THREE.MathUtils.degToRad((s + n) / 2), lon = THREE.MathUtils.degToRad((w + e) / 2);
+    WGS84_ELLIPSOID.getCartographicToPosition(lat, lon, (minH + maxH) / 2, box.position);
+    // Oriented to East/North/Up at its own position: TransformControls' `space="local"` then draws its
+    // arrows along those axes. (east, up, south) is the proper rotation: (east, up, north) would mirror.
+    const up = WGS84_ELLIPSOID.getPositionToNormal(box.position, new THREE.Vector3());
+    const { east, north } = enuAxes(lat, lon);
+    box.quaternion.setFromRotationMatrix(new THREE.Matrix4().makeBasis(east, up, north.clone().negate()));
+    const R = 6378137;
+    box.scale.set(
+      Math.max(1, THREE.MathUtils.degToRad(e - w) * R * Math.cos(lat)),
+      Math.max(1, maxH - minH),
+      Math.max(1, THREE.MathUtils.degToRad(n - s) * R),
+    );
+    invalidate();
+  }, [box, invalidate]);
+  useEffect(place, [place, crop, on]);
 
-  if (!on || !pickScene) return null;
+  /** The dragged box back to lon/lat/heights. */
+  const commit = useCallback(() => {
+    if (!box) return;
+    const c = WGS84_ELLIPSOID.getPositionToCartographic(box.position, { lat: 0, lon: 0, height: 0 } as any);
+    const R = 6378137;
+    const lat = THREE.MathUtils.radToDeg(c.lat), lon = THREE.MathUtils.radToDeg(c.lon);
+    const halfLat = THREE.MathUtils.radToDeg(Math.abs(box.scale.z) / 2 / R);
+    const halfLon = THREE.MathUtils.radToDeg(Math.abs(box.scale.x) / 2 / (R * Math.max(0.01, Math.cos(c.lat))));
+    const halfH = Math.abs(box.scale.y) / 2;
+    useViewerStore.getState().setCrop({ w: lon - halfLon, e: lon + halfLon, s: lat - halfLat, n: lat + halfLat, minH: Math.round(c.height - halfH), maxH: Math.round(c.height + halfH) });
+    place();                                                    // a rotation snaps back; crop may be unchanged
+  }, [box, place]);
+
+  if (!on || !pickScene || !tilesRef.current) return null;
   return (
     <>
-      <mesh ref={boxRef}>
+      <mesh ref={setBox} raycast={() => {}} renderOrder={10}>
         <boxGeometry args={[1, 1, 1]} />
-        <meshBasicMaterial color="cyan" wireframe />
+        <meshBasicMaterial color="cyan" wireframe depthTest={false} transparent />
       </mesh>
-      {boxRef.current && <TransformControls object={boxRef.current} mode={mode} space="local" />}
+      {box && <TransformControls object={box} mode={mode} space="local" onMouseUp={commit} />}
     </>
   );
 }
@@ -548,7 +584,7 @@ function styleDatasetModel(scene: THREE.Object3D, tile: any, st: DatasetStyle | 
  * parented to the TilesRenderer group so they follow its placement. Never raycast (double-click and
  * the controls' pivot pick must not land on a debug line).
  */
-function MosaicOutlines({ url, tilesRef }: { url: string; tilesRef: React.MutableRefObject<TilesRendererImpl | null> }) {
+function MosaicOutlines({ url, tilesRef, cellsOnly }: { url: string; tilesRef: React.MutableRefObject<TilesRendererImpl | null>; cellsOnly: boolean }) {
   const invalidate = useThree((s) => s.invalidate);
   const [outlines, setOutlines] = useState<TileOutline[] | null>(null);
   useEffect(() => {
@@ -562,6 +598,7 @@ function MosaicOutlines({ url, tilesRef }: { url: string; tilesRef: React.Mutabl
     if (!outlines || !group) return;
     const objs: THREE.LineSegments[] = [];
     for (const o of outlines) {
+      if (cellsOnly && o.leaf) continue;
       const pos: number[] = [];
       for (const line of o.lines) for (let i = 0; i + 5 < line.length; i += 3) pos.push(line[i], line[i + 1], line[i + 2], line[i + 3], line[i + 4], line[i + 5]);
       const g = new THREE.BufferGeometry();
@@ -574,7 +611,7 @@ function MosaicOutlines({ url, tilesRef }: { url: string; tilesRef: React.Mutabl
     }
     invalidate();
     return () => { for (const l of objs) { group.remove(l); l.geometry.dispose(); (l.material as THREE.Material).dispose(); } invalidate(); };
-  }, [outlines, tilesRef, invalidate]);
+  }, [outlines, cellsOnly, tilesRef, invalidate]);
   return null;
 }
 
@@ -596,6 +633,7 @@ const Scene = forwardRef<ViewerHandle, { loadArgs: LoadArgs; tooltip: TooltipCha
   }, [gl]);
   const invalidate = useThree((s) => s.invalidate);
   const store = useViewerStore;
+  const sceneHandleRef = useRef<ViewerHandle | null>(null);       // the devtools hook's way to the handle
   const [pendingFlyTo, setPendingFlyTo] = useState<{ lon: number; lat: number; height: number } | null>(null);
   const [markers, setMarkers] = useState<DatasetMarker[] | null>(null);
   const controlsRef = useRef<any>(null);
@@ -641,7 +679,11 @@ const Scene = forwardRef<ViewerHandle, { loadArgs: LoadArgs; tooltip: TooltipCha
     else tiles.group.position.set(anchor.x, anchor.y + v, anchor.z);
   }, []);
 
-  const controlMode = useViewerStore((s) => s.controlMode);
+  // 'auto' resolves to a real scheme by height (autoScheme, useFrame below): everything else keys off
+  // the scheme actually mounted, so a switch behaves like the user picking it in the sidebar.
+  const controlSetting = useViewerStore((s) => s.controlMode);
+  const [autoScheme, setAutoScheme] = useState<'globe' | 'orbit'>('globe');
+  const controlMode = controlSetting === 'auto' ? autoScheme : controlSetting;
   const terrainBehind = useViewerStore((s) => s.terrainBehind);
   const gizmoOn = useViewerStore((s) => s.cropGizmoOn || s.tilesetGizmoOn);
   const ortho = useViewerStore((s) => s.ortho);
@@ -665,7 +707,7 @@ const Scene = forwardRef<ViewerHandle, { loadArgs: LoadArgs; tooltip: TooltipCha
   // Whether the WGS84-radius wireframe globe is meaningful to show at all — see frameToTileset below.
   const [showGlobe, setShowGlobe] = useState(true);
   useEffect(() => { if (!loadArgs) setShowGlobe(true); }, [loadArgs]);
-  useEffect(() => { setPickScene(null); }, [tilesUrl]);
+  useEffect(() => { setPickScene(null); store.getState().setPointHeightRange(null); }, [tilesUrl]);
 
   // GlobeControls/EnvironmentControls default to raycasting the WHOLE R3F scene (3d-tiles-renderer's
   // own ControlsBaseComponent falls back to useThree's default scene when no `scene` prop is given) to
@@ -952,6 +994,55 @@ const Scene = forwardRef<ViewerHandle, { loadArgs: LoadArgs; tooltip: TooltipCha
     }
   }, []);
 
+  // Controls "Auto": Globe from far away (drag the planet), Orbit near the ground (turn around what is
+  // on screen). Two thresholds so a zoom hovering around one doesn't flip back and forth, measured from
+  // the ground where the terrain is known. Never mid-gesture or mid-flight: the switch waits for the
+  // pointer to be released and the wheel to settle, then happens on a frame queued for it.
+  const autoInput = useRef({ pressed: false, lastWheel: 0 });
+  useEffect(() => {
+    if (controlSetting !== 'auto') return;
+    const dom = gl.domElement, input = autoInput.current;
+    let timer: ReturnType<typeof setTimeout> | null = null;
+    const later = () => { if (timer) clearTimeout(timer); timer = setTimeout(invalidate, AUTO_SETTLE_MS + 20); };
+    const down = () => { input.pressed = true; };
+    const up = () => { input.pressed = false; later(); };
+    const wheel = () => { input.lastWheel = performance.now(); later(); };
+    dom.addEventListener('pointerdown', down);
+    window.addEventListener('pointerup', up);
+    dom.addEventListener('wheel', wheel, { passive: true });
+    return () => { if (timer) clearTimeout(timer); dom.removeEventListener('pointerdown', down); window.removeEventListener('pointerup', up); dom.removeEventListener('wheel', wheel); };
+  }, [controlSetting, gl, invalidate]);
+  const autoSwitch = (geoCam: boolean) => {
+    const input = autoInput.current;
+    if (input.pressed || flight.active || performance.now() - input.lastWheel < AUTO_SETTLE_MS) return;
+    let height = 0;
+    if (geoCam) {
+      WGS84_ELLIPSOID.getPositionToCartographic(camera.position, cartoProbe);
+      const ground = terrain === 'wgs84' ? 0 : (terrariumTiles as any)?.getPluginByName?.('TERRARIUM_MESH_PLUGIN')?.sampleCartographicElevation(cartoProbe.lat, cartoProbe.lon);
+      height = cartoProbe.height - (ground ?? 0);
+    }
+    const next = !geoCam ? 'orbit' : height < AUTO_ORBIT_BELOW ? 'orbit' : height > AUTO_GLOBE_ABOVE ? 'globe' : autoScheme;
+    if (next === autoScheme) return;
+    if (next === 'orbit' && geoCam) {
+      // Orbit turns around its target and re-aims the camera at it, so the target goes under the
+      // centre of the screen. Near-nadir (how one arrives from space) its up vector is parallel to the
+      // view and the heading would be arbitrary: a tilt of 2° keeps the one on screen.
+      const raycaster = new THREE.Raycaster();
+      raycaster.setFromCamera(new THREE.Vector2(0, 0), camera);
+      const hit = pickPoint(raycaster, tilesRef.current?.group ?? null, navSceneRef.current);
+      const view = camera.getWorldDirection(new THREE.Vector3());
+      const fallback = camera.position.clone().addScaledVector(view, Math.max(height, 10) * 2);
+      const target = hit && hit.point.distanceTo(camera.position) < Math.max(height, 10) * 20 ? hit.point.clone() : fallback;
+      const up = WGS84_ELLIPSOID.getPositionToNormal(target, new THREE.Vector3());
+      if (Math.abs(view.dot(up)) > Math.cos(THREE.MathUtils.degToRad(2))) {
+        const screenUp = new THREE.Vector3(0, 1, 0).applyQuaternion(camera.quaternion);
+        camera.position.addScaledVector(screenUp, -0.035 * camera.position.distanceTo(target));
+      }
+      (lastPivotRef.current ??= new THREE.Vector3()).copy(target);
+    }
+    setAutoScheme(next);
+  };
+
   // Per frame: remember the current pivot, and keep the clip planes sane for orbit/env. GlobeControls
   // sets near/far itself (adjustCamera, from the horizon); OrbitControls and EnvironmentControls never
   // touch them, so they stayed at whatever frameToTileset chose for the first framing distance: zoom
@@ -965,7 +1056,9 @@ const Scene = forwardRef<ViewerHandle, { loadArgs: LoadArgs; tooltip: TooltipCha
     // the default controls for the length of a gizmo drag and re-enables them on release; a gizmo
     // unmounted (or remounted) mid-drag never re-enables them. No gizmo shown = controls enabled.
     if (!gizmoOn && controls.enabled === false) { controls.enabled = true; invalidate(); }
-    if (controls.target) (lastPivotRef.current ??= new THREE.Vector3()).copy(controls.target);
+    // (a just-mounted OrbitControls still has its default target at the origin, until the effect above
+    // gives it the pivot: a frame in between must not overwrite that pivot with the Earth's centre)
+    if (controls.target) { if (controls.target.lengthSq() > 0) (lastPivotRef.current ??= new THREE.Vector3()).copy(controls.target); }
     else if (controls.getPivotPoint && controls.getPivotPoint(pivotProbe)) (lastPivotRef.current ??= new THREE.Vector3()).copy(pivotProbe);
 
     // Mosaic markers: which datasets are drawing (every 10th frame; cheap, visibleTiles is small)
@@ -980,6 +1073,7 @@ const Scene = forwardRef<ViewerHandle, { loadArgs: LoadArgs; tooltip: TooltipCha
     // vertical when near the surface and nudges it toward north only from far away (its
     // _alignCameraUp / _alignCameraUpToNorth); nothing here fights that.
     const geoCam = camera.position.length() > 6378137 * 0.5;
+    if (controlSetting === 'auto') autoSwitch(geoCam);
     if (!(camera as THREE.PerspectiveCamera).isPerspectiveCamera) return;
     const pivot = lastPivotRef.current ?? lastSphereCenterRef.current;
     // EnvironmentControls takes its "up" from `this.up`, set once; a camera that travelled far from
@@ -1205,9 +1299,10 @@ const Scene = forwardRef<ViewerHandle, { loadArgs: LoadArgs; tooltip: TooltipCha
   pointAdaptiveRef.current = pointAdaptive;
   const materialMode = useViewerStore((s) => s.materialMode);
   const xrayOpacity = useViewerStore((s) => s.xrayOpacity);
-  const xrayPoints = useViewerStore((s) => s.xrayPoints);
-  const xrayColor = useViewerStore((s) => s.xrayColor);
-  const materialOpts = useMemo((): MaterialOpts => ({ mode: materialMode, opacity: xrayOpacity, points: xrayPoints, color: xrayColor }), [materialMode, xrayOpacity, xrayPoints, xrayColor]);
+  const pointColorMode = useViewerStore((s) => s.pointColorMode);
+  const pointColor = useViewerStore((s) => s.pointColor);
+  const pointHeightRange = useViewerStore((s) => s.pointHeightRange);
+  const materialOpts = useMemo((): MaterialOpts => ({ mode: materialMode, opacity: xrayOpacity, points: pointColorMode, color: pointColor, range: pointHeightRange, stop: tilesRef.current?.group ?? null }), [materialMode, xrayOpacity, pointColorMode, pointColor, pointHeightRange, pickScene]);
   const materialModeRef = useRef(materialOpts);
   materialModeRef.current = materialOpts;
   /**
@@ -1304,6 +1399,7 @@ const Scene = forwardRef<ViewerHandle, { loadArgs: LoadArgs; tooltip: TooltipCha
       setContentRenderOrder(sc);
       styleDatasetModel(sc, leaf, datasetStyleRef.current);
       sc.traverse((o: any) => { applyPointSize(o, childTile); applyMaterialMode(o, materialModeRef.current); });
+      if (store.getState().pointColorMode === 'height' && !store.getState().pointHeightRange) fitPointHeightsRef.current();
     },
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }), []);
@@ -1328,6 +1424,7 @@ const Scene = forwardRef<ViewerHandle, { loadArgs: LoadArgs; tooltip: TooltipCha
     setContentRenderOrder(e.scene);
     styleDatasetModel(e.scene, e.tile, datasetStyleRef.current);
     e.scene.traverse((o: any) => { applyPointSize(o, e.tile); applyMaterialMode(o, materialModeRef.current); });   // any points, whatever the preset's type
+    if (store.getState().pointColorMode === 'height' && !store.getState().pointHeightRange) fitPointHeightsRef.current();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -1384,6 +1481,7 @@ const Scene = forwardRef<ViewerHandle, { loadArgs: LoadArgs; tooltip: TooltipCha
   // demand frameloop no frame would come, so the loop runs continuously in fly mode only.
   const setFrameloop = useThree((s) => s.setFrameloop);
   useEffect(() => { setFrameloop(controlMode === 'fly' ? 'always' : 'demand'); return () => setFrameloop('demand'); }, [controlMode, setFrameloop]);
+  useEffect(() => { if (controlSetting === 'auto') invalidate(); }, [controlSetting, invalidate]);
 
   // rAF-throttled: the point-size slider's onValueChange fires on every drag tick (dozens of times a
   // second), and traversing the WHOLE tiles group to restyle every Points mesh is not free for a large
@@ -1399,6 +1497,23 @@ const Scene = forwardRef<ViewerHandle, { loadArgs: LoadArgs; tooltip: TooltipCha
     (tiles as any).getPluginByName?.('NATIVE_LEAVES_PLUGIN')?.forEachChildModel((sc: THREE.Object3D) => sc.traverse((o: any) => applyMaterialMode(o, materialOpts)));
     invalidate();
   }, [materialOpts, loadArgs, invalidate]);
+  // Colour by height: the range comes from what is loaded, when asked (the sidebar's Fit), when the mode
+  // is picked with no range yet, and from the first tiles that arrive if nothing was loaded by then.
+  const fitPointHeights = useCallback(() => {
+    const tiles = tilesRef.current as any;
+    if (!tiles) return false;
+    const pts: THREE.Object3D[] = [];
+    const add = (sc: THREE.Object3D) => sc.traverse((o: any) => { if (o.isPoints) pts.push(o); });
+    tiles.forEachLoadedModel(add);
+    tiles.getPluginByName?.('NATIVE_LEAVES_PLUGIN')?.forEachChildModel(add);
+    const range = fitHeightRange(pts, tiles.group);
+    if (range) store.getState().setPointHeightRange(range);
+    return !!range;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+  const fitPointHeightsRef = useRef(fitPointHeights);
+  fitPointHeightsRef.current = fitPointHeights;
+  useEffect(() => { if (pointColorMode === 'height' && !pointHeightRange) fitPointHeights(); }, [pointColorMode, pointHeightRange, loadArgs, fitPointHeights]);
 
   const pointSizeRaf = useRef<number | null>(null);
   useEffect(() => {
@@ -1453,8 +1568,8 @@ const Scene = forwardRef<ViewerHandle, { loadArgs: LoadArgs; tooltip: TooltipCha
       const pt = E.getCartographicToPosition(lat, lon, 20000, new THREE.Vector3());
       const nrm = E.getCartographicToNormal(lat, lon, new THREE.Vector3());
       raycaster.set(pt, nrm.negate());
-      const hit = raycaster.intersectObjects(scene.children, true)
-        .find((h) => { let o: THREE.Object3D | null = h.object; while (o) { if (o === tiles.group) return false; o = o.parent; } return true; });
+      // the terrain renderer itself: the rest of the scene holds markers, gizmos and debug lines
+      const hit = terrainTiles ? raycaster.intersectObject(terrainTiles.group, true)[0] : undefined;
       if (!hit) return null;
       const c: any = {};
       E.getPositionToCartographic(hit.point, c);
@@ -1503,8 +1618,7 @@ const Scene = forwardRef<ViewerHandle, { loadArgs: LoadArgs; tooltip: TooltipCha
           else if (terrarium) groundH = terrarium.sampleCartographicElevation(carto.lat, carto.lon);
           else {
             // World Terrain / Google 3D: real geometry, so raycast everything that is NOT the dataset
-            const ground = raycaster.intersectObjects(scene.children, true)
-              .find((h) => { let o: THREE.Object3D | null = h.object; while (o) { if (o === tiles.group) return false; o = o.parent; } return true; });
+            const ground = terrainTiles ? raycaster.intersectObject(terrainTiles.group, true)[0] : undefined;
             if (ground) { E.getPositionToCartographic(ground.point, carto); groundH = carto.height; }
           }
           if (groundH != null && Number.isFinite(groundH)) diffs.push(groundH - dataH);
@@ -1523,7 +1637,7 @@ const Scene = forwardRef<ViewerHandle, { loadArgs: LoadArgs; tooltip: TooltipCha
       await new Promise((r) => setTimeout(r, 1500));
     }
     return `Snapped to ground: moved ${total.toFixed(2)} m (Z offset now ${store.getState().localFrame.zOffset} m; ${last}).`;
-  }, [scene, invalidate, applyZOffsetInternal, groundSamplesFor]);
+  }, [invalidate, applyZOffsetInternal, groundSamplesFor]);
 
   // Auto snap: re-measure whenever the terrain under the tileset refines (a terrain tile arrives), the
   // terrain mode changes, or a new tileset loads — debounced, one run at a time, quiet unless the offset
@@ -1533,7 +1647,7 @@ const Scene = forwardRef<ViewerHandle, { loadArgs: LoadArgs; tooltip: TooltipCha
   useEffect(() => {
     if (!zOffsetAuto || !pickScene || isAggregateUrl(store.getState().lastLoadUrl)) return;
     let timer: ReturnType<typeof setTimeout> | null = null;
-    let running = false, again = false, cancelled = false;
+    let running = false, again = false, cancelled = false, measured = false;
     const run = async () => {
       if (cancelled) return;
       if (running) { again = true; return; }
@@ -1543,21 +1657,34 @@ const Scene = forwardRef<ViewerHandle, { loadArgs: LoadArgs; tooltip: TooltipCha
       running = false;
       if (cancelled) return;
       const after = store.getState().localFrame.zOffset;
-      if (Math.abs(after - before) > 0.05 || !/^Snapped/.test(msg)) store.getState().setStatus(`Auto Z offset: ${msg}`);
+      measured = /^Snapped/.test(msg);
+      if (Math.abs(after - before) > 0.05 || !measured) store.getState().setStatus(`Auto Z offset: ${msg}`);
       if (again) { again = false; schedule(); }
     };
     const schedule = () => { if (timer) clearTimeout(timer); timer = setTimeout(run, 1000); };
     schedule();
     // Raster terrains are sampled from their tiles at a fixed zoom, independently of what is drawn, so
-    // one measurement per terrain mode is final; only real-geometry terrain (World Terrain, Re:Earth
-    // QM, Google 3D) refines under the tileset as the camera gets closer.
-    const t = snapRasterFor(terrain) == null && terrain !== 'wgs84' ? terrainTiles : null;
-    t?.addEventListener('load-model', schedule);
-    return () => { cancelled = true; if (timer) clearTimeout(timer); t?.removeEventListener('load-model', schedule); };
+    // one measurement per terrain mode is final; only real-geometry terrain (World Terrain, Google 3D)
+    // refines under the tileset as the camera gets closer.
+    // The renderer itself mounts a moment after this effect runs, hence the watch for it.
+    const realGeometry = snapRasterFor(terrain) == null && terrain !== 'wgs84';
+    let t: TilesRendererImpl | null = null;
+    const watchTerrain = setInterval(() => {
+      if (!realGeometry || t === terrainTiles) return;
+      t?.removeEventListener('load-model', schedule);
+      t = terrainTiles;
+      t?.addEventListener('load-model', schedule);
+    }, 500);
+    // On any terrain, a first try can find nothing to measure (content the bins cannot read, whose
+    // fallback picks the rendered data): new data retries until a measurement lands.
+    const data = tilesRef.current;
+    const retry = () => { if (!measured) schedule(); };
+    data?.addEventListener('load-model', retry);
+    return () => { cancelled = true; if (timer) clearTimeout(timer); clearInterval(watchTerrain); t?.removeEventListener('load-model', schedule); data?.removeEventListener('load-model', retry); };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [zOffsetAuto, zOffsetClearance, pickScene, terrainMode, loadArgs, snapToGroundInternal]);
 
-  useImperativeHandle(ref, (): ViewerHandle => ({
+  useImperativeHandle(ref, (): ViewerHandle => (sceneHandleRef.current = {
     load() { /* handled via loadArgs prop from the outer component (URL change remounts TilesRenderer) */ },
     setBasemap() { /* the globe surface TilesRenderer below is always mounted; no per-provider imagery yet (first pass) */ },
     setTerrainMode() { /* Cesium-only (Ion World Terrain / Google Photorealistic 3D Tiles) — no-op here */ },
@@ -1615,10 +1742,10 @@ const Scene = forwardRef<ViewerHandle, { loadArgs: LoadArgs; tooltip: TooltipCha
       const raycaster = new THREE.Raycaster();
       applyPointsPickTolerance(raycaster, camera, gl.domElement, lastSphereCenterRef.current ?? camera.position);
       const corners: THREE.Vector3[] = [];
-      for (const [nx, ny] of [[0, 0], [-0.9, -0.9], [0.9, -0.9], [-0.9, 0.9], [0.9, 0.9]]) {
+      for (const [nx, ny] of [[0, 0], [-0.8, -0.8], [0.8, -0.8], [-0.8, 0.8], [0.8, 0.8]]) {
         raycaster.setFromCamera(new THREE.Vector2(nx, ny), camera);
-        const hit = raycaster.intersectObject(tiles.group, true)[0];
-        if (hit) { corners.push(hit.point); continue; }
+        const hit = pickPoint(raycaster, tiles.group, navSceneRef.current);
+        if (hit) { corners.push(hit.point.clone()); continue; }
         const ground = ellipsoid.intersectRay(raycaster.ray, new THREE.Vector3());
         if (ground) corners.push(ground);
       }
@@ -1639,10 +1766,7 @@ const Scene = forwardRef<ViewerHandle, { loadArgs: LoadArgs; tooltip: TooltipCha
         center.divideScalar(corners.length);
         const centerCarto: any = {};
         ellipsoid.getPositionToCartographic(center, centerCarto);
-        const up = ellipsoid.getPositionToNormal(center, new THREE.Vector3());
-        const helper = Math.abs(up.y) < 0.99 ? new THREE.Vector3(0, 1, 0) : new THREE.Vector3(1, 0, 0);
-        const east = new THREE.Vector3().crossVectors(helper, up).normalize();
-        const north = new THREE.Vector3().crossVectors(up, east).normalize();
+        const { east, north } = enuAxes(centerCarto.lat, centerCarto.lon);
         let minE = Infinity, maxE = -Infinity, minN = Infinity, maxN = -Infinity;
         const heights: number[] = [];
         const rel = new THREE.Vector3();
@@ -1661,7 +1785,10 @@ const Scene = forwardRef<ViewerHandle, { loadArgs: LoadArgs; tooltip: TooltipCha
         e = THREE.MathUtils.radToDeg(centerCarto.lon + maxE / (R * cosLat));
         s = THREE.MathUtils.radToDeg(centerCarto.lat + minN / R);
         n = THREE.MathUtils.radToDeg(centerCarto.lat + maxN / R);
-        minH = Math.min(...heights); maxH = Math.max(...heights);
+        // Five points of a surface say little about the height of what stands on it: a flat view would
+        // give a box with no height, and an extract of nothing. A quarter of its width above and below, up to 1 km.
+        const pad = THREE.MathUtils.clamp(0.25 * Math.max(maxE - minE, maxN - minN), 10, 1000);
+        minH = Math.min(...heights) - pad; maxH = Math.max(...heights) + pad;
       } else {
         // No ray hit anything visible (e.g. camera framing content too loosely) — fall back to the
         // tileset's own bounding sphere so this always produces a usable box instead of no-oping.
@@ -1712,12 +1839,13 @@ const Scene = forwardRef<ViewerHandle, { loadArgs: LoadArgs; tooltip: TooltipCha
     },
     autoZoomToTileset() { frameToTileset(tilesRef.current); },
     setControlMode(mode) { store.getState().setControlMode(mode); },
+    fitPointHeights() { return fitPointHeights(); },
     setPointSize(px) { store.getState().setPointSize(px); },
     showCropGizmo() { store.getState().setCropGizmoOn(true); return true; },
     hideCropGizmo() { store.getState().setCropGizmoOn(false); },
     showTilesetGizmo() { store.getState().setTilesetGizmoOn(true); },
     hideTilesetGizmo() { store.getState().setTilesetGizmoOn(false); },
-  }), [camera, invalidate, frameToTileset, applyZOffsetInternal, animateCameraTo, snapToGroundInternal]);
+  }), [camera, invalidate, frameToTileset, applyZOffsetInternal, animateCameraTo, snapToGroundInternal, fitPointHeights]);
 
   /**
    * Frame a dataset from its bounding sphere: 3 radii out, pitched ~35° down, approaching from the
@@ -1782,9 +1910,7 @@ const Scene = forwardRef<ViewerHandle, { loadArgs: LoadArgs; tooltip: TooltipCha
       <group ref={setNavScene}>
       {showGlobe && globeVisible && (terrain === 'cesium' ? (
         <TerrainGlobe basemap={basemap} gl={gl} />
-      ) : terrain === 'reearth-qm' ? (
-        <TerrainGlobe basemap={basemap} gl={gl} url={`${REEARTH_QM_URL}/`} />
-      ) : terrain === 'terrarium' || terrain === 'mapterhorn' || terrain === 'mapterhorn-ellipsoid' ? (
+      ) : terrain === 'terrarium' || terrain === 'mapterhorn' ? (
         <TerrariumGlobe basemap={basemap} source={terrain} gl={gl} />
       ) : terrain === 'google' ? (
         <GoogleGlobe ktxLoader={ktxLoader} />
@@ -1807,7 +1933,7 @@ const Scene = forwardRef<ViewerHandle, { loadArgs: LoadArgs; tooltip: TooltipCha
           // AFTER and override that flyTo with the tileset's own (possibly world-sized) bounding sphere.
           onLoadRootTileset={() => {
             // devtools / headless inspection — the counterpart of CesiumViewer's window.viewer
-            (window as any).tiles3dtr = { tiles: tilesRef.current, globeLru: GLOBE_LRU_CACHE, scene, camera, invalidate, store, controls: () => controlsRef.current, motionLod: () => [...motionLodPlugins], flight };
+            (window as any).tiles3dtr = { tiles: tilesRef.current, globeLru: GLOBE_LRU_CACHE, scene, camera, invalidate, store, terrarium: () => terrariumTiles, terrain: () => terrainTiles, handle: () => sceneHandleRef.current, controls: () => controlsRef.current, motionLod: () => [...motionLodPlugins], flight };
             if (!loadArgs?.skipAutoFrame) frameToTileset(tilesRef.current, true);
             const fly = pendingFlyToRef.current;
             pendingFlyToRef.current = null;
@@ -1850,7 +1976,7 @@ const Scene = forwardRef<ViewerHandle, { loadArgs: LoadArgs; tooltip: TooltipCha
           <TilesPlugin plugin={NativeLeavesPlugin as any} args={nativeArgs as any} />
           {isSplat && <TilesPlugin plugin={GaussianSplatPlugin as any} args={splatArgs as any} />}
           {debugMode === 'tiles' && <TilesPlugin plugin={DebugTilesPlugin as any} displayBoxBounds colorMode={7} />}
-          {debugMode === 'cells' && <MosaicOutlines url={loadArgs.url} tilesRef={tilesRef} />}
+          {(debugMode === 'cells' || debugMode === 'cells-only') && <MosaicOutlines url={loadArgs.url} tilesRef={tilesRef} cellsOnly={debugMode === 'cells-only'} />}
           {/* enableDoubleTapZoom off: the controls' own double-click zoom raced our animated one
               (it starts on pointerup, ours on dblclick: a jump, then the tween) */}
           {controlMode === 'globe' && <GlobeControls ref={controlsRef} scene={navScene ?? undefined} enableDamping dampingFactor={0.05} minDistance={1} enableDoubleTapZoom={false} />}
@@ -1963,6 +2089,7 @@ const ThreeDTRjsViewer = forwardRef<ViewerHandle, Props>(function ThreeDTRjsView
     flyToSphere: (...a) => whenScene((h) => h.flyToSphere?.(...a)),
     datasetsInView: (list, f) => sceneRef.current?.datasetsInView?.(list, f) ?? [],
     setControlMode: (...a) => sceneRef.current?.setControlMode?.(...a),
+    fitPointHeights: () => sceneRef.current?.fitPointHeights?.() ?? false,
     setPointSize: (...a) => sceneRef.current?.setPointSize?.(...a),
     showCropGizmo: () => sceneRef.current?.showCropGizmo?.() ?? false,
     hideCropGizmo: () => sceneRef.current?.hideCropGizmo?.(),

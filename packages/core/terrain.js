@@ -13,6 +13,7 @@ import { dirname } from 'node:path';
 const require = createRequire(import.meta.url);
 
 export const TERRAINS = {
+  wgs84: { flat: true },                       // the bare ellipsoid: every height is 0
   'mapterhorn-ellipsoid': { url: 'https://terrain.reearth.land/mapterhorn-egm08/terrarium/ellipsoid/{z}/{x}/{y}.webp', size: 512, maxZoom: 14, datum: 'ellipsoid' },
   mapterhorn: { url: 'https://tiles.mapterhorn.com/{z}/{x}/{y}.webp', size: 512, maxZoom: 17, datum: 'sea level' },
   terrarium: { url: 'https://s3.amazonaws.com/elevation-tiles-prod/terrarium/{z}/{x}/{y}.png', size: 256, maxZoom: 15, datum: 'sea level' },
@@ -60,6 +61,7 @@ function tile(src, z, x, y) {
 export async function sampleTerrain(id, lon, lat, zoom = 14) {
   const src = TERRAINS[id];
   if (!src) throw new Error(`unknown terrain "${id}" — ${Object.keys(TERRAINS).join(', ')}`);
+  if (src.flat) return 0;
   const z0 = Math.min(zoom, src.maxZoom);
   const n0 = 2 ** z0;
   const fx = ((lon + 180) / 360) * n0;

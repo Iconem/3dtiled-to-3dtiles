@@ -5,6 +5,40 @@ Format loosely follows [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+### Fixed — 2026-11-02 (Terrarium globes, follow the terrain, crop box)
+- **Mapterhorn and AWS terrain failed tile by tile in 3DTRjs** whenever imagery was on: since
+  `e879906` the globe registered an undefined `load-model` listener, and three's event dispatch threw on
+  every loaded tile. AWS Terrain Tiles work again.
+- **Mapterhorn 404s** left holes in the globe. Open ocean now reads as sea level, and a deep tile without
+  a regional DEM is cut out of its nearest ancestor.
+- **Auto (follow the terrain) on mosaics**: `&snap=` used Mapterhorn even on WGS84, and never changed
+  with the terrain. It now follows it, with a new `&snap=wgs84`; each dataset's samples are cached apart
+  from the terrain, so switching takes 0.08 s on the 660 Iconem datasets (22 s for the first build).
+- **Auto on a single tileset**: Google 3D and World Terrain mounted after the listener was attached,
+  so a first failed measurement was never retried, and the ray could hit anything in the scene; it
+  now reads the terrain renderer only. A failed measurement also retries as the data loads, on any terrain.
+- **Set box to view (3DTRjs)**: its "east" axis was not east, which turned and mis-sized the box;
+  a flat view gave a box with no height, hence empty extracts. It now uses true east/north, 80 % of the
+  view as labelled, and pads the heights.
+- **3D crop box**: it did not show until an unrelated re-render, ignored the numbers, and a drag never
+  reached them, so the extract ignored it. It now follows the sidebar and writes back on release.
+- **Switching controls**: a frame between the mount and the pivot could leave Orbit's target at the
+  Earth's centre.
+
+### Changed — 2026-11-02 (terrain list, controls Auto, point colour)
+- **3DTRjs is the default renderer**, in the viewer, the aggregate builder and the desktop app's links.
+  `?renderer=cesium` still opens Cesium; a link without `renderer` now opens 3DTRjs.
+- **Terrain list**: WGS84, Google 3D, Mapterhorn, AWS Terrain Tiles, Cesium World Terrain. In 3DTRjs,
+  Mapterhorn is now mapterhorn.com's own Terrarium webp tiles (sea level) rather than Re:Earth's
+  ellipsoidal mirror (z14). A georeferenced dataset therefore floats above it by the geoid undulation
+  until snapped. Its depth follows the location, z12 to z16, each missing tile being cut out of its
+  nearest ancestor.
+- **Controls mode Auto**: Globe from far away, Orbit below 3 km above the ground, back to Globe above 6 km.
+- **Point colour** (RGB, one colour, height) in every material mode, replacing X-ray's own setting.
+- **Debug: Cells only**, without the dataset roots' bounding spheres.
+- **Native Potree leaves** on by default.
+- **Auto (follow the terrain)** is the first control of Local Frame.
+
 ### Changed — 2026-10-30 (level Trackball and Fly, faster Orbit damping)
 - **Trackball and Fly keep the camera level**, like Orbit: the roll each accumulates (Trackball
   rotates `camera.up` with the drag, Fly composes pitch and yaw in the camera's frame) is removed

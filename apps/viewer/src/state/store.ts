@@ -61,11 +61,11 @@ interface ViewerStore {
   ortho: boolean;
   // 'cells' draws the loaded tileset's OWN tiles (a mosaic's quadtree cells and dataset roots);
   // 'tiles' is the renderer's own debug view of every tile it holds (lib/mosaicOutlines.ts).
-  debugMode: 'off' | 'cells' | 'tiles';
+  debugMode: 'off' | 'cells' | 'cells-only' | 'tiles';
   shadeless: boolean;
   brightness: number;
   fov: number;
-  controlMode: 'globe' | 'orbit' | 'env' | 'trackball' | 'fly'; // 3DTRJS only
+  controlMode: 'auto' | 'globe' | 'orbit' | 'env' | 'trackball' | 'fly'; // 3DTRJS only
   // 3DTRJS globe/env controls: roll the camera back to north-up whenever the user is not rotating.
   // 3DTRJS: draw the globe/terrain first and clear the depth buffer before the data, so datasets
   // under the DEM stay visible (the terrain then never occludes the data).
@@ -86,11 +86,14 @@ interface ViewerStore {
   /** X-ray: opacity of the points (meshes draw at 60 % of it) and whether points keep their colours or go white. */
   xrayOpacity: number;
   setXrayOpacity: (v: number) => void;
-  xrayPoints: 'rgb' | 'color';
-  setXrayPoints: (v: ViewerStore['xrayPoints']) => void;
-  /** X-ray points in one colour (`xrayPoints: 'color'`), CSS hex. */
-  xrayColor: string;
-  setXrayColor: (v: string) => void;
+  pointColorMode: 'rgb' | 'color' | 'height';
+  setPointColorMode: (v: ViewerStore['pointColorMode']) => void;
+  /** Points in one colour (`pointColorMode: 'color'`), CSS hex. */
+  pointColor: string;
+  /** Points by height (`pointColorMode: 'height'`): metres at the two ends of the ramp, null = fit to what is loaded. */
+  pointHeightRange: [number, number] | null;
+  setPointHeightRange: (v: [number, number] | null) => void;
+  setPointColor: (v: string) => void;
   edl: boolean;
   edlStrength: number;
   setPointAdaptive: (v: boolean) => void;
@@ -209,10 +212,12 @@ export const useViewerStore = create<ViewerStore>((set, get) => ({
   setMaterialMode: (v) => set({ materialMode: v }),
   xrayOpacity: 0.35,
   setXrayOpacity: (v) => set({ xrayOpacity: v }),
-  xrayPoints: 'rgb',
-  setXrayPoints: (v) => set({ xrayPoints: v }),
-  xrayColor: '#ffffff',
-  setXrayColor: (v) => set({ xrayColor: v }),
+  pointColorMode: 'rgb',
+  setPointColorMode: (v) => set({ pointColorMode: v }),
+  pointColor: '#ffffff',
+  setPointColor: (v) => set({ pointColor: v }),
+  pointHeightRange: null,
+  setPointHeightRange: (v) => set({ pointHeightRange: v }),
   edl: true,
   edlStrength: 1,
   shadeless: false,

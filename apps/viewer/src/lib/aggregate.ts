@@ -4,7 +4,7 @@
  */
 import { useEffect, useState, useSyncExternalStore } from 'react';
 import { MW } from './formats';
-import { snapRasterFor, type TerrainMode } from './terrainModes';
+import { resolveTerrainMode, snapRasterFor, type TerrainMode } from './terrainModes';
 
 /** One placed dataset of a mosaic, as returned by /aggregate/index.json. */
 export interface DatasetMarker {
@@ -113,11 +113,17 @@ function withParam(url: string, key: string, value: string | null): string {
 }
 export const withBv = (url: string, bv: BvMode) => withParam(url, 'bv', bv === 'cell' ? null : bv);
 
-/** `&snap=` for the terrain on screen (its raster twin for the quantized mesh), or off. */
+/**
+ * `&snap=` for the terrain on screen: the ellipsoid, its raster twin for the quantized mesh, or, for
+ * terrain the server cannot read (Google 3D, World Terrain), the ellipsoidal DEM closest to it. Or off.
+ */
 export const readSnap = (url: string) => new URL(url, location.href).searchParams.get('snap');
-export function withSnap(url: string, terrain: TerrainMode | null): string {
-  if (!terrain) return withParam(url, 'snap', null);
-  return withParam(url, 'snap', snapRasterFor(terrain) ?? 'mapterhorn-ellipsoid');
+export const snapParamFor = (terrain: TerrainMode, renderer: 'cesium' | '3dtrjs') => {
+  const mode = resolveTerrainMode(terrain, renderer);
+  return mode === 'wgs84' ? 'wgs84' : snapRasterFor(mode) ?? 'mapterhorn-ellipsoid';
+};
+export function withSnap(url: string, terrain: TerrainMode | null, renderer: 'cesium' | '3dtrjs'): string {
+  return withParam(url, 'snap', terrain ? snapParamFor(terrain, renderer) : null);
 }
 
 /**

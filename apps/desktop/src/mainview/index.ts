@@ -320,7 +320,7 @@ function exportCli(r: ExportRequest = exportRequest()): string {
 /** The demo viewer, told to load a tileset on start (its `?load=` parameter). */
 function viewerLink(tilesetUrl: string, type = 'mesh'): string {
   if (!viewerUrl || !tilesetUrl) return '';
-  return `${viewerUrl}/?mode=stream&format=3dtiles&renderer=cesium&type=${type}&load=${encodeURIComponent(tilesetUrl)}`;
+  return `${viewerUrl}/?mode=stream&format=3dtiles&renderer=3dtrjs&type=${type}&load=${encodeURIComponent(tilesetUrl)}`;
 }
 const assetType = () => (['copc', 'potree'].includes(formatEl.value) ? 'pointcloud' : ['sog', 'lcc', 'rad', 'geosplats'].includes(formatEl.value) ? 'splat' : 'mesh');
 

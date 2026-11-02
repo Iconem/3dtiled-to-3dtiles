@@ -85,7 +85,7 @@ export default function BuilderApp() {
   const canUndo = useBuilder((s) => s.past.length > 0);
   const canRedo = useBuilder((s) => s.future.length > 0);
   const status = useBuilder((s) => s.status);
-  const [renderer, setRenderer] = useState<Renderer>('cesium');
+  const [renderer, setRenderer] = useState<Renderer>('3dtrjs');
   const [busy, setBusy] = useState(false);
   const [urlDialog, setUrlDialog] = useState(false);
   const fileRef = useRef<HTMLInputElement>(null);

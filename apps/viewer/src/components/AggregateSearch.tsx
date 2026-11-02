@@ -526,8 +526,8 @@ export default function AggregateSearch({ activeHandleRef, renderer }: {
             <span className="flex items-center gap-1">
               <span className="text-muted-foreground">snap</span>
               <Segmented value={snap ? 'ground' : 'off'} options={['off', 'ground'] as const}
-                onChange={(v) => commit(withSnap(lastLoadUrl, v === 'ground' ? terrainMode : null), true)}
-                title="Put every dataset on the terrain, each with its own vertical offset (server-side, from its own geometry against Mapterhorn)" />
+                onChange={(v) => commit(withSnap(lastLoadUrl, v === 'ground' ? terrainMode : null, renderer === 'cesium' ? 'cesium' : '3dtrjs'), true)}
+                title="Put every dataset on the terrain, each with its own vertical offset (server-side, from its own geometry against the terrain on screen)" />
             </span>
           </div>
           {yearSpan && years && yearSpan.max > yearSpan.min && (

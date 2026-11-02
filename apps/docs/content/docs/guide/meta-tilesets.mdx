@@ -725,7 +725,7 @@ own cells by depth, and each dataset's root volume in white (see
 ## Snap each dataset to the ground: `&snap=`
 
 `&snap=1` (Mapterhorn on the ellipsoid) or `&snap=<terrain>` (`mapterhorn-ellipsoid`, `mapterhorn`,
-`terrarium`) moves **every dataset separately** onto the terrain. The offset is applied where the
+`terrarium`, `wgs84` for the bare ellipsoid) moves **every dataset separately** onto the terrain. The offset is applied where the
 dataset's root is attached: the leaf tile gets a `transform`, a translation along the local up, which
 chains into the external tileset below it. The leaf's bounding sphere is expressed in that translated
 frame, so it stays as it is. `extras.snap` = `{terrain, dz, bins, spread}` records the result, and
@@ -892,7 +892,7 @@ hand-authored "Cambodia" node can have an auto-nested mosaic of 40 Angkor scans 
 Every leaf of a mosaic is 3D Tiles: Potree and COPC children are wrapped through `/stream`. With
 `&native=1` a Potree leaf **also** says "this dataset is really a Potree 1.8 cloud at this URL", so a
 renderer that reads Potree itself loads it directly, and every other client still gets 3D Tiles.
-In the viewer this is **Native Potree leaves** under *Tileset & LOD*, in 3DTRjs mode (`?native=true`).
+In the viewer this is **Native Potree leaves** under *Tileset & LOD*, in 3DTRjs mode, on by default (`?native=false` to turn off).
 CesiumJS has no Potree reader, so the setting does not exist there. The 3DTRjs viewer always
 requests the mosaic with `&native=1` and switches each Potree leaf **in place**: its Potree reader and
 its `/stream` reader are both mounted (lazily), and the checkbox picks which one loads and draws, so

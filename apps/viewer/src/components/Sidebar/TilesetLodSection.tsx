@@ -25,12 +25,13 @@ export default function TilesetLodSection({ activeHandleRef }: { activeHandleRef
         Show asset
       </Label>
       <div className="flex items-center justify-between">
-        <Label className="text-xs" title="cells: the loaded tileset's own tiles — a mosaic's quadtree cells (colour by depth) and its dataset roots (white). tiles: every tile the renderer holds, bounds + depth colour.">Debug</Label>
+        <Label className="text-xs" title="cells: the loaded tileset's own tiles — a mosaic's quadtree cells (colour by depth) and its dataset roots (white). cells only: without the dataset roots' bounding spheres. tiles: every tile the renderer holds, bounds + depth colour.">Debug</Label>
         <Select value={s.debugMode} onValueChange={(v) => { s.setDebugMode(v as any); h()?.setDebugMode(v as any); }}>
           <SelectTrigger size="sm"><SelectValue /></SelectTrigger>
           <SelectContent>
             <SelectItem value="off">Off</SelectItem>
             <SelectItem value="cells">Cells + dataset roots</SelectItem>
+            <SelectItem value="cells-only">Cells only</SelectItem>
             <SelectItem value="tiles">All tiles (bounds + depth)</SelectItem>
           </SelectContent>
         </Select>

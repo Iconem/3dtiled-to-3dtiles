@@ -62,7 +62,9 @@ export interface ViewerHandle {
    */
   snapToGround?(): Promise<string>;
   // 3DTRJS-only — no-ops on CesiumViewer.
-  setControlMode?(mode: 'globe' | 'orbit' | 'env' | 'trackball' | 'fly'): void;
+  setControlMode?(mode: 'auto' | 'globe' | 'orbit' | 'env' | 'trackball' | 'fly'): void;
+  /** Colour by height: refit the ramp to the points loaded now. False when there are none. */
+  fitPointHeights?(): boolean;
   setPointSize?(px: number): void;
   showCropGizmo?(): boolean;
   hideCropGizmo?(): void;

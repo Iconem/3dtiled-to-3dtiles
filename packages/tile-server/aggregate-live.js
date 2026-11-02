@@ -422,9 +422,10 @@ const DEFAULT_BV = 'cell';
  * which chains into the external tileset below it. The leaf's bounding sphere stays as it is — it is
  * expressed in the leaf's own (translated) frame. Cached per dataset like the child roots.
  */
+const snapSamples = ttlCache((url) => datasetGroundSamples(url));   // per dataset, whatever the terrain
 const snapOffset = ttlCache(async (key) => {
-  const { url, terrain } = JSON.parse(key);
-  const samples = await datasetGroundSamples(url);
+  const { url, terrain, ttlMs } = JSON.parse(key);
+  const samples = await snapSamples(url, ttlMs);
   if (!samples) return null;
   const heights = await Promise.all(samples.map((s) => sampleTerrain(terrain, s.lon, s.lat)));
   return offsetFromSamples(samples, heights);
@@ -594,7 +595,7 @@ export async function buildAggregate(urls, { nest = 'auto', ttlMs = DEFAULT_TTL_
   }
 
   if (snap) {
-    const offsets = await pooledSettled(children, (c) => snapOffset(JSON.stringify({ url: c.content.uri, terrain: snap }), ttlMs));
+    const offsets = await pooledSettled(children, (c) => snapOffset(JSON.stringify({ url: c.content.uri, terrain: snap, ttlMs }), ttlMs));
     children.forEach((c, i) => {
       const r = offsets[i].status === 'fulfilled' ? offsets[i].value : null;
       if (!r) { c.extras = { ...(c.extras || {}), snap: { terrain: snap, dz: null } }; return; }

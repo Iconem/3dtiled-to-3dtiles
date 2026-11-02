@@ -11,7 +11,9 @@
  *
  * The datum matters as soon as data meets terrain: 3D Tiles are placed in ECEF, i.e. on the ELLIPSOID,
  * while sea-level heights sit lower or higher by the geoid undulation (+55 m in the Alps, −100 m off
- * India). The two ellipsoidal sources are the ones to snap datasets against.
+ * India). The two ellipsoidal sources are the ones Cesium draws and samples by default; 3DTRjs draws
+ * mapterhorn.com's own tiles, so a georeferenced dataset floats above them by that undulation until
+ * it is snapped to them.
  *
  * 3DTRjs renders the rasters natively (TerrariumMeshPlugin). Cesium does not read Terrarium, so a
  * CustomHeightmapTerrainProvider on a web-mercator scheme adapts it: each Cesium tile (x, y, level)
@@ -30,8 +32,10 @@ export interface RasterTerrain {
   maxZoom: number;
   datum: 'sea level' | 'ellipsoid';
   credit: string;
-  /** Replacement for a broken z0 tile (see ThreeDTRjsViewer's TerrariumRootFallbackPlugin). */
+  /** Replacement for a broken z0 tile. */
   rootUrl?: string;
+  /** The deepest level with complete coverage: a tile missing at or above it is open ocean. */
+  completeZoom?: number;
 }
 
 export const RASTER_TERRAINS: Record<RasterTerrainId, RasterTerrain> = {
@@ -42,7 +46,7 @@ export const RASTER_TERRAINS: Record<RasterTerrainId, RasterTerrain> = {
   },
   mapterhorn: {
     url: 'https://tiles.mapterhorn.com/{z}/{x}/{y}.webp',
-    tileSize: 512, maxZoom: 17, datum: 'sea level',
+    tileSize: 512, maxZoom: 17, completeZoom: 12, datum: 'sea level',
     credit: 'Mapterhorn (mapterhorn.com)',
   },
   'mapterhorn-ellipsoid': {
@@ -99,13 +103,36 @@ function bilinear(h: Float32Array, n: number, px: number, py: number): number {
 }
 
 /** The nearest available tile at or above (z, x, y), with this tile's window inside it. */
-async function ancestorTile(src: RasterTerrain, level: number, x: number, y: number) {
-  for (let d = Math.max(0, level - src.maxZoom); d <= level; d++) {
+async function ancestorTile(src: RasterTerrain, level: number, x: number, y: number, first = 0, floor = 0) {
+  for (let d = Math.max(first, level - src.maxZoom); d <= level - floor; d++) {
     const z = level - d, ax = x >> d, ay = y >> d;
     const h = z === 0 && src.rootUrl ? await sourceTile({ ...src, url: src.rootUrl }, 0, 0, 0) : await sourceTile(src, z, ax, ay);
     if (h) return { h, d, ax, ay };
   }
   return null;
+}
+
+/**
+ * A tile the source does not have, cut out of its nearest ancestor and encoded as a Terrarium PNG (lossless;
+ * blending the encoded channels instead of the heights would break the encoding). Null when nothing above
+ * it down to the source's complete level has data, i.e. over open ocean.
+ */
+export async function terrariumFromAncestor(id: RasterTerrainId, z: number, x: number, y: number): Promise<ArrayBuffer | null> {
+  const src = RASTER_TERRAINS[id];
+  if (src.completeZoom == null || z <= src.completeZoom) return null;
+  const t = await ancestorTile(src, z, x, y, 1, src.completeZoom);
+  if (!t) return null;
+  const n = src.tileSize, span = n / 2 ** t.d, ox = (x - (t.ax << t.d)) * span, oy = (y - (t.ay << t.d)) * span;
+  const img = new ImageData(n, n), px = img.data;
+  for (let r = 0, i = 0; r < n; r++) {
+    for (let c = 0; c < n; c++, i += 4) {
+      const v = Math.round((bilinear(t.h, n, ox + ((c + 0.5) / n) * span - 0.5, oy + ((r + 0.5) / n) * span - 0.5) + 32768) * 256);
+      px[i] = v >> 16; px[i + 1] = (v >> 8) & 255; px[i + 2] = v & 255; px[i + 3] = 255;
+    }
+  }
+  const canvas = new OffscreenCanvas(n, n);
+  canvas.getContext('2d')!.putImageData(img, 0, 0);
+  return (await canvas.convertToBlob({ type: 'image/png' })).arrayBuffer();
 }
 
 export function createRasterTerrainProvider(id: RasterTerrainId): Cesium.TerrainProvider {

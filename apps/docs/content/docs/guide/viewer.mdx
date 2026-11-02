@@ -360,8 +360,13 @@ m up, 45° down, as 3DTRjs does. A builder preview of 660 datasets now opens on 
 
 ### Navigating in 3DTRjs
 
-Three control schemes (*Controls mode*): **Globe** (3DTRjs GlobeControls, the default), **Orbit**
-(three's OrbitControls) and **Environment** (3DTRjs EnvironmentControls). With every scheme:
+Control schemes (*Controls mode*): **Globe** (3DTRjs GlobeControls, the default), **Orbit** (three's
+OrbitControls), **Environment** (3DTRjs EnvironmentControls), Trackball and Fly, and **Auto**: Globe
+from far away, Orbit once the camera is below 3 km above the ground, back to Globe above 6 km. The
+gap keeps a zoom hovering around one height from flipping back and forth, and a switch waits for
+the end of a drag or a wheel zoom. Switching to Orbit puts its target under the centre of the screen;
+from a straight-down view it adds a 2° tilt, as Orbit's heading is undefined at the nadir. Heights are
+from the ground on Mapterhorn and AWS, from the ellipsoid on the other terrains. With every scheme:
 
 - **double-click** pivots on the picked point and moves halfway to it (animated);
 - **middle-drag** dollies toward the point under the cursor at drag start, drag down = in;
@@ -477,7 +482,7 @@ Not exposed.
 
 ### Debug: cells, or every tile
 
-The **Debug** select has two views:
+The **Debug** select has three views (**Cells only** is the first one without the white dataset roots):
 
 | Mode | What is drawn | How |
 |---|---|---|
@@ -497,11 +502,17 @@ bounds, native Potree leaves), **Material & Points** (material mode, point size 
 lighting; Cesium's shadeless and brightness), and the two occasional ones that start folded, **Crop &
 Extract** and **Local Frame**.
 
+**Point colour** (3DTRjs, in every material mode): *RGB* keeps the points' own colours, *One colour*
+paints them all the same, *Height* runs a blue-to-red ramp over a range in metres, read from the
+points loaded when the mode is picked or when **Fit** is pressed (ignoring the top and bottom 2 %).
+Heights are the tileset's own, before the Z offset. Height writes a replacement colour attribute
+(`lib/pointColors.ts`), 6 bytes a point while the mode is on, so it works the same on `/stream` tiles
+and native Potree leaves. Meshes keep their textures.
+
 **Material** (3DTRjs): *Default* keeps the content's own materials; *X-ray* draws meshes as an additive
 tint that writes no depth and points additive, so a scan's interior shows through its walls and
 overlapping datasets read through each other — with an **opacity** slider (points; meshes draw at 60 %
-of it) and **RGB / one colour** points (a colour picker, white by default: density alone reads as
-brightness); *Wireframe* draws mesh edges only. The original mesh material is kept and restored by
+of it), and with one point colour, density alone reads as brightness; *Wireframe* draws mesh edges only. The original mesh material is kept and restored by
 *Default*; applied to every loaded tile, native Potree leaves included.
 
 **Imagery None** (3DTRjs) draws the terrain unlit and black: a silhouette that hides what is behind
@@ -552,7 +563,7 @@ source:
   implicit subtree roots) and the size to use inside each, down to the finest spacing visible in the
   child's subtree, and the vertex shader picks it per point.
 
-**Native Potree leaves** (3DTRjs only, `?native=true`) renders the Potree datasets of an
+**Native Potree leaves** (3DTRjs only, on by default, `?native=false` to turn off) renders the Potree datasets of an
 `/aggregate` mosaic through 3DTRjs's `PotreePlugin` instead of `/stream`, with Potree's own adaptive
 point size. The point-size slider then sets `PotreePlugin`'s point scale. The mosaic is always
 requested with `&native=1`; the checkbox switches each Potree dataset **in place** between its
@@ -567,36 +578,38 @@ shapes, EDL, adaptive size per point from the active octree nodes) is the lab's.
 
 ### Terrain and snap to ground
 
-**Terrain** — every open source is keyless and CORS-open. The default, **Mapterhorn (auto)**, is the
-ellipsoidal Mapterhorn DEM in each renderer's native form: the quantized mesh in Cesium, the
-Terrarium tiles in 3DTRjs.
+**Terrain** — every open source is keyless and CORS-open. The list is the same in both renderers;
+**Mapterhorn**, the default, is drawn in each renderer's native form.
 
 | Mode | Source | Encoding | Max z | Heights |
 |---|---|---|---|---|
 | WGS84 | the plain ellipsoid | — | — | ellipsoid (0) |
-| Cesium World Terrain | Cesium ion asset 1 | quantized mesh | — | ellipsoid |
-| **Mapterhorn · quantized mesh** | [Re:Earth Terrain](https://terrain.reearth.land/) `cesium-mesh/ellipsoid` | quantized mesh | 14 | **ellipsoid** |
-| **Mapterhorn · Terrarium (ellipsoid)** | Re:Earth `mapterhorn-egm08/terrarium/ellipsoid/{z}/{x}/{y}.webp` | Terrarium, 512 px | 14 | **ellipsoid** |
-| Mapterhorn · Terrarium (sea level) | [tiles.mapterhorn.com](https://tiles.mapterhorn.com/tilejson.json) `{z}/{x}/{y}.webp` | Terrarium, 512 px | 12 (17 regionally) | sea level |
-| AWS Terrain Tiles | `elevation-tiles-prod/terrarium` | Terrarium, 256 px | 15 | sea level |
 | Google 3D | Google Photorealistic 3D Tiles | mesh | — | ellipsoid |
+| **Mapterhorn**, 3DTRjs | [tiles.mapterhorn.com](https://tiles.mapterhorn.com/tilejson.json) `{z}/{x}/{y}.webp` | Terrarium, 512 px | 12 to 17, by location | **sea level** |
+| **Mapterhorn**, Cesium | [Re:Earth Terrain](https://terrain.reearth.land/) `cesium-mesh/ellipsoid` | quantized mesh | 14 | ellipsoid |
+| AWS Terrain Tiles | `elevation-tiles-prod/terrarium` | Terrarium, 256 px | 15 | sea level |
+| Cesium World Terrain | Cesium ion asset 1 | quantized mesh | — | ellipsoid |
 
 **Datum matters when data meets terrain.** 3D Tiles sit in ECEF, i.e. on the WGS84 ellipsoid, while
 sea-level heights differ by the geoid undulation: +55 m in the Alps, about +16 m at Geghard,
-−100 m off India. Mapterhorn itself serves orthometric heights (vertical datums are "not treated at
-the moment", mapterhorn#255). Re:Earth's mirror blends in EGM2008 and publishes `/elevation/`
-(orthometric), `/ellipsoid/` (h = H + N) and `/geoid/` (N) variants. The 3DTRjs `terrainrgb` example
-uses `/elevation/`; we use `/ellipsoid/`, the right one to snap datasets against.
+−100 m off India. So in 3DTRjs a correctly georeferenced dataset floats above Mapterhorn and AWS by
+that undulation until it is snapped to them. Mapterhorn itself serves orthometric heights (vertical
+datums are "not treated at the moment", mapterhorn#255). Re:Earth's mirror blends in EGM2008 and
+publishes ellipsoidal tiles too (`mapterhorn-egm08/terrarium/ellipsoid`, z14): `&snap=mapterhorn-ellipsoid`
+and Cesium's Snap still read those.
 
-Re:Earth's ellipsoidal Terrarium set answers its **z0** tile with HTTP 500
-(`Invalid typed array length`; z1 and deeper are fine), and `TerrariumMeshPlugin` cannot start
-without a root. `TerrariumRootFallbackPlugin` substitutes mapterhorn.com's z0 for it. That tile is
-sea level, but it is only seen at planet scale.
+mapterhorn.com's depth depends on where you are: z12 is complete, and deeper tiles exist only where a
+regional DEM does. Probed on 2026-11-02, Geghard and Angkor stop at z12, Rome at z13, Tokyo at z16,
+Chamonix, Corsica and Paris at z17. It answers 404 elsewhere, which the terrain plugin would decode and
+fail on, leaving holes in the globe. `TerrariumFallbackPlugin` handles both cases: a 404 at or above z12
+is open ocean and reads as sea level; a deeper one is cut out of the nearest ancestor that exists, so
+refinement carries on with the best data there. The plugin fetches even levels only, so z16 is the
+deepest it reads, and z13 or z15 are used through this fallback.
 
 **How each renderer draws them.**
-- **3DTRjs**: Terrarium sources through `TerrariumMeshPlugin` with the basemap draped on it (capped
-  at z12 for mapterhorn.com, where coverage is global); quantized mesh through `QuantizedMeshPlugin`
-  pointed at the Re:Earth base.
+- **3DTRjs**: Terrarium sources through `TerrariumMeshPlugin` with the basemap draped on it (down
+  to z16 on mapterhorn.com, where a regional DEM exists);
+  World Terrain through `QuantizedMeshPlugin`.
 - **Cesium**: quantized mesh through `CesiumTerrainProvider.fromUrl`. Terrarium has no native Cesium
   provider, so `src/lib/terrarium.ts` adapts it as a `CustomHeightmapTerrainProvider` on a
   web-mercator scheme. Deeper than a source goes, or wherever it has no tile, a tile is cut out of its
@@ -606,17 +619,21 @@ sea level, but it is only seen at planet scale.
 the active terrain. On an `/aggregate` mosaic it instead reloads it with `&snap=`, which snaps **each
 dataset separately**, server-side (see [Meta-tilesets](/docs/guide/meta-tilesets#snap-each-dataset-to-the-ground-snap)). The button runs **once, when you press it**, and sets the tileset-level Z offset
 (an ENU shift along the local vertical). **↶ Undo** beside it restores the offset from before the snap,
-or removes a mosaic's `&snap=`. **Auto (follow the terrain)** keeps the tileset on the ground instead:
-the offset is re-measured when the terrain under it refines (World Terrain, Re:Earth QM and Google 3D
-load finer tiles as you approach; raster terrains are sampled at a fixed zoom, so one measurement is
-final), when the terrain mode changes and when a new tileset loads — the dataset's own low bins against
-the terrain, so a scan of a basilica sits on its forecourt, not on its dome. Both measure against the
-**terrain source selected** in the Basemap section: Mapterhorn or Terrarium tiles sampled directly,
-World Terrain / Re:Earth / Google 3D by a ray against the loaded geometry, the bare WGS84 ellipsoid as
+or removes a mosaic's `&snap=`. **Auto (follow the terrain)**, first in the section, keeps the tileset
+on the ground instead: the offset is re-measured when the terrain under it refines (World Terrain and
+Google 3D load finer tiles as you approach; raster terrains are sampled at a fixed zoom, so one
+measurement is final), when the terrain mode changes and when a new tileset loads — the dataset's own
+low bins against the terrain, so a scan of a basilica sits on its forecourt, not on its dome. Both
+measure against the **terrain source selected** in the Basemap section: Mapterhorn or AWS tiles sampled
+directly, World Terrain / Google 3D by a ray against the loaded geometry, the bare WGS84 ellipsoid as
 height 0. **Clearance above ground** (10 m by default) is added on top, so the dataset's ground bins
 land that far above the terrain and the scan lies above most of it instead of half inside it; 0 puts
 it exactly on the terrain. On a mosaic the same checkbox turns the server-side per-dataset snap on and
-off.
+off, and a snapped mosaic follows the terrain: changing it changes `&snap=` and reloads the mosaic in
+place. The server cannot read Google 3D or World Terrain, so under those it snaps to Mapterhorn on
+the ellipsoid, the closest DEM it has. Measured on the 660 Iconem datasets: 22 s for the first
+snapped mosaic (657 datasets get an offset; the other 3 have no readable top content), 0.08 s to
+switch to WGS84 afterwards, since each dataset's samples are cached apart from the terrain.
 
 **Where the samples come from** (`packages/core/dataset-ground.js`, shared with the server): not from
 picks, but from the dataset's **own top geometry**.
