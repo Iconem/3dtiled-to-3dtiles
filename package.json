@@ -2,6 +2,7 @@
   "name": "3dtiled-to-3dtiles",
   "version": "0.1.0",
   "private": true,
+  "license": "MIT",
   "packageManager": "pnpm@10.20.0",
   "workspaces": [
     "packages/*",

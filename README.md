@@ -284,3 +284,7 @@ Mermaid diagrams of each source format's LoD/hierarchy tree (RAD, Streamed SOG, 
 
 See the [Appendix guide](apps/docs/content/docs/guide/planning/appendix-per-format-schema-diagrams.md) for the
 full diagrams.
+
+## License
+
+[MIT](LICENSE). Material mirrored under `apps/docs/content/docs/references/` stays under its authors' own terms.
