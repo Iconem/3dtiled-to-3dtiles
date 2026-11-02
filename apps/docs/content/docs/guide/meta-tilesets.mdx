@@ -209,21 +209,32 @@ share one selection function and one cached mosaic.
   used to happen again after every restart or deploy and every 24 h. The cache now survives restarts;
   an entry older than its TTL is still served and refreshed in the background (stale-while-revalidate),
   so the mosaic is instant and at worst a day old, never blocked. Failures are not persisted.
-  The key ignores the child URL's `cache=`, so a mosaic opened with `&cache=hierarchy` reuses it.
+  The key ignores the child URL's `cache=`.
 - **Bounds baked into the manifest**: `scripts/aggregate-bake-bounds.mjs <manifest.json>` writes
   each entry's placement into the manifest as
   `bounds: { sphere: [x, y, z, r], geometricError, native? }`, exactly what the server would derive
-  from the child's root. With it, a mosaic and its `index.json` (the picker's circles) build without
+  from the child's root: the bounding sphere's centre in Earth-centred coordinates (metres) and its
+  radius, the root's geometric error (the dataset's reference-tile error), and for a Potree source
+  the native descriptor (format, version, URI, source-to-leaf transform) that `&native=1` hands the
+  viewer. Not a lon/lat: the sphere is what the mosaic tree needs to place and size the dataset, and
+  the picker's circle is drawn from it. With it, a mosaic and its `index.json` (the picker's circles) build without
   fetching any child root, even on a fresh server with no cache: the 692-dataset Iconem index
   answered in 60 ms cold with zero root fetches. The bake reuses the persisted cache, so it takes
   under a second when the cache is warm. Every committed manifest is baked, and the Iconem and Open
   Heritage 3D generators carry bounds over when they regenerate. `&ttl=0` and `&curved=` ignore baked
   bounds and probe. Re-bake after re-georeferencing a dataset.
-- **`&cache=none|hierarchy`** sets what every `/stream` child of the mosaic asks for, and the viewer's
-  cache pill in the top bar passes it on. The default stays `none`, which is lazy. `hierarchy` makes
-  each child's first root request drain its whole hierarchy through the source before answering, in
-  exchange for instant subtrees afterwards. Point tiles are built per request in both modes, so
-  `hierarchy` does not speed up content. Measured cold on Iconem share links:
+- **Every `/stream` child of a mosaic opens lazily.** The server never asks a child for
+  `cache=hierarchy`, which drains the whole hierarchy before the root answers (measured below), for
+  every dataset the client merely sees from afar. The top bar's cache pills reach a mosaic as:
+  - `cache=none` (default): children `cache=none&prefetch=N`, N from the prefetch input.
+  - `cache=hierarchy`: children `cache=refine`. A child opens with nothing prefetched; the first
+    tile request below its root (the client refining into it) starts a background drain of its
+    whole hierarchy. Only the datasets someone zooms into are drained and no request waits on it:
+    on Bastia's share link the root answered in 186 ms, the drain then read about 270 `.hrc` files
+    a second while tile and subtree requests kept answering in under 100 ms.
+  - `cache=all` is not offered for mosaics (no per-dataset meaning).
+
+  For comparison, a child opened with `cache=hierarchy` itself, measured cold on Iconem share links:
 
   | Mode | Root, first open | Root subtree | Level-1 point tiles |
   |---|---|---|---|
@@ -501,9 +512,16 @@ same as in lazy mode. It is only as slow as the cloud is big:
 
 A lazy client viewing that cloud reads only the hierarchy files under the subtrees it refines into.
 
-That is why the default stays lazy, and why the mosaic build never probes with `cache=hierarchy`.
-`&cache=hierarchy` on an `/aggregate` URL, or the top bar's cache pill, still passes it to every
-dataset, for a server that will serve the same few clouds many times.
+That is why a mosaic's children always open lazily: `&cache=hierarchy` on `/aggregate` becomes
+`cache=refine` on each child (drain in the background once the client refines into it), never a
+blocking drain. A single dataset opened through `/stream` can still ask for `cache=hierarchy`.
+
+The background drain does not hold up the requests around it. Measured on Bastia (803 million points,
+one client, 2026-11-02): 35,362 `.hrc` files in 151 s, about 234 files/s, during which tiles took a
+median 130 ms and a worst 357 ms (the root tile took 175 ms just before it), and a request that needs no
+source read took a median 2 ms and a worst 114 ms. Once started a drain runs to the end, even if the
+client has flown elsewhere. Potree leaves drawn by the native reader (below) never reach `/stream`,
+so this applies to the `/stream` reader only.
 
 ### 5. Summary of what is kept
 

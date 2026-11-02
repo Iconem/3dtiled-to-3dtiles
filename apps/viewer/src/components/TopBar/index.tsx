@@ -36,6 +36,17 @@ const CACHE_PILLS: [string, string][] = [
   ['hierarchy', '◑ cache=hierarchy'],
   ['all', '● cache=all'],
 ];
+// What each choice costs and buys, on hover. Mosaics read the same pills differently (see below).
+const CACHE_TIPS: Record<string, string> = {
+  none: 'Lazy: the server reads only the hierarchy chunks the client asks for, as it refines. Fastest to open; each new subtree costs a source round trip (prefetch warms the first levels in the background).',
+  hierarchy: 'Upfront: the server reads the WHOLE hierarchy before the root answers (seconds for a small cloud, minutes for a billion-point one over the network), then every subtree is answered from memory. Point tiles are built per request either way.',
+  all: 'Convert: the whole dataset is converted to static 3D Tiles once (minutes to hours), then served from disk. Slowest first open, fastest afterwards.',
+};
+const CACHE_TIPS_MOSAIC: Record<string, string> = {
+  none: 'Every dataset of the mosaic opens lazily: only the hierarchy chunks the client asks for are read. Prefetch warms that many levels of each dataset the client opens.',
+  hierarchy: 'Each dataset opens lazily, then its whole hierarchy is read in the background as soon as you zoom into it (its first tile below the root). Only the datasets you reach pay for it, and nothing waits on it.',
+};
+const PREFETCH_TIP = 'Hierarchy (never points) read in the background when a dataset opens (cache=none): 0 none, N that many 3-level blocks, -1 everything (the cache=hierarchy work, without waiting for it).';
 const TOOL_PILLS: [string, string][] = [
   ['implicit-to-explicit', '⬡→⬢ implicit→explicit'],
   ['upgrade', '⬆ upgrade'],
@@ -307,11 +318,13 @@ export default function TopBar({ activeHandleRef }: { activeHandleRef: React.Ref
 
         {url.mode === 'stream' && (
           <PillGroup tint="amber">
-            {CACHE_PILLS.map(([v, l]) => (
-              <Pill key={v} tint="amber" active={url.cache === v} onClick={() => setUrl({ cache: v as any })}>{l}</Pill>
+            {/* mosaics: no cache=all (no per-dataset meaning), and hierarchy means "on refine" */}
+            {CACHE_PILLS.filter(([v]) => url.format !== 'aggregate' || v !== 'all').map(([v, l]) => (
+              <Pill key={v} tint="amber" active={url.cache === v} onClick={() => setUrl({ cache: v as any })}
+                title={(url.format === 'aggregate' ? CACHE_TIPS_MOSAIC : CACHE_TIPS)[v]}>{l}</Pill>
             ))}
             {url.cache === 'none' && (
-              <span className="flex items-center gap-1 text-xs text-muted-foreground">
+              <span className="flex items-center gap-1 text-xs text-muted-foreground" title={PREFETCH_TIP}>
                 prefetch
                 <Input type="number" min={-1} step={1} value={url.prefetch} onChange={(e) => setUrl({ prefetch: parseInt(e.target.value, 10) || 0 })} className="h-7 w-14" />
               </span>

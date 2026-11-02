@@ -31,7 +31,20 @@ import * as tilesCore from '3d-tiles-renderer/core';
 const GLOBE_PARSE_QUEUE = new tilesCore.PriorityQueue();
 GLOBE_PARSE_QUEUE.maxJobs = 32;
 GLOBE_PARSE_QUEUE.priorityCallback = (tilesCore as any).unifiedPriorityCallback;   // exported, not typed
-const useGlobeParseQueue = (t: any) => { if (t && t.parseQueue !== GLOBE_PARSE_QUEUE) t.parseQueue = GLOBE_PARSE_QUEUE; };
+// The globes also get their own tile cache. 3DTRjs shares one LRU cache (DEFAULT_LRU_CACHE, 0.4 GiB)
+// between every renderer, and a renderer whose cache is full requests nothing more. A terrain tile with
+// its imagery texture weighs ~2.2 MB: measured headless at 150 m over Bastia, 161 globe tiles held
+// 350 MB of the 429 and the 211 point tiles of the dataset 66 MB, so a pitched view or a long browse
+// filled the cache with terrain and the data stopped refining (the "only the root loads" of Bastia).
+// The data renderer and its native-leaf children keep the default cache to themselves.
+const GLOBE_LRU_CACHE = new tilesCore.LRUCache();
+GLOBE_LRU_CACHE.unloadPriorityCallback = (tilesCore as any).DEFAULT_LRU_CACHE.unloadPriorityCallback;
+const useGlobeQueues = (t: any) => {
+  if (!t) return;
+  if (t.parseQueue !== GLOBE_PARSE_QUEUE) t.parseQueue = GLOBE_PARSE_QUEUE;
+  if (t.lruCache !== GLOBE_LRU_CACHE) t.lruCache = GLOBE_LRU_CACHE;
+};
+const useGlobeCache = (t: any) => { if (t && t.lruCache !== GLOBE_LRU_CACHE) t.lruCache = GLOBE_LRU_CACHE; };
 import { GaussianSplatPlugin } from '3d-tiles-rendererjs-3dgs-plugin';
 import * as THREE from 'three';
 import { acceleratedRaycast, computeBoundsTree, disposeBoundsTree } from 'three-mesh-bvh';
@@ -266,7 +279,7 @@ function Globe({ basemap, gl }: { basemap: BasemapId; gl: THREE.WebGLRenderer })
   // weird thing when switching xyz/tms tiles"). Forcing a full remount is the only reliable way to
   // guarantee every tile re-fetches against the new overlay.
   return (
-    <TilesRendererR3F key={basemap} errorTarget={2} ref={useGlobeParseQueue} onLoadModel={(e: any) => buildBoundsTrees(e.scene)}>
+    <TilesRendererR3F key={basemap} errorTarget={2} ref={useGlobeQueues} onLoadModel={(e: any) => buildBoundsTrees(e.scene)}>
       <TilesPlugin plugin={GeneratedSurfacePlugin as any} args={pluginArgs as any} />
       {extra && <TilesPlugin plugin={ImageOverlayPlugin as any} args={extra as any} />}
       <TilesPlugin plugin={StaleLoadAbortPlugin as any} />
@@ -288,7 +301,7 @@ function TerrainGlobe({ basemap, gl, url }: { basemap: BasemapId; gl: THREE.WebG
     [basemap]);
   // `url` = an open quantized-mesh base (its layer.json is resolved against it); else Cesium ion asset 1.
   return (
-    <TilesRendererR3F key={`${url ?? 'ion'}|${basemap}`} url={url} ref={(t: any) => { terrainTiles = t ?? null; }} onLoadModel={(e: any) => buildBoundsTrees(e.scene)}>
+    <TilesRendererR3F key={`${url ?? 'ion'}|${basemap}`} url={url} ref={(t: any) => { terrainTiles = t ?? null; useGlobeCache(t); }} onLoadModel={(e: any) => buildBoundsTrees(e.scene)}>
       {!url && <TilesPlugin plugin={PrioritizedCesiumIonAuthPlugin as any} args={{ apiToken: CESIUM_ION_TOKEN, assetId: '1', autoRefreshToken: true } as any} />}
       <TilesPlugin plugin={QuantizedMeshPlugin as any} />
       {overlays.length > 0 && <TilesPlugin plugin={ImageOverlayPlugin as any} args={{ renderer: gl, overlays } as any} />}
@@ -348,7 +361,7 @@ function TerrariumGlobe({ basemap, source, gl }: { basemap: BasemapId; source: R
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [basemap, source]);
   return (
-    <TilesRendererR3F key={`${basemap}|${source}`} ref={(t: any) => { terrariumTiles = t ?? null; useGlobeParseQueue(t); }}
+    <TilesRendererR3F key={`${basemap}|${source}`} ref={(t: any) => { terrariumTiles = t ?? null; useGlobeQueues(t); }}
       onLoadModel={args.overlay ? undefined : (e: any) => e.scene.traverse((o: any) => { if (o.isMesh && o.material?.color) o.material.color.setRGB(0, 0, 0); })}>
       <TilesPlugin plugin={TerrariumRootFallbackPlugin as any} args={args as any} />
       {extra && <TilesPlugin plugin={ImageOverlayPlugin as any} args={extra as any} />}
@@ -366,7 +379,7 @@ function TerrariumGlobe({ basemap, source, gl }: { basemap: BasemapId; source: R
 // here, unlike TerrainGlobe above.
 function GoogleGlobe({ ktxLoader }: { ktxLoader: KTX2Loader }) {
   return (
-    <TilesRendererR3F ref={(t: any) => { terrainTiles = t ?? null; }} onLoadModel={(e: any) => buildBoundsTrees(e.scene)}>
+    <TilesRendererR3F ref={(t: any) => { terrainTiles = t ?? null; useGlobeCache(t); }} onLoadModel={(e: any) => buildBoundsTrees(e.scene)}>
       <TilesPlugin plugin={GoogleCloudAuthPlugin as any} args={{ apiToken: GOOGLE_MAPS_API_KEY, autoRefreshToken: true } as any} />
       {/* Google Photorealistic 3D Tiles ships Draco-compressed (and sometimes KTX2-textured) geometry —
           same decoders as content below. */}
@@ -1180,6 +1193,8 @@ const Scene = forwardRef<ViewerHandle, { loadArgs: LoadArgs; tooltip: TooltipCha
   const isPoints = loadArgs?.type === 'pointcloud';
   const defaultSSE = isSplat ? 0.5 : loadArgs?.type === 'mesh' ? 16 : 2;   // see CesiumViewer: 2 px for points
   const errorTarget = loadArgs?.sseOverride ?? maxSSE ?? defaultSSE;
+  const autoSSE = loadArgs ? loadArgs.sseOverride ?? defaultSSE : null;
+  useEffect(() => { store.getState().setAutoSSE(autoSSE); }, [autoSSE]);
 
   // Read fresh in onLoadContentModel below (called from 3d-tiles-renderer's own event, not a React
   // effect) — a plain closure over `pointSize` would capture whatever value was current when
@@ -1321,6 +1336,50 @@ const Scene = forwardRef<ViewerHandle, { loadArgs: LoadArgs; tooltip: TooltipCha
   // globe/orbit/env, toggling debug tiles, changing basemap or LOD target) has nothing queued yet, so it'd
   // otherwise sit frozen until the next interaction.
   useEffect(() => { invalidate(); }, [controlMode, debugMode, basemap, terrainMode, errorTarget, invalidate]);
+  // Trackball and Fly keep the camera level, like Orbit: neither has an up vector of its own
+  // (Trackball rotates camera.up with every drag, Fly composes pitch and yaw in the camera's own frame),
+  // so the roll they accumulate is removed after each of their updates. The vertical is the ellipsoid
+  // normal (at the trackball target, at the fly camera) on the globe, world +Y otherwise. Trackball
+  // also stops 2° short of the zenith and nadir instead of rolling over the pole.
+  const levelTmp = useMemo(() => ({ up: new THREE.Vector3(), v: new THREE.Vector3(), h: new THREE.Vector3(), prevH: new THREE.Vector3(), hasPrev: false }), []);
+  const verticalAt = useCallback((p: THREE.Vector3, out: THREE.Vector3) =>
+    p.length() > 6378137 * 0.5 ? WGS84_ELLIPSOID.getPositionToNormal(p, out) : out.set(0, 1, 0), []);
+  const POLE_COS = Math.cos(THREE.MathUtils.degToRad(2));
+  const levelTrackball = useCallback(() => {
+    const c = controlsRef.current;
+    if (!c?.target) return;
+    const { up, v, h, prevH } = levelTmp;
+    verticalAt(c.target, up);
+    v.subVectors(camera.position, c.target);                     // eye, target → camera
+    const r = v.length();
+    if (r === 0) return;
+    const cos = v.dot(up) / r;
+    h.copy(v).addScaledVector(up, -v.dot(up));                  // horizontal part of the eye
+    const crossed = levelTmp.hasPrev && h.dot(prevH) < 0 && Math.abs(cos) > 0.5;   // went over a pole
+    if (Math.abs(cos) > POLE_COS || crossed || h.lengthSq() < 1e-12) {
+      if (!levelTmp.hasPrev) return;
+      const sgn = Math.sign(cos) || 1;
+      v.copy(up).multiplyScalar(sgn * POLE_COS).addScaledVector(prevH, Math.sqrt(1 - POLE_COS * POLE_COS)).multiplyScalar(r);
+      camera.position.copy(c.target).add(v);
+    } else { prevH.copy(h).normalize(); levelTmp.hasPrev = true; }
+    camera.up.copy(up);
+    camera.lookAt(c.target);
+  }, [camera, levelTmp, verticalAt, POLE_COS]);
+  const levelFly = useCallback(() => {
+    const { up, v, h } = levelTmp;
+    verticalAt(camera.position, up);
+    v.set(0, 0, -1).applyQuaternion(camera.quaternion);          // forward
+    const cos = v.dot(up);
+    if (Math.abs(cos) > 0.999) {                                 // straight up or down: heading from the camera's own up
+      h.set(0, 1, 0).applyQuaternion(camera.quaternion).multiplyScalar(-Math.sign(cos));
+      h.addScaledVector(up, -h.dot(up)).normalize();
+      v.copy(up).multiplyScalar(Math.sign(cos) * 0.999).addScaledVector(h, Math.sqrt(1 - 0.999 * 0.999));
+    }
+    camera.up.copy(up);
+    camera.lookAt(h.copy(camera.position).add(v));
+  }, [camera, levelTmp, verticalAt]);
+  useEffect(() => { levelTmp.hasPrev = false; }, [controlMode, levelTmp]);
+
   // Fly controls move the camera while a key is held, from their own per-frame update: with the
   // demand frameloop no frame would come, so the loop runs continuously in fly mode only.
   const setFrameloop = useThree((s) => s.setFrameloop);
@@ -1748,7 +1807,7 @@ const Scene = forwardRef<ViewerHandle, { loadArgs: LoadArgs; tooltip: TooltipCha
           // AFTER and override that flyTo with the tileset's own (possibly world-sized) bounding sphere.
           onLoadRootTileset={() => {
             // devtools / headless inspection — the counterpart of CesiumViewer's window.viewer
-            (window as any).tiles3dtr = { tiles: tilesRef.current, scene, camera, invalidate, store, controls: () => controlsRef.current, motionLod: () => [...motionLodPlugins], flight };
+            (window as any).tiles3dtr = { tiles: tilesRef.current, globeLru: GLOBE_LRU_CACHE, scene, camera, invalidate, store, controls: () => controlsRef.current, motionLod: () => [...motionLodPlugins], flight };
             if (!loadArgs?.skipAutoFrame) frameToTileset(tilesRef.current, true);
             const fly = pendingFlyToRef.current;
             pendingFlyToRef.current = null;
@@ -1806,12 +1865,13 @@ const Scene = forwardRef<ViewerHandle, { loadArgs: LoadArgs; tooltip: TooltipCha
           every control scheme is registered the same way. */}
       {/* MIDDLE off: the middle-drag zoom is ours (toward the clicked point, drag down = in); OrbitControls'
           own dolly on the same button went the other way at the same time */}
-      {controlMode === 'orbit' && <OrbitControls ref={controlsRef} makeDefault enableDamping dampingFactor={0.05} mouseButtons={{ LEFT: THREE.MOUSE.ROTATE, MIDDLE: undefined, RIGHT: THREE.MOUSE.PAN }} />}
-      {/* Trackball: free rotation about the target (no up vector), like a model viewer; MIDDLE off for
-          the same reason as OrbitControls. Fly: WASD / R F / Q E and drag to look, speed from the
-          height above ground (useFrame above); needs the frameloop running (effect above). */}
-      {controlMode === 'trackball' && <TrackballControls ref={controlsRef} makeDefault rotateSpeed={2.5} zoomSpeed={1.2} panSpeed={0.8} dynamicDampingFactor={0.15} mouseButtons={{ LEFT: THREE.MOUSE.ROTATE, MIDDLE: undefined as any, RIGHT: THREE.MOUSE.PAN }} />}
-      {controlMode === 'fly' && <FlyControls ref={controlsRef} makeDefault dragToLook movementSpeed={100} rollSpeed={0.25} />}
+      {controlMode === 'orbit' && <OrbitControls ref={controlsRef} makeDefault enableDamping dampingFactor={0.3} mouseButtons={{ LEFT: THREE.MOUSE.ROTATE, MIDDLE: undefined, RIGHT: THREE.MOUSE.PAN }} />}
+      {/* Trackball: rotation about the target at trackball speed, kept level (levelTrackball); MIDDLE
+          off for the same reason as OrbitControls. Fly: WASD / R F and drag to look, kept level
+          (levelFly, so Q E roll does nothing), speed from the height above ground (useFrame above);
+          needs the frameloop running (effect above). */}
+      {controlMode === 'trackball' && <TrackballControls ref={controlsRef} makeDefault rotateSpeed={2.5} zoomSpeed={1.2} panSpeed={0.8} dynamicDampingFactor={0.15} onChange={levelTrackball} mouseButtons={{ LEFT: THREE.MOUSE.ROTATE, MIDDLE: undefined as any, RIGHT: THREE.MOUSE.PAN }} />}
+      {controlMode === 'fly' && <FlyControls ref={controlsRef} makeDefault dragToLook movementSpeed={100} rollSpeed={0.25} onChange={levelFly} />}
       </group>
       {terrainBehind && <primitive object={clearDepthHook} />}
       <CameraTransition

@@ -30,16 +30,26 @@ how much of it is persisted**:
 How much the middleware caches.
 
 ```
-cache = none | hierarchy | full          # default: none
-prefetch = <N levels>                    # background-warm N levels below root (cache=none) — default: 1
+cache = none | hierarchy | refine | full # default: none
+prefetch = <N blocks>                    # background-warm N 3-level hierarchy blocks (cache=none) — default: 1
 tiling   = implicit | explicit           # octree/quadtree only — default: implicit
+colors   = u16 | u8 | f32                # point tiles' COLOR_0 storage — default: u16 (env POINT_COLORS)
 ```
 
 | `cache` | hierarchy read up front? | tile contents persisted? | first request | later / restart | = today's |
 |---|---|---|---|---|---|
 | **none** | no — root only, chunks on demand (lazy) | no | fast | re-derived; ephemeral | `/stream` lazy |
 | **hierarchy** | yes — whole tree in RAM | no (per-request) | slower cold start, warm after | tree warm in RAM (per process) | `/stream` eager |
+| **refine** | in the background, once a client asks for a tile below the root | no (per-request) | fast (nothing prefetched) | tree warm in RAM once drained | `/stream`, what a mosaic's `cache=hierarchy` asks of its children (COPC, Potree) |
 | **full** | yes | **yes — tree + all tile GLBs to disk** | **slow** (convert all) | served static; survives restart | `/convert` |
+
+**Point colours (`colors=`).** glTF `COLOR_0` is linear, and point sources store 8- or 16-bit sRGB,
+so the server linearises them. It then stores them as normalized `u16` (8 bytes a point as VEC4): lossless
+for 8-bit sources, where linear 8-bit merges the darkest values (sRGB 0–17 land on 0–1, and 256 values
+become 183). An 8-bit sRGB source is not banded itself: sRGB spends its codes where the eye needs them,
+and storing the same light linearly needs more bits. `u8` (4 bytes) accepts that banding; `f32` (16 bytes) is what every tile carried before 2026-10-31. A Bastia tile:
+position 12 B + colour 16 B = 28 B a point in `f32`, 20 B in `u16`. The viewer's native Potree reader
+(the vendored 3DTRjs loader) does the same: linear `Uint16`, 18 B a point instead of 24.
 
 `?cache=hierarchy` reads literally as "cache the hierarchy, not the tiles." `cache=none` = fully
 dynamic; `cache=full` = convert-and-store. The parameter name carries the concept, so nobody has to
@@ -372,10 +382,21 @@ header lists every chunk, which is O(chunks) and unavoidable, but the expensive 
 lazily per 4-level fragment.)
 
 **Why prefetch.** With a chunked hierarchy, `cache=none` reads only the page(s) a request needs, so the
-*first* request into a new region pays a fetch. `prefetch=N` warms the next N levels in the background so
-the renderer usually finds them already resident — combining a lazy cold start with eager-like
-refinement. It is meaningful only where there *are* pages to warm: **COPC, Potree 2.0, Potree 1.x**
-(octree-lazy). For RAD/I3S the 4-level fragment is itself a prefetch unit. SOG/LCC have no pages → n/a.
+*first* request into a new region pays a fetch. `prefetch=N` warms hierarchy in the background so
+the renderer usually finds it already resident — combining a lazy cold start with eager-like
+refinement. It reads hierarchy only, never points, and it fills the server's memory: the client still
+asks for one 3-level `.subtree` at a time. It is meaningful only where there *are* pages to warm:
+**COPC, Potree 2.0, Potree 1.x** (octree-lazy). For RAD/I3S the 4-level fragment is itself a prefetch unit. SOG/LCC have no pages → n/a.
+
+What N reaches depends on the format:
+
+| Format | `prefetch=N` loads | `prefetch=5` |
+|---|---|---|
+| Potree 1.x | every `.hrc` chunk rooted at a level ≤ 3×N, in every branch | chunk roots down to level 15, close to a full drain on most clouds |
+| Potree 2.0 | every chunk rooted at a level ≤ 3, then one block per N under the corner cell (0,0,0) | that, plus the corner down to level 15 |
+| COPC | every page at a level ≤ 3, then one level per N under the corner cell (0,0,0) | that, plus the corner down to level 7 |
+
+Past N=1, Potree 2.0 and COPC warm one corner of the cloud rather than a wider front.
 
 > **Can we avoid reading availability/`getCtx` up front *and* not pay it lazily either?**
 > Largely yes. For the **octree/quadtree implicit** formats (Potree 2.0, COPC, Potree 1.x) `getCtx` no

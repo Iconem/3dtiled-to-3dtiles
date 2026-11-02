@@ -119,6 +119,7 @@ const CesiumViewer = forwardRef<ViewerHandle, Props>(function CesiumViewer({ vis
     // ~1 km, which reads as "it does not load" — points are sparse where a mesh would still look whole.
     const defaultSSE = isSplat ? 0.5 : isMesh ? 16 : 2;
     const sse = opts?.sseOverride ?? store.getState().maxSSE ?? defaultSSE;
+    store.getState().setAutoSSE(opts?.sseOverride ?? defaultSSE);
     const loadOpts: any = isSplat
       ? { maximumScreenSpaceError: sse, skipLevelOfDetail: false, cacheBytes: 512 * 1024 * 1024 }
       : { maximumScreenSpaceError: sse };

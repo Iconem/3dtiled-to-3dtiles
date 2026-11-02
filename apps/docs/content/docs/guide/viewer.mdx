@@ -71,7 +71,8 @@ scene.add(tiles.group);
 
 `viewer.html` consolidates all controls into a right **sidebar** (Renderer · Basemap · Tileset &
 LoD · Navigation · Local frame · Ion · Snippet), including a **Max SSE (px)** input that drives
-CesiumJS `maximumScreenSpaceError` and 3DTRJS `errorTarget`, and a **Debug** select (see below) that
+CesiumJS `maximumScreenSpaceError` and 3DTRJS `errorTarget` (empty = auto, and the field shows what
+auto resolves to for the loaded tileset: `auto · 2` for points, 16 for meshes, 0.5 for splats), and a **Debug** select (see below) that
 draws bounding volumes coloured by octree depth in both renderers. The preset bar includes the
 **◈ GSplat 1/2** reference splat tilesets from the
 [3DTilesRendererJS-3DGS-Plugin](https://github.com/WilliamLiu-1997/3DTilesRendererJS-3DGS-Plugin)
@@ -448,6 +449,27 @@ Measured steady state, camera fixed 400 m above Ghent, tilted from nadir toward 
   down through every level, and each level's tiles pass through the parse queue on the way, which
   is why the queue width mattered.
 
+#### What a globe tile weighs
+
+Measured over Bastia at 150 m (`.local/check-globe2.js`), 161 globe tiles resident, Mapterhorn +
+Mapbox Satellite:
+
+| Part of a tile | Each | Really held | Counted by 3DTRjs |
+|---|---|---|---|
+| Imagery, 512×512 RGBA | 1.05 MB | 169 MB | 169 MB |
+| Elevation grid, 514×514 Float32 | 1.06 MB, shared by up to 16 tiles (41 unique here) | 43 MB | 169 MB |
+| Mesh, 33×33 grid, about 1,200 vertices | 70 KB | 11 MB | 11 MB |
+| **Total** | | **223 MB** | **350 MB** |
+
+- **The mesh is not the cost.** A flat quad instead of the 33×33 grid would save at most 11 MB of
+  223: imagery is three quarters of the real weight.
+- **The over-count is the elevation grid.** A tile samples a window of a grid from two levels up, and
+  its bump and displacement maps are `grid.clone()`s of it: the pixels stay shared, while
+  `estimateBytesUsed` charges each tile for its clone in full.
+- **Why it matters.** 3DTRjs stops requesting tiles once its cache is full, and every `TilesRenderer`
+  shares one cache of 0.4 GiB by default. At 350 MB counted, the globe left the data 79 MB and Bastia
+  stopped refining, so the globes now have their own cache (`GLOBE_LRU_CACHE`).
+
 The planar (EPSG:3857) projection that 3DTRjs offers is for its generated image surface only
 (`GeneratedSurfacePlugin({ shape: 'planar' })`): 3D Tiles content stays in ECEF, and a true Web
 Mercator view would need every loaded tile reprojected per vertex, with the bounding volumes to match.
@@ -489,10 +511,14 @@ it, with no hillshade competing with the data.
 well under eye-dome lighting. Sources with intensity but no RGB used to show intensity as grey; most
 scanners store small intensity values in a 16-bit field, so that grey came out near black.
 
-**Controls mode** (3DTRjs) offers, besides Globe, Orbit and Environment, **Trackball** (free rotation
-about the target with no up vector, like a model viewer) and **Fly** (W A S D move, R F up and down,
-Q E roll, arrows turn, drag to look; the speed follows the height above ground, so a city passes in a
-few seconds from 2 km up and a facade at walking pace). Fly keeps the frame loop running while it is
+**Controls mode** (3DTRjs) offers, besides Globe, Orbit and Environment, **Trackball** (rotation
+about the target at trackball speed) and **Fly** (W A S D move, R F up and down, arrows turn, drag to
+look; the speed follows the height above ground, so a city passes in a few seconds from 2 km up and a
+facade at walking pace). Both keep the camera level, like Orbit: the vertical is the ellipsoid normal
+(at the target for Trackball, at the camera for Fly), world +Y for a local tileset. Neither control
+has an up vector of its own, so the viewer removes the roll after each of their updates; Trackball
+stops 2° short of straight up or down instead of rolling over the pole, and Fly's Q E roll does
+nothing. Orbit's damping factor is 0.3, so it settles six times faster than three.js's 0.05. Fly keeps the frame loop running while it is
 active — the only mode that does — since it moves the camera from its own per-frame update.
 
 The Material & Points section exposes, in both renderers, for any tileset that holds points (a mixed

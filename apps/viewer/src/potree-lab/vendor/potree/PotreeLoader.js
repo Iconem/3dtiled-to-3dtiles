@@ -455,7 +455,9 @@ export class PotreeLoader {
 		const intIdx = attributes.findIndex( a => a.name === 'intensity' );
 
 		const positions = new Float32Array( numPoints * 3 );
-		const colors = colIdx !== - 1 ? new Float32Array( numPoints * 3 ) : null;
+		// Linear colours as normalized uint16 (6 B/point) rather than float32 (12 B): lossless for 8-bit
+		// sRGB sources, where 8-bit linear would merge the darkest values. [3d-tiled patch]
+		const colors = colIdx !== - 1 ? new Uint16Array( numPoints * 3 ) : null;
 		const intensities = intIdx !== - 1 ? new Float32Array( numPoints ) : null;
 		const view = new DataView( buffer );
 
@@ -483,7 +485,6 @@ export class PotreeLoader {
 						view.getUint16( off + 4, true ) / 65535,
 						SRGBColorSpace,
 					);
-					_color.toArray( colors, i * 3 );
 
 				} else {
 
@@ -494,9 +495,12 @@ export class PotreeLoader {
 						view.getUint8( off + 2 ) / 255,
 						SRGBColorSpace,
 					);
-					_color.toArray( colors, i * 3 );
 
 				}
+
+				colors[ i * 3 ] = Math.round( _color.r * 65535 );
+				colors[ i * 3 + 1 ] = Math.round( _color.g * 65535 );
+				colors[ i * 3 + 2 ] = Math.round( _color.b * 65535 );
 
 			}
 
@@ -514,7 +518,7 @@ export class PotreeLoader {
 
 		if ( colors ) {
 
-			geometry.setAttribute( 'color', new BufferAttribute( colors, 3 ) );
+			geometry.setAttribute( 'color', new BufferAttribute( colors, 3, true ) );
 
 		}
 

@@ -309,7 +309,7 @@ function buildTilesetImplicit(ctx, urlParam) {
     maxLevel, subtreeLevels: SUBTREE_LEVELS, transform, urlParam });
 }
 
-async function serveTileGlb(ctx, name) {
+async function serveTileGlb(ctx, name, colorsEnc) {
   // Eager ctx has a full node map to gate on; lazy ctx (1.x .hrc) has no map — rely on readTile
   // returning null for a missing/empty node.
   if (ctx.nodes) { const node = ctx.nodes.get(name); if (!node || !node.numPoints) return null; }
@@ -319,7 +319,7 @@ async function serveTileGlb(ctx, name) {
   const [ox, oy, oz] = ctx.origin;                          // world → tile-local (float32-safe)
   const pos = new Float32Array(count * 3);
   for (let i = 0; i < count; i++) { pos[i*3]=positions[i*3]-ox; pos[i*3+1]=positions[i*3+1]-oy; pos[i*3+2]=positions[i*3+2]-oz; }
-  return Buffer.from(await buildPointsGlb(pos, colors, count));   // core applies the (E,U,−N) Y-up swizzle
+  return Buffer.from(await buildPointsGlb(pos, colors, count, { colors: colorsEnc }));   // core applies the (E,U,−N) Y-up swizzle
 }
 
 // ── 1.x explicit tree (&tiling=explicit): drains every .hrc chunk up front, then builds one complete
@@ -400,13 +400,22 @@ async function potreeTilesetInner(url, opts) {
     return withCrsOverride(opts.tiling === 'explicit' ? buildTilesetExplicit1x(ctx, url) : buildTilesetImplicit(ctx, url), ctx, opts.crs, 'potree-live');
   return withCrsOverride(opts.tiling === 'explicit' ? buildTilesetExplicit(ctx, url) : buildTilesetImplicit(ctx, url), ctx, opts.crs, 'potree-live');
 }
-export async function potreeTile(url, token) {
+// The whole hierarchy into the cached ctx, for /stream's cache=refine (started when a client first
+// refines below the root). Same drain as cache=hierarchy, without a request waiting on it.
+export async function potreeDrain(url) {
+  const ctx = await getCtx(url);
+  const drain = ctx.drainAll2 || ctx.drainAll;
+  if (!drain) return;
+  progressStart(url, 'Potree hierarchy drain (cache=refine)');
+  try { await drain(); } finally { progressDone(url); }
+}
+export async function potreeTile(url, token, opts = {}) {
   const ctx = await getCtx(url);
   // token is a Potree name ("r012", explicit) or a "level-x-y-z" coord (implicit). Lazy ctx resolves
   // coords by box-containment (nameForCoord); lazy2/eager ctx uses the byCoord map (populated as chunks load).
   const name = /^[r0-7]+$/.test(token) ? token
     : (ctx.lazy ? ctx.nameForCoord(...token.split('-').map(Number)) : ctx.byCoord?.get(token));
-  return name ? serveTileGlb(ctx, name) : null;
+  return name ? serveTileGlb(ctx, name, opts.colors) : null;
 }
 export async function potreeSubtree(url, key) {
   const ctx = await getCtx(url);

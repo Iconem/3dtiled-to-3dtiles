@@ -54,6 +54,9 @@ interface ViewerStore {
 
   // Tileset & LOD
   maxSSE: number | null; // null = per-type default
+  /** What "auto" resolves to for the loaded tileset (set by the active viewer), shown in the input. */
+  autoSSE: number | null;
+  setAutoSSE: (v: number | null) => void;
   assetVisible: boolean;
   ortho: boolean;
   // 'cells' draws the loaded tileset's OWN tiles (a mosaic's quadtree cells and dataset roots);
@@ -195,6 +198,8 @@ export const useViewerStore = create<ViewerStore>((set, get) => ({
   setGlobeVisible: (v) => set({ globeVisible: v }),
 
   maxSSE: null,
+  autoSSE: null,
+  setAutoSSE: (v) => set({ autoSSE: v }),
   assetVisible: true,
   ortho: false,
   debugMode: 'off',

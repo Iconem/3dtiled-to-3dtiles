@@ -17,7 +17,7 @@ export default function TilesetLodSection({ activeHandleRef }: { activeHandleRef
     <SidebarCollapsibleSection title="Tileset & LOD" defaultOpen>
       <div className="flex items-center justify-between">
         <Label className="text-xs" title="Screen-space error target: CesiumJS maximumScreenSpaceError, 3DTRjs errorTarget. Empty = the format's default (2 px for points, 16 for meshes, 0.5 for splats).">Max SSE (px)</Label>
-        <Input type="number" className="h-7 w-20" value={s.maxSSE ?? ''} placeholder="auto"
+        <Input type="number" className="h-7 w-20" value={s.maxSSE ?? ''} placeholder={s.autoSSE != null ? `auto · ${s.autoSSE}` : 'auto'}
           onChange={(e) => { const v = e.target.value === '' ? null : Number(e.target.value); s.setMaxSSE(v); h()?.setMaxSSE(v); }} />
       </div>
       <Label className="text-xs" title="Show/hide the loaded asset without unloading it">

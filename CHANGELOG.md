@@ -5,6 +5,38 @@ Format loosely follows [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+### Changed — 2026-10-30 (level Trackball and Fly, faster Orbit damping)
+- **Trackball and Fly keep the camera level**, like Orbit: the roll each accumulates (Trackball
+  rotates `camera.up` with the drag, Fly composes pitch and yaw in the camera's frame) is removed
+  after every update, against the ellipsoid normal on the globe. Trackball stops 2° short of the
+  poles; Fly's Q E roll no longer applies.
+- **Orbit damping** 0.05 → 0.3: it settles six times faster.
+- **Mosaic children never drain upfront.** `&cache=hierarchy` on `/aggregate` now asks each child
+  for the new `/stream` **`cache=refine`**: open with nothing prefetched, then drain the whole
+  hierarchy in the background on the first tile request below the root, so only the datasets a user
+  zooms into are drained and nothing waits (Bastia: root in 186 ms, drain at ~270 `.hrc`/s, tile
+  and subtree requests under 100 ms meanwhile). `&cache=none` passes `&prefetch=N` through. The
+  top bar keeps none/hierarchy for mosaics (no `all`), and every cache pill and the prefetch input
+  now explain their upfront cost and what they buy on hover.
+- **Point colours as normalized `u16`** instead of `f32`: `/stream` and the offline converters write
+  `COLOR_0` as normalized unsigned short VEC4 (8 B a point instead of 16; a Bastia tile 28 → 20 B a
+  point), lossless for 8-bit sRGB sources. `&colors=u8|u16|f32` per `/stream` request,
+  `POINT_COLORS` server-wide; `u8` halves again but bands the darkest values (glTF colours are
+  linear). The vendored 3DTRjs Potree loader stores linear `Uint16` too (24 → 18 B a point).
+- **Max SSE shows what auto is** for the loaded tileset (`auto · 2` for points).
+
+### Fixed — 2026-10-31 (data stopped refining: the globe filled the shared tile cache)
+- Measured, a globe tile holds a 512² RGBA imagery texture (1.05 MB), its share of a 514² Float32
+  elevation grid (1.06 MB, shared by up to 16 tiles) and a 33×33 mesh (~70 KB). 3DTRjs's cache
+  charges every tile for the whole shared grid: 161 tiles counted 350 MB for 223 MB really held
+  (169 MB imagery, 43 MB for 41 grids, 11 MB meshes).
+- 3DTRjs shares one LRU tile cache (0.4 GiB) between every renderer, and a renderer whose cache is
+  full requests nothing more. The terrain and imagery globe weighs ~2.2 MB a tile: measured over
+  Bastia at 150 m, 161 globe tiles held 350 MB of the 429 and the dataset's 211 point tiles 66 MB.
+  A pitched view or a long browse filled the cache with terrain and the data stopped at whatever it
+  had, often the root. The globe renderers now have their own cache; the data renderer and its
+  native-leaf children keep the default one to themselves.
+
 ### Added — 2026-10-30 (baked mosaic bounds, `&cache=` on mosaics, tile-count table)
 - **Docs: "What a mosaic costs"** in the meta-tilesets guide: where a dataset's sphere comes from
   (baked, cached, or probed), what the client fetches and when, what a lazy `/stream` open reads,

@@ -148,7 +148,8 @@ function sphereToParent(sphere, transform, isRegion) {
 }
 
 /**
- * The child-root cache key, and the URL the probe fetches: the child URL without `cache=`. The root a
+ * The child-root cache key, and the URL the probe fetches: the child URL without `cache=` or
+ * `prefetch=`. The root a
  * mosaic places is the same whether the client later streams the hierarchy lazily or eagerly, and
  * probing with cache=hierarchy would make /stream drain a child's WHOLE hierarchy before answering
  * (measured cold on Iconem share links: 183 s for one cloud, over 300 s for the next) just to read
@@ -156,7 +157,7 @@ function sphereToParent(sphere, transform, isRegion) {
  */
 function infoKey(url) {
   if (!/\/stream\/tileset\.json\?/.test(url)) return url;
-  return url.replace(/&cache=[^&]*/g, '').replace(/\?cache=[^&]*&?/, '?');
+  return url.replace(/&(cache|prefetch)=[^&]*/g, '').replace(/\?(cache|prefetch)=[^&]*&?/, '?');
 }
 
 // One child's meta entry: fetch its tileset.json (cached per URL, persisted to disk), derive sphere + GE.
@@ -829,7 +830,7 @@ async function loadLocalSets() {
  * a .copc.laz) are not 3D Tiles, so they are wrapped through THIS server's /stream — absolute, since
  * the child URI is resolved by the client, not by us.
  */
-function childUrlFor(entry, origin, cache = 'none') {
+function childUrlFor(entry, origin, cache = 'none', prefetch = null) {
   const fmt = entry.format || '3dtiles';
   // `proxy`: a host that sends no CORS (Aerometrex). /proxy is tileset-aware — it rewrites every child
   // content.uri to come back through itself — so the whole tree, not just the root, becomes readable.
@@ -840,6 +841,7 @@ function childUrlFor(entry, origin, cache = 'none') {
   const place = Number.isFinite(entry.lon) && Number.isFinite(entry.lat)
     ? `&lon=${entry.lon}&lat=${entry.lat}` + (entry.alt != null ? `&alt=${entry.alt}` : '') + (entry.heading != null ? `&heading=${entry.heading}` : '') : '';
   return `${origin}/stream/tileset.json?format=${encodeURIComponent(fmt)}&url=${encodeURIComponent(entry.url)}&cache=${cache}`
+    + (prefetch != null ? `&prefetch=${prefetch}` : '')
     + (entry.crs ? `&crs=${encodeURIComponent(entry.crs)}` : '') + place;
 }
 
@@ -1242,12 +1244,17 @@ function selectChildren(req, u, sets) {
   if (setName && !sets[setName]) return { error: `unknown set "${setName}" — try one of: ${Object.keys(sets).join(', ')}` };
   const proto = (req.headers['x-forwarded-proto'] || 'http').split(',')[0].trim();
   const origin = `${proto}://${req.headers['x-forwarded-host'] || req.headers.host}`;
-  // &cache=none|hierarchy — what every /stream child of the mosaic is asked for. Default none (lazy):
-  // hierarchy makes each child's FIRST root request drain its whole hierarchy through the source
-  // (minutes per Iconem share link, cold) in exchange for instant subtrees afterwards; point tiles
-  // are built per request either way.
-  const cacheMode = u.searchParams.get('cache') === 'hierarchy' ? 'hierarchy' : 'none';
-  const childUrl = (e) => childUrlFor(e, origin, cacheMode);
+  // Every /stream child of a mosaic opens lazily: a child is never asked for cache=hierarchy, which
+  // drains the whole hierarchy before the root answers (183 s and over 300 s for two Iconem share
+  // links, cold) — for every dataset the client merely sees from afar.
+  //   &cache=none (default) [&prefetch=N]  children cache=none, prefetching N levels (/stream's default 1)
+  //   &cache=hierarchy                      children cache=refine: nothing prefetched at open; the first
+  //                                         tile request below a child's root drains that child's whole
+  //                                         hierarchy in the background. Only datasets someone zooms
+  //                                         into are drained, and no request waits on it.
+  const wantsHierarchy = /^(hierarchy|refine)$/.test(u.searchParams.get('cache') || '');
+  const prefetchQ = u.searchParams.has('prefetch') ? Math.trunc(Number(u.searchParams.get('prefetch')) || 0) : null;
+  const childUrl = (e) => (wantsHierarchy ? childUrlFor(e, origin, 'refine') : childUrlFor(e, origin, 'none', prefetchQ));
   // `bounds` ({ sphere, geometricError, native? }) baked into a manifest entry: the mosaic places the
   // dataset without fetching its root (scripts/aggregate-bake-bounds.mjs writes them).
   const boundsOf = (e) => (e.bounds && Array.isArray(e.bounds.sphere) && e.bounds.sphere.length === 4 ? e.bounds : null);

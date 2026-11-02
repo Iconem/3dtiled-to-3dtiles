@@ -237,7 +237,7 @@ function buildTilesetImplicit(ctx, urlParam) {
     maxLevel, subtreeLevels: SUBTREE_LEVELS, transform, urlParam });
 }
 
-async function serveTileGlb(ctx, key, curved = null) {
+async function serveTileGlb(ctx, key, curved = null, colorsEnc) {
   const node = ctx.nodeMap.get(key);
   if (!node || !node.pointCount) return null;
   const view = await Copc.loadPointDataView(ctx.getter, ctx.copc, node);
@@ -259,12 +259,14 @@ async function serveTileGlb(ctx, key, curved = null) {
   // No RGB: white (colors = null), which reads well under eye-dome lighting. Intensity as grey used to
   // stand in, but intensity is stored in 16 bits with small values (0–255 or 0–4095 for most
   // scanners), so divided by 65535 it rendered near-black.
-  return Buffer.from(await buildPointsGlb(pos, colors, n));   // core applies the (E,U,−N) Y-up swizzle
+  return Buffer.from(await buildPointsGlb(pos, colors, n, { colors: colorsEnc }));   // core applies the (E,U,−N) Y-up swizzle
 }
 
 // Pure builders the /stream dispatcher reuses. Tiles/subtrees are keyed "level-x-y-z" (explicit and
 // implicit both use that token, so one tile route serves both modes).
 export const copcTileRe = /^[0-9]+-[0-9]+-[0-9]+-[0-9]+$/;
+// The whole hierarchy into the cached ctx, for /stream's cache=refine (see potreeDrain).
+export async function copcDrain(url) { await (await getCtx(url)).drainAll(); }
 export async function copcTileset(url, opts = {}) {
   const ctx = await getCtx(url);
   // depth=0 (the aggregate placing a child): the root tile alone, from the header and root page
@@ -311,7 +313,7 @@ export function withCrsOverride(ts, ctx, crs, tag) {
 }
 export async function copcTile(url, key, opts = {}) {
   const ctx = await getCtx(url);
-  return serveTileGlb(ctx, key, curvedFor(ctx, opts.crs, opts.curved));   // &crs= / &curved= ride on the tile URL (stream-live tags them)
+  return serveTileGlb(ctx, key, curvedFor(ctx, opts.crs, opts.curved), opts.colors);   // &crs= / &curved= ride on the tile URL (stream-live tags them)
 }
 export async function copcSubtree(url, key) {
   const ctx = await getCtx(url);

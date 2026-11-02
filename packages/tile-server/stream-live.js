@@ -34,8 +34,8 @@
  * The tileset's relative content URIs (`tile/<key>.glb?url=…`) get `&format=<fmt>` appended so the
  * follow-up `/stream/tile/...` requests carry the format and dispatch to the same adapter.
  */
-import { copcTileset, copcTile, copcSubtree, copcTileRe } from './copc-live.js';
-import { potreeTileset, potreeTile, potreeSubtree, potreeTileRe } from './potree-live.js';
+import { copcTileset, copcTile, copcSubtree, copcTileRe, copcDrain } from './copc-live.js';
+import { potreeTileset, potreeTile, potreeSubtree, potreeTileRe, potreeDrain } from './potree-live.js';
 import { sogTileset, sogTile, sogTileRe } from './sog-live.js';
 import { lccTileset, lccTile, lccTileRe } from './lcc-live.js';
 import { radTileset, radTile, radTileRe, radSubtree } from './rad-live.js';
@@ -82,8 +82,8 @@ const COORD_RE = /^\d+-\d+-\d+-\d+$/;
 // streams too (decode each chunk's center column for the tree, full-encode tiles on demand).
 // COPC/Potree are octrees → support &tiling=implicit|explicit (default implicit) + on-the-fly subtrees.
 const ADAPTERS = {
-  copc:      { tileset: copcTileset,      tile: copcTile,      subtree: copcSubtree, tileRe: copcTileRe,      octree: true },
-  potree:    { tileset: potreeTileset,    tile: potreeTile,    subtree: potreeSubtree, tileRe: potreeTileRe, octree: true },
+  copc:      { tileset: copcTileset,      tile: copcTile,      subtree: copcSubtree, tileRe: copcTileRe,      octree: true, drain: copcDrain },
+  potree:    { tileset: potreeTileset,    tile: potreeTile,    subtree: potreeSubtree, tileRe: potreeTileRe, octree: true, drain: potreeDrain },
   sog:       { tileset: sogTileset,       tile: sogTile,       tileRe: sogTileRe },
   lcc:       { tileset: lccTileset,       tile: lccTile,       tileRe: lccTileRe },
   rad:       { tileset: radTileset,       tile: radTile,       tileRe: radTileRe },
@@ -92,6 +92,15 @@ const ADAPTERS = {
   geosplats: { tileset: geosplatsTileset, tile: geosplatsTile, tileRe: geosplatsTileRe },
 };
 export const streamableFormats = Object.keys(ADAPTERS);
+
+// cache=refine: open lazily with nothing prefetched, then drain the whole hierarchy in the background
+// as soon as a client asks for a tile below the root, i.e. once it refines into the dataset. What a
+// mosaic's `&cache=hierarchy` asks of its children: only the datasets someone zooms into pay for a
+// drain, and nobody waits on it (cache=hierarchy blocks the root answer for the whole drain).
+// Source URL → its adapter's drain, until the first refining tile request starts it.
+const drainOnRefine = new Map();
+// depth of a tile token: "level-x-y-z" (implicit, COPC keys) or a Potree 1.x name ("r", "r04", …)
+const tokenLevel = (tok) => (/^r[0-7]*$/.test(tok) ? tok.length - 1 : Number(tok.split('-')[0]) || 0);
 
 // Append &format=<fmt> to every relative content/subtree URI (so the follow-up /stream/{tile,subtrees}
 // requests carry the format and dispatch to the same adapter). Handles both the explicit nested-tree
@@ -170,10 +179,12 @@ export async function handleStream(req, res, u) {
     // Unified live knobs (Axis B): cache=none|hierarchy (default none) + prefetch=<N levels>.
     // octree adapters also honor &tiling (default implicit). Non-octree (sog/lcc) ignore the lot.
     const cache = u.searchParams.get('cache');
-    const hierarchy = cache === 'hierarchy' ? 'eager' : cache === 'none' ? 'lazy' : null;
+    const hierarchy = cache === 'hierarchy' ? 'eager' : cache === 'none' || cache === 'refine' ? 'lazy' : null;
     // prefetch: 0 = warm nothing · N≥1 = warm N hierarchy levels in the background · -1 = warm ALL
     // (lazy cold start + full background drain). Applies to cache=none only. Default 1.
-    const prefetch = u.searchParams.has('prefetch') ? Math.trunc(Number(u.searchParams.get('prefetch')) || 0) : undefined;
+    const prefetch = cache === 'refine' ? 0
+      : u.searchParams.has('prefetch') ? Math.trunc(Number(u.searchParams.get('prefetch')) || 0) : undefined;
+    if (cache === 'refine' && adapter.drain && !drainOnRefine.has(url) && !drainOnRefine.has(`done:${url}`)) drainOnRefine.set(url, adapter.drain);
     const lazy = hierarchy !== 'eager';   // cache= absent or none → lazy (the default)
     // centroids: tiled-splat formats (sog/lcc/rad) emit glTF POINTS of splat centres instead of full
     // gaussians — a cheap preview. Affects the tileset (drops the KHR_gaussian_splatting requirement)
@@ -206,7 +217,9 @@ export async function handleStream(req, res, u) {
     // convention stays normalized at the tileset level. Skipped when the source is already
     // georeferenced (its own placement wins) and for geosplats (own georef params: frame/yaw/alt).
     if (fmt !== 'geosplats') applyPlacement(ts.root, u.searchParams, `stream:${fmt}`);
-    tagContentUris(ts.root, `&format=${fmt}` + (centroids ? '&centroids=1' : '') + (crs ? `&crs=${encodeURIComponent(crs)}` : '') + (curved ? `&curved=${curved}` : '')
+    // colors: COLOR_0 storage of point tiles (u16 default, u8, f32; core/points-glb.js), carried to the tiles
+    const colorsQ = /^(u16|u8|f32)$/.test(u.searchParams.get('colors') || '') ? `&colors=${u.searchParams.get('colors')}` : '';
+    tagContentUris(ts.root, `&format=${fmt}` + colorsQ + (centroids ? '&centroids=1' : '') + (crs ? `&crs=${encodeURIComponent(crs)}` : '') + (curved ? `&curved=${curved}` : '')
       + (transform ? `&transform=${transform}` + (transform === 'decompress' && tex === 'png' ? '&tex=png' : '') : ''));
     res.writeHead(200, { 'Content-Type': 'application/json', ...CORS });
     res.end(JSON.stringify(ts));
@@ -214,8 +227,15 @@ export async function handleStream(req, res, u) {
   }
   const m = u.pathname.match(/^\/stream\/tile\/(.+)\.glb$/);
   if (m && adapter.tileRe.test(m[1])) {
+    const drain = drainOnRefine.get(url);
+    if (drain && tokenLevel(m[1]) >= 1) {
+      drainOnRefine.delete(url);
+      drainOnRefine.set(`done:${url}`, null);
+      drain(url).catch((e) => { drainOnRefine.delete(`done:${url}`); console.warn(`[stream] cache=refine drain failed for ${url.split('?')[0].slice(-80)}: ${e.message}`); });
+    }
     const centroids = u.searchParams.get('centroids') === '1' || u.searchParams.get('centroids') === 'true';
-    let glb = await adapter.tile(url, m[1], { centroids, crs: u.searchParams.get('crs') || undefined, curved: curvedParam(u.searchParams.get('curved')) });
+    let glb = await adapter.tile(url, m[1], { centroids, crs: u.searchParams.get('crs') || undefined, curved: curvedParam(u.searchParams.get('curved')),
+      colors: u.searchParams.get('colors') || undefined });
     if (!glb) { res.writeHead(404, CORS); res.end('no such node'); return true; }
     const transform = TRANSFORMS.has(u.searchParams.get('transform')) ? u.searchParams.get('transform') : null;
     if (transform) glb = await applyTransform(glb, transform, u.searchParams.get('tex'));
