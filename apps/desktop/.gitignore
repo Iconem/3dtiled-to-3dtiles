@@ -3,6 +3,7 @@ node_modules/
 build/
 dist/
 artifacts/
+bundle/
 # scratch dir the Cottontail runtime creates next to the project on dev/build
 .cottontail-tmp/
 *.tsbuildinfo

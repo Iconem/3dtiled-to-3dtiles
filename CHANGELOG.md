@@ -5,6 +5,11 @@ Format loosely follows [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+### Added — 2026-11-02 (desktop app release)
+- **Windows desktop app on GitHub Releases** (`desktop-latest`), built by the `Desktop app (Windows)`
+  workflow. It now carries its own Node and tile-server, so it no longer needs this repo or a system Node;
+  the workflow installs it on the runner with the system Node hidden before publishing.
+
 ### Changed — 2026-11-02 (licence)
 - **MIT licence** for the repository.
 

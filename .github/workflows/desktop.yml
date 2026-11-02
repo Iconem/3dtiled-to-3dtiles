@@ -1,0 +1,91 @@
+name: Desktop app (Windows)
+
+# Builds the Electrobun desktop companion and publishes it on one rolling GitHub Release, `desktop-latest`,
+# replaced on every run. On demand, or by pushing a `desktop-v*` tag. Unsigned. See apps/desktop/README.md.
+on:
+  workflow_dispatch:
+  push:
+    tags: ['desktop-v*']
+
+permissions:
+  contents: write
+
+jobs:
+  windows:
+    runs-on: windows-latest
+    timeout-minutes: 45
+    # PowerShell throughout: Hutch shells out to `tar`, and Git Bash's reads a C:\ path as a remote host.
+    defaults:
+      run:
+        shell: pwsh
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Install Hutch
+        run: |
+          & ([scriptblock]::Create((irm https://hutch.blackboard.sh/hutch/install.ps1)))
+          "$env:USERPROFILE\.hutch\bin" | Out-File -FilePath $env:GITHUB_PATH -Append
+
+      - name: Bundle Node and the tile-server
+        run: node apps/desktop/scripts/prepare-bundle.mjs
+
+      - name: Build
+        working-directory: apps/desktop
+        run: |
+          hutch --version
+          hutch install
+          $env:DESKTOP_BUNDLE_MAP = "$PWD\bundle\copy-map.json"
+          hutch electrobun build --env=stable
+          Get-ChildItem artifacts | Select-Object Name, Length
+
+      # What a user does: unzip, install, launch. The system Node is hidden, so a pass means the bundled one ran.
+      - name: Smoke test the installed app
+        working-directory: apps/desktop
+        run: |
+          $dir = Join-Path $env:RUNNER_TEMP 'setup'
+          Expand-Archive artifacts/win-x64-3DTiled-Setup.zip $dir
+          $installed = "$env:LOCALAPPDATA\com.iconem.3dtiled.desktop\stable"
+          $path = $env:PATH
+          $env:PATH = 'C:\Windows\System32;C:\Windows'
+          # The installer stays open on its finished screen, so wait for its files rather than its exit.
+          $setup = Start-Process "$dir\3D Tiled-Setup.exe" -WorkingDirectory $dir -PassThru
+          $deadline = (Get-Date).AddMinutes(8)
+          while (-not (Test-Path "$installed\uninstall.exe") -and (Get-Date) -lt $deadline) { Start-Sleep 3 }
+          if (-not (Test-Path "$installed\uninstall.exe")) { throw 'the installer did not finish' }
+          Stop-Process $setup -Force -ErrorAction SilentlyContinue
+          $bin = "$installed\app\bin"
+          $app = Start-Process "$bin\launcher.exe" -WorkingDirectory $bin -PassThru
+          $env:PATH = $path
+          $title = $null
+          $deadline = (Get-Date).AddMinutes(4)
+          while (-not $title -and (Get-Date) -lt $deadline) {
+            try { $title = (Invoke-RestMethod http://127.0.0.1:3001/openapi.json -TimeoutSec 3).info.title } catch { Start-Sleep 3 }
+          }
+          if (-not $title) { throw 'the app did not start its tile-server' }
+          $owner = Get-CimInstance Win32_Process -Filter "Name='node.exe'" | Where-Object { $_.CommandLine -match 'tile-server' }
+          if ($owner.ExecutablePath -notmatch 'com\.iconem\.3dtiled\.desktop') { throw "tile-server runs from $($owner.ExecutablePath)" }
+          $url = [uri]::EscapeDataString('https://s3.amazonaws.com/hobu-lidar/autzen-classified.copc.laz')
+          $tileset = Invoke-RestMethod "http://127.0.0.1:3001/stream/tileset.json?format=copc&url=$url&cache=none" -TimeoutSec 120
+          "$title, COPC tileset $($tileset.asset.version), from $($owner.ExecutablePath)"
+          Stop-Process $app -Force -ErrorAction SilentlyContinue
+
+      - name: Publish the rolling release
+        working-directory: apps/desktop
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $sha = (git rev-parse --short HEAD)
+          $date = (Get-Date).ToUniversalTime().ToString('yyyy-MM-dd')
+          $asset = "3DTiled-win-x64-Setup-$date.zip"
+          Copy-Item artifacts/win-x64-3DTiled-Setup.zip $asset
+          $notes = "Windows x64 build of $sha, $date. Unzip the whole archive, then run ``3D Tiled-Setup.exe`` from the unzipped folder: it needs the ``.installer`` folder beside it. Unsigned, so SmartScreen warns on first run (More info, Run anyway). Includes Node and the tile-server; nothing else to install."
+          gh release view desktop-latest *> $null
+          if ($LASTEXITCODE -ne 0) { gh release create desktop-latest --title "Desktop app ($date)" --notes $notes --target $env:GITHUB_SHA --latest=false }
+          $old = gh release view desktop-latest --json assets -q '.assets[].name'
+          foreach ($name in $old) { gh release delete-asset desktop-latest $name --yes }
+          gh release upload desktop-latest $asset
+          gh release edit desktop-latest --title "Desktop app ($date)" --notes $notes

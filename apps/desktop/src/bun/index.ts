@@ -21,7 +21,7 @@
  * If a 3dtiled server is already listening on a candidate port (e.g. you have `pnpm dev` running),
  * we ADOPT it instead of starting a second copy, and leave it running on quit.
  */
-import { BrowserWindow, Utils, defineElectrobunRPC } from "electrobun/main";
+import Electrobun, { BrowserWindow, Utils, defineElectrobunRPC } from "electrobun/main";
 import type { DesktopRPC } from "../shared/rpc-schema";
 import { createCliRunner, defaultSpawn } from "./cli-runner";
 
@@ -51,32 +51,50 @@ async function spawnDetached(cmd: string[], cwd: string, extraEnv: Record<string
 	const anyGlobal = globalThis as any;
 	const env = { ...(anyGlobal.process?.env ?? {}), ...extraEnv };
 	if (anyGlobal.Bun?.spawn) {
-		const p = anyGlobal.Bun.spawn(cmd, { cwd, env, stdout: "inherit", stderr: "inherit" });
+		const p = anyGlobal.Bun.spawn(cmd, { cwd, env, stdout: "inherit", stderr: "inherit", windowsHide: true });
 		return { kill: () => { try { p.kill(); } catch { /* already gone */ } } };
 	}
 	const { spawn } = await import("node:child_process");
-	const p = spawn(cmd[0], cmd.slice(1), { cwd, env, stdio: "inherit" });
+	const p = spawn(cmd[0], cmd.slice(1), { cwd, env, stdio: "inherit", windowsHide: true });
 	return { kill: () => { try { p.kill(); } catch { /* already gone */ } } };
 }
 
 /**
- * Locate the repo root by walking up from cwd looking for the server we intend to run.
+ * Locate the server by walking up from cwd and from the executable, looking for the file we intend to run.
  *
  * Guessing a fixed depth does not work: `hutch electrobun dev` runs with cwd = apps/desktop, while
  * the built app runs from build/<target>/3DTiled-dev/bin — six levels down and a completely
  * different shape. Probing for the marker file handles both, and any future layout change, without
  * a second code path.
+ *
+ * A distributable carries its own copy and Node (scripts/prepare-bundle.mjs) under Resources/app, which
+ * wins over a repo further up, so that what runs is what ships.
  */
-async function repoRoot(): Promise<string> {
+async function locateServer(): Promise<{ root: string; node: string; bundled: boolean }> {
 	const { existsSync } = await import("node:fs");
-	let dir = (globalThis as any).process?.cwd?.() ?? ".";
-	for (let i = 0; i < 10; i++) {
-		if (existsSync(`${dir}/packages/tile-server/server.js`)) return dir;
-		const parent = dir.replace(/[\\/][^\\/]+[\\/]*$/, "");
-		if (!parent || parent === dir) break;
-		dir = parent;
+	const proc = (globalThis as any).process;
+	const starts: string[] = [proc?.cwd?.() ?? ".", ...(proc?.execPath ? [proc.execPath] : [])];
+	const up = (dir: string) => dir.replace(/[\\/][^\\/]+[\\/]*$/, "");
+	const walk = (found: (dir: string) => string | null) => {
+		for (const start of starts) {
+			let dir = start;
+			for (let i = 0; i < 10; i++) {
+				const hit = found(dir);
+				if (hit) return hit;
+				const parent = up(dir);
+				if (!parent || parent === dir) break;
+				dir = parent;
+			}
+		}
+		return null;
+	};
+	const bundled = walk((d) => (existsSync(`${d}/Resources/app/3dtiled/packages/tile-server/server.js`) ? `${d}/Resources/app/3dtiled` : null));
+	if (bundled) {
+		const exe = `${bundled}/runtime/node${proc?.platform === "win32" ? ".exe" : ""}`;
+		return { root: bundled, node: existsSync(exe) ? exe : "node", bundled: true };
 	}
-	return (globalThis as any).process?.cwd?.() ?? ".";
+	const repo = walk((d) => (existsSync(`${d}/packages/tile-server/server.js`) ? d : null));
+	return { root: repo ?? proc?.cwd?.() ?? ".", node: "node", bundled: false };
 }
 
 /** Is a 3dtiled tile-server answering here? `/openapi.json` is the cheapest unambiguous probe. */
@@ -124,22 +142,28 @@ async function ensureServer(opts: {
 	return null;
 }
 
-const root = await repoRoot();
+const { root, node, bundled } = await locateServer();
+
+// A distributable's folder is replaced on every update: what the user adds or caches lives per user.
+const userData = bundled && (globalThis as any).process?.env?.LOCALAPPDATA;
+const userDirs: Record<string, string> = userData
+	? { AGGREGATE_CACHE_DIR: `${userData}/3D Tiled/aggregate-cache`, AGGREGATE_SETS_DIR: `${userData}/3D Tiled/aggregate-sets` }
+	: {};
 
 const tilePort = await ensureServer({
 	ports: TILE_PORTS,
-	cmd: (p) => ["node", "packages/tile-server/server.js", "--port", String(p)],
+	cmd: (p) => [node, "packages/tile-server/server.js", "--port", String(p)],
 	cwd: root,
 	ready: probeTileServer,
 	timeoutMs: 45_000,
 	// "Export to folder" writes to this machine's disk, so the server only enables it when asked; the
 	// app is exactly the place that asks. (An ADOPTED dev server keeps whatever it was started with.)
-	env: { TILED_ALLOW_EXPORT: "1" },
+	env: { TILED_ALLOW_EXPORT: "1", ...userDirs },
 });
 
 const staticPort = await ensureServer({
 	ports: STATIC_PORTS,
-	cmd: (p) => ["node", "scripts/static-server.mjs", String(p), "scripts"],
+	cmd: (p) => [node, "scripts/static-server.mjs", String(p), "scripts"],
 	cwd: root,
 	ready: async (p) => {
 		try {
@@ -181,7 +205,7 @@ const WIN = { x: 100, y: 40, width: 1120, height: 940, maxWidth: 1600, maxHeight
  * child of THIS process (not of the tile-server), so a crash or memory blow-up in a large conversion
  * cannot take the middleware down. Only the two allow-listed scripts can be run — see cli-runner.ts.
  */
-const cli = createCliRunner({ spawn: await defaultSpawn(), cwd: root });
+const cli = createCliRunner({ spawn: await defaultSpawn(), cwd: root, node });
 children.push({ kill: () => cli.killAll() });
 
 const rpc = defineElectrobunRPC<DesktopRPC, "bun">("bun", {
@@ -233,10 +257,13 @@ const mainWindow = new BrowserWindow({
 });
 
 console.log(`[3dtiled-desktop] tile-server=${tilePort ?? "FAILED"} static=${staticPort ?? "FAILED"} `
-	+ `viewer=${viewerUrl} docs=${docsUrl} root=${root}`);
+	+ `viewer=${viewerUrl} docs=${docsUrl} root=${root} node=${node}`);
 
+const stopChildren = () => children.forEach((c) => c.kill());
 for (const sig of ["SIGINT", "SIGTERM", "exit"]) {
-	try { (globalThis as any).process?.on?.(sig, () => children.forEach((c) => c.kill())); } catch { /* no process object */ }
+	try { (globalThis as any).process?.on?.(sig, stopChildren); } catch { /* no process object */ }
 }
+// Closing the window quits without a process "exit" event, which left the servers running.
+Electrobun.events.on("before-quit", stopChildren);
 
 export { mainWindow };

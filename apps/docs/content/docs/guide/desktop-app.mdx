@@ -11,7 +11,20 @@ Nothing is uploaded. The conversion happens on your machine, streamed on demand 
 cached to the local disk cache (`cache=full`). It is [`3dtiled serve`](/docs/guide/cli-usage) with a
 window, plus the globe-placement params and a stock-CesiumJS preview.
 
-## Running it
+## Installing it
+
+Download the Windows build from the [`desktop-latest` release](https://github.com/jo-chemla/3dtiled-to-3dtiles/releases/tag/desktop-latest)
+(about 155 MB; Node and the tile-server are included). **Unzip the whole archive**, then run
+`3D Tiled-Setup.exe` from the unzipped folder: it needs the `.installer` folder beside it, and answers
+"The installer package is incomplete" without it. The build is unsigned, so SmartScreen warns on first
+run. It installs per user under `%LOCALAPPDATA%\com.iconem.3dtiled.desktop`, and adds Desktop and Start menu
+shortcuts. Your own sets and the mosaic cache live in `%LOCALAPPDATA%\3D Tiled`, so updates keep them.
+
+The [`Desktop app (Windows)` workflow](https://github.com/jo-chemla/3dtiled-to-3dtiles/actions/workflows/desktop.yml)
+builds it on demand or on a `desktop-v*` tag, installs it on the runner with the system Node hidden, checks
+its tile-server serves a tileset, and replaces the release.
+
+## Running it from the repo
 
 ```powershell
 cd apps/desktop
@@ -26,9 +39,18 @@ reads a `C:\…` path as a *remote host* spec — the build fails with
 `tar: Cannot connect to C: resolve failed`. Windows' own `tar.exe` handles it fine.
 </Callout>
 
-A Windows `build --env=stable` produces `3D Tiled-Setup.exe` (a ~1.3 MB installer stub), the app
-tree under `3DTiled/`, and in `artifacts/`: `win-x64-3DTiled-Setup.zip` (~20 MB), the update bundle
-`stable-win-x64-3DTiled.tar.zst`, and `stable-win-x64-update.json`.
+A Windows `build --env=stable` produces in `artifacts/`: `win-x64-3DTiled-Setup.zip` (the distributable),
+the update bundle `stable-win-x64-3DTiled.tar.zst`, and `stable-win-x64-update.json`. Plain it is ~20 MB, and
+needs this repo and a system Node at run time. For one that works anywhere (~155 MB), bundle them first:
+
+```powershell
+node scripts/prepare-bundle.mjs                                # bundle/: production tile-server + Node
+$env:DESKTOP_BUNDLE_MAP = "$PWD\bundle\copy-map.json"
+hutch electrobun build --env=stable
+```
+
+Test the zip, not `build/stable-win-x64/`: `3D Tiled-Setup.exe` there has no `.installer` folder, and
+`3DTiled/bin/launcher.exe` is only the installer stub, so both fail with an invalid installer error.
 
 ### Why the Electrobun version is pinned to a beta
 

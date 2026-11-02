@@ -1,3 +1,4 @@
+import { readFileSync } from "node:fs";
 import type { ElectrobunConfig } from "electrobun";
 
 export default {
@@ -19,6 +20,8 @@ export default {
 		copy: {
 			"src/mainview/index.html": "views/mainview/index.html",
 			"src/mainview/index.css": "views/mainview/index.css",
+			// A distributable carries the tile-server and Node, from scripts/prepare-bundle.mjs.
+			...(process.env.DESKTOP_BUNDLE_MAP ? JSON.parse(readFileSync(process.env.DESKTOP_BUNDLE_MAP, "utf8")) : {}),
 		},
 		// Distributable artifacts (installers, .app/.dmg, update archives) land here. Gitignored
 		// alongside build/ — they are large binaries rebuilt from source on demand.
