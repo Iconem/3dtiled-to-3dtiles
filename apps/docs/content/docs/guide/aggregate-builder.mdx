@@ -26,7 +26,7 @@ library opens on exactly those datasets.
 `/aggregate/demo.json` (each with its count; `660/692` once loaded means 32 entries could not be
 placed), the imported selection, and **Added by URL**. Each set is fetched once from
 `/aggregate/index.json?set=<name>`, and all sets load concurrently. Rows are merged and
-**de-duplicated by id** (the hash of the source URL), so `world`, which includes `angkor` and
+**de-duplicated by id** (the hash of the source URL), so `open`, which includes `flai` and
 `aerometrex`, adds no duplicates when those sets are also ticked. A set that fails to load shows a
 small error row with **retry** and **remove**. The other sets still list. On a first visit the
 library opens on `world` (or the first set if there is no `world`). A remembered set that the server
@@ -163,7 +163,7 @@ builder or draft tileset, **keeping its hierarchy**:
   adopts that cell's children. The server already path-compresses its cells; this also covers builder
   files and plain tilesets. The imported root becomes the document root.
 
-For example the local Iconem set `/aggregate/tileset.json?set=angkor&nest=geodetic` imports as 23
+For example a local Iconem manifest of the 23 Angkor sites, with `&nest=geodetic`, imports as 23
 datasets in 17 groups (18 with the root, eight levels deep).
 
 The URL dialog has two options (the Import menu also has **Open tileset file, flattened…**):

@@ -828,11 +828,11 @@
               "type": "string",
               "enum": [
                 "opendata",
-                "angkor",
+                "iconem-open",
                 "world"
               ]
             },
-            "description": "Expand a curated demo set of real, public, key-less tilesets: \"opendata\" = the ten open datasets from 3D Tiles' own RESOURCES.md (four continents, all three boundingVolume kinds); \"angkor\" = Iconem's Angkor campaign as 23 individual site tilesets; \"world\" = both (33). Composes with ?url=. GET /aggregate/demo.json lists their contents."
+            "description": "Expand a curated demo set of real, public, key-less tilesets: \"opendata\" = the ten open datasets from 3D Tiles' own RESOURCES.md (four continents, all three boundingVolume kinds); \"iconem-open\" = a local Iconem set: the Angkor campaign as 23 individual tilesets, plus Geghard; \"world\" = both (33). Composes with ?url=. GET /aggregate/demo.json lists their contents."
           },
           {
             "name": "urls",

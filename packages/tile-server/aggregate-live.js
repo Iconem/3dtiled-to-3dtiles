@@ -748,9 +748,9 @@ const OPEN_DATA = [
   { id: 'minato', provider: "Project PLATEAU", country: 'JPN', attribution: "© MLIT Japan, Project PLATEAU", label: 'Tokyo Minato-ku LOD4 — PLATEAU (JP)', url: 'https://assets.cms.plateau.reearth.io/assets/99/e2a800-7d75-4d11-94e1-bef604c39d01/13103_minato-ku_pref_2023_citygml_1_op_bldg_3dtiles_13103_minato-ku_lod4/tileset.json' },
 ];
 
-// Iconem's own demo sets (`angkor`: the 23 Angkor sites as individual tilesets; `iconem-open`: those
-// plus Geghard) are NOT here: their URLs are Iconem share links, which stay out of the repository.
-// They live as machine-local manifests in .local/aggregate-sets/ (angkor.json, iconem-open.json),
+// Iconem's own demo sets (`iconem-open`: the 23 Angkor sites as individual tilesets
+// plus Geghard; `iconem-public`: a selection of them) are NOT here: their URLs are Iconem share links, which stay out of the repository.
+// They live as machine-local manifests in .local/aggregate-sets/ (iconem-open.json, iconem-public.json),
 // same shape as the iconem.json that scripts/iconem-share-links.mjs writes, and appear only where
 // those files exist. Everything committed below is open or evaluation data from outside Iconem.
 

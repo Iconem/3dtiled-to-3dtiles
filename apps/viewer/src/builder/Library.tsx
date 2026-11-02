@@ -126,7 +126,7 @@ export default function Library({ importUrl }: { importUrl: string | null }) {
   }, [sources, formats, providers, setFilter, tag, groupBy, sourcesOpen]);
 
   // Once the server's sets are known: drop remembered sets it no longer has (never load a missing
-  // `angkor`), and when no set is left, default to `world`, else the first set.
+  // `iconem-open`), and when no set is left, default to `world`, else the first set.
   useEffect(() => {
     if (setsState.status !== 'ok') return;
     setSources((cur) => {
