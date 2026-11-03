@@ -56,7 +56,7 @@ const CACHE_DIR = process.env.AGGREGATE_CACHE_DIR || fileURLToPath(new URL('../.
  */
 function ttlCache(builder, { persist = null, normalize = null } = {}) {
   const cache = new Map();                       // key → { at, ttl, value | error, fromDisk? }
-  const file = persist ? CACHE_DIR + persist : null;
+  const file = persist ? path.join(CACHE_DIR, persist) : null;
   let loaded = !persist, saveTimer = null;
   const load = async () => {
     if (loaded) return; loaded = true;

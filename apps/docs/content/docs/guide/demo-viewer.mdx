@@ -1,0 +1,167 @@
+---
+title: "Demo viewer: renderers, options and how tiles load"
+description: "What the demo viewer's two renderers do, what each sidebar option means, how a mosaic's hierarchy is built, and what is fetched from the root down to the tiles as screen-space error is reached."
+---
+
+<InlineTOC items={toc} />
+
+The demo viewer ([demo.3dtiled.iconem.com](https://demo.3dtiled.iconem.com)) loads any 3D Tiles URL, or any
+source this repository converts live, in one of two renderers. Pick a format pill and a dataset in the top
+bar, or paste a URL. This page is the user's guide. For running it from source and the measurements behind
+it, see [Viewer: development notes](/docs/guide/viewer).
+
+## Two renderers
+
+The **Renderer** pill switches between them. The loaded tileset carries over to the other one.
+
+| | CesiumJS | 3DTilesRendererJS (3DTRjs) |
+|---|---|---|
+| What it is | a complete globe engine | a three.js renderer for 3D Tiles, with a globe built from tiles |
+| Good for | checking what stock clients such as Cesium for Unreal will get | point-cloud quality, eye-dome lighting, x-ray, native Potree |
+| Controls | Cesium's own | **Auto**, Globe, Orbit, Environment, Trackball, Fly |
+| Point shape | squares | round, square or sphere |
+| Potree in a mosaic | through `/stream` | Potree's own reader (*Native Potree leaves*), or `/stream` |
+| A dataset far away in a mosaic | decided by screen-space error | also held back until its bounds span 24 px |
+
+Both read the same tileset. Placement and up-axis live in the tileset (a root `transform`), not in either
+renderer, so the two agree, and any other 3D Tiles client gets the same result.
+
+To open a tileset directly, use `?renderer=3dtrjs` or `?renderer=cesium` with `&load=<encoded tileset URL>`.
+
+## Sidebar options
+
+### Basemap & Terrain
+
+- **Imagery**: the image draped on the globe. *None* draws the terrain as an unlit black silhouette in 3DTRjs.
+- **Terrain**: the checkbox removes the globe, for data under the ground or a view from below. The select
+  chooses the source, and matters for height:
+
+  | Source | Heights are from | Depth |
+  |---|---|---|
+  | WGS84 ellipsoid | the ellipsoid, flat | none |
+  | Mapterhorn | sea level in 3DTRjs, the ellipsoid in Cesium | up to z17 where a regional DEM exists |
+  | Re:Earth (Mapterhorn geoid) | the ellipsoid | z14 |
+  | AWS Terrain Tiles | sea level | z15 |
+  | Google 3D, Cesium World Terrain | the ellipsoid | need a key |
+
+  3D Tiles sit on the ellipsoid, so on a sea-level terrain correctly georeferenced data floats by the local
+  geoid height, about 50 m in much of Europe. Choose Re:Earth, or snap.
+
+### Camera & Controls
+
+**Controls mode** (3DTRjs):
+
+| Mode | Behaviour |
+|---|---|
+| **Auto** | Globe from far away, Orbit close up |
+| Globe | the whole Earth: drag the ground under the cursor |
+| Orbit | rotate around a target, level with the horizon |
+| Environment | move through a scene, pivoting on what is under the cursor |
+| Trackball | rotate about a target at trackball speed, kept level |
+| Fly | W A S D to move, R F up and down, arrows to turn, drag to look |
+
+**When Auto switches.** To Orbit below 3,000 m above the ground, back to Globe above 6,000 m. Between the two
+it stays as it is, so a zoom hovering around one height does not flip back and forth. A switch waits until you
+release the pointer, the wheel has been still for 180 ms and no flight is running. A tileset that is not on
+the globe always uses Orbit.
+
+Heights are from the ground on Mapterhorn and AWS, from the ellipsoid on the other terrains. **FOV** and
+**Orthographic** set the camera.
+
+With every mode, double-click pivots on the picked point and moves halfway to it, and middle-drag dollies
+toward the point under the cursor.
+
+### Tileset & LOD
+
+- **Max SSE (px)**: the [screen-space error target](#from-the-root-to-the-tiles). Lower is sharper and loads
+  more. Empty uses the format's default, shown in the field: 2 for points, 16 for meshes, 0.5 for splats.
+- **Show asset**: hides the data without unloading it.
+- **Debug**: *Cells only* or *Cells + dataset roots* draw the tileset's own tree, such as a mosaic's quadtree.
+  *All tiles* draws every tile currently held, coloured by depth.
+- **Native Potree leaves** (3DTRjs, mosaics): reads each Potree dataset with Potree's own reader. It switches in
+  place, without loading anything again. Potree 1.x `.bin` and 2.0 DEFAULT only; the rest stay on `/stream`.
+
+### Material & Points
+
+- **Material** (3DTRjs): *Default*, *X-ray* with an opacity slider, or *Wireframe*.
+- **Point colour** (3DTRjs): *RGB*, *One colour*, or *Height* with a range and a *Fit* button.
+- **Point size**, **Adaptive point size** (size from the tile's geometric error, so coarse tiles close their
+  gaps), **Point shape** (3DTRjs) and **Eye-dome lighting** with its strength, for any tileset holding points.
+- **Shadeless** and **Brightness** (Cesium): unlit rendering, for photogrammetry with baked light.
+
+### Crop & Extract
+
+Draws a box and extracts what is inside it to a file. The tooltip on each control gives its format.
+
+### Local Frame
+
+Moves the tileset as a whole.
+
+- **Auto (follow the terrain)** keeps it on the ground as the terrain changes or refines. On a mosaic it turns
+  on the per-dataset snap ([below](#snap-to-terrain-in-a-mosaic)).
+- **Snap to ground** does it once, and **Undo** restores the previous offset.
+- **Z offset** and **Clearance above ground** (10 m by default) set the height by hand.
+- The **gizmo** drags the tileset (W, E and R switch its mode), with its numbers below.
+
+These last ones apply in this viewer only. To attach a dataset to the globe for every client, put the placement
+in its URL: [`&lon=&lat=`](/docs/guide/cli-usage).
+
+## How a mosaic is built
+
+The *Aggregate* pills load `/aggregate`, one 3D Tiles URL over many datasets. The server reads each dataset's
+root bounding sphere, and nothing else:
+
+1. **Select** the datasets: a named set or a list of URLs, filtered by format, name or date.
+2. **Place** each dataset by its bounding sphere, baked into the manifest or read from its root `tileset.json`.
+3. **Group** them into a quadtree. Each dataset goes in the deepest cell at least 4× its radius, and only cells
+   that branch become tiles. Debug's *Cells* mode draws this tree.
+4. **Set errors**: a dataset's reference tile takes its radius as geometric error, and a group takes 2× its
+   largest child's, so errors decrease going down.
+5. **Emit** an explicit tileset with `refine: "ADD"` everywhere, whose leaves point at each dataset's own
+   `tileset.json`.
+
+The tree takes milliseconds. The full account is in [Meta-tilesets](/docs/guide/meta-tilesets).
+
+### Snap to terrain in a mosaic
+
+A snap moves each dataset separately, and is computed on the server, so the offset is in the tileset that every
+client receives. It reads each dataset's top geometry against the terrain, which takes about 25 s for 660
+datasets the first time.
+
+The viewer does not wait for it. The unsnapped mosaic appears at once, its dots grey at their own height, then
+each dot settles as its offset arrives, with a count next to *snap*. When all have arrived the tileset reloads
+snapped, which can show as a small jump. The offsets are kept on the server's disk, so the next visitor gets
+the snapped mosaic directly.
+
+## From the root to the tiles
+
+A 3D Tiles client decides what to load from one number. Each tile declares a **geometric error**, in metres:
+how wrong the picture is if this tile is drawn and its children are not. On screen, that error is
+
+```
+SSE (px) = geometricError × screenHeight / (2 × distance × tan(fovY / 2))
+```
+
+**When a tile's SSE is above the target (*Max SSE*), the client needs its children.** Approaching a tile raises
+its SSE, so more of the tree opens; below the target, the descent stops. Tiles out of view are skipped whatever
+their error.
+
+Opening a mosaic from orbit and zooming onto one Potree site goes like this:
+
+| Camera | Reached in the tree | Request |
+|---|---|---|
+| Page load | the mosaic | `aggregate/tileset.json`, with every group and reference tile inline, and `index.json` for the dots and search |
+| Far away | nothing further | a group's error is too small on screen, so no dataset is opened. The dots stand for the data |
+| Approaching | a dataset's reference tile passes the target | that dataset's `/stream/tileset.json` |
+| Closer | its root | the root `.subtree`, availability for 3 levels, and the root's points |
+| Closer still | level by level | a point tile per visible node, then a new `.subtree` every 3 levels |
+| Moving away | | tiles no longer needed stay in a memory cache, then are dropped when it fills |
+
+Two refinement rules decide what is drawn along the way:
+
+- **`REPLACE`**: the children take the parent's place. Usual for meshes.
+- **`ADD`**: the children draw alongside the parent. Used by point clouds, where each level adds points, and
+  between datasets in a mosaic, so overlapping datasets show together.
+
+Lowering *Max SSE* from 16 to 8 means opening each tile from twice as far, which on a dense tileset loads many
+more tiles.

@@ -1,6 +1,7 @@
 {
   "pages": [
     "supported-formats",
+    "demo-viewer",
     "cli-usage",
     "meta-tilesets",
     "aggregate-builder",

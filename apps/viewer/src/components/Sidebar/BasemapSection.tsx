@@ -41,13 +41,13 @@ export default function BasemapSection({ activeHandleRef }: { activeHandleRef: R
           </SelectContent>
         </Select>
       </div>
-      <div className="flex items-center justify-between">
-        <Label className="text-xs" title="Unchecked: no globe at all (no terrain, no ellipsoid), for datasets that sit under the terrain or to look at a cloud from below. The tileset stays; the terrain choice is kept for when it comes back.">
+      <div className="flex items-center justify-between gap-2">
+        <Label className="shrink-0 text-xs" title="Unchecked: no globe at all (no terrain, no ellipsoid), for datasets that sit under the terrain or to look at a cloud from below. The tileset stays; the terrain choice is kept for when it comes back.">
           <Checkbox checked={globeVisible} onCheckedChange={(v) => { setGlobeVisible(!!v); activeHandleRef.current?.setGlobeVisible?.(!!v); }} />
           Terrain
         </Label>
         <Select value={terrainMode} onValueChange={(v) => setTerrainMode(v as any)} disabled={!globeVisible}>
-          <SelectTrigger size="sm" className="whitespace-nowrap text-xs"><SelectValue /></SelectTrigger>
+          <SelectTrigger size="sm" className="text-xs"><SelectValue /></SelectTrigger>
           <SelectContent>
             <SelectItem value="wgs84">WGS84 ellipsoid (flat)</SelectItem>
             <SelectItem value="google" disabled={!(url.renderer === 'cesium' ? CESIUM_ION_TOKEN : GOOGLE_MAPS_API_KEY)} title={NEEDS_KEY}>Google 3D</SelectItem>

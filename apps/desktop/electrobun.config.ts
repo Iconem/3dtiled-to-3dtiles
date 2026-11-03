@@ -48,9 +48,11 @@ export default {
 		},
 		linux: {
 			bundleCEF: false,
+			icon: "assets/icon.png",
 		},
 		win: {
 			bundleCEF: false,
+			icon: "assets/icon.ico",
 			// Electrobun exposes no Windows signing option — Authenticode is a post-build step
 			// (`signtool sign /fd sha256 /tr <timestamp-url> …` against the produced .exe). Left
 			// undone rather than faked: this repo has no code-signing certificate.

@@ -5,13 +5,27 @@ Format loosely follows [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+### Added — 2026-11-03 (desktop previews, viewer guide)
+- **Desktop app icon**: the installer, shortcuts and taskbar use the 3D Tiled logo.
+- **Desktop previews open over the launcher**, with a *Back to menu* button, instead of replacing the page with only
+  Alt+Left to return. **Preview in 3DTRjs** joins *Preview in Cesium*, through the demo viewer. The API playground and
+  hierarchy graph open the same way.
+- **New docs page, [Demo viewer](/docs/guide/demo-viewer)**: both renderers, every sidebar option, when Auto controls
+  switch, how a mosaic is built, and what is fetched from the root to the tiles as screen-space error is reached.
+
+### Fixed — 2026-11-03
+- A select's long value no longer pushes the sidebar's content past its right edge: it is cut with an ellipsis.
+- `AGGREGATE_CACHE_DIR` without a trailing slash, as the desktop app sets it, wrote the cache beside the folder instead
+  of inside it (`aggregate-cachesnap-offsets.json`).
+
 ### Added — 2026-11-03 (mosaics appear at once, snap follows)
 - **A snapped mosaic no longer blocks on its first build** (22 s for the 660 Iconem datasets). It loads unsnapped at once,
   its dots show grey at their own height and settle one by one as each offset arrives, with a count next to *snap*,
   then the tileset moves to the snapped one. Already built, it loads directly.
 - **`GET /aggregate/snap.ndjson`** streams the offsets, one line per dataset as each resolves.
-- **Snap offsets are kept on disk**, so a restart or a deploy no longer costs the first build again. Two clients
-  asking for the same mosaic or offset now share one build.
+- **Snap offsets are kept on the server's disk**, so a restart no longer costs the first build again. A deploy replaces
+  the container, so that also needs a volume on `AGGREGATE_CACHE_DIR`, now in `docker-compose.yml`. Two clients asking for
+  the same mosaic or offset now share one build.
 
 ### Added — 2026-11-03 (JSON subtrees)
 - **The server tools read JSON subtrees as well as binary ones**, with external buffers and `constant` availability:

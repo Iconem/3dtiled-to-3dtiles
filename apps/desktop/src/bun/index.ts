@@ -237,6 +237,7 @@ const rpc = defineElectrobunRPC<DesktopRPC, "bun">("bun", {
 			 * window taller than the screen.
 			 */
 			openFolder: ({ path }) => Utils.openPath(path),
+			openExternal: ({ url }) => /^https?:\/\//.test(url) && Utils.openExternal(url),
 
 			runCli: ({ args, then }) => ({ id: cli.run(then ? [args, then] : [args]) }),
 			cliStatus: ({ id }) => cli.status(id),

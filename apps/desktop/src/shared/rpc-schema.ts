@@ -33,6 +33,11 @@ export interface DesktopRPC {
        * here. That is why the layout stays inside a conservative fixed width and this call only
        * ever GROWS the window — anything cleverer would be guessing.
        */
+      /** Open a page in the default browser. */
+      openExternal: {
+        params: { url: string };
+        response: boolean;
+      };
       /** Open a folder in the OS file manager (after an export). */
       openFolder: {
         params: { path: string };

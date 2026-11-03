@@ -530,6 +530,7 @@ so this applies to the `/stream` reader only.
 | Manifests | `packages/tile-server/aggregate-sets/`, `.local/aggregate-sets/` | read on every request | set name |
 | Baked bounds | inside each manifest entry | until re-baked | entry |
 | Child roots (sphere, error, native source) | memory and `.local/aggregate-cache/child-roots.json` | 24 h, then refreshed in the background | child URL without `cache=` |
+| Snap offsets | memory and `.local/aggregate-cache/snap-offsets.json` | 24 h, across restarts | child URL and terrain |
 | Mosaic tree and index | memory | 24 h | full query string |
 | `/stream` source context (Potree hierarchy read so far) | memory | process lifetime, no eviction | source URL |
 | Point tiles | not kept on the server | per request | — |

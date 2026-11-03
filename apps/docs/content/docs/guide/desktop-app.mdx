@@ -131,7 +131,10 @@ If a 3dtiled server is already listening on a candidate port (e.g. you have `pnp
   kind, root children, and whether a root transform was applied — a fast sanity check before you paste
   the URL into a heavier client.
 - **Preview in Cesium** opens the stock-CesiumJS harness, which has zero viewer-side fix-ups: whatever
-  it shows is what any 3D Tiles client gets from the tileset alone.
+  it shows is what any 3D Tiles client gets from the tileset alone. **Preview in 3DTRjs** opens the
+  [demo viewer](/docs/guide/demo-viewer) with the tileset loaded, which needs an internet connection for
+  the page itself. Both open over the launcher: **Back to menu** returns to it, a bar switches renderer,
+  and *Open in browser* hands the same page to your default browser.
 - **Hierarchy graph** opens the [hierarchy explorer](/docs/guide/hierarchy-explorer) — the viewer
   app's multi-tileset one when a viewer is reachable, otherwise the tile-server's own single-tileset
   page.
@@ -157,15 +160,14 @@ every level), and press **Export**.
 - **Equivalent CLI.** The card shows the command doing the same thing, updated live:
   `3dtiled export …` for a crawl, `3dtiled <source> <dir> --format …` (plus the pack script) for the
   converter.
-- **Links.** Export and CLI docs, the middleware's home page, *Open the live tileset in the demo
-  viewer*, and after an export *Open copy in demo viewer*. The last two use the viewer's
-  `?load=<url>` start parameter.
+- **Links.** Export and CLI docs, the middleware's home page, and *Open the live tileset in the demo
+  viewer*, which uses the viewer's `?load=<url>` start parameter.
 - **Run in: tile-server or CLI subprocess.** The card lets you pick where the export runs. The view
   never does the work itself.
   - **tile-server** (default): `POST /export`, polled with `GET /export/{id}`. The server is already
     running with every adapter loaded. It reports structured progress (tiles found and written,
     bytes), the job survives switching tabs, and the server serves the result back for *Preview
-    exported copy* and *Open copy in demo viewer*. **Cancel** stops a crawl and leaves a partial copy.
+    exported copy*. **Cancel** stops a crawl and leaves a partial copy.
     An offline convert runs inside the server and can't be stopped part-way.
   - **CLI subprocess**: the app's main process runs exactly the *Equivalent CLI* command
     (`node packages/convert/cli.js …` from the repo root). A convert that asked for packing is followed

@@ -4,6 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>3D Tiled — local middleware</title>
+    <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='14 14 92 92' fill='none'%3E%3Crect x='20' y='20' width='80' height='80' stroke='%2322c55e' stroke-width='5' stroke-linejoin='round'/%3E%3Cpath d='M60 20V100M20 60H100M80 60V100M60 80H100' stroke='%2322c55e' stroke-width='5' stroke-linecap='round'/%3E%3Crect x='80' y='80' width='20' height='20' fill='%2322c55e'/%3E%3C/svg%3E">
     <link rel="stylesheet" href="index.css">
 </head>
 <body>
@@ -88,6 +89,7 @@
                 </div>
                 <div class="actions">
                     <button id="preview" class="btn">Preview in Cesium</button>
+                    <button id="preview-3dtrjs" class="btn">Preview in 3DTRjs</button>
                     <button id="save" class="btn">Bookmark</button>
                 </div>
                 <div id="result" class="result"></div>
@@ -118,7 +120,6 @@
                 <div class="actions" id="export-done" hidden>
                     <button id="export-open" class="btn">Open folder</button>
                     <button id="export-preview" class="btn">Preview exported copy</button>
-                    <button id="export-viewer" class="btn">Open copy in demo viewer</button>
                     <button id="export-copy" class="btn btn-ghost">Copy folder path</button>
                 </div>
                 <details class="placement">
@@ -195,16 +196,16 @@
                     <span class="field-label" style="margin:0">Bookmarks</span>
                     <div class="card-head-actions">
                         <button id="lib-refresh" class="btn btn-ghost">Refresh stats</button>
-                        <button id="lib-export" class="btn btn-ghost">Export JSON</button>
-                        <button id="lib-import" class="btn btn-ghost">Import JSON</button>
+                        <button id="lib-export" class="btn btn-ghost">Export bookmarks as JSON</button>
+                        <button id="lib-import" class="btn btn-ghost">Import bookmarks as JSON</button>
                     </div>
                 </div>
                 <p class="hint">
-                    Datasets you want to keep around. The JSON holds this list and the history below,
-                    and any share links or signed URLs in them: treat it as private.
+                    Datasets you want to keep around. The JSON also carries the history below, and any share
+                    links or signed URLs in either: treat it as private.
                 </p>
                 <div id="lib-list" class="list"></div>
-                <textarea id="lib-io" class="io" spellcheck="false" placeholder="Paste exported JSON here, then press Import JSON again."></textarea>
+                <textarea id="lib-io" class="io" spellcheck="false" placeholder="Paste exported JSON here, then press Import bookmarks as JSON again."></textarea>
             </div>
             <div class="card">
                 <div class="card-head">
@@ -240,6 +241,20 @@
             <a id="link-plugins" href="#" target="_blank" rel="noreferrer">Cesium for Unreal</a>
             <a id="link-repo" href="#" target="_blank" rel="noreferrer">Source</a>
         </footer>
+    </div>
+
+    <!-- Previews and tools open over the launcher, which keeps running (an export carries on) and is one click back. -->
+    <div class="overlay" id="overlay" hidden>
+        <div class="overlay-bar">
+            <button id="overlay-back" class="btn">&larr; Back to menu</button>
+            <div class="overlay-renderers" id="overlay-renderers">
+                <button id="overlay-cesium" class="btn">Cesium</button>
+                <button id="overlay-3dtrjs" class="btn">3DTRjs</button>
+            </div>
+            <span class="overlay-title" id="overlay-title"></span>
+            <button id="overlay-external" class="btn btn-ghost">Open in browser</button>
+        </div>
+        <iframe id="overlay-frame" title="Preview" allow="fullscreen; clipboard-write"></iframe>
     </div>
     <!-- Required: the Electrobun builder emits views/mainview/index.js from the configured view
          entrypoint but does NOT inject a tag for it, so without this the view ships dead HTML. -->

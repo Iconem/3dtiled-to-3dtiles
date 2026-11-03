@@ -154,6 +154,7 @@ let lastFit = '';
 
 function fitWindowToContent() {
   if (!pickerAvailable()) return;                 // no host to resize (plain-browser preview)
+  if (!$('overlay').hidden) return;               // a preview asked for its own size
   const el = document.querySelector<HTMLElement>('.container');
   if (!el) return;
   const rect = el.getBoundingClientRect();
@@ -224,26 +225,68 @@ $('check').addEventListener('click', async () => {
 const previewUrl = (u: string) =>
   staticPort ? `http://127.0.0.1:${staticPort}/cesium-harness.html?url=${encodeURIComponent(u)}` : '';
 
-$('preview').addEventListener('click', () => {
-  const u = buildUrl();
-  if (!u) return say('Enter a dataset path or URL first.', 'err');
-  const p = previewUrl(u);
-  // The harness is stock CesiumJS with zero viewer-side fix-ups, so whatever it shows is what any
-  // 3D Tiles client gets from the tileset alone.
-  if (!p) return say('Preview unavailable — the static server for cesium-harness.html did not start.', 'err');
-  const f = currentForm();
-  noteServed(lib, nameFor(f.src), f); persist();
-  location.href = p;
+// ── preview over the launcher ───────────────────────────────────────────────────────────────────
+//
+// Cesium is the stock harness, with zero viewer-side fix-ups: whatever it shows is what any 3D Tiles
+// client gets from the tileset alone. 3DTRjs is the demo viewer, told to load the tileset.
+let overlayTarget: { tileset: string; type: string; external: string } | null = null;
+
+function showInOverlay(url: string, title: string) {
+  $<HTMLIFrameElement>('overlay-frame').src = url;
+  $('overlay-title').textContent = title;
+  $('overlay').hidden = false;
+  // Only ever grows the window (see fitWindow): 3D needs more room than the launcher's form.
+  pickerRpc?.request.fitWindow({ cssWidth: 1280, cssHeight: 800, viewportWidth: window.innerWidth, viewportHeight: window.innerHeight }).catch(() => {});
+}
+
+function previewIn(renderer: 'cesium' | '3dtrjs', tileset: string, type: string, title: string) {
+  const url = renderer === 'cesium' ? previewUrl(tileset) : viewerLink(tileset, type);
+  if (!url) return say(renderer === 'cesium' ? 'Preview unavailable: the static server for cesium-harness.html did not start.' : 'Preview unavailable: no demo viewer address.', 'err');
+  overlayTarget = { tileset, type, external: url };
+  $('overlay-renderers').hidden = false;
+  $('overlay-cesium').classList.toggle('active', renderer === 'cesium');
+  $('overlay-3dtrjs').classList.toggle('active', renderer === '3dtrjs');
+  showInOverlay(url, title);
+}
+
+function openTool(url: string, title: string) {
+  overlayTarget = { tileset: '', type: '', external: url };
+  $('overlay-renderers').hidden = true;
+  showInOverlay(url, title);
+}
+
+function closeOverlay() {
+  $('overlay').hidden = true;
+  $<HTMLIFrameElement>('overlay-frame').src = 'about:blank';   // frees the renderer's GPU memory
+  overlayTarget = null;
+}
+$('overlay-back').addEventListener('click', closeOverlay);
+$('overlay-cesium').addEventListener('click', () => { if (overlayTarget) previewIn('cesium', overlayTarget.tileset, overlayTarget.type, $('overlay-title').textContent ?? ''); });
+$('overlay-3dtrjs').addEventListener('click', () => { if (overlayTarget) previewIn('3dtrjs', overlayTarget.tileset, overlayTarget.type, $('overlay-title').textContent ?? ''); });
+$('overlay-external').addEventListener('click', () => {
+  if (!overlayTarget) return;
+  if (pickerRpc) void pickerRpc.request.openExternal({ url: overlayTarget.external }).catch(() => {});
+  else window.open(overlayTarget.external, '_blank');
 });
 
-$('playground').addEventListener('click', () => { if (base) location.href = `${base}/playground`; });
+function previewCurrent(renderer: 'cesium' | '3dtrjs') {
+  const u = buildUrl();
+  if (!u) return say('Enter a dataset path or URL first.', 'err');
+  const f = currentForm();
+  noteServed(lib, nameFor(f.src), f); persist();
+  previewIn(renderer, u, assetType(), nameFor(f.src));
+}
+$('preview').addEventListener('click', () => previewCurrent('cesium'));
+$('preview-3dtrjs').addEventListener('click', () => previewCurrent('3dtrjs'));
+
+$('playground').addEventListener('click', () => { if (base) openTool(`${base}/playground`, 'API playground'); });
 $('hierarchy').addEventListener('click', () => {
   const u = buildUrl();
   if (!base) return;
   // Prefer the viewer app's multi-tileset explorer when one is reachable; the server's own page is
   // the always-available single-tileset fallback.
   const target = viewerUrl ? `${viewerUrl}/hierarchy` : `${base}/hierarchy`;
-  location.href = u ? `${target}?url=${encodeURIComponent(u)}` : target;
+  openTool(u ? `${target}?url=${encodeURIComponent(u)}` : target, 'Hierarchy graph');
 });
 
 $('save').addEventListener('click', () => {
@@ -359,7 +402,8 @@ function viewerLink(tilesetUrl: string, type = 'mesh'): string {
   if (!viewerUrl || !tilesetUrl) return '';
   return `${viewerUrl}/?mode=stream&format=3dtiles&renderer=3dtrjs&type=${type}&load=${encodeURIComponent(tilesetUrl)}`;
 }
-const assetType = () => (['copc', 'potree'].includes(formatEl.value) ? 'pointcloud' : ['sog', 'lcc', 'rad', 'geosplats'].includes(formatEl.value) ? 'splat' : 'mesh');
+const typeOfFormat = (format: string) => (['copc', 'potree'].includes(format) ? 'pointcloud' : ['sog', 'lcc', 'rad', 'geosplats'].includes(format) ? 'splat' : 'mesh');
+const assetType = () => typeOfFormat(formatEl.value);
 
 function refreshExport() {
   const convert = methodEl.value === 'convert';
@@ -410,7 +454,7 @@ $('export-start').addEventListener('click', async () => {
   exportStarted = { form: currentForm(), outDir: r.outDir, method: r.method };
   if (runnerEl.value === 'cli') return startCliExport(r);
   $('export-log-wrap').hidden = true;
-  $('export-preview').hidden = $('export-viewer').hidden = false;
+  $('export-preview').hidden = false;
   try {
     const resp = await fetch(`${base}/export`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(r) });
     const j = await resp.json().catch(() => ({}));
@@ -448,7 +492,7 @@ async function startCliExport(r: ExportRequest) {
   } catch (e) { return exportSay(`Could not start the CLI: ${e instanceof Error ? e.message : e}`, 'err'); }
   // The preview buttons need the server's job URL; a CLI export is a plain folder on disk.
   exportPreview = '';
-  $('export-preview').hidden = $('export-viewer').hidden = true;
+  $('export-preview').hidden = true;
   exportLog.textContent = '';
   $('export-log-wrap').hidden = false;
   $('export-progress').hidden = false;
@@ -554,12 +598,7 @@ $('export-copy').addEventListener('click', async () => {
 });
 $('export-preview').addEventListener('click', () => {
   // The exported files, served back by the tile-server exactly as a static host would serve them.
-  const p = exportPreview && previewUrl(exportPreview);
-  if (p) location.href = p;
-});
-$('export-viewer').addEventListener('click', () => {
-  const v = exportPreview && viewerLink(exportPreview, assetType());
-  if (v) window.open(v, '_blank');
+  if (exportPreview) previewIn('cesium', exportPreview, assetType(), 'Exported copy');
 });
 
 // A server started without TILED_ALLOW_EXPORT (e.g. an adopted `pnpm dev` one) can't export; say so
@@ -666,10 +705,7 @@ function renderLibrary() {
     host.appendChild(libraryRow(e, meta, [
       openBtn(e),
       copyBtn(e),
-      mkBtn('Preview', 'btn-ghost', () => {
-        const p = previewUrl(buildUrlFrom(e));
-        if (p) location.href = p;
-      }),
+      mkBtn('Preview', 'btn-ghost', () => previewIn('cesium', buildUrlFrom(e), typeOfFormat(e.format), e.name)),
       mkBtn('Remove', 'btn-ghost', () => { lib.bookmarks = lib.bookmarks.filter((x) => x.id !== e.id); persist(); }),
     ]));
   }

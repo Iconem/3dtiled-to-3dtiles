@@ -8,6 +8,11 @@ services:
     restart: unless-stopped
     ports:
       - "3001:3001"
+    # Child roots and snap offsets, kept across restarts and new images: the first snapped mosaic is slow.
+    environment:
+      - AGGREGATE_CACHE_DIR=/cache
+    volumes:
+      - tile-cache:/cache
 
   viewer:
     container_name: 3dtiled-viewer
@@ -44,3 +49,6 @@ services:
     # you're putting a reverse proxy in front of all three (Traefik, Caddy, nginx...), route
     # `/docs` + `/_next` + `/api/search` + `/og` + `/llms*` at this service's :3002 and everything
     # else at viewer's :3000, matching what apps/viewer/vite.config.ts's dev-only proxy already does.
+
+volumes:
+  tile-cache:

@@ -18,10 +18,10 @@ function SelectTrigger({
       data-slot="select-trigger"
       data-size={size}
       className={cn(
-        "flex w-fit items-center justify-between gap-2 rounded-md border bg-transparent px-2 py-1 text-sm shadow-xs outline-none transition-colors",
+        "flex w-fit min-w-0 items-center justify-between gap-2 rounded-md border bg-transparent px-2 py-1 text-sm shadow-xs outline-none transition-colors",
         'focus-visible:border-ring focus-visible:ring-2 focus-visible:ring-ring/50',
         'disabled:cursor-not-allowed disabled:opacity-50',
-        'data-[size=default]:h-8 data-[size=sm]:h-7',
+        'data-[size=default]:h-8 data-[size=sm]:h-7 [&>span:first-child]:truncate',
         className,
       )}
       {...props}
