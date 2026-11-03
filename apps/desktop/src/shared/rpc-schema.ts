@@ -68,6 +68,16 @@ export interface DesktopRPC {
         params: { id: string };
         response: boolean;
       };
+      /** The version of a downloaded update ready to apply, null when there is none. */
+      updateStatus: {
+        params: Record<string, never>;
+        response: { version: string | null };
+      };
+      /** Stop the servers and restart into the downloaded update. */
+      applyUpdate: {
+        params: Record<string, never>;
+        response: boolean;
+      };
     };
     messages: Record<string, never>;
   }>;

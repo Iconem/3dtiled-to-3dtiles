@@ -93,6 +93,20 @@ function say(msg: string, kind: 'ok' | 'err' | 'info' = 'info') {
   resultEl.className = `result result-${kind}`;
 }
 
+// A downloaded update waits for this button: restarting by itself could end a running conversion.
+const updateBtn = $<HTMLButtonElement>('update');
+updateBtn.addEventListener('click', () => {
+  updateBtn.disabled = true;
+  void pickerRpc?.request.applyUpdate({});
+});
+const updatePoll = setInterval(async () => {
+  const version = (await pickerRpc?.request.updateStatus({}).catch(() => null))?.version;
+  if (version == null) return;
+  updateBtn.title = `Restart into version ${version}`;
+  updateBtn.hidden = false;
+  clearInterval(updatePoll);
+}, 30_000);
+
 for (const el of [srcEl, formatEl, cacheEl, ...placement.map((k) => $<HTMLInputElement>(k))]) {
   el.addEventListener('input', refresh);
   el.addEventListener('change', refresh);

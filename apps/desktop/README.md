@@ -8,7 +8,7 @@ window, plus the placement params and a stock-CesiumJS preview.
 ## Installing it
 
 Windows builds are on the [`desktop-latest` release](https://github.com/jo-chemla/3dtiled-to-3dtiles/releases/tag/desktop-latest).
-Unzip the whole archive and run `3D Tiled-Setup.exe` from there. See the
+One installer that updates itself, and a portable zip. See the
 [desktop app guide](../docs/content/docs/guide/desktop-app.mdx), which also covers building one.
 
 ## Running it

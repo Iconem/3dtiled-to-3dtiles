@@ -123,7 +123,8 @@ http.createServer(async (req, res) => {
     if (!res.headersSent) res.writeHead(500, CORS);
     res.end(res.headersSent ? '' : String(e.message || e));
   }
-}).listen(PORT, () => {
+// HOST=127.0.0.1 (the desktop app) stays off the network, so Windows asks no firewall question.
+}).listen(PORT, process.env.HOST || undefined, () => {
   console.log(`tile-server on http://localhost:${PORT}`);
   console.log(`  playground  interactive API reference (Scalar, driven by /openapi.json) → /playground (alias: /docs)`);
   console.log(`  tiles    (unified, no redirect) /tiles/tileset.json?url=<SRC>&format=<fmt>&cache=<none|hierarchy|full>[&prefetch=N][&tiling=implicit|explicit]`);

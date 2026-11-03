@@ -26,4 +26,4 @@ http.createServer((req, res) => {
     else if (e && !path.extname(f)) f = f + '.html';          // extensionless → .html (Pages behavior)
     serve(f);
   });
-}).listen(port, () => console.log(`static on ${port} root=${root} prefix=${prefix || '(none)'}`));
+}).listen(port, process.env.HOST || undefined, () => console.log(`static on ${port} root=${root} prefix=${prefix || '(none)'}`));

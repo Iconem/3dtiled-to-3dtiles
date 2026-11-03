@@ -39,15 +39,19 @@ jobs:
           hutch --version
           hutch install
           $env:DESKTOP_BUNDLE_MAP = "$PWD\bundle\copy-map.json"
+          $now = (Get-Date).ToUniversalTime()
+          $env:BUILD_VERSION = "$($now.Year).$($now.Month).$($now.Day)"
           hutch electrobun build --env=stable
+          node scripts/package-windows.mjs
           Get-ChildItem artifacts | Select-Object Name, Length
 
-      # What a user does: unzip, install, launch. The system Node is hidden, so a pass means the bundled one ran.
+      # What a user does: install, launch. The system Node is hidden, so a pass means the bundled one ran.
       - name: Smoke test the installed app
         working-directory: apps/desktop
         run: |
           $dir = Join-Path $env:RUNNER_TEMP 'setup'
-          Expand-Archive artifacts/win-x64-3DTiled-Setup.zip $dir
+          New-Item -ItemType Directory $dir | Out-Null
+          Copy-Item artifacts/Setup.exe "$dir\3D Tiled-Setup.exe"
           $installed = "$env:LOCALAPPDATA\com.iconem.3dtiled.desktop\stable"
           $path = $env:PATH
           $env:PATH = 'C:\Windows\System32;C:\Windows'
@@ -68,9 +72,37 @@ jobs:
           if (-not $title) { throw 'the app did not start its tile-server' }
           $owner = Get-CimInstance Win32_Process -Filter "Name='node.exe'" | Where-Object { $_.CommandLine -match 'tile-server' }
           if ($owner.ExecutablePath -notmatch 'com\.iconem\.3dtiled\.desktop') { throw "tile-server runs from $($owner.ExecutablePath)" }
+          # Off the network, or Windows asks a firewall question.
+          $ip = (Get-NetIPAddress -AddressFamily IPv4 | Where-Object { $_.IPAddress -notlike '127.*' -and $_.IPAddress -notlike '169.*' } | Select-Object -First 1).IPAddress
+          $open = $false
+          try { Invoke-RestMethod "http://${ip}:3001/openapi.json" -TimeoutSec 4 | Out-Null; $open = $true } catch {}
+          if ($open) { throw "tile-server answers on $ip" }
           $url = [uri]::EscapeDataString('https://s3.amazonaws.com/hobu-lidar/autzen-classified.copc.laz')
           $tileset = Invoke-RestMethod "http://127.0.0.1:3001/stream/tileset.json?format=copc&url=$url&cache=none" -TimeoutSec 120
           "$title, COPC tileset $($tileset.asset.version), from $($owner.ExecutablePath)"
+          Stop-Process $app -Force -ErrorAction SilentlyContinue
+          Get-CimInstance Win32_Process -Filter "Name='node.exe'" | Where-Object { $_.ExecutablePath -match 'com\.iconem\.3dtiled\.desktop' } | ForEach-Object { Stop-Process $_.ProcessId -Force }
+
+      - name: Smoke test the portable zip
+        working-directory: apps/desktop
+        run: |
+          $dir = Join-Path $env:RUNNER_TEMP 'portable'
+          New-Item -ItemType Directory $dir | Out-Null
+          C:\Windows\System32\tar.exe -xf artifacts/Portable.zip -C $dir
+          $root = (Get-ChildItem $dir)[0].FullName
+          $path = $env:PATH
+          $env:PATH = 'C:\Windows\System32;C:\Windows'
+          $app = Start-Process "$root\bin\launcher.exe" -WorkingDirectory "$root\bin" -PassThru
+          $env:PATH = $path
+          $title = $null
+          $deadline = (Get-Date).AddMinutes(4)
+          while (-not $title -and (Get-Date) -lt $deadline) {
+            try { $title = (Invoke-RestMethod http://127.0.0.1:3001/openapi.json -TimeoutSec 3).info.title } catch { Start-Sleep 3 }
+          }
+          if (-not $title) { throw 'the portable app did not start its tile-server' }
+          $owner = Get-CimInstance Win32_Process -Filter "Name='node.exe'" | Where-Object { $_.CommandLine -match 'tile-server' }
+          if ($owner.ExecutablePath -notlike "$dir*") { throw "tile-server runs from $($owner.ExecutablePath)" }
+          "$title, from $($owner.ExecutablePath)"
           Stop-Process $app -Force -ErrorAction SilentlyContinue
 
       - name: Publish the rolling release
@@ -80,12 +112,17 @@ jobs:
         run: |
           $sha = (git rev-parse --short HEAD)
           $date = (Get-Date).ToUniversalTime().ToString('yyyy-MM-dd')
-          $asset = "3DTiled-win-x64-Setup-$date.zip"
-          Copy-Item artifacts/win-x64-3DTiled-Setup.zip $asset
-          $notes = "Windows x64 build of $sha, $date. Unzip the whole archive, then run ``3D Tiled-Setup.exe`` from the unzipped folder: it needs the ``.installer`` folder beside it. Unsigned, so SmartScreen warns on first run (More info, Run anyway). Includes Node and the tile-server; nothing else to install."
+          $setup = "3DTiled-win-x64-Setup-$date.exe"
+          $portable = "3DTiled-win-x64-Portable-$date.zip"
+          Copy-Item artifacts/Setup.exe $setup
+          Copy-Item artifacts/Portable.zip $portable
+          # The two feed files keep their names: an installed app fetches them from this release to update itself.
+          $assets = @($setup, $portable, 'artifacts/stable-win-x64-update.json', 'artifacts/stable-win-x64-3DTiled.tar.zst')
+          $notes = "Windows x64 build of $sha, $date. **$setup** installs for your user, with no admin rights, and updates itself. **$portable** runs from any folder after unzipping: start ``3D Tiled.cmd``; it does not update itself. Unsigned, so SmartScreen warns on first run (More info, Run anyway). Includes Node and the tile-server; nothing else to install. The other two files are the update feed."
           gh release view desktop-latest *> $null
           if ($LASTEXITCODE -ne 0) { gh release create desktop-latest --title "Desktop app ($date)" --notes $notes --target $env:GITHUB_SHA --latest=false }
+          gh release upload desktop-latest @assets --clobber
+          $keep = $assets | ForEach-Object { Split-Path $_ -Leaf }
           $old = gh release view desktop-latest --json assets -q '.assets[].name'
-          foreach ($name in $old) { gh release delete-asset desktop-latest $name --yes }
-          gh release upload desktop-latest $asset
+          foreach ($name in $old) { if ($keep -notcontains $name) { gh release delete-asset desktop-latest $name --yes } }
           gh release edit desktop-latest --title "Desktop app ($date)" --notes $notes

@@ -8,6 +8,13 @@ Format loosely follows [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+### Changed — 2026-11-03 (desktop app)
+- **One-file installer, a portable zip, and automatic updates** for the Windows app, as in terrain-viewer. The installer
+  no longer needs a `.installer` folder beside it. Updates download in the background and wait for an *Update ready* button.
+- **Its servers listen on `127.0.0.1` only** (`HOST`), so Windows no longer asks to allow Node through its firewall, a dialog
+  that needs admin rights. Docker and `pnpm dev` keep listening on all interfaces.
+- On stable Electrobun 2.0.2, which can package on Windows, rather than a beta.
+
 ### Changed — 2026-11-03 (3d-tiles-renderer 0.5.4)
 - **Viewer on `3d-tiles-renderer` 0.5.4**, which ships our [#1780](https://github.com/NASA-AMMOS/3DTilesRendererJS/pull/1780)
   and [#1782](https://github.com/NASA-AMMOS/3DTilesRendererJS/pull/1782). `lib/implicitAddFix.ts` and the vendored

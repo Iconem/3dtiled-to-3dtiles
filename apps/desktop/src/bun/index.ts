@@ -21,7 +21,7 @@
  * If a 3dtiled server is already listening on a candidate port (e.g. you have `pnpm dev` running),
  * we ADOPT it instead of starting a second copy, and leave it running on quit.
  */
-import Electrobun, { BrowserWindow, Utils, defineElectrobunRPC } from "electrobun/main";
+import Electrobun, { BrowserWindow, Updater, Utils, defineElectrobunRPC } from "electrobun/main";
 import type { DesktopRPC } from "../shared/rpc-schema";
 import { createCliRunner, defaultSpawn } from "./cli-runner";
 
@@ -158,7 +158,7 @@ const tilePort = await ensureServer({
 	timeoutMs: 45_000,
 	// "Export to folder" writes to this machine's disk, so the server only enables it when asked; the
 	// app is exactly the place that asks. (An ADOPTED dev server keeps whatever it was started with.)
-	env: { TILED_ALLOW_EXPORT: "1", ...userDirs },
+	env: { TILED_ALLOW_EXPORT: "1", HOST: "127.0.0.1", ...userDirs },
 });
 
 const staticPort = await ensureServer({
@@ -172,6 +172,7 @@ const staticPort = await ensureServer({
 		} catch { return false; }
 	},
 	timeoutMs: 15_000,
+	env: { HOST: "127.0.0.1" },
 });
 
 /** Is something answering here at all? Used to prefer a local viewer/docs over the public one. */
@@ -237,6 +238,13 @@ const rpc = defineElectrobunRPC<DesktopRPC, "bun">("bun", {
 			cliStatus: ({ id }) => cli.status(id),
 			cancelCli: ({ id }) => cli.cancel(id),
 
+			updateStatus: () => ({ version: updateVersion }),
+			applyUpdate: async () => {
+				stopChildren();   // the bundled node.exe is locked for as long as it runs
+				await Updater.applyUpdate();
+				return true;
+			},
+
 			fitWindow: ({ cssWidth, cssHeight, viewportWidth, viewportHeight }) => {
 				const sx = viewportWidth > 0 ? WIN.width / viewportWidth : 1;
 				const sy = viewportHeight > 0 ? WIN.height / viewportHeight : 1;
@@ -265,5 +273,28 @@ for (const sig of ["SIGINT", "SIGTERM", "exit"]) {
 }
 // Closing the window quits without a process "exit" event, which left the servers running.
 Electrobun.events.on("before-quit", stopChildren);
+
+/**
+ * Download a newer build in the background; the launcher offers to restart into it. Never restarts by
+ * itself, as a conversion may be running. Not in a portable copy (package-windows.mjs leaves portable.txt
+ * beside bin/): the updater only knows the installed folder.
+ */
+let updateVersion: string | null = null;
+async function checkForUpdate() {
+	const { existsSync } = await import("node:fs");
+	const app = (globalThis as any).process?.execPath?.replace(/[\\/]bin[\\/][^\\/]+$/, "");
+	if (!bundled || !app || existsSync(`${app}/portable.txt`)) return;
+	try {
+		const local = await Updater.getLocalInfo();
+		if (!local.baseUrl || local.channel === "dev") return;
+		const info = await Updater.checkForUpdate();
+		if (info.error || !(info.updateAvailable || info.updateReady)) return;
+		if (!info.updateReady) await Updater.downloadUpdate();
+		if (Updater.updateInfo().updateReady) updateVersion = info.version ?? "";
+	} catch (e) {
+		console.warn("[3dtiled-desktop] update check failed:", e);
+	}
+}
+setTimeout(() => { void checkForUpdate(); }, 4000);
 
 export { mainWindow };
