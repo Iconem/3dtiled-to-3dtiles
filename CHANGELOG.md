@@ -5,6 +5,12 @@ Format loosely follows [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+### Changed — 2026-11-03 (static docs)
+- **The docs image serves plain files.** Pages were already pre-rendered when the image was built, but a Next.js server
+  still ran to hand them out. It now holds the static export and a small file server, on the same port and address.
+- **The desktop window opens at its content's width**, with the content centred if you widen it. Closing a preview
+  returns the window to that size.
+
 ### Added — 2026-11-03 (desktop previews, viewer guide)
 - **Desktop app icon**: the installer, shortcuts and taskbar use the 3D Tiled logo.
 - **Desktop previews open over the launcher**, with a *Back to menu* button, instead of replacing the page with only

@@ -35,16 +35,11 @@ body {
   -webkit-font-smoothing: antialiased;
 }
 
-/* LEFT-aligned, not centred, and deliberately so. On a HiDPI Windows display the webview reports a
-   CSS viewport wider than the native frame, so `margin: 0 auto` centres the content against a width
-   the user cannot actually see and the right-hand side is clipped. */
-/* 720px is NOT a style preference — it is the measured safe width, and widening it regresses.
-   On a HiDPI Windows display this webview reports a CSS viewport WIDER than the native frame, so
-   content laid out past roughly (window width ÷ DPI scale) CSS px is simply never on screen. A
-   1000px container on a 1120px window at 150% scaling clipped the right-hand column clean off —
-   including the dataset row's Browse buttons — and nothing in a plain-browser preview reveals it,
-   because a normal browser has no such mismatch. Verify any change to this in the real app. */
-.container { max-width: 720px; margin: 0; padding: 24px 26px 32px; }
+/* Centred, in a window that opens at about this width (WIN in bun/index.ts). Measured on Windows at 150%:
+   a 1680 px window, a 1106 CSS px viewport at devicePixelRatio 1.5, so the page sees the real window. Older
+   Electrobun builds reported a viewport wider than the frame, which clipped centred content: check any
+   change here in the real app, as a plain browser cannot show that. */
+.container { max-width: 720px; margin: 0 auto; padding: 24px 26px 32px; }
 
 header { display: flex; align-items: center; gap: 12px; margin-bottom: 8px; flex-wrap: wrap; }
 h1 { font-size: 18px; font-weight: 600; margin: 0; letter-spacing: -0.02em; }

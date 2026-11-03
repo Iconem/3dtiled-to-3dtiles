@@ -70,7 +70,7 @@ ENTRYPOINT ["docker-entrypoint.sh"]
 # extension-less rewrite that vite's OWN dev-only middleware handles in `pnpm dev`.
 CMD ["serve", "-l", "3000", "dist"]
 
-# ---- docs: next build → next start, its own service (see the Traefik-routing note up top) ----
+# ---- docs: next build → static files, its own service (see the Traefik-routing note up top) ----
 FROM deps AS docs-build
 COPY CHANGELOG.md ./
 # Optional page-view counting (see deploy/analytics): the static pages are built here, so these are build args.
@@ -78,20 +78,18 @@ ARG NEXT_PUBLIC_UMAMI_SRC=""
 ARG NEXT_PUBLIC_UMAMI_WEBSITE_ID=""
 ENV NEXT_PUBLIC_UMAMI_SRC=${NEXT_PUBLIC_UMAMI_SRC}
 ENV NEXT_PUBLIC_UMAMI_WEBSITE_ID=${NEXT_PUBLIC_UMAMI_WEBSITE_ID}
+ENV DOCS_STATIC_EXPORT=1
+ENV DOCS_BASE_PATH=""
 RUN pnpm --filter docs build
 
-FROM base AS docs
-ENV NODE_ENV=production
-# hoisted node-linker (.npmrc) puts `next`'s real binary in the ROOT node_modules/.bin, not
-# apps/docs/node_modules/.bin (that dir doesn't even exist — this runtime stage never copies
-# pnpm-workspace.yaml/pnpm-lock.yaml, so `pnpm run start` here can't resolve the workspace root to
-# find it either). Skip pnpm entirely and put the real bin dir on PATH so `next` resolves directly.
-ENV PATH="/app/node_modules/.bin:${PATH}"
-COPY --from=docs-build /app/apps/docs ./apps/docs
-COPY --from=docs-build /app/node_modules ./node_modules
-WORKDIR /app/apps/docs
+# Every page, the search index and the og images are files by now; no Next.js server runs.
+FROM node:22-slim AS docs
+RUN npm install -g serve@14
+WORKDIR /app
+COPY --from=docs-build /app/apps/docs/out ./out
 EXPOSE 3002
-CMD ["next", "start", "-p", "3002"]
+# `out/serve.json` (apps/docs/public/serve.json) redirects / and sets the search index's type.
+CMD ["serve", "-l", "3002", "out"]
 
 # ---- tile-server: the Node middleware, no build step needed (plain ESM) ----
 # `packages/` (source + its per-package node_modules symlinks) is already correct from `deps` — don't

@@ -44,8 +44,7 @@ services:
     restart: unless-stopped
     ports:
       - "3002:3002"
-    # Note: this is a separate Next.js server (not folded into the viewer's own port) because its
-    # search API needs a live server, not just static files — see apps/docs/src/app/api/search. If
+    # Note: static files built by Next.js, served on their own port. If
     # you're putting a reverse proxy in front of all three (Traefik, Caddy, nginx...), route
     # `/docs` + `/_next` + `/api/search` + `/og` + `/llms*` at this service's :3002 and everything
     # else at viewer's :3000, matching what apps/viewer/vite.config.ts's dev-only proxy already does.

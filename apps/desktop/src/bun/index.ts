@@ -199,7 +199,7 @@ const qs = `?tilePort=${tilePort ?? ""}&staticPort=${staticPort ?? ""}`
  * OS dialog is the only way to get one.
  */
 /** Window bounds, and the ceiling we will not grow past. */
-const WIN = { x: 100, y: 40, width: 1120, height: 940, maxWidth: 1600, maxHeight: 1200 };
+const WIN = { x: 100, y: 40, width: 800, height: 940, maxWidth: 1600, maxHeight: 1200 };
 
 /**
  * "Export → Run in: CLI subprocess": the same `packages/convert/cli.js` the card shows, as an isolated
@@ -231,9 +231,8 @@ const rpc = defineElectrobunRPC<DesktopRPC, "bun">("bun", {
 			 * for vs the viewport the view reports), not from devicePixelRatio, which reports 1 under
 			 * Windows DPI virtualization — see the note on the RPC schema.
 			 *
-			 * One-directional on purpose: never shrink below the default, so switching from the long
-			 * Samples tab back to the short Build tab does not collapse a window the user is using,
-			 * and an under-estimate can never clip content. Capped so a 30-row catalogue cannot open a
+			 * Never below the default, so switching from the long Samples tab back to the short Build
+			 * tab does not collapse a window the user is using, and an under-estimate can never clip content. Capped so a 30-row catalogue cannot open a
 			 * window taller than the screen.
 			 */
 			openFolder: ({ path }) => Utils.openPath(path),

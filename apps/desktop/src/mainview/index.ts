@@ -158,7 +158,7 @@ function fitWindowToContent() {
   const el = document.querySelector<HTMLElement>('.container');
   if (!el) return;
   const rect = el.getBoundingClientRect();
-  const cssWidth = Math.ceil(rect.right + 24);    // content's right edge + breathing room
+  const cssWidth = Math.ceil(rect.width + 24);    // the content, centred, + breathing room
   const cssHeight = Math.ceil(document.documentElement.scrollHeight + 8);
   const key = `${cssWidth}x${cssHeight}`;
   if (key === lastFit) return;                    // don't spam the host on every tab switch
@@ -234,9 +234,9 @@ let overlayTarget: { tileset: string; type: string; external: string } | null = 
 function showInOverlay(url: string, title: string) {
   $<HTMLIFrameElement>('overlay-frame').src = url;
   $('overlay-title').textContent = title;
+  // 3D needs more room than the launcher's form; closing the preview gives it back.
+  if ($('overlay').hidden) pickerRpc?.request.fitWindow({ cssWidth: 1280, cssHeight: 800, viewportWidth: window.innerWidth, viewportHeight: window.innerHeight }).catch(() => {});
   $('overlay').hidden = false;
-  // Only ever grows the window (see fitWindow): 3D needs more room than the launcher's form.
-  pickerRpc?.request.fitWindow({ cssWidth: 1280, cssHeight: 800, viewportWidth: window.innerWidth, viewportHeight: window.innerHeight }).catch(() => {});
 }
 
 function previewIn(renderer: 'cesium' | '3dtrjs', tileset: string, type: string, title: string) {
@@ -259,6 +259,8 @@ function closeOverlay() {
   $('overlay').hidden = true;
   $<HTMLIFrameElement>('overlay-frame').src = 'about:blank';   // frees the renderer's GPU memory
   overlayTarget = null;
+  lastFit = '';
+  requestAnimationFrame(fitWindowToContent);
 }
 $('overlay-back').addEventListener('click', closeOverlay);
 $('overlay-cesium').addEventListener('click', () => { if (overlayTarget) previewIn('cesium', overlayTarget.tileset, overlayTarget.type, $('overlay-title').textContent ?? ''); });

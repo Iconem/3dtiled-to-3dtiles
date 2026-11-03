@@ -5,8 +5,8 @@ name: Deploy docs to GitHub Pages
 # search ships as a static Orama index (see apps/docs/src/app/api/search/route.ts).
 #
 # MANUAL-ONLY, ON PURPOSE. The canonical docs deployment is NOT GitHub Pages — it is the `docs`
-# GHCR image (a live Next.js server, so the search API and /og routes work) published by
-# docker-publish.yml and reverse-proxied by Traefik. This workflow is kept as a ready-to-go
+# GHCR image (the same static export, served as files) published by docker-publish.yml and
+# reverse-proxied by Traefik. This workflow is kept as a ready-to-go
 # fallback: a zero-infrastructure static mirror, useful for forks or if the container host is
 # unavailable. It does NOT run on push, because Pages is not enabled on this repo
 # (Settings → Pages → Source: "GitHub Actions") and every push would otherwise fail the run.

@@ -1,0 +1,9 @@
+{
+  "redirects": [
+    { "source": "/", "destination": "/docs/", "type": 307 }
+  ],
+  "headers": [
+    { "source": "/api/search", "headers": [{ "key": "Content-Type", "value": "application/json" }] },
+    { "source": "/_next/static/**", "headers": [{ "key": "Cache-Control", "value": "public, max-age=31536000, immutable" }] }
+  ]
+}
