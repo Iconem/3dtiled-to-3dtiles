@@ -43,6 +43,9 @@ jobs:
         with:
           context: .
           target: ${{ matrix.target }}
+          build-args: |
+            NEXT_PUBLIC_UMAMI_SRC=${{ vars.UMAMI_SRC }}
+            NEXT_PUBLIC_UMAMI_WEBSITE_ID=${{ vars.UMAMI_DOCS_WEBSITE_ID }}
           push: true
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}

@@ -1,0 +1,45 @@
+---
+title: "Usage analytics"
+description: "Counting page views on the demo and docs with Umami, and tile-server use from Traefik's access log, without logging share links or signed URLs."
+---
+
+Both are off unless you set them up, and neither applies to the desktop app or to a server you run yourself.
+
+<Callout type="warn">
+A tile-server URL can hold a bearer credential: `/stream/tileset.json?url=` carries share links and SAS
+signatures, and a viewer URL's `?load=` carries that whole URL. Anything that records usage must leave
+query strings out.
+</Callout>
+
+## Demo and docs: Umami
+
+[Umami](https://umami.is) is self-hosted and sets no cookies. `deploy/analytics/docker-compose.yml` runs it with its database:
+
+```bash
+cd deploy/analytics
+cp .env.example .env     # fill in the three secrets: openssl rand -hex 32
+docker compose up -d     # http://127.0.0.1:3005, first login admin / umami: change it
+```
+
+Route a subdomain to it, and add two websites in its settings. Each gives a website ID, which is not a secret.
+
+| Site | Set | Where |
+|---|---|---|
+| Demo | `UMAMI_SRC=https://<umami>/script.js`, `UMAMI_WEBSITE_ID=<id>` | The viewer container's environment; applies at its next start. |
+| Docs | `UMAMI_SRC=https://<umami>/script.js`, `UMAMI_DOCS_WEBSITE_ID=<id>` | [Repository variables](https://docs.github.com/en/actions/learn-github-actions/variables) of the repo that builds the image; applies at its next build, as the pages are static. |
+
+Both load the tracker with `data-exclude-search` and `data-exclude-hash`, so it sends the path alone, and
+the referrer without its query. Check it after setting it up: open the demo with a `?load=` and look at
+the page in Umami.
+
+## Tile-server: Traefik
+
+`deploy/traefik/access-log.yml` is the static configuration to merge into Traefik's. It writes a JSON access log and exposes
+Prometheus metrics per router. It drops query parameters, all headers and the client address.
+
+`fields.queryParameters` needs **Traefik 3.7 or later**. Earlier versions write the query inside `RequestPath`,
+so that field must be dropped too, and the log then only tells requests per router.
+
+This counts requests, and one opened dataset makes thousands of them. It answers how busy the server is
+and how often it fails, not how many datasets were opened, or in which format. A count of those needs a
+small counter in the tile-server, on `/stream/tileset.json`.

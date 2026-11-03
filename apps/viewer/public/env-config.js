@@ -8,3 +8,5 @@ window.__TILE_SERVER_URL__ = '';
 window.__DOCS_URL__ = '';
 window.__GOOGLE_MAPS_API_KEY__ = '';
 window.__CESIUM_ION_TOKEN__ = '';
+window.__UMAMI_SRC__ = '';
+window.__UMAMI_WEBSITE_ID__ = '';

@@ -1,0 +1,30 @@
+# Traefik STATIC configuration (merge into traefik.yml) to count tile-server requests from the access log.
+#
+# Query strings hold bearer credentials: /stream?url= carries share links and SAS signatures, and they
+# must never reach a log file. See docs/guide/usage-analytics.
+#
+# Needs Traefik 3.7 or later: earlier versions have no queryParameters option and write the query into
+# RequestPath, so there uncomment the line below, which also drops the path.
+accessLog:
+  filePath: /var/log/traefik/access.json
+  format: json
+  bufferingSize: 100
+  fields:
+    defaultMode: keep
+    names:
+      ClientAddr: drop
+      ClientHost: drop
+      ClientPort: drop
+      ClientUsername: drop
+      # RequestPath: drop   # Traefik before 3.7
+    queryParameters:
+      defaultMode: drop
+    # Referer can be a viewer URL whose ?load= holds a share link, and Authorization a token.
+    headers:
+      defaultMode: drop
+
+# Requests, status codes and latency per router, for Prometheus.
+metrics:
+  prometheus:
+    addRoutersLabels: true
+    addServicesLabels: true

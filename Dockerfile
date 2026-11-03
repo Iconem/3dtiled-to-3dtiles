@@ -73,6 +73,11 @@ CMD ["serve", "-l", "3000", "dist"]
 # ---- docs: next build → next start, its own service (see the Traefik-routing note up top) ----
 FROM deps AS docs-build
 COPY CHANGELOG.md ./
+# Optional page-view counting (see deploy/analytics): the static pages are built here, so these are build args.
+ARG NEXT_PUBLIC_UMAMI_SRC=""
+ARG NEXT_PUBLIC_UMAMI_WEBSITE_ID=""
+ENV NEXT_PUBLIC_UMAMI_SRC=${NEXT_PUBLIC_UMAMI_SRC}
+ENV NEXT_PUBLIC_UMAMI_WEBSITE_ID=${NEXT_PUBLIC_UMAMI_WEBSITE_ID}
 RUN pnpm --filter docs build
 
 FROM base AS docs

@@ -8,6 +8,38 @@ Format loosely follows [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+### Added — 2026-11-03 (mosaics appear at once, snap follows)
+- **A snapped mosaic no longer blocks on its first build** (22 s for the 660 Iconem datasets). It loads unsnapped at once,
+  its dots show grey at their own height and settle one by one as each offset arrives, with a count next to *snap*,
+  then the tileset moves to the snapped one. Already built, it loads directly.
+- **`GET /aggregate/snap.ndjson`** streams the offsets, one line per dataset as each resolves.
+- **Snap offsets are kept on disk**, so a restart or a deploy no longer costs the first build again. Two clients
+  asking for the same mosaic or offset now share one build.
+
+### Added — 2026-11-03 (JSON subtrees)
+- **The server tools read JSON subtrees as well as binary ones**, with external buffers and `constant` availability:
+  `implicit-to-explicit`, `/stats`, `/export` and `/extract`, through one `loadSubtree` in `packages/core`. A crop used
+  to treat a JSON subtree as missing, and silently return less. An implicit export keeps the source's encoding, with
+  external buffers beside their subtree.
+
+### Added — 2026-11-03 (desktop app library and layout)
+- **Two flows in the Build tab**: enter a dataset, then *Live-stream* (copy a URL) or *Export to disk*. Everything else is
+  folded under *Advanced*.
+- **History** in the Library tab, next to bookmarks: what you served or exported, with JSON import and export of both.
+  The library moves to `%LOCALAPPDATA%\3D Tiled\library.json`, so it survives updates.
+- **The app is named `3DTiled`**, so that Windows search finds it by that word.
+- A build updates from the releases of the repository that built it, so Iconem's builds follow Iconem's.
+
+### Added — 2026-11-03 (usage analytics)
+- **Umami for the demo and docs**, off unless configured: `UMAMI_SRC` and `UMAMI_WEBSITE_ID` on the viewer container, the
+  repository variables `UMAMI_SRC` and `UMAMI_DOCS_WEBSITE_ID` for the docs image, `deploy/analytics` to run it.
+- **`deploy/traefik/access-log.yml`**, a JSON access log and metrics for the tile-server that drop query strings, as they
+  hold share links and SAS signatures.
+
+### Security — 2026-11-03
+- The Iconem viewer and tile-server images built before the keys left the source are deleted from the registry (162 versions).
+  Publishing to Iconem's packages works again after Paul reset the GitHub Actions access on them, a settings change.
+
 ### Changed — 2026-11-03 (desktop app)
 - **One-file installer, a portable zip, and automatic updates** for the Windows app, as in terrain-viewer. The installer
   no longer needs a `.installer` folder beside it. Updates download in the background and wait for an *Update ready* button.
@@ -20,7 +52,7 @@ Format loosely follows [Keep a Changelog](https://keepachangelog.com/).
   and [#1782](https://github.com/NASA-AMMOS/3DTilesRendererJS/pull/1782). `lib/implicitAddFix.ts` and the vendored
   `potree-lab/vendor` copies are gone. Three local changes upstream does not have stay, without a copy:
   `lib/potreePlugin.ts` (aborted hierarchy chunks, uint16 colours) and the child boxes in `lib/addRefinePointSize.ts`.
-- **Mapterhorn (geoid)** in the terrain list, for both renderers: heights above the ellipsoid, so
+- **Re:Earth (Mapterhorn geoid)** in the terrain list, for both renderers: heights above the ellipsoid, so
   correctly georeferenced data sits on the terrain without a snap.
 - The debug list has *Cells only* above *Cells + dataset roots*.
 
