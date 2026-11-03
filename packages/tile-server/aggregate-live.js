@@ -63,7 +63,7 @@ function ttlCache(builder, { persist = null, normalize = null } = {}) {
     try {
       const entries = JSON.parse(await readFile(file, 'utf8'));
       for (const [k, e] of Object.entries(entries)) { const key = normalize ? normalize(k) : k; if (e && e.value !== undefined && !cache.has(key)) cache.set(key, { at: e.at, ttl: e.ttl, value: e.value, fromDisk: true }); }
-      console.log(`[aggregate] ${persist}: ${Object.keys(entries).length} cached child roots from disk`);
+      console.log(`[aggregate] ${persist}: ${Object.keys(entries).length} entries from disk`);
     } catch { /* no cache yet */ }
   };
   const save = () => {
@@ -77,7 +77,14 @@ function ttlCache(builder, { persist = null, normalize = null } = {}) {
     }, 2000);
   };
   const refreshing = new Set();
-  const build = async (key, ttlMs) => {
+  const inflight = new Map();                    // key → the build under way: a second caller joins it
+  const build = (key, ttlMs) => {
+    if (!(ttlMs > 0)) return run(key, ttlMs);
+    let p = inflight.get(key);
+    if (!p) { p = run(key, ttlMs).finally(() => inflight.delete(key)); inflight.set(key, p); }
+    return p;
+  };
+  const run = async (key, ttlMs) => {
     try {
       const value = await builder(key);
       if (ttlMs > 0) { cache.set(key, { at: Date.now(), ttl: ttlMs, value }); save(); }
@@ -429,7 +436,32 @@ const snapOffset = ttlCache(async (key) => {
   if (!samples) return null;
   const heights = await Promise.all(samples.map((s) => sampleTerrain(terrain, s.lon, s.lat)));
   return offsetFromSamples(samples, heights);
-});
+}, { persist: 'snap-offsets.json' });
+
+/**
+ * GET /aggregate/snap.ndjson?<same query as the snapped mosaic> — the offsets of &snap=, one line per
+ * dataset as each resolves, after a first line { total }. The offsets land in the cache the mosaic reads,
+ * so a viewer can show the unsnapped mosaic at once and ask for the snapped one when this ends.
+ */
+async function streamSnapOffsets(res, tree, items, terrain, ttlMs) {
+  const byUrl = new Map(items.map((it) => [it.url, it]));
+  const leaves = [];
+  (function walk(t) { if (t.content?.uri) leaves.push(t); for (const c of t.children || []) walk(c); })(tree.root);
+  res.writeHead(200, { 'Content-Type': 'application/x-ndjson', 'Cache-Control': 'no-store', ...CORS });
+  res.write(`${JSON.stringify({ total: leaves.length })}\n`);
+  await pooledSettled(leaves, async (t) => {
+    if (res.destroyed) return;
+    const r = await snapOffset(JSON.stringify({ url: t.content.uri, terrain, ttlMs }), ttlMs).catch(() => null);
+    const [x, y, z] = t.boundingVolume.sphere;
+    const dz = r ? +r.dz.toFixed(2) : null;
+    res.write(`${JSON.stringify({
+      id: byUrl.get(t.content.uri)?.id ?? idOf(t.content.uri),
+      height: +(ecefToLlh(x, y, z)[2] + (dz ?? 0)).toFixed(1),
+      snap: r ? { terrain, dz, bins: r.used, spread: +r.spread.toFixed(1) } : { terrain, dz: null },
+    })}\n`);
+  });
+  res.end();
+}
 
 function unionRegion(a, b) {
   if (!a) return b;
@@ -1093,10 +1125,12 @@ export async function handleAggregate(req, res, u) {
   }
   const isTileset = u.pathname === '/aggregate/tileset.json';
   const isIndex = u.pathname === '/aggregate/index.json';
-  if (!isTileset && !isIndex) return false;
+  const isSnapStream = u.pathname === '/aggregate/snap.ndjson';
+  if (!isTileset && !isIndex && !isSnapStream) return false;
 
   const sel = selectChildren(req, u, sets);
   if (sel.error) { res.writeHead(400, CORS); res.end(sel.error); return true; }
+  if (isSnapStream && !sel.snap) { res.writeHead(400, CORS); res.end('snap.ndjson needs &snap=<terrain>'); return true; }
   const { nest, ttlMs, bv } = sel;
   let { items } = sel;
   // &latest=1 needs every dataset's footprint, so it runs after selection, on the cached child roots.
@@ -1113,7 +1147,7 @@ export async function handleAggregate(req, res, u) {
 
   // Baked bounds are trusted unless the request forces a re-read (&ttl=0) or changes placement (&curved=).
   const known = ttlMs > 0 && !curved ? Object.fromEntries(items.filter((it) => it.bounds).map((it) => [it.url, it.bounds])) : {};
-  const key = JSON.stringify({ urls, nest, ttlMs, bv, labels, snap: sel.snap, native: sel.native, known });
+  const key = JSON.stringify({ urls, nest, ttlMs, bv, labels, snap: isSnapStream ? null : sel.snap, native: sel.native, known });
   let ts;
   try {
     ts = await aggregateCached(key, ttlMs);
@@ -1124,6 +1158,8 @@ export async function handleAggregate(req, res, u) {
       hint: 'datasets without a georeference can be placed first: /stream/tileset.json?…&lon=<deg>&lat=<deg>' }));
     return true;
   }
+
+  if (isSnapStream) { await streamSnapOffsets(res, ts, items, sel.snap, ttlMs); return true; }
 
   if (isIndex) {
     // Same selection and the same cached mosaic as tileset.json, flattened into one row per PLACED

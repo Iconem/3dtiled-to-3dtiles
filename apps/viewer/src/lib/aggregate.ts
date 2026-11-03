@@ -126,6 +126,51 @@ export function withSnap(url: string, terrain: TerrainMode | null, renderer: 'ce
   return withParam(url, 'snap', terrain ? snapParamFor(terrain, renderer) : null);
 }
 
+/** A mosaic the server snaps as it builds (drafts have no offset stream), and the same one unsnapped. */
+export const snapsLive = (url: string) => /\/aggregate\/tileset\.json(\?|$)/.test(url) && !!readSnap(url);
+export const withoutSnap = (url: string) => withParam(url, 'snap', null);
+
+export type SnapRow = { id: string; height: number; snap: NonNullable<DatasetMarker['snap']> };
+
+/** Calls onRow for each dataset as its offset resolves (/aggregate/snap.ndjson). */
+export async function streamSnapOffsets(tilesetUrl: string, signal: AbortSignal, onRow: (row: SnapRow) => void): Promise<void> {
+  const r = await fetch(tilesetUrl.replace('/aggregate/tileset.json', '/aggregate/snap.ndjson'), { signal });
+  if (!r.ok || !r.body) throw new Error(`HTTP ${r.status}`);
+  const reader = r.body.pipeThrough(new TextDecoderStream()).getReader();
+  let pending = '';
+  for (;;) {
+    const { value, done } = await reader.read();
+    if (done) return;
+    const lines = (pending + value).split('\n');
+    pending = lines.pop() ?? '';
+    for (const line of lines) if (line.includes('"id"')) onRow(JSON.parse(line));
+  }
+}
+
+// A snapped mosaic that answers within this is already built: load it directly, without showing it unsnapped.
+const SNAPPED_READY_MS = 1200;
+let mosaicLoads = 0;
+
+/**
+ * Every load goes through here, so the mosaic is on screen before its first snap ends (22 s for the 660
+ * Iconem datasets): it loads unsnapped at once, then snapped as soon as the server has built it. If
+ * `showing` is the same mosaic, what is on screen stays until then rather than being loaded again.
+ */
+export async function loadMosaic(
+  h: { load(url: string, type: any, opts?: { skipAutoFrame?: boolean }): void } | null | undefined,
+  url: string, type: unknown, opts: { skipAutoFrame?: boolean } = {}, showing = '',
+): Promise<void> {
+  const load = ++mosaicLoads;
+  if (!h) return;
+  if (!snapsLive(url)) { h.load(url, type, opts); return; }
+  const built = fetch(url).then((r) => { void r.body?.cancel(); return r.ok; }).catch(() => false);
+  const ready = await Promise.race([built, new Promise<boolean>((done) => setTimeout(done, SNAPPED_READY_MS, false))]);
+  if (load !== mosaicLoads) return;
+  if (ready) { h.load(url, type, opts); return; }
+  if (!showing || withoutSnap(showing) !== withoutSnap(url)) h.load(withoutSnap(url), type, opts);
+  if (await built && load === mosaicLoads) h.load(url, type, { ...opts, skipAutoFrame: true });
+}
+
 /**
  * Open ONE dataset of a mosaic on its own, in a new tab: a Potree cloud in the potree lab (raw
  * `cloud.js`, PotreePlugin), anything else in the 3DTRjs viewer. `url` is the mosaic leaf's content

@@ -9,7 +9,7 @@ import { ChevronDown } from 'lucide-react';
 import { useViewerStore } from '@/state/store';
 import type { ViewerHandle } from '@/lib/viewer-handle';
 import { SidebarCollapsibleSection } from './SidebarSection';
-import { isAggregateUrl, readSnap, snapParamFor, withSnap } from '@/lib/aggregate';
+import { isAggregateUrl, readSnap, snapParamFor, withSnap, loadMosaic } from '@/lib/aggregate';
 import { useUrlState } from '@/state/urlState';
 
 export default function LocalFrameSection({ activeHandleRef }: { activeHandleRef: React.RefObject<ViewerHandle | null> }) {
@@ -32,8 +32,9 @@ export default function LocalFrameSection({ activeHandleRef }: { activeHandleRef
   function setMosaicSnap(on: boolean) {
     const st = useViewerStore.getState();
     const url = withSnap(st.lastLoadUrl, on ? st.terrainMode : null, renderer);
+    const showing = st.lastLoadUrl;
     st.setLastLoadUrl(url); st.setUrlField(url);
-    h()?.load(url, st.currentType, { skipAutoFrame: true });
+    void loadMosaic(h(), url, st.currentType, { skipAutoFrame: true }, showing);
     st.setStatus(on ? 'Snapping every dataset of the mosaic to the ground (server-side, per dataset)…' : 'Mosaic back at its own heights (snap removed).');
   }
   // A snapped mosaic follows the terrain on screen: its &snap= changes when the terrain does (and only
@@ -43,7 +44,7 @@ export default function LocalFrameSection({ activeHandleRef }: { activeHandleRef
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [terrainMode, renderer]);
   const terrainLabel = {
-    auto: 'Mapterhorn', wgs84: 'ellipsoid', cesium: 'World Terrain', 'reearth-qm': 'Mapterhorn', 'mapterhorn-ellipsoid': 'Mapterhorn (geoid)',
+    auto: 'Mapterhorn', wgs84: 'ellipsoid', cesium: 'World Terrain', 'reearth-qm': 'Mapterhorn', 'mapterhorn-ellipsoid': 'Re:Earth (Mapterhorn geoid)',
     mapterhorn: 'Mapterhorn, sea level', terrarium: 'AWS, sea level', google: 'Google 3D',
   }[terrainMode];
 

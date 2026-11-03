@@ -587,7 +587,7 @@ The list is the same in both renderers;
 | Google 3D | Google Photorealistic 3D Tiles | mesh | — | ellipsoid |
 | **Mapterhorn**, 3DTRjs | [tiles.mapterhorn.com](https://tiles.mapterhorn.com/tilejson.json) `{z}/{x}/{y}.webp` | Terrarium, 512 px | 12 to 17, by location | **sea level** |
 | **Mapterhorn**, Cesium | [Re:Earth Terrain](https://terrain.reearth.land/) `cesium-mesh/ellipsoid` | quantized mesh | 14 | ellipsoid |
-| **Mapterhorn (geoid)** | [Re:Earth Terrain](https://terrain.reearth.land/) `mapterhorn-egm08/terrarium/ellipsoid` | Terrarium, 512 px | 14 | ellipsoid |
+| **Re:Earth (Mapterhorn geoid)** | [Re:Earth Terrain](https://terrain.reearth.land/) `mapterhorn-egm08/terrarium/ellipsoid` | Terrarium, 512 px | 14 | ellipsoid |
 | AWS Terrain Tiles | `elevation-tiles-prod/terrarium` | Terrarium, 256 px | 15 | sea level |
 | Cesium World Terrain | Cesium ion asset 1 | quantized mesh | — | ellipsoid |
 
@@ -597,7 +597,7 @@ about +16 m at Geghard, −100 m off India. So in 3DTRjs a correctly georeferenc
 Mapterhorn and AWS by that undulation until it is snapped to them. Mapterhorn itself serves orthometric
 heights (vertical datums are "not treated at the moment", mapterhorn#255).
 
-To avoid the gap, pick **Mapterhorn (geoid)**. Re:Earth's mirror adds EGM2008 and
+To avoid the gap, pick **Re:Earth (Mapterhorn geoid)**. Re:Earth's mirror adds EGM2008 and
 publishes ellipsoidal tiles (`mapterhorn-egm08/terrarium/ellipsoid`), so correctly georeferenced data
 sits on the terrain without a snap. The price is depth: it stops at z14, where mapterhorn.com reaches
 z17 in places. `&snap=mapterhorn-ellipsoid` and Cesium's Snap read the same tiles.

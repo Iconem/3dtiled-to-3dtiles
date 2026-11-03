@@ -19,8 +19,8 @@ import { Slider } from '@/components/ui/slider';
 import { useViewerStore } from '@/state/store';
 import type { ViewerHandle } from '@/lib/viewer-handle';
 import {
-  BV_MODES, dateSpan, externalViewerUrl, fetchAggregateIndex, heightForPlace, isAggregateUrl, pickerBaseUrl, readBv, readPicker, readSnap,
-  searchDatasets, searchPlaces, withBv, withPicker, withSnap, type AggregateIndex, type BvMode, type DatasetMarker,
+  BV_MODES, dateSpan, externalViewerUrl, fetchAggregateIndex, heightForPlace, isAggregateUrl, loadMosaic, pickerBaseUrl, readBv, readPicker, readSnap,
+  searchDatasets, searchPlaces, snapsLive, streamSnapOffsets, withBv, withoutSnap, withPicker, withSnap, type AggregateIndex, type SnapRow, type BvMode, type DatasetMarker,
   type PickerState, type Place,
 } from '@/lib/aggregate';
 import { markerColors, providerColor, type ColorMode, type DatasetStyle } from '@/lib/datasetStyle';
@@ -78,7 +78,8 @@ export default function AggregateSearch({ activeHandleRef, renderer }: {
   const picker = useMemo(() => (active ? readPicker(lastLoadUrl) : null), [active, lastLoadUrl]);
   const filtered = baseUrl !== '' && baseUrl !== new URL(lastLoadUrl, location.href).toString();
 
-  const [full, setFull] = useState<AggregateIndex | null>(null);
+  const [baseIndex, setBaseIndex] = useState<AggregateIndex | null>(null);
+  const [offsets, setOffsets] = useState<Map<string, SnapRow> | null>(null);
   const [current, setCurrent] = useState<AggregateIndex | null>(null);
   const [error, setError] = useState('');
   const [showMarkers, setShowMarkers] = useState(true);
@@ -103,14 +104,29 @@ export default function AggregateSearch({ activeHandleRef, renderer }: {
     selfUrlRef.current = '';
   }, [lastLoadUrl, renderer]);
 
-  // Full index: only when the underlying mosaic changes, not on every picker tweak.
+  // Full index: only when the underlying mosaic changes, not on every picker tweak. A snapped mosaic's
+  // index waits for every offset, so its dots come from the unsnapped one, and each settles as its
+  // offset arrives.
   useEffect(() => {
-    setFull(null); setError(''); setQuery(''); setPlaces([]); setInView([]);
+    setBaseIndex(null); setOffsets(null); setError(''); setQuery(''); setPlaces([]); setInView([]);
     if (!baseUrl) return;
     const ac = new AbortController();
-    fetchAggregateIndex(baseUrl, ac.signal).then(setFull).catch((e) => { if (!ac.signal.aborted) setError(String(e.message || e)); });
-    return () => ac.abort();
+    const live = snapsLive(baseUrl);
+    fetchAggregateIndex(live ? withoutSnap(baseUrl) : baseUrl, ac.signal).then(setBaseIndex).catch((e) => { if (!ac.signal.aborted) setError(String(e.message || e)); });
+    let timer: ReturnType<typeof setTimeout> | null = null;
+    if (live) {
+      const rows = new Map<string, SnapRow>();
+      setOffsets(new Map());
+      const flush = () => { timer = null; setOffsets(new Map(rows)); };
+      streamSnapOffsets(baseUrl, ac.signal, (row) => { rows.set(row.id, row); timer ??= setTimeout(flush, 120); })
+        .catch(() => { if (!ac.signal.aborted) { rows.clear(); setOffsets(null); } });
+    }
+    return () => { ac.abort(); if (timer) clearTimeout(timer); };
   }, [baseUrl]);
+  const full = useMemo(() => {
+    if (!baseIndex || !offsets?.size) return baseIndex;
+    return { ...baseIndex, datasets: baseIndex.datasets.map((d) => { const o = offsets.get(d.id); return o ? { ...d, height: o.height, snap: o.snap } : d; }) };
+  }, [baseIndex, offsets]);
 
   // Current index: what the loaded (filtered) URL actually contains. The previous one stays until the
   // next arrives, so rapid clicks keep working instead of every row flashing disabled meanwhile.
@@ -118,7 +134,7 @@ export default function AggregateSearch({ activeHandleRef, renderer }: {
   useEffect(() => {
     if (!active || !filtered) return;
     const ac = new AbortController();
-    fetchAggregateIndex(lastLoadUrl, ac.signal).then(setCurrent).catch((e) => { if (!ac.signal.aborted) setError(String(e.message || e)); });
+    fetchAggregateIndex(snapsLive(lastLoadUrl) ? withoutSnap(lastLoadUrl) : lastLoadUrl, ac.signal).then(setCurrent).catch((e) => { if (!ac.signal.aborted) setError(String(e.message || e)); });
     return () => ac.abort();
   }, [lastLoadUrl, active, filtered]);
 
@@ -161,8 +177,9 @@ export default function AggregateSearch({ activeHandleRef, renderer }: {
     return full.datasets
       .filter((d) => !(picker.formats.length && !picker.formats.includes(d.format)))
       .filter((d) => !offSources.has(sourceKeyOf(d)))
-      .map((d) => ({ ...d, color: colors.get(d.id), ...(activeIds.has(d.id) ? {} : { inactive: true }) }));
-  }, [full, current, filtered, activeIds, picker, offSources, sourceKeyOf, colors]);
+      // grey until placed: hidden, or still waiting for its snap offset
+      .map((d) => ({ ...d, color: colors.get(d.id), ...(activeIds.has(d.id) && (!offsets || offsets.has(d.id)) ? {} : { inactive: true }) }));
+  }, [full, current, filtered, activeIds, picker, offSources, sourceKeyOf, colors, offsets]);
 
   // Push markers to the renderer. Re-run on renderer switch: the handle behind the ref changes.
   useEffect(() => {
@@ -334,9 +351,10 @@ export default function AggregateSearch({ activeHandleRef, renderer }: {
     st.setLastLoadUrl(url);
     st.setUrlField(url);
     if (inPlace) return;
+    const showing = loadedRef.current.renderer === renderer ? loadedRef.current.url : '';
     loadedRef.current = { renderer, url: base };
     // keep the camera where it is: the user is looking at what they are filtering
-    h.load(base, st.currentType, { skipAutoFrame: true });
+    void loadMosaic(h, base, st.currentType, { skipAutoFrame: true }, showing);
   }
   const apply = (next: PickerState) => commit(withPicker(lastLoadUrl, next));
   const patch = (p: Partial<PickerState>) => apply({ ...picker!, ...p });
@@ -524,7 +542,7 @@ export default function AggregateSearch({ activeHandleRef, renderer }: {
               <Segmented value={bv} options={BV_MODES} onChange={(v: BvMode) => commit(withBv(lastLoadUrl, v), true)} title={BV_HELP} />
             </span>
             <span className="flex items-center gap-1">
-              <span className="text-muted-foreground">snap</span>
+              <span className="text-muted-foreground">snap{offsets && full && offsets.size < full.count ? ` ${offsets.size}/${full.count}` : ''}</span>
               <Segmented value={snap ? 'ground' : 'off'} options={['off', 'ground'] as const}
                 onChange={(v) => commit(withSnap(lastLoadUrl, v === 'ground' ? terrainMode : null, renderer === 'cesium' ? 'cesium' : '3dtrjs'), true)}
                 title="Put every dataset on the terrain, each with its own vertical offset (server-side, from its own geometry against the terrain on screen)" />

@@ -897,7 +897,10 @@
             "in": "query",
             "schema": {
               "type": "string",
-              "enum": ["1", "true"]
+              "enum": [
+                "1",
+                "true"
+              ]
             },
             "description": "Also describe each Potree leaf in its source format: content.extensions.ICONEM_content_source = { format, version, encoding, uri, transform }, listed in extensionsUsed (never required). content.uri stays the /stream 3D Tiles wrapper, so clients that do not know the extension are unaffected. transform maps the source's own coordinates to the leaf frame. Used by the viewer's 3DTRjs 'Native Potree leaves' setting."
           }
@@ -908,6 +911,44 @@
           },
           "400": {
             "description": "No child URLs given"
+          }
+        }
+      }
+    },
+    "/aggregate/snap.ndjson": {
+      "get": {
+        "tags": [
+          "aggregate"
+        ],
+        "summary": "Snap offsets of a mosaic, as they resolve",
+        "description": "Takes the same query as /aggregate/tileset.json, and needs &snap=<terrain>. Answers newline-delimited JSON: a first line { total }, then one line per dataset as its offset resolves: { id, height, snap: { terrain, dz, bins, spread } }, dz null when it could not be measured. The offsets land in the cache the mosaic reads, so a client can show the unsnapped mosaic at once and request the snapped one when this ends.",
+        "parameters": [
+          {
+            "name": "snap",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "The terrain, as on /aggregate/tileset.json."
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "application/x-ndjson",
+            "content": {
+              "application/x-ndjson": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "No &snap=, or a bad selection."
+          },
+          "422": {
+            "description": "None of the datasets could be placed."
           }
         }
       }

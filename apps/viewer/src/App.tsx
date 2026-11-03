@@ -8,6 +8,7 @@ import CesiumViewer from '@/components/Viewport/CesiumViewer';
 import ThreeDTRjsViewer from '@/components/Viewport/ThreeDTRjsViewer';
 import { useUrlState } from '@/state/urlState';
 import { useViewerStore } from '@/state/store';
+import { loadMosaic } from '@/lib/aggregate';
 import type { ViewerHandle } from '@/lib/viewer-handle';
 
 export default function App() {
@@ -40,7 +41,7 @@ export default function App() {
     shownRenderer.current = url.renderer;
     const { lastLoadUrl, currentType } = useViewerStore.getState();
     if (!lastLoadUrl) return;
-    activeHandleRef.current?.load(lastLoadUrl, currentType);
+    void loadMosaic(activeHandleRef.current, lastLoadUrl, currentType);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [url.renderer]);
 

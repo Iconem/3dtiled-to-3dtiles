@@ -16,6 +16,7 @@ GET /aggregate/tileset.json?urls=<u1>,<u2>,…           # comma form (each URL-
 GET /aggregate/tileset.json?set=opendata|iconem-open|world|flai|aerometrex|vexcel|…  # a named set (below)
     [&nest=auto|mercator|geodetic|flat]  [&bv=cell|sphere|region|box]  [&snap=0|1|<terrain>]  [&ttl=<seconds>]
     [&format=…] [&only=…] [&exclude=…] [&hide=<id>] [&latest=1] [&from=…] [&to=…]
+GET /aggregate/snap.ndjson?<same query, with &snap=>  # the snap offsets, one line per dataset as each resolves
 GET /aggregate/index.json?<same query>                 # one row per dataset, for UIs
 ```
 

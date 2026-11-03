@@ -8,7 +8,7 @@ import { PSEUDO_FORMATS, FORMAT_PILL_ORDER, pillMeta, fmtMeta, canCentroids, MW 
 import { buildMiddlewareUrl, currentPresets, type MiddlewareParams, type Preset } from '@/lib/middleware';
 import type { ViewerHandle } from '@/lib/viewer-handle';
 import { cn } from '@/lib/utils';
-import { aggregateIndexUrl, isAggregateUrl, forgetUploadedSet, noteUploadedUrl, restoreUploadedSet, uploadManifest, uploadedSetOf, useAvailableSets, useUploadedSets } from '@/lib/aggregate';
+import { aggregateIndexUrl, isAggregateUrl, loadMosaic, forgetUploadedSet, noteUploadedUrl, restoreUploadedSet, uploadManifest, uploadedSetOf, useAvailableSets, useUploadedSets } from '@/lib/aggregate';
 
 // `?load=<tileset URL>[&type=mesh|pointcloud|splat]` — load an arbitrary tileset on start instead of a
 // preset (the Aggregate Builder's "Preview in viewer" uses it for drafts). Read once: the URL itself is
@@ -176,7 +176,7 @@ export default function TopBar({ activeHandleRef }: { activeHandleRef: React.Ref
     store.getState().setCurrentType(type);
     store.getState().setLastLoadUrl(loadUrl);
     store.getState().tlogReset(`${url.mode} · ${url.format}${flyTo ? ' [fly]' : ''}`);
-    activeHandleRef.current?.load(loadUrl, type, { skipAutoFrame: !!flyTo });
+    void loadMosaic(activeHandleRef.current, loadUrl, type, { skipAutoFrame: !!flyTo });
     if (flyTo) activeHandleRef.current?.flyToCity(flyTo.lon, flyTo.lat, flyTo.height);
   }
 
