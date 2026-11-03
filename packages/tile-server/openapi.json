@@ -4,7 +4,6 @@
     "title": "3dtiled tile-server",
     "description": "A \"TiTiler for 3D\": live `<format>` → OGC 3D Tiles middleware. CORS-open, no auth, reads public sources only. Every endpoint streams/transcodes on demand — nothing is pre-baked unless you ask for `cache=full` (`/convert`).\n\nSee the [playground](/playground) to try requests interactively, or the [project docs]({{DOCS_URL}}) for the full architecture writeup.",
     "version": "0.1.0",
-    "x-deploy-check": "2026-11-03",
     "license": {
       "name": "MIT"
     }

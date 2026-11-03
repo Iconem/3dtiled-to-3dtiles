@@ -19,11 +19,16 @@ const tmpC = new THREE.Vector3();
 const tmpUp = new THREE.Vector3();
 const carto = { lat: 0, lon: 0, height: 0 };
 
-/** `o`'s matrix up to (not including) `stop`: the tileset's frame, whether attached yet or not. */
+/**
+ * `o`'s matrix up to (not including) `stop`: the tileset's frame, whether attached yet or not. A native
+ * Potree leaf's model holds source CRS coordinates and its tile may not be attached, so its top object
+ * names where it goes (`userData.heightParent`, lib/nativeLeaves.ts): without the leaf's frame, a
+ * projected Y of 6,500 km reads as ECEF, hundreds of km above the ellipsoid.
+ */
 function chainMatrix(o: THREE.Object3D, stop: THREE.Object3D | null, out: THREE.Matrix4) {
   if (o.matrixAutoUpdate) o.updateMatrix();
   out.copy(o.matrix);
-  for (let p = o.parent; p && p !== stop && !(p as THREE.Scene).isScene; p = p.parent) {
+  for (let c = o, p = o.parent ?? c.userData.heightParent; p && p !== stop && !(p as THREE.Scene).isScene; c = p, p = p.parent ?? c.userData.heightParent) {
     if (p.matrixAutoUpdate) p.updateMatrix();
     out.premultiply(p.matrix);
   }

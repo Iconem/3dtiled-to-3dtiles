@@ -9,8 +9,8 @@
  *
  * `transform` maps the source's own coordinates (what PotreePlugin draws) to the leaf's frame.
  *
- * This plugin claims the leaves it can read. Today that is Potree 1.x with `.bin` nodes (1.8 thanks
- * to the vendored loader patch) and Potree 2.0 DEFAULT. For each claimed leaf it mounts a CHILD
+ * This plugin claims the leaves it can read. Today that is Potree 1.x with `.bin` nodes and Potree
+ * 2.0 DEFAULT. For each claimed leaf it mounts a CHILD
  * TilesRenderer — two variants, created lazily and kept side by side:
  *
  *   native   3DTRjs's own PotreePlugin reading the source octree directly;
@@ -40,7 +40,7 @@
 import * as THREE from 'three';
 import { TilesRenderer } from '3d-tiles-renderer';
 // Vendored from 3DTilesRendererJS master (not in an npm release yet), with the Potree 1.8 patch.
-import { PotreePlugin } from '@/potree-lab/vendor/potree/PotreePlugin.js';
+import { PotreePlugin } from '@/lib/potreePlugin';
 
 export const NATIVE_EXT = 'ICONEM_content_source';
 const PLACEHOLDER_EXT = 'iconem-native';
@@ -55,7 +55,7 @@ export interface NativeSource {
   transform: number[];
 }
 
-/** Whether 3DTRjs (with the vendored PotreePlugin) reads this source directly. */
+/** Whether 3DTRjs's PotreePlugin reads this source directly. */
 export function nativeSupported(src: NativeSource | undefined | null): boolean {
   if (!src || src.format !== 'potree' || !Array.isArray(src.transform) || src.transform.length !== 16) return false;
   const v = String(src.version ?? '');
@@ -230,7 +230,10 @@ export class NativeLeavesPlugin {
     child.addEventListener('needs-update', this._forward);
     child.addEventListener('needs-render', this._forward);
     child.addEventListener('load-error', (e: any) => console.warn('[native leaf]', url ?? m.src.uri, e.error));
-    child.addEventListener('load-model', (e: any) => this.onChildModel?.(e.scene, m.tile, e.tile));
+    child.addEventListener('load-model', (e: any) => {
+      e.scene.userData.heightParent = child.group;   // lib/pointColors.ts
+      this.onChildModel?.(e.scene, m.tile, e.tile);
+    });
     for (const p of this.extraPlugins?.() ?? []) child.registerPlugin(p);
     return child;
   }

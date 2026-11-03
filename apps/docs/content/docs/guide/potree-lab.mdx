@@ -9,12 +9,11 @@ time with the point-rendering controls 3DTilesRendererJS added in
 example has no URL parameter — its datasets are hard-coded — so this page exists to point the same
 renderer at *our* datasets.
 
-Since 2026-10-28 the main 3DTRjs viewer uses the same vendored `PointCloudEffectsPlugin` for every
+Since 2026-10-28 the main 3DTRjs viewer uses the same `PointCloudEffectsPlugin` for every
 point cloud (3D Tiles, `/stream` and native Potree leaves), with its *Point shape* and *Eye-dome
 lighting* controls under *Tileset & LOD*; the lab remains the single-dataset bench with the debug
-colour modes and the raw, middleware-free Potree path. The vendored material carries two local
-patches (a maximum point size, and child-box sizing for ADD-refined non-octree tilesets), see
-[Viewer](/docs/guide/viewer).
+colour modes and the raw, middleware-free Potree path. On top of the plugin the viewer adds child-box
+sizing for ADD-refined non-octree tilesets, see [Viewer](/docs/guide/viewer).
 
 Open it from the demo app with **✺ potree lab** in the top bar. A raw `cloud.js` / `.copc.laz` in the
 URL field opens as itself; a loaded point-cloud tileset (a `/stream` or `/aggregate` URL) opens in
@@ -33,7 +32,7 @@ URL field opens as itself; a loaded point-cloud tileset (a `/stream` or `/aggreg
 
 **Potree 1.8 is most of our data.** 38 of 40 sampled Iconem clouds are 1.8. The version is decided
 by file name only (`metadata.json` → v2, anything else → v1) and v1 attributes are looked up by name,
-which is the same bug our own decoder had. The vendored `PotreeLoader.js` carries the patch,
+which is the same bug our own decoder had. `PotreeLoader.js` now has the patch,
 `v1Attributes()`, that accepts 1.8's objects (their `size`, or `elements × elementSize`). With it an
 Iconem 1.8 cloud loads raw (12,343 points on screen; 0 before). It is the first commit of PR #1780, described below.
 
@@ -139,17 +138,18 @@ self-imports. Verified at `70847eb`: implicit `/stream` Potree
 loads in the main viewer, and this lab renders a 149,695-point Mes Aynak aggregate with EDL. Once a
 release ships the work, bump the dependency and delete `.local/3DTilesRendererJS`.
 
-## Why the plugins are vendored
+## What the viewer still adds to the plugins
 
-`PotreePlugin` and `PointCloudEffectsPlugin` shipped in 3DTilesRendererJS `0.5.3` (2026-09-18), the
-same code as the `70847eb` master commit the copies under `apps/viewer/src/potree-lab/vendor/` are pinned
-to (Apache-2.0, license included). The copies stay because they carry patches the release does not:
-five are proposed upstream as one commit each in [PR #1780](https://github.com/NASA-AMMOS/3DTilesRendererJS/pull/1780) (branch
-`jo-chemla/3DTilesRendererJS:pointcloud-fixes`)
+The viewer used to carry vendored copies of `PotreePlugin` and `PointCloudEffectsPlugin`. They are gone
+since `3d-tiles-renderer` `0.5.4`, which ships [PR #1780](https://github.com/NASA-AMMOS/3DTilesRendererJS/pull/1780)
 (Potree 1.8 attribute objects, a clear error for LAS/LAZ nodes and BROTLI encoding, a thrown error on
-failed node downloads, `maxPointSize`, `sizeAttenuation = false`), each linked from the file header, and
-one is local (child-box sizing, see [Viewer](/docs/guide/viewer)). The viewer itself still depends on
-`0.5.2`; the plugins need nothing newer. Delete the copies once a release includes the upstream commits.
+failed node downloads, `maxPointSize`, `sizeAttenuation = false`). Three local changes remain, as small
+extensions rather than copies:
+
+- `lib/potreePlugin.ts`: a hierarchy chunk whose download was aborted can be fetched again, and a node
+  with no hierarchy entry stays a leaf. Both matter because `lib/staleLoads.ts` aborts in-flight requests.
+- `lib/potreePlugin.ts`: colours stored as normalized uint16 (6 B/point) rather than float32 (12 B).
+- `lib/addRefinePointSize.ts`: child-box sizing, see [Viewer](/docs/guide/viewer).
 
 A public Potree 1.8 reproducer for the attribute bug: Iconem's STAC catalogue at
 `https://app.iconem.com/api/stac/collections/pointcloud` lists 1.8 clouds among its items (32 of the

@@ -33,10 +33,9 @@ import { TilesRenderer, EnvironmentControls, GlobeControls } from '3d-tiles-rend
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { DebugTilesPlugin, ImplicitTilingPlugin, ReorientationPlugin } from '3d-tiles-renderer/plugins';
 import { GUI } from 'three/addons/libs/lil-gui.module.min.js';
-import { PotreePlugin } from './vendor/potree/PotreePlugin.js';
-import { PointCloudEffectsPlugin } from './vendor/pointcloud/PointCloudEffectsPlugin.js';
+import { PotreePlugin } from '@/lib/potreePlugin';
+import { PointCloudEffectsPlugin } from '3d-tiles-renderer/plugins';
 import { MW } from '@/lib/formats';
-import { ImplicitAddRefineFixPlugin } from '@/lib/implicitAddFix';
 
 const POTREE_REPO = 'https://raw.githubusercontent.com/potree/potree/refs/heads/develop/pointclouds/';
 const BUILTIN = {
@@ -265,7 +264,6 @@ function initTiles() {
   } else {
     tiles = new TilesRenderer(streamUrl(params.url));
     tiles.registerPlugin(new ImplicitTilingPlugin());
-    tiles.registerPlugin(new ImplicitAddRefineFixPlugin());   // see lib/implicitAddFix.ts
     // /stream may emit a georeferenced (ECEF) root; recentre + orient so both modes frame the same way.
     tiles.registerPlugin(new ReorientationPlugin({ recenter: true }));
     effects = new PointCloudEffectsPlugin(effectOpts);

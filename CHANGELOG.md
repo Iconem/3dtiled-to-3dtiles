@@ -5,8 +5,18 @@ Format loosely follows [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
-### Changed — 2026-11-03 (deploy check)
-- Harmless marker in the viewer, tile-server and docs, to time how long a push to main takes to reach production.
+### Changed — 2026-11-03 (3d-tiles-renderer 0.5.4)
+- **Viewer on `3d-tiles-renderer` 0.5.4**, which ships our [#1780](https://github.com/NASA-AMMOS/3DTilesRendererJS/pull/1780)
+  and [#1782](https://github.com/NASA-AMMOS/3DTilesRendererJS/pull/1782). `lib/implicitAddFix.ts` and the vendored
+  `potree-lab/vendor` copies are gone. Three local changes upstream does not have stay, without a copy:
+  `lib/potreePlugin.ts` (aborted hierarchy chunks, uint16 colours) and the child boxes in `lib/addRefinePointSize.ts`.
+- **Mapterhorn (geoid)** in the terrain list, for both renderers: heights above the ellipsoid, so
+  correctly georeferenced data sits on the terrain without a snap.
+- The debug list has *Cells only* above *Cells + dataset roots*.
+
+### Fixed — 2026-11-03
+- **Colour by height on native Potree leaves.** A model whose tile was not attached yet was measured in its source
+  CRS, read as ECEF: Etretat's range came out around 675 km. Native models now name the frame they belong to.
 
 ### Added — 2026-11-02 (desktop app release)
 - **Windows desktop app on GitHub Releases** (`desktop-latest`), built by the `Desktop app (Windows)`

@@ -43,7 +43,7 @@ export default function LocalFrameSection({ activeHandleRef }: { activeHandleRef
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [terrainMode, renderer]);
   const terrainLabel = {
-    auto: 'Mapterhorn', wgs84: 'ellipsoid', cesium: 'World Terrain', 'reearth-qm': 'Mapterhorn', 'mapterhorn-ellipsoid': 'Mapterhorn',
+    auto: 'Mapterhorn', wgs84: 'ellipsoid', cesium: 'World Terrain', 'reearth-qm': 'Mapterhorn', 'mapterhorn-ellipsoid': 'Mapterhorn (geoid)',
     mapterhorn: 'Mapterhorn, sea level', terrarium: 'AWS, sea level', google: 'Google 3D',
   }[terrainMode];
 

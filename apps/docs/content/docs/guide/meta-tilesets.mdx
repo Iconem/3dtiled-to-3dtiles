@@ -944,8 +944,8 @@ are 1.8, all with `.bin` nodes, so every one is readable natively.
 
 `lib/nativeLeaves.ts` is a 3DTRjs plugin on the mosaic's renderer:
 
-1. **Claims a leaf** whose extension it can read: Potree 1.x `.bin` (1.8 through the vendored
-   loader patch) or 2.0 DEFAULT. COPC, Brotli and LAS/LAZ-node clouds keep the `/stream` path.
+1. **Claims a leaf** whose extension it can read: Potree 1.x `.bin` or 2.0
+   DEFAULT. COPC, Brotli and LAS/LAZ-node clouds keep the `/stream` path.
    The core marks a `.json` content as an external tileset, so the plugin flips the leaf to
    renderable content. It redirects only the request, not `content.uri`, because dataset ids,
    hide and tint are derived from that link.

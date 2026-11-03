@@ -14,6 +14,7 @@ import { KTX2Loader } from 'three/addons/loaders/KTX2Loader.js';
 // GeneratedSurfacePlugin is exported at runtime (3d-tiles-renderer/src/three/plugins/index.js) but
 // missing from this package's .d.ts — imported via the namespace + cast to dodge the stale types.
 import * as ThreeTilesPlugins from '3d-tiles-renderer/plugins';
+import { PointCloudEffectsPlugin } from '3d-tiles-renderer/plugins';
 const GeneratedSurfacePlugin = (ThreeTilesPlugins as any).GeneratedSurfacePlugin;
 const TerrariumMeshPlugin = (ThreeTilesPlugins as any).TerrariumMeshPlugin;
 import { WGS84_ELLIPSOID, type TilesRenderer as TilesRendererImpl } from '3d-tiles-renderer';
@@ -64,11 +65,9 @@ import { MotionLodPlugin, flight, motionLodPlugins, setMotionLodInvalidate } fro
 import { fetchOutlines, outlineColor, type TileOutline } from '@/lib/mosaicOutlines';
 import { datasetGroundSamples, offsetFromSamples, type GroundSample } from '@/lib/datasetGround';
 import { applyHeightColors, fitHeightRange, restoreHeightColors, type HeightRange } from '@/lib/pointColors';
-import { ImplicitAddRefineFixPlugin } from '@/lib/implicitAddFix';
 import { NativeLeavesPlugin, withNativeLeaves } from '@/lib/nativeLeaves';
 import { AddRefinePointSizePlugin } from '@/lib/addRefinePointSize';
 // Vendored from 3DTilesRendererJS master (unreleased), with local patches (size cap, child boxes).
-import { PointCloudEffectsPlugin } from '@/potree-lab/vendor/pointcloud/PointCloudEffectsPlugin.js';
 import { useUrlState } from '@/state/urlState';
 import { SNAP_HALF, SNAP_SAMPLES, SNAP_MIN_HITS } from '@/lib/snapToGround';
 import { isAggregateUrl, type DatasetMarker } from '@/lib/aggregate';
@@ -357,7 +356,9 @@ class TerrariumFallbackPlugin extends TerrariumMeshPlugin {
     const tileset = await super.loadRootTileset();
     const source = this._source, fetchData = source.fetchData;
     source.fetchData = async (url: string, options: RequestInit) => {
-      const res = await fetchData(url, options);
+      // Re:Earth answers 500 for its z0 tile (RasterTerrain.rootUrl)
+      const root = RASTER_TERRAINS[this.terrainId].rootUrl;
+      const res = await fetchData(root && /\/0\/0\/0\.\w+$/.test(url) ? root : url, options);
       if (res.status !== 404) return res;
       const m = /(\d+)\/(\d+)\/(\d+)\.\w+$/.exec(url);
       const cut = m && await terrariumFromAncestor(this.terrainId, +m[1], +m[2], +m[3]);
@@ -1385,7 +1386,6 @@ const Scene = forwardRef<ViewerHandle, { loadArgs: LoadArgs; tooltip: TooltipCha
     // a /stream child renderer gets the same plugin set as the parent's own /stream leaves
     createStreamPlugins: () => [
       new ImplicitTilingPlugin(),
-      new ImplicitAddRefineFixPlugin(),
       new (GLTFExtensionsPlugin as any)(gltfArgsRef.current),
       new (PointCloudEffectsPlugin as any)({ ...effectsArgs }),
       new AddRefinePointSizePlugin(),
@@ -1910,7 +1910,7 @@ const Scene = forwardRef<ViewerHandle, { loadArgs: LoadArgs; tooltip: TooltipCha
       <group ref={setNavScene}>
       {showGlobe && globeVisible && (terrain === 'cesium' ? (
         <TerrainGlobe basemap={basemap} gl={gl} />
-      ) : terrain === 'terrarium' || terrain === 'mapterhorn' ? (
+      ) : terrain === 'terrarium' || terrain === 'mapterhorn' || terrain === 'mapterhorn-ellipsoid' ? (
         <TerrariumGlobe basemap={basemap} source={terrain} gl={gl} />
       ) : terrain === 'google' ? (
         <GoogleGlobe ktxLoader={ktxLoader} />
@@ -1961,7 +1961,6 @@ const Scene = forwardRef<ViewerHandle, { loadArgs: LoadArgs; tooltip: TooltipCha
               implicit roots) never expands past the root tile. Plug-and-play, no options, and a no-op on
               explicit tilesets (only triggers on nodes that actually carry `implicitTiling`). */}
           <TilesPlugin plugin={ImplicitTilingPlugin as any} />
-          <TilesPlugin plugin={ImplicitAddRefineFixPlugin as any} />
           <TilesPlugin plugin={GLTFExtensionsPlugin as any} args={gltfArgs as any} />
           {/* point sprites: shape, min/max size, EDL — the same plugin the potree lab and the native
               Potree leaves use, so one sidebar block drives all of them */}

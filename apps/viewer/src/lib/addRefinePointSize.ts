@@ -1,6 +1,6 @@
 /**
- * ADD-refinement point sizing for 3D Tiles point clouds drawn with the (vendored, locally patched)
- * PointCloudMaterial — see the CHILD_BOXES block in potree-lab/vendor/pointcloud/PointCloudMaterial.js.
+ * ADD-refinement point sizing for 3D Tiles point clouds drawn with 3d-tiles-renderer's
+ * PointCloudMaterial, whose shader this extends (see withChildBoxes).
  *
  * A /stream Potree or COPC cloud refines additively: a tile keeps drawing under its children, and
  * every tile is sized by its own spacing (geometricError). Where fine children are visible, the
@@ -20,10 +20,47 @@
  * every /stream child renderer the native-leaves plugin mounts.
  */
 import * as THREE from 'three';
-import { CHILD_BOXES } from '@/potree-lab/vendor/pointcloud/PointCloudMaterial.js';
 
+// Visible child-tile boxes a material can size by.
+const CHILD_BOXES = 8;
 const _inv = new THREE.Matrix4();
 const _groupInv = new THREE.Matrix4();
+
+/** Adds the child boxes to a PointCloudMaterial: a point inside one takes that child's world size. */
+function withChildBoxes(material: any) {
+  const u = material.uniforms;
+  if (u.uChildCount) return u;
+  u.uChildCount = { value: 0 };
+  u.uChildInv = { value: Array.from({ length: CHILD_BOXES }, () => new THREE.Matrix4()) };
+  u.uChildMin = { value: Array.from({ length: CHILD_BOXES }, () => new THREE.Vector3()) };
+  u.uChildMax = { value: Array.from({ length: CHILD_BOXES }, () => new THREE.Vector3()) };
+  u.uChildSize = { value: new Float32Array(CHILD_BOXES) };
+  const base = material.onBeforeCompile;
+  material.onBeforeCompile = (shader: any, renderer: any) => {
+    base(shader, renderer);
+    const size = 'float worldSize = size / pow( 2.0, activeResult.x + activeResult.z );';
+    if (!shader.vertexShader.includes(size)) throw new Error('PointCloudMaterial: worldSize line not found');
+    shader.vertexShader = shader.vertexShader
+      .replace('void main() {', `
+        uniform int uChildCount;
+        uniform mat4 uChildInv[ ${CHILD_BOXES} ];
+        uniform vec3 uChildMin[ ${CHILD_BOXES} ];
+        uniform vec3 uChildMax[ ${CHILD_BOXES} ];
+        uniform float uChildSize[ ${CHILD_BOXES} ];
+        void main() {`)
+      .replace(size, `${size}
+        for ( int i = 0; i < ${CHILD_BOXES}; i ++ ) {
+          if ( i >= uChildCount ) break;
+          vec3 q = ( uChildInv[ i ] * vec4( position, 1.0 ) ).xyz;
+          if ( all( greaterThanEqual( q, uChildMin[ i ] ) ) && all( lessThanEqual( q, uChildMax[ i ] ) ) ) {
+            worldSize = uChildSize[ i ];
+            break;
+          }
+        }`);
+  };
+  material.needsUpdate = true;
+  return u;
+}
 
 function firstPoints(tile: any): any | null {
   const scene = tile.engineData?.scene;
@@ -70,9 +107,13 @@ export class AddRefinePointSizePlugin {
     visible.forEach((t) => {
       const pts = firstPoints(t);
       if (!pts) return;
-      const u = pts.material.uniforms;
+      const unsized = pts.material.uniforms;
       // PotreePlugin tiles size per point from the active-nodes texture already
-      if (u.uActiveNodes.value || !pts.material.sizeAttenuation || t.refine !== 'ADD' || !t.children?.length) { u.uChildCount.value = 0; return; }
+      if (unsized.uActiveNodes.value || !pts.material.sizeAttenuation || t.refine !== 'ADD' || !t.children?.length) {
+        if (unsized.uChildCount) unsized.uChildCount.value = 0;
+        return;
+      }
+      const u = withChildBoxes(pts.material);
       // visible children with points, finest-spacing first. An implicit subtree root has no
       // content of its own (its model sits in a content child one level down), so a child without
       // points is looked through, a couple of levels deep.

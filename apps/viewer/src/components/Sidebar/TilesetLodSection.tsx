@@ -30,8 +30,8 @@ export default function TilesetLodSection({ activeHandleRef }: { activeHandleRef
           <SelectTrigger size="sm"><SelectValue /></SelectTrigger>
           <SelectContent>
             <SelectItem value="off">Off</SelectItem>
-            <SelectItem value="cells">Cells + dataset roots</SelectItem>
             <SelectItem value="cells-only">Cells only</SelectItem>
+            <SelectItem value="cells">Cells + dataset roots</SelectItem>
             <SelectItem value="tiles">All tiles (bounds + depth)</SelectItem>
           </SelectContent>
         </Select>
