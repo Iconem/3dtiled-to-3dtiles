@@ -17,7 +17,7 @@
 
 import fs   from 'fs/promises';
 import path from 'path';
-import { keyToCoords, coordsToKey, cubeToBox, octreeSubCube, buildExplicitTree } from '3dtiles-convert-core';
+import { keyToCoords, coordsToKey, cubeToBox, octreeSubCube, buildExplicitTree, loadSubtree, subtreeBufferUri } from '3dtiles-convert-core';
 
 // ── Morton decode (BigInt, safe for any level) ─────────────────────────────────
 
@@ -43,41 +43,6 @@ function mortonDecode2D(m) {           // QUADTREE: interleave x (even bits) and
 const mortonDecode = (scheme, m) => scheme === 'QUADTREE' ? mortonDecode2D(m) : mortonDecode3D(m);
 const childCount   = (scheme, d) => scheme === 'QUADTREE' ? 4 ** d : 8 ** d;
 
-// ── Binary .subtree parser ─────────────────────────────────────────────────────
-
-// Availability can be a Uint8Array bitstream OR a sentinel {constant:0|1}.
-// constant=0 → all bits 0 (nothing available); constant=1 → all bits 1 (all available).
-const getBit = (arr, i) => {
-  if (arr.constant !== undefined) return arr.constant === 1;
-  return ((arr[i >> 3] >> (i & 7)) & 1) === 1;
-};
-
-function parseSubtree(buf) {
-  const magic = buf.readUInt32LE(0);
-  if (magic !== 0x74627573) throw new Error(`bad subtree magic 0x${magic.toString(16)}`);
-  const jsonLen   = Number(buf.readBigUInt64LE(8));
-  const binaryLen = Number(buf.readBigUInt64LE(16));
-  const raw = buf.slice(24, 24 + jsonLen).toString('utf8').replace(/[\x00\x20]+$/, '');
-  const json   = JSON.parse(raw);
-  const binary = buf.slice(24 + jsonLen, 24 + jsonLen + binaryLen);
-
-  // Resolve an availability reference to either a Uint8Array or {constant:0|1}
-  const resolve = (ref) => {
-    if (!ref) return { constant: 0 };
-    if (ref.constant !== undefined) return { constant: ref.constant };
-    const v = json.bufferViews[ref.bitstream];
-    if (!v) return { constant: 0 };
-    return new Uint8Array(binary.buffer, binary.byteOffset + (v.byteOffset ?? 0), v.byteLength);
-  };
-
-  const ca = json.contentAvailability;
-  return {
-    tileAvail:   resolve(json.tileAvailability),
-    contentAvail: resolve(Array.isArray(ca) ? ca[0] : ca),
-    childAvail:  resolve(json.childSubtreeAvailability),
-  };
-}
-
 // ── Availability collector ─────────────────────────────────────────────────────
 
 /**
@@ -90,6 +55,7 @@ async function collectAvailability(uriTemplate, scheme, subtreeLevels, available
   const avail   = new Set();
   const content = new Set();
   const subtrees = new Set();                  // keys of the subtree files actually read
+  const buffers = new Map();                   // subtree key → the external buffers it names (uris as written)
 
   async function walk(rootLevel, rootX, rootY, rootZ) {
     if (availableLevels !== null && rootLevel >= availableLevels) return;
@@ -102,7 +68,12 @@ async function collectAvailability(uriTemplate, scheme, subtreeLevels, available
     if (!buf) return;
     subtrees.add(coordsToKey(rootLevel, rootX, rootY, rootZ));
 
-    const { tileAvail, contentAvail, childAvail } = parseSubtree(buf);
+    const sub = await loadSubtree(buf, async (bufferUri) => {
+      const bytes = await readSubtree(subtreeBufferUri(uri, bufferUri));
+      if (!bytes) throw new Error(`subtree ${uri}: buffer ${bufferUri} not found`);
+      return bytes;
+    });
+    if (sub.bufferUris.length) buffers.set(coordsToKey(rootLevel, rootX, rootY, rootZ), sub.bufferUris);
 
     let bit = 0;
     for (let d = 0; d < subtreeLevels; d++) {
@@ -113,8 +84,8 @@ async function collectAvailability(uriTemplate, scheme, subtreeLevels, available
       for (let m = 0; m < n; m++) {
         const { x, y, z } = mortonDecode(scheme, BigInt(m));
         const key = coordsToKey(absLevel, rootX*stride + x, rootY*stride + y, rootZ*stride + z);
-        if (getBit(tileAvail,    bit)) avail.add(key);
-        if (getBit(contentAvail, bit)) content.add(key);
+        if (sub.tileBit(bit)) avail.add(key);
+        if (sub.contentBit(bit)) content.add(key);
         bit++;
       }
     }
@@ -125,7 +96,7 @@ async function collectAvailability(uriTemplate, scheme, subtreeLevels, available
     const nc = childCount(scheme, subtreeLevels);
     const tasks = [];
     for (let m = 0; m < nc; m++) {
-      if (!getBit(childAvail, m)) continue;
+      if (!sub.childBit(m)) continue;
       const { x, y, z } = mortonDecode(scheme, BigInt(m));
       tasks.push(walk(childLevel, rootX*childStride + x, rootY*childStride + y, rootZ*childStride + z));
     }
@@ -133,7 +104,7 @@ async function collectAvailability(uriTemplate, scheme, subtreeLevels, available
   }
 
   await walk(0, 0, 0, 0);
-  return { avail, content, subtrees };
+  return { avail, content, subtrees, buffers };
 }
 
 // ── Bounding volume helpers ────────────────────────────────────────────────────
@@ -264,7 +235,7 @@ export async function buildExplicitFromUrl(tilesetUrl, { maxLevels = null } = {}
   const raw = await r.json();
   const baseUrl = tilesetUrl.replace(/\/[^/]+$/, '/');
 
-  const { tileset, avail, content, subtrees, availLevels } = await _buildExplicitTileset(raw, async (uri) => {
+  const { tileset, avail, content, subtrees, buffers, availLevels } = await _buildExplicitTileset(raw, async (uri) => {
     const u = new URL(uri, baseUrl).href;
     try {
       const resp = await fetch(u);
@@ -274,7 +245,7 @@ export async function buildExplicitFromUrl(tilesetUrl, { maxLevels = null } = {}
   }, maxLevels);
 
   // avail/content/subtrees: coordinate keys ("level-x-y-z") — what a copy that STAYS implicit needs
-  return { tileset, baseUrl, raw, avail, content, subtrees, availLevels };
+  return { tileset, baseUrl, raw, avail, content, subtrees, buffers, availLevels };
 }
 
 // ── Core: build explicit tileset from parsed JSON + readSubtree callback ──────
@@ -294,7 +265,7 @@ async function _buildExplicitTileset(raw, readSubtree, maxLevels = null) {
   const contentUri    = raw.root.content?.uri ?? null;
 
   console.log(`[i→e] ${scheme} subtreeLevels=${subtreeLevels} availableLevels=${availLevels ?? 'walk'} …`);
-  const { avail, content, subtrees } = await collectAvailability(subtreeUri, scheme, subtreeLevels, availLevels, readSubtree);
+  const { avail, content, subtrees, buffers } = await collectAvailability(subtreeUri, scheme, subtreeLevels, availLevels, readSubtree);
   console.log(`[i→e] ${avail.size} tile nodes, ${content.size} with content`);
 
   // content Set drives actual URI assignment; avail Set drives hierarchy existence
@@ -314,7 +285,7 @@ async function _buildExplicitTileset(raw, readSubtree, maxLevels = null) {
     geometricError: raw.geometricError ?? raw.root.geometricError,
     root: explicitRoot,
   };
-  return { tileset, avail, content, subtrees, availLevels };
+  return { tileset, avail, content, subtrees, buffers, availLevels };
 }
 
 // ── CLI ───────────────────────────────────────────────────────────────────────

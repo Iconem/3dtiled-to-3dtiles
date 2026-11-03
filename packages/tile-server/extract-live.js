@@ -24,7 +24,7 @@ import { crc32 } from 'node:zlib';
 import { Document, NodeIO } from '@gltf-transform/core';
 import { ALL_EXTENSIONS } from '@gltf-transform/extensions';
 import { readSpz, combine, writeSpz, writeSog, writeGlb, writePly, Transform, MemoryReadFileSystem, MemoryFileSystem } from '@playcanvas/splat-transform';
-import { decompressGlb, LasWriter, lasHeaderBuffer, lasRecordBuffer, ecefToLlh, llhToEcef, enuFrame, CORS } from '../core/index.js';
+import { decompressGlb, LasWriter, lasHeaderBuffer, lasRecordBuffer, ecefToLlh, llhToEcef, enuFrame, CORS, loadSubtree } from '../core/index.js';
 
 // Resolve the PDAL binary for /extract/copc. Prefer $PDAL_BIN, then the pixi-global shim (`pixi global
 // install pdal` → ~/.pixi/bin/pdal[.exe]), then `pdal` on PATH. pixi is the right installer here — PDAL
@@ -178,16 +178,6 @@ function tileIntersects(node, m, bb) {
 }
 
 // ── implicit tiling (OCTREE/QUADTREE subtrees) expansion ─────────────────────────
-function parseSubtree(buf) {
-  if (buf.toString('latin1', 0, 4) !== 'subt') return null;
-  const jl = Number(buf.readBigUInt64LE(8));
-  const j = JSON.parse(buf.toString('utf8', 24, 24 + jl));
-  const bin = buf.subarray(24 + jl + ((8 - (jl % 8)) % 8)), bv = j.bufferViews || [];
-  const v = (i) => i == null ? null : bin.subarray(bv[i].byteOffset, bv[i].byteOffset + bv[i].byteLength);
-  return { tile: { b: v(j.tileAvailability?.bitstream), c: j.tileAvailability?.constant },
-           content: { b: v(j.contentAvailability?.[0]?.bitstream), c: j.contentAvailability?.[0]?.constant } };
-}
-const bit = (a, i) => a && a.b ? ((a.b[i >> 3] >> (i & 7)) & 1) : (a && a.c ? 1 : 0);
 const morton = (dims, co) => { let m = 0; for (let i = 0; i < 16; i++) for (let d = 0; d < dims; d++) m |= ((co[d] >> i) & 1) << (dims * i + d); return m; };
 const subst = (tpl, l, x, y, z) => tpl.replace(/\{level\}/g, l).replace(/\{x\}/g, x).replace(/\{y\}/g, y).replace(/\{z\}/g, z);
 // axis-aligned sub-box of `rootBox` at implicit coord (level,x,y[,z]).
@@ -203,18 +193,19 @@ async function expandImplicit(node, worldM, base, bb, maxGE, maxDepth, onContent
   if (!rootBox || !contentTpl || !subTpl) return;
   const add = (node.refine || 'REPLACE').toUpperCase() === 'ADD', cells = (2 ** dims), cache = new Map();
   const getSub = async (l, x, y, z) => { const k = `${l}-${x}-${y}-${z}`; if (cache.has(k)) return cache.get(k);
-    let s = null; try { s = parseSubtree(await fetchBuf(absUrl(subst(subTpl, l, x, y, z), base))); } catch {} cache.set(k, s); return s; };
+    let s = null; const subUrl = absUrl(subst(subTpl, l, x, y, z), base);
+    try { s = await loadSubtree(await fetchBuf(subUrl), (uri) => fetchBuf(absUrl(uri, subUrl))); } catch {} cache.set(k, s); return s; };
   const walk = async (level, x, y, z) => {
     if (level > maxDepth) return;
     const sroot = Math.floor(level / SL) * SL, d = level - sroot;
     const sub = await getSub(sroot, x >> d, y >> d, dims === 3 ? z >> d : 0); if (!sub) return;
     const lx = x & ((1 << d) - 1), ly = y & ((1 << d) - 1), lz = dims === 3 ? z & ((1 << d) - 1) : 0;
     const tIdx = (cells ** d - 1) / (cells - 1) + morton(dims, dims === 3 ? [lx, ly, lz] : [lx, ly]);
-    if (!bit(sub.tile, tIdx)) return;
+    if (!sub.tileBit(tIdx)) return;
     const box = cellBox(rootBox, level, x, y, z, dims);
     if (!tileIntersects({ boundingVolume: { box } }, worldM, bb)) return;
     const descend = rootGE / 2 ** level > maxGE && level < maxDepth;
-    if (bit(sub.content, tIdx) && (add || !descend)) await onContent(absUrl(subst(contentTpl, level, x, y, z), base), worldM, { boundingVolume: { box } });
+    if (sub.contentBit(tIdx) && (add || !descend)) await onContent(absUrl(subst(contentTpl, level, x, y, z), base), worldM, { boundingVolume: { box } });
     if (!descend) return;
     for (let i = 0; i < cells; i++) await walk(level + 1, x*2 + (i&1), y*2 + ((i>>1)&1), dims === 3 ? z*2 + ((i>>2)&1) : 0);
   };

@@ -180,8 +180,23 @@ export async function exportTileset(rootUrl, outDir, { maxDepth = Infinity, conc
           return template.replace('{level}', level).replace('{x}', x).replace('{y}', y).replace('{z}', z);
         };
         const subT = imp.subtrees.uri;
-        for (const key of ex.subtrees) schedule(new URL(expand(subT, key), url).href, `${dir}/subtrees/${key}.subtree`);
-        imp.subtrees.uri = `${path.posix.relative(fromDir, `${dir}/subtrees`)}/{level}-{x}-{y}-{z}.subtree`;
+        // Same encoding as the source: a JSON subtree stays JSON. External buffers are named relative to their
+        // subtree, so those subtrees keep their folder layout, and the buffers go beside them.
+        const subFile = subT.split('?')[0].replace(/^\.\//, '');
+        const subExt = (subFile.match(/\.\w+$/) || ['.subtree'])[0];
+        const flat = !ex.buffers?.size;
+        if (!flat && !/^[^/:]+(\/[^/:]+)*$/.test(subFile)) throw new Error(`cannot keep implicit: subtree uri ${subT} is not a plain relative path`);
+        const subRel = flat ? `{level}-{x}-{y}-{z}${subExt}` : subFile;
+        for (const key of ex.subtrees) {
+          const subUrl = new URL(expand(subT, key), url).href, out = `${dir}/subtrees/${expand(subRel, key)}`;
+          schedule(subUrl, out);
+          for (const b of ex.buffers?.get(key) ?? []) {
+            const target = path.posix.normalize(`${path.posix.dirname(out)}/${b}`);
+            if (/^[a-z][a-z0-9+.-]*:|^\//i.test(b) || !target.startsWith(`${dir}/subtrees/`)) throw new Error(`cannot keep implicit: subtree buffer ${b} is outside the subtree folder`);
+            schedule(new URL(b, subUrl).href, target);
+          }
+        }
+        imp.subtrees.uri = `${path.posix.relative(fromDir, `${dir}/subtrees`)}/${subRel}`;
         const conT = json.root.content?.uri ?? json.root.content?.url;
         if (conT) {
           const ext = (conT.split('?')[0].match(/\.\w+$/) || ['.glb'])[0];

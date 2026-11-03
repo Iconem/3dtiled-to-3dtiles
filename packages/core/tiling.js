@@ -61,7 +61,7 @@ export function buildExplicitTree(rootKey, cb) {
   return make(rootKey);
 }
 
-// ── IMPLICIT tiling: 3D Tiles 1.1 binary .subtree files ──────────────────────────
+// ── IMPLICIT tiling: 3D Tiles 1.1 subtree files (we write binary, and read binary or JSON) ──────
 // Spec: github.com/CesiumGS/3d-tiles/blob/1.1/specification/ImplicitTiling
 
 function mortonEncode(x, y, z) {       // BigInt (no 32-bit shift overflow), up to level 21
@@ -137,19 +137,20 @@ export function buildSubtreeBuffer(rootKey, avail, subtreeLevels) {
 }
 
 /**
- * Parse a 3D Tiles 1.1 binary `.subtree` → availability accessors. The inverse of
+ * Parse a 3D Tiles 1.1 subtree, binary or JSON → availability accessors. The inverse of
  * buildSubtreeBuffer, but general: handles `{constant}` availability and both internal and
- * (pre-fetched) external buffers.
- * @param {Buffer|Uint8Array} buf the .subtree bytes
+ * pre-fetched external buffers (see loadSubtree, which fetches them).
+ * @param {Buffer|Uint8Array} buf the subtree file's bytes
+ * @param {(Buffer|null)[]} [externalBuffers] by index in `buffers`, for those with a `uri`
  * @returns {{ json: object, tileBit:(i:number)=>0|1, contentBit:(i:number)=>0|1, childBit:(i:number)=>0|1 }}
  */
-export function parseSubtreeBuffer(buf) {
-  const b = Buffer.isBuffer(buf) ? buf : Buffer.from(buf.buffer || buf, buf.byteOffset || 0, buf.byteLength);
-  if (b.toString('latin1', 0, 4) !== 'subt') throw new Error('not a .subtree (bad magic)');
-  const jsonLen = Number(b.readBigUInt64LE(8));
-  const json = JSON.parse(b.toString('utf8', 24, 24 + jsonLen));
-  const bin = b.subarray(24 + jsonLen);
-  const viewOf = (bv) => bv == null ? null : bin.subarray(bv.byteOffset || 0, (bv.byteOffset || 0) + bv.byteLength);
+export function parseSubtreeBuffer(buf, externalBuffers = []) {
+  const { json, bin } = splitSubtree(buf);
+  const viewOf = (bv) => {
+    if (bv == null) return null;
+    const data = json.buffers?.[bv.buffer ?? 0]?.uri != null ? externalBuffers[bv.buffer ?? 0] : bin;
+    return data ? data.subarray(bv.byteOffset || 0, (bv.byteOffset || 0) + bv.byteLength) : null;
+  };
   const accessor = (avail) => {
     if (!avail) return () => 0;
     if (avail.constant !== undefined) return () => (avail.constant ? 1 : 0);
@@ -159,6 +160,48 @@ export function parseSubtreeBuffer(buf) {
   };
   const content0 = Array.isArray(json.contentAvailability) ? json.contentAvailability[0] : json.contentAvailability;
   return { json, tileBit: accessor(json.tileAvailability), contentBit: accessor(content0), childBit: accessor(json.childSubtreeAvailability) };
+}
+
+/** A subtree's JSON and its internal binary chunk: a binary `.subtree`, or a plain JSON subtree (no chunk). */
+function splitSubtree(buf) {
+  const b = Buffer.isBuffer(buf) ? buf : Buffer.from(buf.buffer || buf, buf.byteOffset || 0, buf.byteLength);
+  if (b.toString('latin1', 0, 4) === 'subt') {
+    const jsonLen = Number(b.readBigUInt64LE(8));
+    return { json: JSON.parse(b.toString('utf8', 24, 24 + jsonLen)), bin: b.subarray(24 + jsonLen) };
+  }
+  let json;
+  try { json = JSON.parse(b.toString('utf8')); } catch { throw new Error('not a subtree: neither the binary magic nor JSON'); }
+  return { json, bin: null };
+}
+
+/** A subtree buffer's uri, relative to the subtree file itself, as a uri relative to the same base. */
+export function subtreeBufferUri(subtreeUri, bufferUri) {
+  if (/^[a-z][a-z0-9+.-]*:/i.test(bufferUri) || bufferUri.startsWith('/')) return bufferUri;
+  const file = subtreeUri.split('?')[0];
+  return file.slice(0, file.lastIndexOf('/') + 1) + bufferUri;
+}
+
+/**
+ * Parse a subtree in either encoding, binary or JSON, fetching the external buffers its availability
+ * points into.
+ * @param {Buffer|Uint8Array} buf the subtree file's bytes
+ * @param {(uri:string)=>Promise<Buffer|Uint8Array>} fetchBuffer gets a buffer's uri as the subtree wrote it
+ * @returns {Promise<ReturnType<typeof parseSubtreeBuffer> & { bufferUris: string[] }>}
+ */
+export async function loadSubtree(buf, fetchBuffer) {
+  const { json } = splitSubtree(buf);
+  const buffers = json.buffers ?? [];
+  const used = new Set();
+  for (const a of [json.tileAvailability, ...[json.contentAvailability].flat(), json.childSubtreeAvailability]) {
+    const view = a && a.constant === undefined ? json.bufferViews?.[a.bitstream ?? a.bufferView] : null;
+    if (view) used.add(view.buffer ?? 0);
+  }
+  const external = await Promise.all(buffers.map(async (b, i) => {
+    if (b.uri == null || !used.has(i)) return null;
+    const bytes = await fetchBuffer(b.uri);
+    return Buffer.isBuffer(bytes) ? bytes : Buffer.from(bytes);
+  }));
+  return { ...parseSubtreeBuffer(buf, external), bufferUris: buffers.filter((b, i) => b.uri != null && used.has(i)).map((b) => b.uri) };
 }
 
 /** Morton-decode m → {x,y} (quadtree) — BigInt-free, safe to level 15. */

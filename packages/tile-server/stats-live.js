@@ -14,7 +14,7 @@
  * remote tileset — so it doubles as a diagnostic for the live adapters (a truncated octree shows up
  * immediately as a ring that stops early; see the Potree 1.x .hrc boundary-cache fix).
  */
-import { parseSubtreeBuffer, morton2Decode, morton3Decode } from '../core/index.js';
+import { loadSubtree, morton2Decode, morton3Decode } from '../core/index.js';
 
 const CORS = { 'Access-Control-Allow-Origin': '*', 'Access-Control-Allow-Headers': '*' };
 
@@ -182,7 +182,8 @@ export async function collectStats(tsUrl, { maxNodes = 4000, maxDepth = 32, maxE
         let sub;
         try {
           const u = stTemplate.replace('{level}', st.level).replace('{x}', st.x).replace('{y}', st.y).replace('{z}', st.z);
-          sub = parseSubtreeBuffer(await fetchBuf(resolveUri(u, baseUrl)));
+          const subUrl = resolveUri(u, baseUrl);
+          sub = await loadSubtree(await fetchBuf(subUrl), (uri) => fetchBuf(resolveUri(uri, subUrl)));
           subtreesFetched++;
         } catch { continue; }
         // internal levels: level-major, morton-within-level bit order; parents linked via cell>>1
