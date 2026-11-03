@@ -281,3 +281,7 @@ footer a:hover { color: hsl(var(--foreground)); text-decoration: underline; }
   font: 11.5px/1.5 ui-monospace, "Cascadia Code", Consolas, monospace;
 }
 .io:focus { outline: none; border-color: hsl(var(--ring)); box-shadow: 0 0 0 2px hsl(var(--ring) / 0.25); }
+
+/* the two flows of the Build tab */
+.flow-title { font-size: 13.5px; line-height: 1.5; color: hsl(var(--foreground)); }
+#flows-empty { margin: 0 0 14px; }

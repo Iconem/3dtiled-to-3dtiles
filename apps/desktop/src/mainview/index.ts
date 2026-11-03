@@ -3,8 +3,10 @@
  * keeps a small library of datasets you care about.
  *
  * Three tabs, one job each:
- *   Build    — dataset + format + materialization + optional globe placement → paste-ready URL.
- *   Library  — datasets you've saved, with a cached structural check (tiles/depth/leaves from /stats).
+ *   Build    — a dataset, then two flows: live-stream (a paste-ready URL) or export to disk. Everything
+ *              else is folded under Advanced.
+ *   Library  — bookmarks, with a cached structural check (tiles/depth/leaves from /stats), and a
+ *              history of what was served or exported.
  *   Samples  — a real dataset for every format the middleware reads, one click into Build.
  *
  * The ports and the docs/viewer URLs arrive in the query string (see src/bun/index.ts): the main
@@ -13,7 +15,7 @@
  */
 import { Electroview } from 'electrobun/view';
 import { CATALOG, LINKS, type Sample } from './catalog';
-import { loadLibrary, saveLibrary, newId, serialize, replaceAll, type LibraryEntry } from './library';
+import { loadLibrary, saveLocal, newId, noteExported, noteServed, parseLibrary, serialize, type DatasetOptions, type HistoryEntry, type Library } from './library';
 import type { DesktopRPC } from '../shared/rpc-schema';
 
 /**
@@ -86,6 +88,10 @@ function refresh() {
   const u = buildUrl();
   urlEl.textContent = u || '—';
   urlEl.classList.toggle('empty', !u);
+  const entered = srcEl.value.trim() !== '';
+  $('flows').hidden = !entered;
+  $('flows-empty').hidden = entered;
+  requestAnimationFrame(fitWindowToContent);
 }
 
 function say(msg: string, kind: 'ok' | 'err' | 'info' = 'info') {
@@ -175,6 +181,7 @@ function showTab(name: string) {
   // Panels differ hugely in height (Build is short, Samples is a 20-row catalogue), so re-fit.
   requestAnimationFrame(fitWindowToContent);
 }
+document.addEventListener('toggle', () => requestAnimationFrame(fitWindowToContent), true);   // the Advanced folds
 $('tabs').addEventListener('click', (e) => {
   const t = (e.target as HTMLElement).closest<HTMLButtonElement>('.tab');
   // `dataset` is an index signature, so bracket access is required under
@@ -187,6 +194,8 @@ $('tabs').addEventListener('click', (e) => {
 $('copy').addEventListener('click', async () => {
   const u = buildUrl();
   if (!u) return say('Enter a dataset path or URL first.', 'err');
+  const f = currentForm();
+  noteServed(lib, nameFor(f.src), f); persist();
   try { await navigator.clipboard.writeText(u); say('Copied — paste it into Cesium for Unreal/Unity, QGIS or CesiumJS.', 'ok'); }
   catch { say(u, 'info'); }
 });
@@ -201,6 +210,8 @@ $('check').addEventListener('click', async () => {
     const ms = Math.round(performance.now() - t0);
     if (!r.ok) return say(`HTTP ${r.status} — ${(await r.text()).slice(0, 300)}`, 'err');
     const j = await r.json();
+    const f = currentForm();
+    noteServed(lib, nameFor(f.src), f); persist();
     const root = j.root ?? {};
     const bv = root.boundingVolume ?? {};
     const kind = bv.region ? 'region' : bv.box ? 'box' : bv.sphere ? 'sphere' : 'none';
@@ -220,6 +231,8 @@ $('preview').addEventListener('click', () => {
   // The harness is stock CesiumJS with zero viewer-side fix-ups, so whatever it shows is what any
   // 3D Tiles client gets from the tileset alone.
   if (!p) return say('Preview unavailable — the static server for cesium-harness.html did not start.', 'err');
+  const f = currentForm();
+  noteServed(lib, nameFor(f.src), f); persist();
   location.href = p;
 });
 
@@ -236,9 +249,9 @@ $('hierarchy').addEventListener('click', () => {
 $('save').addEventListener('click', () => {
   const f = currentForm();
   if (!f.src) return say('Enter a dataset path or URL first.', 'err');
-  library.push({ id: newId(), name: nameFor(f.src), addedAt: Date.now(), ...f });
+  lib.bookmarks.push({ id: newId(), name: nameFor(f.src), addedAt: Date.now(), ...f });
   persist();
-  say('Saved to library.', 'ok');
+  say('Bookmarked.', 'ok');
   showTab('library');
 });
 
@@ -264,6 +277,16 @@ const runnerEl = $<HTMLSelectElement>('export-runner');
 let exportJob: string | null = null;
 let cliJob: string | null = null;
 let exportPreview = '';
+let exportStarted: { form: DatasetOptions; outDir: string; method: string } | null = null;
+
+/** An export that ended goes in the history, however it ended. */
+function recordExport(state: NonNullable<HistoryEntry['state']>, files?: number, bytes?: number) {
+  if (!exportStarted) return;
+  const { form, outDir, method } = exportStarted;
+  exportStarted = null;
+  noteExported(lib, nameFor(form.src), form, { outDir, method, state, files, bytes });
+  persist();
+}
 
 function exportSay(msg: string, kind: 'ok' | 'err' | 'info' = 'info') {
   const el = $('export-status');
@@ -384,6 +407,7 @@ $('export-start').addEventListener('click', async () => {
   if (!r.outDir) return exportSay('Pick an empty output folder.', 'err');
   if (r.maxDepth != null && !(r.maxDepth >= 0)) return exportSay('Max depth must be a number of levels.', 'err');
   $('export-done').hidden = true;
+  exportStarted = { form: currentForm(), outDir: r.outDir, method: r.method };
   if (runnerEl.value === 'cli') return startCliExport(r);
   $('export-log-wrap').hidden = true;
   $('export-preview').hidden = $('export-viewer').hidden = false;
@@ -462,6 +486,7 @@ async function pollCli() {
   }
   cliJob = null;
   setExportRunning(false, false);
+  recordExport(s.state);
   exportBar.classList.remove('indeterminate');
   exportBar.style.width = '100%';
   if (s.state === 'done') {
@@ -507,6 +532,7 @@ async function pollExport() {
   }
   exportJob = null;
   setExportRunning(false, false);
+  recordExport(j.state === 'done' ? 'done' : j.state === 'cancelled' ? 'cancelled' : 'failed', written, pr.bytes);
   if (j.state === 'done') {
     exportPreview = j.preview ? `${base}${j.preview}` : '';
     $('export-done').hidden = false;
@@ -560,54 +586,73 @@ function nameFor(src: string): string {
 }
 
 // ── library ─────────────────────────────────────────────────────────────────────────────────────
-let library: LibraryEntry[] = loadLibrary();
+let lib: Library = loadLibrary();
 
 function persist() {
-  saveLibrary(library);
+  saveLocal(lib);
+  if (pickerAvailable()) pickerRpc!.request.writeLibrary({ json: serialize(lib) }).catch(() => { /* localStorage still has it */ });
   renderLibrary();
 }
 
-function renderLibrary() {
-  $('lib-count').textContent = String(library.length);
-  const host = $('lib-list');
-  host.textContent = '';
-  if (!library.length) {
-    const p = document.createElement('p');
-    p.className = 'hint';
-    p.textContent = 'Nothing saved yet — build a URL and press “Save to library”, or start from Samples.';
-    host.appendChild(p);
-    return;
+const hostOf = (id: string) => { const host = $(id); host.textContent = ''; return host; };
+const emptyHint = (host: HTMLElement, text: string) => {
+  const p = document.createElement('p');
+  p.className = 'hint';
+  p.textContent = text;
+  host.appendChild(p);
+};
+
+/** One row of either list: what the dataset is, one line about it, and its actions. */
+function libraryRow(e: DatasetOptions & { name: string }, meta: HTMLElement, acts: HTMLButtonElement[]): HTMLElement {
+  const row = document.createElement('div');
+  row.className = 'item';
+
+  const glyph = document.createElement('div');
+  glyph.className = 'glyph';
+  glyph.dataset['kind'] = kindOf(e.format);
+  glyph.textContent = iconOf(e.format);
+
+  const body = document.createElement('div');
+  body.className = 'item-body';
+  const title = document.createElement('div');
+  title.className = 'item-title';
+  title.textContent = e.name;
+  const tag = document.createElement('span');
+  tag.className = 'chip';
+  tag.textContent = e.format || 'auto';
+  title.appendChild(tag);
+  if (e.lon && e.lat) {
+    const geo = document.createElement('span');
+    geo.className = 'chip';
+    geo.textContent = `${e.lon}, ${e.lat}`;
+    title.appendChild(geo);
   }
-  for (const e of library) {
-    const row = document.createElement('div');
-    row.className = 'item';
+  const sub = document.createElement('div');
+  sub.className = 'item-sub';
+  sub.textContent = e.src;
+  sub.title = e.src;
+  meta.classList.add('item-meta');
+  body.append(title, sub, meta);
 
-    const glyph = document.createElement('div');
-    glyph.className = 'glyph';
-    glyph.dataset['kind'] = kindOf(e.format);
-    glyph.textContent = iconOf(e.format);
+  const actions = document.createElement('div');
+  actions.className = 'item-actions';
+  actions.append(...acts);
 
-    const body = document.createElement('div');
-    body.className = 'item-body';
-    const title = document.createElement('div');
-    title.className = 'item-title';
-    title.textContent = e.name;
-    const tag = document.createElement('span');
-    tag.className = 'chip';
-    tag.textContent = e.format || 'auto';
-    title.appendChild(tag);
-    if (e.lon && e.lat) {
-      const geo = document.createElement('span');
-      geo.className = 'chip';
-      geo.textContent = `${e.lon}, ${e.lat}`;
-      title.appendChild(geo);
-    }
-    const sub = document.createElement('div');
-    sub.className = 'item-sub';
-    sub.textContent = e.src;
-    sub.title = e.src;
+  row.append(glyph, body, actions);
+  return row;
+}
+
+const openBtn = (e: DatasetOptions) => mkBtn('Open', 'btn-ghost', () => { loadIntoBuilder(e); showTab('build'); });
+const copyBtn = (e: DatasetOptions) => mkBtn('Copy', 'btn-ghost', async () => {
+  try { await navigator.clipboard.writeText(buildUrlFrom(e)); say('Copied.', 'ok'); } catch { /* ignore */ }
+});
+
+function renderLibrary() {
+  $('lib-count').textContent = String(lib.bookmarks.length);
+  const host = hostOf('lib-list');
+  if (!lib.bookmarks.length) emptyHint(host, 'Nothing bookmarked yet — enter a dataset and press Bookmark, or start from Samples.');
+  for (const e of lib.bookmarks) {
     const meta = document.createElement('div');
-    meta.className = 'item-meta';
     if (e.stats) {
       const n = e.stats.tiles.toLocaleString('en-US');
       meta.textContent = e.stats.truncated
@@ -618,26 +663,43 @@ function renderLibrary() {
     } else {
       meta.textContent = 'not checked yet';
     }
-    body.append(title, sub, meta);
-
-    const acts = document.createElement('div');
-    acts.className = 'item-actions';
-    acts.append(
-      mkBtn('Open', 'btn-ghost', () => { loadIntoBuilder(e); showTab('build'); }),
-      mkBtn('Copy', 'btn-ghost', async () => {
-        try { await navigator.clipboard.writeText(buildUrlFrom(e)); say('Copied.', 'ok'); } catch { /* ignore */ }
-      }),
+    host.appendChild(libraryRow(e, meta, [
+      openBtn(e),
+      copyBtn(e),
       mkBtn('Preview', 'btn-ghost', () => {
         const p = previewUrl(buildUrlFrom(e));
         if (p) location.href = p;
       }),
-      mkBtn('Remove', 'btn-ghost', () => { library = library.filter((x) => x.id !== e.id); persist(); }),
-    );
+      mkBtn('Remove', 'btn-ghost', () => { lib.bookmarks = lib.bookmarks.filter((x) => x.id !== e.id); persist(); }),
+    ]));
+  }
 
-    row.append(glyph, body, acts);
-    host.appendChild(row);
+  const hist = hostOf('hist-list');
+  $<HTMLButtonElement>('hist-clear').disabled = !lib.history.length;
+  if (!lib.history.length) emptyHint(hist, 'Nothing yet — a URL you copy, preview or test, and every export, shows up here.');
+  for (const e of lib.history) {
+    const meta = document.createElement('div');
+    const when = new Date(e.at).toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' });
+    meta.textContent = e.kind === 'served'
+      ? `Served · ${when}${(e.count ?? 1) > 1 ? ` · ${e.count} times` : ''}`
+      : `Exported · ${when} · ${e.state === 'done' ? 'done' : e.state}${e.files ? ` · ${e.files} files` : ''}${e.bytes ? ` · ${mb(e.bytes)}` : ''} · ${e.outDir}`;
+    if (e.kind === 'exported') meta.title = e.outDir ?? '';
+    hist.appendChild(libraryRow(e, meta, [
+      openBtn(e),
+      ...(e.kind === 'exported'
+        ? [mkBtn('Folder', 'btn-ghost', () => { if (e.outDir) void pickerRpc?.request.openFolder({ path: e.outDir }).catch(() => {}); })]
+        : [copyBtn(e)]),
+      mkBtn('Bookmark', 'btn-ghost', () => {
+        const { src, format, cache, lon, lat, alt, heading, name } = e;
+        lib.bookmarks.push({ id: newId(), name, addedAt: Date.now(), src, format, cache, lon, lat, alt, heading });
+        persist();
+      }),
+      mkBtn('Remove', 'btn-ghost', () => { lib.history = lib.history.filter((x) => x.id !== e.id); persist(); }),
+    ]));
   }
 }
+
+$('hist-clear').addEventListener('click', () => { lib.history = []; persist(); });
 
 function mkBtn(label: string, cls: string, onClick: () => void): HTMLButtonElement {
   const b = document.createElement('button');
@@ -665,10 +727,10 @@ const iconOf = (fmt: string) => CATALOG.find((g) => g.format === fmt)?.icon ?? '
  * learned the hard way).
  */
 $('lib-refresh').addEventListener('click', async () => {
-  if (!base || !library.length) return;
+  if (!base || !lib.bookmarks.length) return;
   const btn = $<HTMLButtonElement>('lib-refresh');
   btn.disabled = true;
-  for (const e of library) {
+  for (const e of lib.bookmarks) {
     btn.textContent = `Checking ${e.name}…`;
     try {
       const u = `${base}/stats/tileset.json?url=${encodeURIComponent(buildUrlFrom(e))}&maxNodes=2000`;
@@ -688,7 +750,7 @@ $('lib-refresh').addEventListener('click', async () => {
 $('lib-export').addEventListener('click', () => {
   const io = $<HTMLTextAreaElement>('lib-io');
   io.style.display = 'block';
-  io.value = serialize(library);
+  io.value = serialize(lib);
   io.select();
 });
 
@@ -696,10 +758,10 @@ $('lib-import').addEventListener('click', () => {
   const io = $<HTMLTextAreaElement>('lib-io');
   if (io.style.display !== 'block') { io.style.display = 'block'; io.value = ''; io.focus(); return; }
   try {
-    library = replaceAll(io.value);
+    lib = parseLibrary(io.value, lib);
     persist();
     io.style.display = 'none';
-    say(`Imported ${library.length} entries.`, 'ok');
+    say(`Imported ${lib.bookmarks.length} bookmarks and ${lib.history.length} history entries.`, 'ok');
   } catch (e) { say(`Import failed: ${(e as Error).message}`, 'err'); }
 });
 
@@ -742,7 +804,7 @@ function renderSamples() {
       acts.append(
         mkBtn('Load', 'btn-ghost', () => { useSample(s); showTab('build'); }),
         mkBtn('Save', 'btn-ghost', () => {
-          library.push({ id: newId(), name: s.label, src: s.src, format: s.format, cache: 'none', addedAt: Date.now() });
+          lib.bookmarks.push({ id: newId(), name: s.label, src: s.src, format: s.format, cache: 'none', addedAt: Date.now() });
           persist();
         }),
       );
@@ -758,6 +820,7 @@ function useSample(s: Sample) {
 }
 
 // ── boot ────────────────────────────────────────────────────────────────────────────────────────
+refresh();
 (async () => {
   const statusEl = $('status');
   const portsEl = $('ports');
@@ -779,6 +842,14 @@ function useSample(s: Sample) {
   // native dialog cannot exist — hide the buttons rather than offering an action that always fails.
   if (!pickerAvailable()) for (const id of ['browse-file', 'browse-dir']) $(id).style.display = 'none';
 
+  // The file wins; a first run with this version starts it from what localStorage holds.
+  if (pickerAvailable()) {
+    const stored = await pickerRpc!.request.readLibrary({}).catch(() => null);
+    try {
+      if (stored) { lib = parseLibrary(stored); saveLocal(lib); }
+      else if (lib.bookmarks.length) persist();
+    } catch { /* a corrupt file: keep what localStorage has */ }
+  }
   renderLibrary();
   renderSamples();
 
@@ -789,6 +860,5 @@ function useSample(s: Sample) {
   }
   statusEl.textContent = `tile-server ready on :${tilePort}`;
   statusEl.className = 'status status-ok';
-  refresh();
   requestAnimationFrame(fitWindowToContent);
 })();

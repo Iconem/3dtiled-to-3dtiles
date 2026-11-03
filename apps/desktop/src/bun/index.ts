@@ -209,6 +209,10 @@ const WIN = { x: 100, y: 40, width: 1120, height: 940, maxWidth: 1600, maxHeight
 const cli = createCliRunner({ spawn: await defaultSpawn(), cwd: root, node });
 children.push({ kill: () => cli.killAll() });
 
+// The library outlives the app's folder, which every update replaces, and is shared by a portable copy.
+const libraryDir = env.LOCALAPPDATA ? `${env.LOCALAPPDATA}/3D Tiled` : `${env.HOME ?? "."}/.3dtiled`;
+const libraryFile = `${libraryDir}/library.json`;
+
 const rpc = defineElectrobunRPC<DesktopRPC, "bun">("bun", {
 	handlers: {
 		requests: {
@@ -237,6 +241,18 @@ const rpc = defineElectrobunRPC<DesktopRPC, "bun">("bun", {
 			runCli: ({ args, then }) => ({ id: cli.run(then ? [args, then] : [args]) }),
 			cliStatus: ({ id }) => cli.status(id),
 			cancelCli: ({ id }) => cli.cancel(id),
+
+			readLibrary: async () => {
+				const { readFile } = await import("node:fs/promises");
+				return readFile(libraryFile, "utf8").catch(() => null);
+			},
+			writeLibrary: async ({ json }) => {
+				const { mkdir, rename, writeFile } = await import("node:fs/promises");
+				await mkdir(libraryDir, { recursive: true });
+				await writeFile(`${libraryFile}.tmp`, json);
+				await rename(`${libraryFile}.tmp`, libraryFile);   // a crash mid-write leaves the previous file
+				return true;
+			},
 
 			updateStatus: () => ({ version: updateVersion }),
 			applyUpdate: async () => {

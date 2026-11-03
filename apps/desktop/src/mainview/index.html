@@ -15,9 +15,8 @@
         </header>
 
         <p class="lede">
-            Point this at a tiled dataset — on this machine or a public URL — and it serves a live
-            <strong>OGC 3D Tiles</strong> endpoint. Nothing is uploaded: the conversion happens here,
-            on demand. Paste the resulting URL into Cesium&nbsp;for&nbsp;Unreal/Unity, QGIS, or CesiumJS.
+            Turn a tiled dataset, on this machine or at a URL, into <strong>OGC 3D Tiles</strong>.
+            Nothing is uploaded: the conversion happens here.
         </p>
 
         <nav class="tabs" id="tabs">
@@ -39,33 +38,32 @@
                     </div>
                 </label>
 
-                <div class="row">
-                    <label class="field">
-                        <span>Format</span>
-                        <select id="format">
-                            <option value="">auto-detect</option>
-                            <option value="copc">COPC</option>
-                            <option value="potree">Potree</option>
-                            <option value="sog">SOG (streamed)</option>
-                            <option value="lcc">LCC</option>
-                            <option value="rad">RAD</option>
-                            <option value="i3s">I3S</option>
-                            <option value="threemx">3MX</option>
-                            <option value="geosplats">GeoSplats</option>
-                        </select>
-                    </label>
-                    <label class="field">
-                        <span>Materialization</span>
-                        <select id="cache">
-                            <option value="none">cache=none — stream, nothing stored</option>
-                            <option value="hierarchy">cache=hierarchy — index in RAM</option>
-                            <option value="full">cache=full — convert once to disk</option>
-                        </select>
-                    </label>
-                </div>
-
                 <details class="placement">
-                    <summary>Place a local dataset on the globe <span class="hint">(for sources with no georeference)</span></summary>
+                    <summary>Advanced <span class="hint">format, materialization, placement on the globe</span></summary>
+                    <div class="row">
+                        <label class="field">
+                            <span>Format</span>
+                            <select id="format">
+                                <option value="">auto-detect</option>
+                                <option value="copc">COPC</option>
+                                <option value="potree">Potree</option>
+                                <option value="sog">SOG (streamed)</option>
+                                <option value="lcc">LCC</option>
+                                <option value="rad">RAD</option>
+                                <option value="i3s">I3S</option>
+                                <option value="threemx">3MX</option>
+                                <option value="geosplats">GeoSplats</option>
+                            </select>
+                        </label>
+                        <label class="field">
+                            <span>Materialization</span>
+                            <select id="cache">
+                                <option value="none">cache=none — stream, nothing stored</option>
+                                <option value="hierarchy">cache=hierarchy — index in RAM</option>
+                                <option value="full">cache=full — convert once to disk</option>
+                            </select>
+                        </label>
+                    </div>
                     <div class="row">
                         <label class="field"><span>Longitude</span><input id="lon" type="text" placeholder="2.2945"></label>
                         <label class="field"><span>Latitude</span><input id="lat" type="text" placeholder="48.8584"></label>
@@ -73,88 +71,41 @@
                         <label class="field"><span>Heading°</span><input id="heading" type="text" placeholder="0"></label>
                     </div>
                     <p class="hint">
-                        Applied as a root ENU transform in the tileset itself, so every client gets it —
-                        not just this preview. Sources that carry their own georeference ignore these.
+                        For sources with no georeference: applied as a root ENU transform in the tileset
+                        itself, so every client gets it. Sources that carry their own georeference ignore these.
                     </p>
                 </details>
             </div>
 
+            <p class="hint" id="flows-empty">Enter a dataset above, then stream it live or export it to a folder.</p>
+
+            <div id="flows" hidden>
             <div class="card">
-                <span class="field-label">Tileset URL</span>
+                <span class="field-label flow-title">Live-stream <span class="hint">— a URL for Cesium for Unreal/Unity, QGIS or CesiumJS, converted on demand while this app runs</span></span>
                 <div class="urlbar">
                     <code id="url">—</code>
-                    <button id="copy" class="btn btn-primary">Copy</button>
+                    <button id="copy" class="btn btn-primary">Copy URL</button>
                 </div>
                 <div class="actions">
                     <button id="preview" class="btn">Preview in Cesium</button>
-                    <button id="check" class="btn">Test endpoint</button>
-                    <button id="save" class="btn">Save to library</button>
-                    <button id="playground" class="btn btn-ghost">API playground</button>
-                    <button id="hierarchy" class="btn btn-ghost">Hierarchy graph</button>
+                    <button id="save" class="btn">Bookmark</button>
                 </div>
                 <div id="result" class="result"></div>
+                <details class="placement">
+                    <summary>Advanced <span class="hint">test, API playground, hierarchy</span></summary>
+                    <div class="actions">
+                        <button id="check" class="btn">Test endpoint</button>
+                        <button id="playground" class="btn btn-ghost">API playground</button>
+                        <button id="hierarchy" class="btn btn-ghost">Hierarchy graph</button>
+                    </div>
+                </details>
             </div>
 
             <div class="card" id="export-card">
-                <span class="field-label">Export to a folder <span class="hint">— a finished, static 3D Tiles tree</span></span>
-                <p class="hint">
-                    Writes the dataset above into a folder that any web server, S3 bucket or Cesium for
-                    Unreal can host without this app. The equivalent CLI command is shown below.
-                </p>
-                <div class="row">
-                    <label class="field">
-                        <span>Method</span>
-                        <select id="export-method">
-                            <option value="crawl">Crawl the tileset URL above — any source</option>
-                            <option value="convert">Offline converter — raw source, per format</option>
-                        </select>
-                    </label>
-                    <label class="field">
-                        <span>Max depth <span class="hint">(crawl; blank = all)</span></span>
-                        <input id="export-depth" type="text" placeholder="all levels">
-                    </label>
-                    <label class="field">
-                        <span>Run in</span>
-                        <select id="export-runner">
-                            <option value="server">tile-server (default)</option>
-                            <option value="cli">CLI subprocess</option>
-                        </select>
-                    </label>
-                </div>
-                <p class="hint" id="export-runner-hint">
-                    <strong>tile-server</strong> (default): already running with every adapter loaded,
-                    reports structured progress, keeps going while you switch tabs, and serves the result
-                    back for the preview buttons.
-                    <strong>CLI subprocess</strong>: the exact command below in its own process — a crash
-                    or memory blow-up cannot take the tile-server down; same code, progress parsed from its
-                    output. With the offline converter it does not need the server at all (a crawl still
-                    reads the tileset URL the server serves). Prefer it for very large conversions.
-                    <span id="export-runner-na" hidden>Needs the desktop app — not available in a plain browser.</span>
-                </p>
-                <div class="options" id="export-crawl-opts">
-                    <label class="check" title="Copy the .subtree files and templated tiles as they are, instead of expanding the tree into explicit children. Smaller JSON; needs a client with implicit tiling (CesiumJS, 3DTRjs, Cesium for Unreal).">
-                        <input type="checkbox" id="export-keep-implicit"> keep implicit tiling
-                    </label>
-                </div>
-                <div class="options" id="export-convert-opts" hidden>
-                    <label class="field compact"><span>Tiling</span>
-                        <select id="conv-tiling"><option value="">converter default</option><option value="implicit">implicit</option><option value="explicit">explicit</option></select>
-                    </label>
-                    <label class="field compact"><span>Scale</span><input id="conv-scale" type="text" placeholder="1"></label>
-                    <label class="field compact"><span>GE scale</span><input id="conv-ge-scale" type="text" placeholder="1"></label>
-                    <label class="field compact"><span>GE layer</span><input id="conv-ge-layer" type="text" placeholder="—"></label>
-                    <label class="check" title="Splat formats only: write the splat centres as a point cloud"><input type="checkbox" id="conv-centroids"> splat centroids only</label>
-                </div>
-                <div class="options">
-                    <span class="hint">Also pack as</span>
-                    <label class="check"><input type="checkbox" id="pack-3tz"> .3tz</label>
-                    <label class="check"><input type="checkbox" id="pack-3dtiles"> .3dtiles</label>
-                </div>
+                <span class="field-label flow-title">Export to disk <span class="hint">— a finished 3D Tiles folder that any web server, S3 bucket or Cesium for Unreal can host without this app</span></span>
                 <div class="urlbar">
                     <input id="export-dir" type="text" spellcheck="false" placeholder="C:\exports\my-site   (an empty folder)">
                     <button id="export-browse" class="btn">Folder…</button>
-                </div>
-                <div class="actions">
                     <button id="export-start" class="btn btn-primary">Export</button>
                     <button id="export-cancel" class="btn" disabled>Cancel</button>
                 </div>
@@ -170,17 +121,70 @@
                     <button id="export-viewer" class="btn">Open copy in demo viewer</button>
                     <button id="export-copy" class="btn btn-ghost">Copy folder path</button>
                 </div>
-                <span class="field-label" style="margin-top:14px">Equivalent CLI <span class="hint">(from the repo root)</span></span>
-                <div class="urlbar">
-                    <code id="export-cli" class="cli">—</code>
-                    <button id="export-cli-copy" class="btn">Copy</button>
-                </div>
-                <div class="links">
-                    <a id="export-doc" href="#" target="_blank" rel="noreferrer">Export docs</a>
-                    <a id="export-cli-doc" href="#" target="_blank" rel="noreferrer">CLI docs</a>
-                    <a id="export-mw" href="#" target="_blank" rel="noreferrer">Middleware home</a>
-                    <a id="export-live" href="#" target="_blank" rel="noreferrer">Open the live tileset in the demo viewer</a>
-                </div>
+                <details class="placement">
+                    <summary>Advanced <span class="hint">method, depth, packing, CLI</span></summary>
+                    <div class="row">
+                        <label class="field">
+                            <span>Method</span>
+                            <select id="export-method">
+                                <option value="crawl">Crawl the tileset URL above — any source</option>
+                                <option value="convert">Offline converter — raw source, per format</option>
+                            </select>
+                        </label>
+                        <label class="field">
+                            <span>Max depth <span class="hint">(crawl; blank = all)</span></span>
+                            <input id="export-depth" type="text" placeholder="all levels">
+                        </label>
+                        <label class="field">
+                            <span>Run in</span>
+                            <select id="export-runner">
+                                <option value="server">tile-server (default)</option>
+                                <option value="cli">CLI subprocess</option>
+                            </select>
+                        </label>
+                    </div>
+                    <p class="hint" id="export-runner-hint">
+                        <strong>tile-server</strong> (default): already running with every adapter loaded,
+                        reports structured progress, keeps going while you switch tabs, and serves the result
+                        back for the preview buttons.
+                        <strong>CLI subprocess</strong>: the exact command below in its own process — a crash
+                        or memory blow-up cannot take the tile-server down; same code, progress parsed from its
+                        output. With the offline converter it does not need the server at all (a crawl still
+                        reads the tileset URL the server serves). Prefer it for very large conversions.
+                        <span id="export-runner-na" hidden>Needs the desktop app — not available in a plain browser.</span>
+                    </p>
+                    <div class="options" id="export-crawl-opts">
+                        <label class="check" title="Copy the subtree files and templated tiles as they are, instead of expanding the tree into explicit children. Smaller JSON; needs a client with implicit tiling (CesiumJS, 3DTRjs, Cesium for Unreal).">
+                            <input type="checkbox" id="export-keep-implicit"> keep implicit tiling
+                        </label>
+                    </div>
+                    <div class="options" id="export-convert-opts" hidden>
+                        <label class="field compact"><span>Tiling</span>
+                            <select id="conv-tiling"><option value="">converter default</option><option value="implicit">implicit</option><option value="explicit">explicit</option></select>
+                        </label>
+                        <label class="field compact"><span>Scale</span><input id="conv-scale" type="text" placeholder="1"></label>
+                        <label class="field compact"><span>GE scale</span><input id="conv-ge-scale" type="text" placeholder="1"></label>
+                        <label class="field compact"><span>GE layer</span><input id="conv-ge-layer" type="text" placeholder="—"></label>
+                        <label class="check" title="Splat formats only: write the splat centres as a point cloud"><input type="checkbox" id="conv-centroids"> splat centroids only</label>
+                    </div>
+                    <div class="options">
+                        <span class="hint">Also pack as</span>
+                        <label class="check"><input type="checkbox" id="pack-3tz"> .3tz</label>
+                        <label class="check"><input type="checkbox" id="pack-3dtiles"> .3dtiles</label>
+                    </div>
+                    <span class="field-label" style="margin-top:14px">Equivalent CLI <span class="hint">(from the repo root)</span></span>
+                    <div class="urlbar">
+                        <code id="export-cli" class="cli">—</code>
+                        <button id="export-cli-copy" class="btn">Copy</button>
+                    </div>
+                    <div class="links">
+                        <a id="export-doc" href="#" target="_blank" rel="noreferrer">Export docs</a>
+                        <a id="export-cli-doc" href="#" target="_blank" rel="noreferrer">CLI docs</a>
+                        <a id="export-mw" href="#" target="_blank" rel="noreferrer">Middleware home</a>
+                        <a id="export-live" href="#" target="_blank" rel="noreferrer">Open the live tileset in the demo viewer</a>
+                    </div>
+                </details>
+            </div>
             </div>
         </section>
 
@@ -188,19 +192,29 @@
         <section class="panel panel-hidden" id="panel-library">
             <div class="card">
                 <div class="card-head">
-                    <span class="field-label" style="margin:0">Tracked tilesets</span>
+                    <span class="field-label" style="margin:0">Bookmarks</span>
                     <div class="card-head-actions">
                         <button id="lib-refresh" class="btn btn-ghost">Refresh stats</button>
-                        <button id="lib-export" class="btn btn-ghost">Export</button>
-                        <button id="lib-import" class="btn btn-ghost">Import</button>
+                        <button id="lib-export" class="btn btn-ghost">Export JSON</button>
+                        <button id="lib-import" class="btn btn-ghost">Import JSON</button>
                     </div>
                 </div>
                 <p class="hint">
-                    Local paths and remote URLs you want to keep around. Stored in this app only —
-                    not shared with the CLI or the web viewer.
+                    Datasets you want to keep around. The JSON holds this list and the history below,
+                    and any share links or signed URLs in them: treat it as private.
                 </p>
                 <div id="lib-list" class="list"></div>
-                <textarea id="lib-io" class="io" spellcheck="false" placeholder="Paste exported JSON here, then press Import again."></textarea>
+                <textarea id="lib-io" class="io" spellcheck="false" placeholder="Paste exported JSON here, then press Import JSON again."></textarea>
+            </div>
+            <div class="card">
+                <div class="card-head">
+                    <span class="field-label" style="margin:0">History</span>
+                    <div class="card-head-actions">
+                        <button id="hist-clear" class="btn btn-ghost">Clear</button>
+                    </div>
+                </div>
+                <p class="hint">What you served or exported from this app, latest first, up to 200.</p>
+                <div id="hist-list" class="list"></div>
             </div>
         </section>
 

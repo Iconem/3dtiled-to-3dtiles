@@ -68,6 +68,15 @@ export interface DesktopRPC {
         params: { id: string };
         response: boolean;
       };
+      /** The library file's content (mainview/library.ts), null before the first write. */
+      readLibrary: {
+        params: Record<string, never>;
+        response: string | null;
+      };
+      writeLibrary: {
+        params: { json: string };
+        response: boolean;
+      };
       /** The version of a downloaded update ready to apply, null when there is none. */
       updateStatus: {
         params: Record<string, never>;

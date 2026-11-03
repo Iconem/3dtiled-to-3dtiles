@@ -51,12 +51,12 @@ jobs:
         run: |
           $dir = Join-Path $env:RUNNER_TEMP 'setup'
           New-Item -ItemType Directory $dir | Out-Null
-          Copy-Item artifacts/Setup.exe "$dir\3D Tiled-Setup.exe"
+          Copy-Item artifacts/Setup.exe "$dir\3DTiled-Setup.exe"
           $installed = "$env:LOCALAPPDATA\com.iconem.3dtiled.desktop\stable"
           $path = $env:PATH
           $env:PATH = 'C:\Windows\System32;C:\Windows'
           # The installer stays open on its finished screen, so wait for its files rather than its exit.
-          $setup = Start-Process "$dir\3D Tiled-Setup.exe" -WorkingDirectory $dir -PassThru
+          $setup = Start-Process "$dir\3DTiled-Setup.exe" -WorkingDirectory $dir -PassThru
           $deadline = (Get-Date).AddMinutes(8)
           while (-not (Test-Path "$installed\uninstall.exe") -and (Get-Date) -lt $deadline) { Start-Sleep 3 }
           if (-not (Test-Path "$installed\uninstall.exe")) { throw 'the installer did not finish' }
@@ -118,7 +118,7 @@ jobs:
           Copy-Item artifacts/Portable.zip $portable
           # The two feed files keep their names: an installed app fetches them from this release to update itself.
           $assets = @($setup, $portable, 'artifacts/stable-win-x64-update.json', 'artifacts/stable-win-x64-3DTiled.tar.zst')
-          $notes = "Windows x64 build of $sha, $date. **$setup** installs for your user, with no admin rights, and updates itself. **$portable** runs from any folder after unzipping: start ``3D Tiled.cmd``; it does not update itself. Unsigned, so SmartScreen warns on first run (More info, Run anyway). Includes Node and the tile-server; nothing else to install. The other two files are the update feed."
+          $notes = "Windows x64 build of $sha, $date. **$setup** installs for your user, with no admin rights, and updates itself. **$portable** runs from any folder after unzipping: start ``3DTiled.cmd``; it does not update itself. Unsigned, so SmartScreen warns on first run (More info, Run anyway). Includes Node and the tile-server; nothing else to install. The other two files are the update feed."
           gh release view desktop-latest *> $null
           if ($LASTEXITCODE -ne 0) { gh release create desktop-latest --title "Desktop app ($date)" --notes $notes --target $env:GITHUB_SHA --latest=false }
           gh release upload desktop-latest @assets --clobber

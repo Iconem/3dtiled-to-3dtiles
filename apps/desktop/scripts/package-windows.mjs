@@ -22,7 +22,7 @@ const artifacts = path.join(desktop, 'artifacts');
 const portable = path.join(desktop, 'build', 'portable');
 const tar = 'C:\\Windows\\System32\\tar.exe';   // Git Bash's reads a C:\ path as a remote host
 
-const setup = path.join(build, '3D Tiled-Setup');
+const setup = path.join(build, '3DTiled-Setup');
 const out = fs.createWriteStream(path.join(artifacts, 'Setup.exe'));
 for (const part of [`${setup}.exe`, 'ELECTROBUN_METADATA_V1', `${setup}.metadata.json`, 'ELECTROBUN_ARCHIVE_V1', `${setup}.tar.zst`]) {
   if (part.startsWith('ELECTROBUN_')) out.write(part);
@@ -41,9 +41,9 @@ fs.rmSync(payload);
 const app = path.join(portable, fs.readdirSync(portable)[0]);
 if (!fs.existsSync(path.join(app, 'bin', 'launcher.exe'))) throw new Error(`no launcher in ${app}`);
 // The launcher finds Resources through ../Resources, so it stays in bin/ and a starter sits at the top.
-fs.writeFileSync(path.join(app, '3D Tiled.cmd'), '@echo off\r\nstart "" "%~dp0bin\\launcher.exe" %*\r\n');
+fs.writeFileSync(path.join(app, '3DTiled.cmd'), '@echo off\r\nstart "" "%~dp0bin\\launcher.exe" %*\r\n');
 // apps/desktop/src/bun/index.ts leaves the updater off when it sees this file.
-fs.writeFileSync(path.join(app, 'portable.txt'), '3D Tiled, portable: no installation. Start it with "3D Tiled.cmd". It does not update itself: download a newer zip.\r\n');
+fs.writeFileSync(path.join(app, 'portable.txt'), '3D Tiled, portable: no installation. Start it with "3DTiled.cmd". It does not update itself: download a newer zip.\r\n');
 const zip = path.join(artifacts, 'Portable.zip');
 fs.rmSync(zip, { force: true });
 execFileSync(tar, ['-a', '-c', '-f', zip, '-C', portable, path.basename(app)], { stdio: 'inherit' });

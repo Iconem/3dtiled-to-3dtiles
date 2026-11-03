@@ -7,6 +7,15 @@ The desktop companion (`apps/desktop`) is the **run-the-middleware-on-device** a
 `packages/tile-server` locally, then turns a dataset on your disk — or a public URL — into a live OGC
 3D Tiles endpoint you can paste into Cesium for Unreal/Unity, QGIS, or CesiumJS.
 
+Enter a dataset, then choose one of two flows: **Live-stream** gives a URL to copy, and **Export to
+disk** writes a finished folder. Everything else (format, materialization, placement, export method, CLI
+command) is folded under *Advanced*.
+
+The **Library** tab holds your bookmarks, and a history of what you served or exported: a URL you copied,
+previewed or tested, and every export with its folder and how it ended. Both live in
+`%LOCALAPPDATA%\3D Tiled\library.json`, survive updates, and are exported and imported together as JSON.
+That JSON holds any share links or signed URLs you used, so treat it as private.
+
 Nothing is uploaded. The conversion happens on your machine, streamed on demand (`cache=none`) or
 cached to the local disk cache (`cache=full`). It is [`3dtiled serve`](/docs/guide/cli-usage) with a
 window, plus the globe-placement params and a stock-CesiumJS preview.
@@ -21,7 +30,7 @@ SmartScreen warns on first run.
   `%LOCALAPPDATA%\com.iconem.3dtiled.desktop` and adds Desktop and Start menu shortcuts, named *3D Tiled*:
   search for "3D Tiled" with the space. It updates itself: a newer build downloads in the background, and
   an *Update ready* button restarts into it, never on its own, as a conversion may be running.
-- **Portable** (`3DTiled-win-x64-Portable-<date>.zip`, about 250 MB): unzip anywhere and start `3D Tiled.cmd`.
+- **Portable** (`3DTiled-win-x64-Portable-<date>.zip`, about 250 MB): unzip anywhere and start `3DTiled.cmd`.
   It does not update itself.
 
 Your own sets and the mosaic cache live in `%LOCALAPPDATA%\3D Tiled` with both, so updates keep them. The
@@ -57,7 +66,7 @@ hutch electrobun build --env=stable
 node scripts/package-windows.mjs                               # artifacts/Setup.exe and Portable.zip
 ```
 
-Test those two, not `build/stable-win-x64/`: `3D Tiled-Setup.exe` there has no payload, and
+Test those two, not `build/stable-win-x64/`: `3DTiled-Setup.exe` there has no payload, and
 `3DTiled/bin/launcher.exe` is only the installer stub, so both fail with an invalid installer error.
 
 ### Why the Electrobun version is pinned to a beta

@@ -3,14 +3,15 @@ import type { ElectrobunConfig } from "electrobun";
 
 export default {
 	app: {
-		name: "3D Tiled",
+		// One word, as the shortcut's name: Windows search for "3dtiled" does not match "3D Tiled".
+		name: "3DTiled",
 		identifier: "com.iconem.3dtiled.desktop",
 		// The build day: a valid three-part version, as the updater compares bundle hashes, not versions.
 		version: process.env.BUILD_VERSION ?? "0.1.0",
 	},
-	// The feed the installed app updates from: what .github/workflows/desktop.yml publishes.
+	// The feed the installed app updates from: what .github/workflows/desktop.yml publishes, in the repo building it.
 	release: {
-		baseUrl: "https://github.com/jo-chemla/3dtiled-to-3dtiles/releases/download/desktop-latest",
+		baseUrl: `https://github.com/${process.env.GITHUB_REPOSITORY ?? "jo-chemla/3dtiled-to-3dtiles"}/releases/download/desktop-latest`,
 		generatePatch: false,
 	},
 	build: {

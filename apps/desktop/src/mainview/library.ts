@@ -1,21 +1,18 @@
 /**
- * The tracked-tileset library.
+ * The library: bookmarks you keep, and a history of what was served or exported from this app.
  *
- * PERSISTENCE. Entries live in the webview's `localStorage`, not in a file the main process owns.
- * That is a deliberate limitation, not an oversight: localStorage is durable per app install and
- * needs no RPC round-trip, no file-permission prompt and no schema migration story — right for a
- * list of bookmarks. It is also therefore NOT shared with the CLI or the web viewer, and it does not
- * survive clearing the app's webview data. If the library ever needs to be shared or exported, it
- * should move to a JSON file under the app's data dir via the main process; `serialize()` /
- * `replaceAll()` below exist so that migration is a small change rather than a rewrite.
+ * PERSISTENCE. The file `library.json` in the user's data folder is the source of truth, read and written
+ * by the main process (readLibrary, writeLibrary), so it survives an update and can be backed up.
+ * `localStorage` is a synchronous copy for the first paint, the only store in a plain browser, and where
+ * bookmarks of earlier versions are picked up from. Not shared with the CLI or the web viewer.
  *
  * We store the SOURCE plus the options, never just the built URL, so an entry can be re-opened into
  * the builder and edited — and so a later change to how URLs are built doesn't strand the library.
+ * A source can be a share link or a signed URL, so an exported library is as private as those links.
  */
 
-export interface LibraryEntry {
-  id: string;
-  name: string;
+/** What identifies a dataset and how it is served. */
+export interface DatasetOptions {
   /** Dataset source: a local path or a remote URL. */
   src: string;
   format: string;
@@ -24,6 +21,11 @@ export interface LibraryEntry {
   lat?: string;
   alt?: string;
   heading?: string;
+}
+
+export interface LibraryEntry extends DatasetOptions {
+  id: string;
+  name: string;
   addedAt: number;
   /**
    * Last structural check, from /stats — cached so the list isn't re-walking on every render.
@@ -34,34 +36,74 @@ export interface LibraryEntry {
   stats?: { tiles: number; depth: number; leaves: number; truncated: boolean; checkedAt: number };
 }
 
-const KEY = '3dtiled-desktop-library-v1';
+export interface HistoryEntry extends DatasetOptions {
+  id: string;
+  name: string;
+  kind: 'served' | 'exported';
+  at: number;
+  /** served: how many times its URL was copied, previewed or tested. */
+  count?: number;
+  /** exported: where to, and how it ended. */
+  outDir?: string;
+  method?: string;
+  state?: 'done' | 'failed' | 'cancelled';
+  files?: number;
+  bytes?: number;
+}
 
-export function loadLibrary(): LibraryEntry[] {
+export interface Library {
+  bookmarks: LibraryEntry[];
+  history: HistoryEntry[];
+}
+
+const KEY = '3dtiled-desktop-library-v1';
+const HISTORY_MAX = 200;
+
+/** Reads this file's JSON, or a plain array of bookmarks as earlier versions exported. */
+export function parseLibrary(json: string, current: Library = { bookmarks: [], history: [] }): Library {
+  const parsed = JSON.parse(json);
+  const lib = Array.isArray(parsed) ? { bookmarks: parsed, history: current.history } : parsed;
+  if (!Array.isArray(lib?.bookmarks)) throw new Error('expected { bookmarks: [...], history: [...] } or an array of bookmarks');
+  const history = Array.isArray(lib.history) ? lib.history : current.history;
+  const valid = (e: { src?: unknown }) => typeof e?.src === 'string';
+  return { bookmarks: lib.bookmarks.filter(valid), history: history.filter(valid) };
+}
+
+export function loadLibrary(): Library {
   try {
     const raw = localStorage.getItem(KEY);
-    if (!raw) return [];
-    const parsed = JSON.parse(raw);
-    return Array.isArray(parsed) ? parsed : [];
+    if (raw) return parseLibrary(raw);
   } catch {
     // A corrupt blob must not brick the app — an empty library is recoverable, a thrown exception
     // during startup is not.
-    return [];
   }
+  return { bookmarks: [], history: [] };
 }
 
-export function saveLibrary(entries: LibraryEntry[]): void {
-  try { localStorage.setItem(KEY, JSON.stringify(entries)); }
+export function serialize(lib: Library): string {
+  return JSON.stringify({ schema: '3dtiled-library/1', ...lib }, null, 2);
+}
+
+export function saveLocal(lib: Library): void {
+  try { localStorage.setItem(KEY, serialize(lib)); }
   catch { /* quota or disabled storage — the session still works, it just won't persist */ }
 }
 
-export function serialize(entries: LibraryEntry[]): string {
-  return JSON.stringify(entries, null, 2);
+const sameDataset = (a: DatasetOptions, b: DatasetOptions) =>
+  (['src', 'format', 'cache', 'lon', 'lat', 'alt', 'heading'] as const).every((k) => (a[k] || '') === (b[k] || ''));
+
+/** The same dataset served again moves back to the top rather than filling the list. */
+export function noteServed(lib: Library, name: string, o: DatasetOptions): void {
+  const i = lib.history.findIndex((h) => h.kind === 'served' && sameDataset(h, o));
+  const count = i >= 0 ? (lib.history[i].count ?? 1) + 1 : 1;
+  if (i >= 0) lib.history.splice(i, 1);
+  lib.history.unshift({ ...o, id: newId(), name, kind: 'served', at: Date.now(), count });
+  lib.history.length = Math.min(lib.history.length, HISTORY_MAX);
 }
 
-export function replaceAll(json: string): LibraryEntry[] {
-  const parsed = JSON.parse(json);
-  if (!Array.isArray(parsed)) throw new Error('expected a JSON array of entries');
-  return parsed;
+export function noteExported(lib: Library, name: string, o: DatasetOptions, out: Pick<HistoryEntry, 'outDir' | 'method' | 'state' | 'files' | 'bytes'>): void {
+  lib.history.unshift({ ...o, ...out, id: newId(), name, kind: 'exported', at: Date.now() });
+  lib.history.length = Math.min(lib.history.length, HISTORY_MAX);
 }
 
 let counter = 0;
