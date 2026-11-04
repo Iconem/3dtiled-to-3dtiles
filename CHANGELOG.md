@@ -23,6 +23,15 @@ Format loosely follows [Keep a Changelog](https://keepachangelog.com/).
   against every format. GeoSplats, `.3dtiles` and `.3tz` packages pass the same export check as the others.
 - **Point tiles carry `_INTENSITY` and `_CLASSIFICATION`** as glTF custom attributes, from COPC and Potree 1.x/2.0, live
   and offline. Nothing was sent before: a cloud without RGB had only white `COLOR_0`.
+- **A crawl export of a deep implicit tree shows progress and starts at once.** Reading the availability of a 25-level
+  Potree cloud (the 1.5 billion point Venice scan) walked tens of thousands of subtrees before the first download and
+  reported nothing meanwhile, so the desktop app sat on "Reading the tree" with an empty bar for minutes. The walk now
+  counts the subtrees read, and a copy that keeps implicit tiling downloads each subtree and its tiles as soon as that
+  subtree is read. The walk reads 8 subtrees at a time instead of every child at once, so the server that generates them
+  keeps answering the viewer. Cancel stops the walk, not only the downloads after it.
+- **Desktop: the folder pickers work on Windows.** Electrobun's dialog cannot pick a folder there (it opened the file
+  dialog, in which no folder can be chosen); the folder buttons now open Windows' own folder dialog.
+- **Desktop: the Advanced rows wrap** instead of squeezing five selects into one line.
 - **The cap on requests to one host adapts:** it halves when the host fails under load (a 429, a 503, a reset) and climbs
   back as reads pass, between 4 and the configured 32.
 - **The tile-server listens in 0.5 s instead of 10–15 s:** the format adapters and the tools load after the port is bound.

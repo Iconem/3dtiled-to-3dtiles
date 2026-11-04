@@ -206,6 +206,26 @@ const env = (globalThis as any).process?.env ?? {};
  * with no real path, and the middleware needs an actual filesystem path to hand to an adapter. The
  * OS dialog is the only way to get one.
  */
+const isWindows = (globalThis as any).process?.platform === "win32";
+
+/**
+ * A folder, on Windows. Electrobun's file dialog there does not pick folders (asked for a folder it opens the file dialog,
+ * in which no folder can be chosen, and answers with nothing), so the folder dialog is Windows' own, through PowerShell:
+ * the modern one under pwsh (.NET 5+), the classic tree under Windows PowerShell. Cancel answers [], like the native one.
+ */
+async function pickFolderWindows(): Promise<string[]> {
+	const { execFile } = await import("node:child_process");
+	const script = "Add-Type -AssemblyName System.Windows.Forms; $d = New-Object System.Windows.Forms.FolderBrowserDialog; "
+		+ "$d.Description = 'Pick a folder'; $d.ShowNewFolderButton = $true; "
+		+ "if ($d.ShowDialog() -eq [System.Windows.Forms.DialogResult]::OK) { [Console]::Out.Write($d.SelectedPath) }";
+	const run = (exe: string) => new Promise<string | null>((resolve) => {
+		execFile(exe, ["-NoProfile", "-NonInteractive", "-STA", "-Command", script], { windowsHide: true, timeout: 600_000 },
+			(err, stdout) => resolve(err ? null : String(stdout).trim()));
+	});
+	const picked = (await run("pwsh.exe")) ?? (await run("powershell.exe"));
+	return picked ? [picked] : [];
+}
+
 /** Window bounds, and the ceiling we will not grow past. */
 const WIN = { x: 100, y: 40, width: 800, height: 940, maxWidth: 1600, maxHeight: 1200 };
 
@@ -225,7 +245,7 @@ const rpc = defineElectrobunRPC<DesktopRPC, "bun">("bun", {
 	handlers: {
 		requests: {
 			pickDataset: ({ directory, allowedFileTypes }) =>
-				Utils.openFileDialog({
+				directory && isWindows ? pickFolderWindows() : Utils.openFileDialog({
 					canChooseFiles: !directory,
 					canChooseDirectory: directory,
 					allowsMultipleSelection: false,

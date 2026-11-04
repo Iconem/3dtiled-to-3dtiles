@@ -51,29 +51,46 @@ const childCount   = (scheme, d) => scheme === 'QUADTREE' ? 4 ** d : 8 ** d;
  *   content — contentAvailability: nodes that have actual tile content files
  * These differ in sparse datasets where interior nodes exist for traversal but have no file.
  */
-async function collectAvailability(uriTemplate, scheme, subtreeLevels, availableLevels, readSubtree) {
+/**
+ * Walks every subtree, at most `concurrency` reads at a time: a tree of 25 levels has tens of thousands of them, and
+ * firing them all at once buried the server that generates them (a Potree source's subtrees come from its .hrc chunks)
+ * under a queue nothing else could get through. `onSubtree(key, { content, buffers })` hears each subtree as soon as it
+ * is read, with the content keys it declares, so a caller can start on them before the walk ends; `onProgress(read)`
+ * counts the subtrees read so far.
+ */
+async function collectAvailability(uriTemplate, scheme, subtreeLevels, availableLevels, readSubtree, { onSubtree = null, onProgress = null, concurrency = 8, signal = null } = {}) {
   const avail   = new Set();
   const content = new Set();
   const subtrees = new Set();                  // keys of the subtree files actually read
   const buffers = new Map();                   // subtree key → the external buffers it names (uris as written)
+  let active = 0, read = 0;
+  const waiters = [];
+  const acquire = async () => { while (active >= concurrency) await new Promise((r) => waiters.push(r)); active++; };
+  const release = () => { active--; waiters.shift()?.(); };
 
   async function walk(rootLevel, rootX, rootY, rootZ) {
     if (availableLevels !== null && rootLevel >= availableLevels) return;
+    signal?.throwIfAborted();
 
     const uri = uriTemplate
       .replace('{level}', rootLevel).replace('{x}', rootX)
       .replace('{y}', rootY).replace('{z}', rootZ);
 
-    const buf = await readSubtree(uri);
-    if (!buf) return;
-    subtrees.add(coordsToKey(rootLevel, rootX, rootY, rootZ));
-
-    const sub = await loadSubtree(buf, async (bufferUri) => {
-      const bytes = await readSubtree(subtreeBufferUri(uri, bufferUri));
-      if (!bytes) throw new Error(`subtree ${uri}: buffer ${bufferUri} not found`);
-      return bytes;
-    });
-    if (sub.bufferUris.length) buffers.set(coordsToKey(rootLevel, rootX, rootY, rootZ), sub.bufferUris);
+    const rootKey = coordsToKey(rootLevel, rootX, rootY, rootZ);
+    await acquire();
+    let sub;
+    try {
+      const buf = await readSubtree(uri);
+      if (!buf) return;
+      sub = await loadSubtree(buf, async (bufferUri) => {
+        const bytes = await readSubtree(subtreeBufferUri(uri, bufferUri));
+        if (!bytes) throw new Error(`subtree ${uri}: buffer ${bufferUri} not found`);
+        return bytes;
+      });
+    } finally { release(); }
+    subtrees.add(rootKey);
+    if (sub.bufferUris.length) buffers.set(rootKey, sub.bufferUris);
+    const localContent = [];
 
     let bit = 0;
     for (let d = 0; d < subtreeLevels; d++) {
@@ -85,10 +102,12 @@ async function collectAvailability(uriTemplate, scheme, subtreeLevels, available
         const { x, y, z } = mortonDecode(scheme, BigInt(m));
         const key = coordsToKey(absLevel, rootX*stride + x, rootY*stride + y, rootZ*stride + z);
         if (sub.tileBit(bit)) avail.add(key);
-        if (sub.contentBit(bit)) content.add(key);
+        if (sub.contentBit(bit)) { content.add(key); localContent.push(key); }
         bit++;
       }
     }
+    onProgress?.(++read);
+    onSubtree?.(rootKey, { content: localContent, buffers: sub.bufferUris });
 
     const childLevel  = rootLevel + subtreeLevels;
     if (availableLevels !== null && childLevel >= availableLevels) return;
@@ -100,7 +119,10 @@ async function collectAvailability(uriTemplate, scheme, subtreeLevels, available
       const { x, y, z } = mortonDecode(scheme, BigInt(m));
       tasks.push(walk(childLevel, rootX*childStride + x, rootY*childStride + y, rootZ*childStride + z));
     }
-    await Promise.all(tasks);
+    // Every branch settles before the first failure is reported: a branch still running when its sibling failed
+    // would otherwise reject with nobody listening.
+    const failed = (await Promise.allSettled(tasks)).find((r) => r.status === 'rejected');
+    if (failed) throw failed.reason;
   }
 
   await walk(0, 0, 0, 0);
@@ -229,17 +251,21 @@ export async function transcodeToExplicit(tilesetDir, outFile) {
  * Build an explicit tileset JSON from a remote implicit tileset URL.
  * Returns { tileset (the explicit JSON object), baseUrl, contentUriTemplate }.
  */
-export async function buildExplicitFromUrl(tilesetUrl, { maxLevels = null, onSubtreeFailure = null } = {}) {
-  const raw = await fetchSourceJson(tilesetUrl);
+export async function buildExplicitFromUrl(tilesetUrl, { maxLevels = null, onSubtreeFailure = null, onSubtree = null, onProgress = null, signal = null } = {}) {
+  const raw = await fetchSourceJson(tilesetUrl, { signal });
   const baseUrl = tilesetUrl.replace(/\/[^/]+$/, '/');
 
   const { tileset, avail, content, subtrees, buffers, availLevels } = await _buildExplicitTileset(raw, async (uri) => {
     // A subtree still unread after retries prunes its whole branch, so the caller hears about it:
     // `onSubtreeFailure({ uri, status, error })` may throw to stop.
     const u = new URL(uri, baseUrl).href;
-    try { return await fetchSource(u); }
-    catch (e) { onSubtreeFailure?.({ uri: u, status: e.status, error: String(e.message || e) }); return null; }
-  }, maxLevels);
+    try { return await fetchSource(u, { signal }); }
+    catch (e) {
+      if (signal?.aborted) throw e;
+      onSubtreeFailure?.({ uri: u, status: e.status, error: String(e.message || e) });
+      return null;
+    }
+  }, maxLevels, { onSubtree, onProgress, signal });
 
   // avail/content/subtrees: coordinate keys ("level-x-y-z") — what a copy that STAYS implicit needs
   return { tileset, baseUrl, raw, avail, content, subtrees, buffers, availLevels };
@@ -247,7 +273,7 @@ export async function buildExplicitFromUrl(tilesetUrl, { maxLevels = null, onSub
 
 // ── Core: build explicit tileset from parsed JSON + readSubtree callback ──────
 
-async function _buildExplicitTileset(raw, readSubtree, maxLevels = null) {
+async function _buildExplicitTileset(raw, readSubtree, maxLevels = null, walkOpts = {}) {
   const imp = raw.root?.implicitTiling;
   if (!imp) {
     // Already explicit — return as-is
@@ -262,7 +288,7 @@ async function _buildExplicitTileset(raw, readSubtree, maxLevels = null) {
   const contentUri    = raw.root.content?.uri ?? null;
 
   console.log(`[i→e] ${scheme} subtreeLevels=${subtreeLevels} availableLevels=${availLevels ?? 'walk'} …`);
-  const { avail, content, subtrees, buffers } = await collectAvailability(subtreeUri, scheme, subtreeLevels, availLevels, readSubtree);
+  const { avail, content, subtrees, buffers } = await collectAvailability(subtreeUri, scheme, subtreeLevels, availLevels, readSubtree, walkOpts);
   console.log(`[i→e] ${avail.size} tile nodes, ${content.size} with content`);
 
   // content Set drives actual URI assignment; avail Set drives hierarchy existence

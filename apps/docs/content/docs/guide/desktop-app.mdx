@@ -161,7 +161,10 @@ every level), and press **Export**.
   - **Crawl** downloads the tileset URL above as served, so it works for any source. Options: max
     depth, and **keep implicit tiling**. Keeping implicit copies the `.subtree` files and templated
     tiles as they are, under `implicit/<hash>/`, and rewrites the templates and `availableLevels`.
-    That gives smaller JSON, and needs an implicit-capable client.
+    That gives smaller JSON, and needs an implicit-capable client. On a deep tree the first step,
+    "Reading the tree", counts the subtrees read, and with implicit tiling kept the tiles of each
+    subtree download as soon as it is read: a 25-level, 1.5 billion point Potree cloud shows files
+    landing within seconds (the whole copy is still hundreds of gigabytes; cap the depth for a sample).
   - **Offline converter** runs the per-format converter on the raw source. It is faster for the
     formats it covers and has their options: tiling (implicit/explicit), scale, GE scale, GE layer,
     splat centroids.

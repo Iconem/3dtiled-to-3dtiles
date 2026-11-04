@@ -166,39 +166,49 @@ export async function exportTileset(rootUrl, outDir, { maxDepth = Infinity, conc
       report();
       // Only the levels the depth cap keeps: `depth0` is where this tileset's root sits.
       const maxLevels = Number.isFinite(maxDepth) ? Math.max(1, maxDepth - depth0 + 1) : null;
-      const ex = await buildExplicitFromUrl(url, { maxLevels, onSubtreeFailure: (f) => noteHierarchyFailure({ file: f.uri, status: f.status, error: f.error ?? `HTTP ${f.status}` }) });
+      // A copy that stays implicit downloads each subtree, its buffers and its tiles as soon as the walk has read that
+      // subtree: a deep tree has tens of thousands of them, and waiting for the whole walk showed nothing for minutes.
+      const imp = json.root.implicitTiling;
+      const dir = `implicit/${hash(url)}`;
+      const expand = (template, key) => {
+        const { level, x, y, z } = keyToCoords(key);
+        return template.replace('{level}', level).replace('{x}', x).replace('{y}', y).replace('{z}', z);
+      };
+      const subT = imp.subtrees.uri;
+      // Same encoding as the source: a JSON subtree stays JSON. External buffers are named relative to their
+      // subtree, so those subtrees keep their folder layout, and the buffers go beside them.
+      const subFile = subT.split('?')[0].replace(/^\.\//, '');
+      const subExt = (subFile.match(/\.\w+$/) || ['.subtree'])[0];
+      const plainPath = /^[^/:]+(\/[^/:]+)*$/.test(subFile);
+      const conT = json.root.content?.uri ?? json.root.content?.url;
+      const conExt = conT ? (conT.split('?')[0].match(/\.\w+$/) || ['.glb'])[0] : null;
+      let subRel = null;                       // decided at the root subtree: flat names unless the subtrees name buffers
+      const onSubtree = keepImplicit ? (key, { content, buffers }) => {
+        if (subRel == null) {
+          if (buffers.length && !plainPath) throw new Error(`cannot keep implicit: subtree uri ${subT} is not a plain relative path`);
+          subRel = buffers.length ? subFile : `{level}-{x}-{y}-{z}${subExt}`;
+        } else if (buffers.length && subRel !== subFile) {
+          throw new Error(`cannot keep implicit: subtree ${key} names external buffers while the root subtree does not`);
+        }
+        const subUrl = new URL(expand(subT, key), url).href, out = `${dir}/subtrees/${expand(subRel, key)}`;
+        schedule(subUrl, out);
+        for (const b of buffers) {
+          const target = path.posix.normalize(`${path.posix.dirname(out)}/${b}`);
+          if (/^[a-z][a-z0-9+.-]*:|^\//i.test(b) || !target.startsWith(`${dir}/subtrees/`)) throw new Error(`cannot keep implicit: subtree buffer ${b} is outside the subtree folder`);
+          schedule(new URL(b, subUrl).href, target);
+        }
+        if (conT) for (const k of content) schedule(new URL(expand(conT, k), url).href, `${dir}/tiles/${k}${conExt}`);
+      } : null;
+      const ex = await buildExplicitFromUrl(url, {
+        maxLevels, signal, onSubtree,
+        onSubtreeFailure: (f) => noteHierarchyFailure({ file: f.uri, status: f.status, error: f.error ?? `HTTP ${f.status}` }),
+        onProgress: (n) => steps.count('Reading the tree', n, null),
+      });
       if (keepImplicit) {
         json = ex.raw;
         const imp = json.root.implicitTiling;
-        const dir = `implicit/${hash(url)}`;
-        const expand = (template, key) => {
-          const { level, x, y, z } = keyToCoords(key);
-          return template.replace('{level}', level).replace('{x}', x).replace('{y}', y).replace('{z}', z);
-        };
-        const subT = imp.subtrees.uri;
-        // Same encoding as the source: a JSON subtree stays JSON. External buffers are named relative to their
-        // subtree, so those subtrees keep their folder layout, and the buffers go beside them.
-        const subFile = subT.split('?')[0].replace(/^\.\//, '');
-        const subExt = (subFile.match(/\.\w+$/) || ['.subtree'])[0];
-        const flat = !ex.buffers?.size;
-        if (!flat && !/^[^/:]+(\/[^/:]+)*$/.test(subFile)) throw new Error(`cannot keep implicit: subtree uri ${subT} is not a plain relative path`);
-        const subRel = flat ? `{level}-{x}-{y}-{z}${subExt}` : subFile;
-        for (const key of ex.subtrees) {
-          const subUrl = new URL(expand(subT, key), url).href, out = `${dir}/subtrees/${expand(subRel, key)}`;
-          schedule(subUrl, out);
-          for (const b of ex.buffers?.get(key) ?? []) {
-            const target = path.posix.normalize(`${path.posix.dirname(out)}/${b}`);
-            if (/^[a-z][a-z0-9+.-]*:|^\//i.test(b) || !target.startsWith(`${dir}/subtrees/`)) throw new Error(`cannot keep implicit: subtree buffer ${b} is outside the subtree folder`);
-            schedule(new URL(b, subUrl).href, target);
-          }
-        }
-        imp.subtrees.uri = `${path.posix.relative(fromDir, `${dir}/subtrees`)}/${subRel}`;
-        const conT = json.root.content?.uri ?? json.root.content?.url;
-        if (conT) {
-          const ext = (conT.split('?')[0].match(/\.\w+$/) || ['.glb'])[0];
-          for (const key of ex.content) schedule(new URL(expand(conT, key), url).href, `${dir}/tiles/${key}${ext}`);
-          setUri(json.root.content, `${path.posix.relative(fromDir, `${dir}/tiles`)}/{level}-{x}-{y}-{z}${ext}`);
-        }
+        imp.subtrees.uri = `${path.posix.relative(fromDir, `${dir}/subtrees`)}/${subRel ?? `{level}-{x}-{y}-{z}${subExt}`}`;
+        if (conT) setUri(json.root.content, `${path.posix.relative(fromDir, `${dir}/tiles`)}/{level}-{x}-{y}-{z}${conExt}`);
         // a depth-capped copy must say where it stops, or clients will ask for subtrees it doesn't have
         if (ex.availLevels != null) imp.availableLevels = ex.availLevels;
         p.implicitKept++;
@@ -270,7 +280,10 @@ export async function exportTileset(rootUrl, outDir, { maxDepth = Infinity, conc
   const rootUrlAbs = new URL(rootUrl).href;
   names.set(rootUrlAbs, 'tileset.json');
   taken.add('tileset.json');
-  await crawlTileset(rootUrlAbs, 'tileset.json', 0);
+  // Downloads start while the crawl runs; a crawl that stops must wait for the ones in flight, or their rejections
+  // (cancelled, or failed after the error) would be nobody's.
+  try { await crawlTileset(rootUrlAbs, 'tileset.json', 0); }
+  catch (e) { await Promise.allSettled(downloads); throw e; }
   p.phase = 'downloading';
   steps.begin('Downloading tiles', p.tilesWritten, p.tilesDiscovered);
   await Promise.all(downloads);

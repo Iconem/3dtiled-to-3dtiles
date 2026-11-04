@@ -8,7 +8,7 @@ import { mkdtemp, readFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { fetchSource, fetchSourceRange, httpStatusOf, hostLimit, memoizeAsync } from '../core/index.js';
+import { fetchSource, fetchSourceRange, httpStatusOf, hostLimit, memoizeAsync, buildSubtreeBuffer } from '../core/index.js';
 import { handleStream } from './stream-live.js';
 import { exportTileset } from './export-live.js';
 
@@ -262,3 +262,46 @@ test('an export of a mosaic that lost a child says so, and stops unless told to 
   assert.equal(r.hierarchyFailures.length, 1);
   assert.equal(r.tilesWritten, 1);
 });
+
+test('an export that keeps implicit tiling downloads tiles while it is still reading the tree, and says how far it is', async (t) => {
+  quiet(t);
+  // Two subtrees of two levels each; the deeper one is held back until the first tile has been asked for.
+  const avail = new Set(['0-0-0-0', '1-0-0-0', '2-0-0-0', '3-0-0-0']);
+  const files = {
+    '/tileset.json': { asset: { version: '1.1' }, geometricError: 4, root: {
+      boundingVolume: { box: [0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 0, 1] }, geometricError: 2, refine: 'ADD',
+      content: { uri: 'tiles/{level}-{x}-{y}-{z}.glb' },
+      implicitTiling: { subdivisionScheme: 'OCTREE', subtreeLevels: 2, availableLevels: 4, subtrees: { uri: 'sub/{level}-{x}-{y}-{z}.subtree' } },
+    } },
+    '/sub/0-0-0-0.subtree': buildSubtreeBuffer('0-0-0-0', avail, 2),
+    '/sub/2-0-0-0.subtree': buildSubtreeBuffer('2-0-0-0', avail, 2),
+    ...Object.fromEntries([...avail].map((k) => [`/tiles/${k}.glb`, Buffer.from(k)])),
+  };
+  let tileBeforeTreeRead = false;
+  const hits = {};
+  const server = http.createServer(async (req, res) => {
+    const p = new URL(req.url, 'http://x').pathname;
+    hits[p] = (hits[p] ?? 0) + 1;
+    if (p === '/sub/2-0-0-0.subtree') {
+      for (let i = 0; i < 40 && !hits['/tiles/0-0-0-0.glb']; i++) await new Promise((r) => setTimeout(r, 50));
+      tileBeforeTreeRead = !!hits['/tiles/0-0-0-0.glb'];
+    }
+    const body = files[p];
+    if (body === undefined) { res.writeHead(404); return res.end(); }
+    res.end(Buffer.isBuffer(body) ? body : JSON.stringify(body));
+  }).listen(0, '127.0.0.1');
+  await once(server, 'listening');
+  t.after(() => new Promise((r) => { server.close(r); server.closeAllConnections(); }));
+  const reading = [];
+  const out = await tmp(t);
+  const r = await exportTileset(`http://127.0.0.1:${server.address().port}/tileset.json`, out, { verify: 'off', keepImplicit: true,
+    onProgress: (p) => { if (p.stepLabel === 'Reading the tree') reading.push(p); } });
+  assert.ok(tileBeforeTreeRead, 'the first tile was downloaded while the second subtree was still being read');
+  assert.ok(reading.some((p) => p.stepDone >= 1 && p.tilesDiscovered > 0), 'the tree step counts the subtrees read and the files found');
+  assert.equal(r.tilesWritten, 6, 'two subtrees and four tiles');
+  assert.equal(r.implicitKept, 1);
+  const ts = JSON.parse(await readFile(path.join(out, 'tileset.json'), 'utf8'));
+  assert.match(ts.root.implicitTiling.subtrees.uri, /^implicit\/[0-9a-f]+\/subtrees\/\{level\}-\{x\}-\{y\}-\{z\}\.subtree$/);
+  for (const k of avail) await readFile(path.join(out, 'implicit', ts.root.implicitTiling.subtrees.uri.split('/')[1], 'tiles', `${k}.glb`));
+});
+
