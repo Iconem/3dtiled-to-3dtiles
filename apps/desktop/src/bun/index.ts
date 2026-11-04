@@ -146,6 +146,9 @@ const { root, node, bundled } = await locateServer();
 
 // A distributable's folder is replaced on every update: what the user adds or caches lives per user.
 const userData = bundled && (globalThis as any).process?.env?.LOCALAPPDATA;
+/** The servers this process starts follow it: they exit when it is gone, so a killed or crashed app leaves no orphan on the ports. */
+const ownPid = (globalThis as any).process?.pid;
+const follow: Record<string, string> = ownPid ? { TILED_PARENT_PID: String(ownPid) } : {};
 const userDirs: Record<string, string> = userData
 	? { AGGREGATE_CACHE_DIR: `${userData}/3D Tiled/aggregate-cache`, AGGREGATE_SETS_DIR: `${userData}/3D Tiled/aggregate-sets` }
 	: {};
@@ -168,7 +171,7 @@ const tilePort = await ensureServer({
 	timeoutMs: 45_000,
 	// "Export to folder" writes to this machine's disk, so the server only enables it when asked; the
 	// app is exactly the place that asks. (An ADOPTED dev server keeps whatever it was started with.)
-	env: { TILED_ALLOW_EXPORT: "1", HOST: "127.0.0.1", ...userDirs },
+	env: { TILED_ALLOW_EXPORT: "1", HOST: "127.0.0.1", ...userDirs, ...follow },
 });
 
 const staticPort = await ensureServer({
@@ -182,7 +185,7 @@ const staticPort = await ensureServer({
 		} catch { return false; }
 	},
 	timeoutMs: 15_000,
-	env: { HOST: "127.0.0.1" },
+	env: { HOST: "127.0.0.1", ...follow },
 });
 
 /** Is something answering here at all? Used to prefer a local viewer/docs over the public one. */
@@ -324,6 +327,7 @@ for (const sig of ["SIGINT", "SIGTERM", "exit"]) {
 }
 // Closing the window quits without a process "exit" event, which left the servers running.
 Electrobun.events.on("before-quit", stopChildren);
+Electrobun.events.on("close", stopChildren);   // the window itself, should the quit not follow
 
 /**
  * Download a newer build in the background; the launcher offers to restart into it. Never restarts by

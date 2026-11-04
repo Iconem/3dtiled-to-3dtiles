@@ -70,6 +70,19 @@ const handleStats = lazy(MODULES.stats, 'handleStats');
 // Port resolution order: --port <n> (CLI, wins) → TILE_PORT → PORT → 3001. The CLI/TILE_PORT escape
 // hatches matter under dev harnesses that inject PORT=<vite port> into the whole `pnpm run dev` process
 // (which would otherwise collide the tile-server onto vite's port); `serve:tiles` passes --port 3001.
+/**
+ * Started by the desktop app, the server leaves with it. Windows does not end a child when its parent is killed or
+ * crashes, and the orphan of an old build was adopted by the next launch, which then ran old code and shared the
+ * orphan's queue. `TILED_PARENT_PID` names the process to follow; a server started by hand has none.
+ */
+const parentPid = Number(process.env.TILED_PARENT_PID);
+if (parentPid) {
+  setInterval(() => {
+    try { process.kill(parentPid, 0); }
+    catch { console.log(`[tile-server] parent process ${parentPid} is gone, exiting`); process.exit(0); }
+  }, 5000).unref();
+}
+
 const _argPort = (() => { const i = process.argv.indexOf('--port'); return i >= 0 ? Number(process.argv[i + 1]) : NaN; })();
 const PORT = _argPort || Number(process.env.TILE_PORT) || Number(process.env.PORT) || 3001;
 const CORS = { 'Access-Control-Allow-Origin': '*', 'Access-Control-Allow-Headers': '*' };

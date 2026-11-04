@@ -7,6 +7,9 @@ import http from 'node:http';
 import fs from 'node:fs';
 import path from 'node:path';
 const port = Number(process.argv[2]) || 3009;
+// Started by the desktop app, it leaves with the app (see the same watch in packages/tile-server/server.js).
+const parentPid = Number(process.env.TILED_PARENT_PID);
+if (parentPid) setInterval(() => { try { process.kill(parentPid, 0); } catch { process.exit(0); } }, 5000).unref();
 const root = path.resolve(process.argv[3] || path.join(process.cwd(), 'scripts'));
 const prefix = process.argv[4] || '';
 const TYPES = { '.html': 'text/html', '.js': 'text/javascript', '.mjs': 'text/javascript', '.css': 'text/css',
