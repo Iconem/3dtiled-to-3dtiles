@@ -30,7 +30,7 @@ export const FieldLabel = ({ className, children, ...rest }: React.ComponentProp
  */
 export function Field({ label, title, compact, children, className }: { label: ReactNode; title?: string; compact?: boolean; children: ReactNode; className?: string }) {
   return (
-    <label className={cn('flex min-w-[170px] flex-[1_1_170px] flex-col gap-1.5', compact && 'min-w-[90px] flex-[0_1_120px]', className)} title={title}>
+    <label className={cn('flex min-w-0 flex-[1_1_170px] flex-col gap-1.5', compact && 'min-w-[90px] flex-[0_1_120px]', className)} title={title}>
       <FieldLabel>{label}</FieldLabel>
       {children}
     </label>

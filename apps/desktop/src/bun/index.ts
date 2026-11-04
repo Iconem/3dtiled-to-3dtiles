@@ -212,17 +212,25 @@ const env = (globalThis as any).process?.env ?? {};
 const isWindows = (globalThis as any).process?.platform === "win32";
 
 /**
- * A folder, on Windows. Electrobun's file dialog there does not pick folders (asked for a folder it opens the file dialog,
- * in which no folder can be chosen, and answers with nothing), so the folder dialog is Windows' own, through PowerShell:
- * the modern one under pwsh (.NET 5+), the classic tree under Windows PowerShell. Cancel answers [], like the native one.
+ * The native dialogs, on Windows, are Windows' own through PowerShell rather than Electrobun's: `Utils.openFileDialog`
+ * called from an RPC request handler never answers (its synchronous FFI call blocks the event loop the answer must
+ * travel on: blackboardsh/electrobun#156, open), so neither picker worked. The modern dialogs under pwsh (.NET 5+), the
+ * classic ones under Windows PowerShell. Cancel answers [], like the native dialog. `allowedFileTypes` is Electrobun's
+ * comma list of extensions.
  */
-async function pickFolderWindows(): Promise<string[]> {
+async function pickWindows(directory: boolean, allowedFileTypes: string): Promise<string[]> {
 	const { execFile } = await import("node:child_process");
-	const script = "Add-Type -AssemblyName System.Windows.Forms; $d = New-Object System.Windows.Forms.FolderBrowserDialog; "
-		+ "$d.Description = 'Pick a folder'; $d.ShowNewFolderButton = $true; "
-		+ "if ($d.ShowDialog() -eq [System.Windows.Forms.DialogResult]::OK) { [Console]::Out.Write($d.SelectedPath) }";
+	const exts = allowedFileTypes.split(",").map((e) => e.trim().replace(/^\*?\.?/, "")).filter((e) => e && e !== "*");
+	const filter = exts.length ? `Datasets (${exts.map((e) => `*.${e}`).join(", ")})|${exts.map((e) => `*.${e}`).join(";")}|All files (*.*)|*.*` : "All files (*.*)|*.*";
+	const script = directory
+		? "Add-Type -AssemblyName System.Windows.Forms; $d = New-Object System.Windows.Forms.FolderBrowserDialog; "
+			+ "$d.Description = 'Pick a dataset folder'; $d.ShowNewFolderButton = $true; "
+			+ "if ($d.ShowDialog() -eq [System.Windows.Forms.DialogResult]::OK) { [Console]::Out.Write($d.SelectedPath) }"
+		: "Add-Type -AssemblyName System.Windows.Forms; $d = New-Object System.Windows.Forms.OpenFileDialog; "
+			+ `$d.Title = 'Pick a dataset file'; $d.Filter = '${filter.replace(/'/g, "''")}'; $d.Multiselect = $false; $d.CheckFileExists = $true; `
+			+ "if ($d.ShowDialog() -eq [System.Windows.Forms.DialogResult]::OK) { [Console]::Out.Write($d.FileName) }";
 	const run = (exe: string) => new Promise<string | null>((resolve) => {
-		execFile(exe, ["-NoProfile", "-NonInteractive", "-STA", "-Command", script], { windowsHide: true, timeout: 600_000 },
+		execFile(exe, ["-NoProfile", "-NonInteractive", "-STA", "-Command", script], { windowsHide: true, timeout: 3_600_000 },
 			(err, stdout) => resolve(err ? null : String(stdout).trim()));
 	});
 	const picked = (await run("pwsh.exe")) ?? (await run("powershell.exe"));
@@ -248,7 +256,7 @@ const rpc = defineElectrobunRPC<DesktopRPC, "bun">("bun", {
 	handlers: {
 		requests: {
 			pickDataset: ({ directory, allowedFileTypes }) =>
-				directory && isWindows ? pickFolderWindows() : Utils.openFileDialog({
+				isWindows ? pickWindows(directory, allowedFileTypes || "*") : Utils.openFileDialog({
 					canChooseFiles: !directory,
 					canChooseDirectory: directory,
 					allowsMultipleSelection: false,

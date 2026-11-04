@@ -236,6 +236,15 @@ export function ExportCard({ app }: { app: AppModel }) {
   async function copyPath() {
     try { await navigator.clipboard.writeText(s.outDir.trim()); exportSay('Folder path copied.', 'ok'); } catch { /* shown already */ }
   }
+  /** The exported tileset as Cesium for Unreal's "URL" source wants it: file:///C:/exports/site/tileset.json, spaces escaped. */
+  const unrealUrl = () => {
+    const dir = s.outDir.trim().replace(/\\/g, '/').replace(/\/+$/, '');
+    return encodeURI(`file://${dir.startsWith('/') ? '' : '/'}${dir}/tileset.json`);
+  };
+  async function copyUnreal() {
+    try { await navigator.clipboard.writeText(unrealUrl()); exportSay(`Copied ${unrealUrl()} — paste it as the tileset URL in Cesium for Unreal (source: URL).`, 'ok'); }
+    catch { exportSay(unrealUrl(), 'info'); }
+  }
   async function copyCli() {
     try { await navigator.clipboard.writeText(exportCli(req)); exportSay('Command copied.', 'ok'); } catch { /* visible anyway */ }
   }
@@ -249,8 +258,11 @@ export function ExportCard({ app }: { app: AppModel }) {
       <UrlBar>
         <TextInput id="export-dir" value={s.outDir} onChange={(e) => patch({ outDir: e.target.value })} placeholder="C:\exports\my-site   (an empty folder)" className="flex-1" />
         <Button id="export-browse" onClick={browseOut}>Folder…</Button>
-        <Button id="export-start" variant="default" disabled={job.running || disabled} onClick={start}>Export</Button>
-        <Button id="export-cancel" disabled={!job.cancellable} onClick={cancel}>Cancel</Button>
+        {/* One slot: the Export call to action becomes Cancel while a run is on (red, outlined, so it reads as the stop it is). */}
+        {job.running
+          ? <Button id="export-cancel" variant="outline" disabled={!job.cancellable} onClick={cancel} title={job.cancellable ? 'Stop this export; the folder keeps a partial copy' : 'The offline converter runs in-process and cannot be interrupted'}
+              className="border-destructive/60 text-destructive hover:bg-destructive/10 hover:text-destructive focus-visible:ring-destructive/30">Cancel</Button>
+          : <Button id="export-start" variant="default" disabled={disabled} onClick={start}>Export</Button>}
       </UrlBar>
       {job.steps ? <StepProgress id="export-progress" steps={job.steps} /> : <div id="export-progress" hidden />}
       <Result id="export-status" message={status} />
@@ -261,10 +273,12 @@ export function ExportCard({ app }: { app: AppModel }) {
       <Actions id="export-done" hidden={!job.done}>
         <Button id="export-open" onClick={openFolder}>Open folder</Button>
         <Button id="export-preview" hidden={!job.preview} onClick={previewExported}>Preview exported copy</Button>
+        <Button id="export-copy-unreal" onClick={copyUnreal} title="file:///… URL of the exported tileset.json, for Cesium for Unreal's URL source">Copy file:// URL for Unreal</Button>
         <Button id="export-copy" variant="ghost" onClick={copyPath}>Copy folder path</Button>
       </Actions>
       <Advanced summary="Advanced" hint="method, depth, packing, CLI">
-        <div className="mt-3.5 flex flex-wrap gap-3">
+        {/* Two fields a row: each label stays on one line and a select shows its whole value. */}
+        <div className="mt-3.5 grid grid-cols-2 gap-3 max-[560px]:grid-cols-1">
           <Field label="Method"><Choice id="export-method" value={s.method} onChange={(v) => patch({ method: v as ExportSettings['method'] })} options={METHODS} /></Field>
           <Field label={<>Max depth <span className="text-xs font-normal text-muted-foreground">(crawl; blank = all)</span></>}>
             <TextInput id="export-depth" value={s.depth} onChange={(e) => patch({ depth: e.target.value })} placeholder="all levels" disabled={convert} />

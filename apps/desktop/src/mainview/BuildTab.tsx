@@ -121,11 +121,11 @@ export function BuildTab({ app, message }: { app: AppModel; message: Message | n
         </Field>
 
         <Advanced summary="Advanced" hint="format, materialization, placement on the globe">
-          <div className="mt-3.5 flex flex-wrap gap-3">
+          <div className="mt-3.5 grid grid-cols-2 gap-3 max-[560px]:grid-cols-1">
             <Field label="Format"><Choice id="format" value={form.format} onChange={(v) => patchForm({ format: v })} options={FORMATS} /></Field>
             <Field label="Materialization"><Choice id="cache" value={form.cache} onChange={(v) => patchForm({ cache: v })} options={CACHES} /></Field>
           </div>
-          <div className="mt-3.5 flex flex-wrap gap-3">
+          <div className="mt-3.5 grid grid-cols-4 gap-3 max-[560px]:grid-cols-2">
             {PLACEMENT.map((k) => (
               <Field key={k} label={PLACEMENT_FIELDS[k].label}>
                 <TextInput id={k} value={form[k]} onChange={(e) => patchForm({ [k]: e.target.value })} placeholder={PLACEMENT_FIELDS[k].placeholder} />

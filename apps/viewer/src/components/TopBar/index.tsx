@@ -1,4 +1,5 @@
-import { Fragment, useEffect, useRef } from 'react';
+import { Fragment, useEffect, useRef, useState } from 'react';
+import { Check, Copy, Link } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
@@ -99,6 +100,37 @@ function Pill({ active, onClick, title, tint, children }: { active: boolean; onC
 
 function PillGroup({ tint, className, children }: { tint: Tint; className?: string; children: React.ReactNode }) {
   return <div className={cn('flex flex-wrap items-center gap-1 rounded-md p-1', GROUP_TINT[tint], className)}>{children}</div>;
+}
+
+// A compact icon button that copies `text` and shows a check for a moment (the builder's Inspector
+// has the same pattern). `text` is resolved on click, so it always copies the current value.
+function CopyButton({ text, icon, label, done, title, testId }: { text: () => string; icon: React.ReactNode; label: string; done: string; title: string; testId?: string }) {
+  const [ok, setOk] = useState(false);
+  const timer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+  useEffect(() => () => clearTimeout(timer.current), []);
+  return (
+    <Button
+      size="sm"
+      variant="outline"
+      className={cn('h-7 px-2 text-xs', HOVER_TINT.blue)}
+      title={title}
+      aria-label={label}
+      data-testid={testId}
+      onClick={() => {
+        const value = text();
+        if (!value) return;
+        navigator.clipboard?.writeText(value).then(() => {
+          setOk(true);
+          clearTimeout(timer.current);
+          timer.current = setTimeout(() => setOk(false), 1500);
+          useViewerStore.getState().setStatus(`${done}: ${value}`);
+        }).catch((e) => useViewerStore.getState().setStatus(`Copy failed: ${(e as Error).message}`));
+      }}
+    >
+      {ok ? <Check className="size-3.5" /> : icon}
+      {ok ? 'copied' : label}
+    </Button>
+  );
 }
 
 export default function TopBar({ activeHandleRef }: { activeHandleRef: React.RefObject<ViewerHandle | null> }) {
@@ -210,6 +242,22 @@ export default function TopBar({ activeHandleRef }: { activeHandleRef: React.Ref
     const loadUrl = rawUrlMode && !field.startsWith(MW) ? buildMiddlewareUrl(field, params) : field;
     doLoad(loadUrl, store.getState().currentType);
   }
+
+  // The tileset URL a renderer actually loads (what goes into CesiumJS / Cesium for Unreal): the last
+  // URL doLoad() sent, with &curved= applied; before anything loaded, what Load would send for the
+  // field. Absolute: the middleware URL may be page-relative (MW = '' behind the same origin).
+  function tilesetUrlToCopy() {
+    const field = urlField.trim();
+    const pending = field ? (rawUrlMode && !field.startsWith(MW) ? buildMiddlewareUrl(field, params) : field) : '';
+    const target = store.getState().lastLoadUrl || pending;
+    return target ? new URL(target, location.origin).toString() : '';
+  }
+
+  // The raw dataset behind the current pill (cloud.js, .copc.laz, …), or the field itself in `raw url`
+  // mode when it holds one. Empty for datasets without a source (offline presets, direct 3D Tiles).
+  const currentPreset = presets.find((p) => p.id === url.preset);
+  const field = urlField.trim();
+  const sourceUrl = rawUrlMode && field && !field.startsWith(MW) ? field : currentPreset?.rawSrc ?? '';
 
   // Toggling the pill alone used to leave the field showing whatever selectPreset()/handleLoadClick()
   // last wrote — flip it, and the text box wouldn't change, so there was no visible sign the toggle did
@@ -456,6 +504,24 @@ export default function TopBar({ activeHandleRef }: { activeHandleRef: React.Ref
           className="min-w-[240px] flex-1 font-mono text-xs"
         />
         <Button size="sm" onClick={handleLoadClick}>Load</Button>
+        <CopyButton
+          text={tilesetUrlToCopy}
+          icon={<Copy className="size-3.5" />}
+          label="tileset url"
+          done="Copied tileset URL"
+          title="Copy the 3D Tiles tileset.json URL being loaded (the middleware output, absolute) — paste it into CesiumJS, Cesium for Unreal/Unity or any 3D Tiles client"
+          testId="copy-tileset-url"
+        />
+        {sourceUrl && (
+          <CopyButton
+            text={() => sourceUrl}
+            icon={<Link className="size-3.5" />}
+            label="source url"
+            done="Copied source URL"
+            title="Copy the raw dataset URL this tileset is streamed from (cloud.js, .copc.laz, model.json, …)"
+            testId="copy-source-url"
+          />
+        )}
         <Button
           size="sm"
           variant="outline"

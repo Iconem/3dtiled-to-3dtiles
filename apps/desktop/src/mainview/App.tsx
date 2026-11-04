@@ -178,9 +178,24 @@ export function App() {
   const app: AppModel = { form, patchForm, dataset, url, lib, updateLib, replaceLib, say, showTab: setTab, previewIn, openTool, loadIntoBuilder, noteServedNow };
 
   const themeTitle = `Theme: ${theme}. Click for ${nextTheme(theme)}.`;
-  const status = tilePort
-    ? { text: `tile-server ready on :${tilePort}`, cls: 'border-success/35 bg-success/10 text-success' }
-    : { text: 'starting the tile-server…', cls: 'border-warning/35 bg-warning/10 text-warning' };
+  // The pill says what the server does now, not what the ports said at start: it is probed every 10 s.
+  const [serverUp, setServerUp] = useState<boolean | null>(null);
+  useEffect(() => {
+    if (!base) return;
+    let stop = false;
+    const probe = async () => {
+      try { const r = await fetch(`${base}/openapi.json`, { signal: AbortSignal.timeout(3000) }); if (!stop) setServerUp(r.ok); }
+      catch { if (!stop) setServerUp(false); }
+    };
+    void probe();
+    const t = setInterval(probe, 10_000);
+    return () => { stop = true; clearInterval(t); };
+  }, []);
+  const status = !tilePort
+    ? { text: 'starting the tile-server…', cls: 'border-warning/35 bg-warning/10 text-warning' }
+    : serverUp === false
+      ? { text: `tile-server not answering on :${tilePort}`, cls: 'border-destructive/40 bg-destructive/10 text-destructive' }
+      : { text: `tile-server ${serverUp ? 'running' : 'ready'} on :${tilePort}`, cls: 'border-success/35 bg-success/10 text-success' };
   const links: [string, string, string][] = [
     ['link-viewer', viewerUrl, 'Web viewer'],
     ['link-explorer', viewerUrl ? `${viewerUrl}/hierarchy` : (base ? `${base}/hierarchy` : ''), 'Hierarchy explorer'],
