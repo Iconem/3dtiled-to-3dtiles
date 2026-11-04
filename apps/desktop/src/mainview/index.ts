@@ -99,6 +99,36 @@ function say(msg: string, kind: 'ok' | 'err' | 'info' = 'info') {
   resultEl.className = `result result-${kind}`;
 }
 
+// The version is only the build day, so two builds of one day differ by their hash alone.
+const buildLabel = (version: string, hash: string | null) => (hash ? `${version} · ${hash.slice(0, 7)}` : version);
+
+// ── theme ───────────────────────────────────────────────────────────────────────────────────────
+// System, light or dark. "System" follows the OS while the app is open.
+const THEME_KEY = '3dtiled-desktop-theme';
+const THEMES = ['system', 'light', 'dark'] as const;
+type Theme = (typeof THEMES)[number];
+const ICONS: Record<Theme, string> = {
+  system: '<rect x="3" y="4" width="18" height="12" rx="2"/><path d="M8 20h8M12 16v4"/>',
+  light: '<circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/>',
+  dark: '<path d="M20 14.5A8.5 8.5 0 0 1 9.5 4a8.5 8.5 0 1 0 10.5 10.5Z"/>',
+};
+const prefersLight = matchMedia('(prefers-color-scheme: light)');
+let theme: Theme = (THEMES as readonly string[]).includes(localStorage.getItem(THEME_KEY) ?? '') ? localStorage.getItem(THEME_KEY) as Theme : 'system';
+function applyTheme() {
+  document.documentElement.dataset['theme'] = theme === 'light' || (theme === 'system' && prefersLight.matches) ? 'light' : 'dark';
+  const btn = $('theme');
+  btn.innerHTML = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">${ICONS[theme]}</svg>`;
+  btn.title = `Theme: ${theme}. Click for ${THEMES[(THEMES.indexOf(theme) + 1) % THEMES.length]}.`;
+  btn.setAttribute('aria-label', btn.title);
+}
+$('theme').addEventListener('click', () => {
+  theme = THEMES[(THEMES.indexOf(theme) + 1) % THEMES.length]!;
+  localStorage.setItem(THEME_KEY, theme);
+  applyTheme();
+});
+prefersLight.addEventListener('change', applyTheme);
+applyTheme();
+
 // A downloaded update waits for this button: restarting by itself could end a running conversion.
 const updateBtn = $<HTMLButtonElement>('update');
 updateBtn.addEventListener('click', () => {
@@ -106,9 +136,9 @@ updateBtn.addEventListener('click', () => {
   void pickerRpc?.request.applyUpdate({});
 });
 const updatePoll = setInterval(async () => {
-  const version = (await pickerRpc?.request.updateStatus({}).catch(() => null))?.version;
-  if (version == null) return;
-  updateBtn.title = `Restart into version ${version}`;
+  const status = await pickerRpc?.request.updateStatus({}).catch(() => null);
+  if (status?.version == null) return;
+  updateBtn.title = `Restart into ${buildLabel(status.version, status.hash)}`;
   updateBtn.hidden = false;
   clearInterval(updatePoll);
 }, 30_000);
@@ -159,7 +189,11 @@ function fitWindowToContent() {
   if (!el) return;
   const rect = el.getBoundingClientRect();
   const cssWidth = Math.ceil(rect.width + 24);    // the content, centred, + breathing room
-  const cssHeight = Math.ceil(document.documentElement.scrollHeight + 8);
+  // What the content needs, not scrollHeight: the column is as tall as the window, and asking for that plus a margin
+  // would grow the window at every call.
+  const footer = el.querySelector('footer')!;
+  const above = [...el.children].filter((c) => c !== footer && c.getClientRects().length).map((c) => c.getBoundingClientRect().bottom);
+  const cssHeight = Math.ceil(Math.max(...above) + window.scrollY + footer.getBoundingClientRect().height + 30);
   const key = `${cssWidth}x${cssHeight}`;
   if (key === lastFit) return;                    // don't spam the host on every tab switch
   lastFit = key;
@@ -316,7 +350,23 @@ $('save').addEventListener('click', () => {
 //             down; progress is parsed from its output. A convert does not need the server at all (a crawl
 //             still reads the tileset URL, which the server serves).
 const exportDirEl = $<HTMLInputElement>('export-dir');
-const exportBar = $<HTMLElement>('export-bar');
+const exportBlocks = $<HTMLElement>('export-progress');
+
+/**
+ * The bar, one block per step of the run: those before are full, the current one shows its share, or runs
+ * indeterminate while its total is unknown. No step given means finished: all full.
+ */
+function showSteps(step: number | null, steps: number, done?: number | null, total?: number | null) {
+  if (exportBlocks.childElementCount !== steps) {
+    exportBlocks.innerHTML = '<div class="progress-step"><div class="progress-bar"></div></div>'.repeat(steps);
+  }
+  [...exportBlocks.querySelectorAll<HTMLElement>('.progress-bar')].forEach((bar, i) => {
+    const current = step != null && i === step - 1;
+    const known = total != null && total > 0;
+    bar.classList.toggle('indeterminate', current && !known);
+    bar.style.width = step == null || i < step - 1 ? '100%' : current && known ? `${Math.round((100 * (done ?? 0)) / total!)}%` : '0';
+  });
+}
 const methodEl = $<HTMLSelectElement>('export-method');
 const runnerEl = $<HTMLSelectElement>('export-runner');
 let exportJob: string | null = null;
@@ -359,6 +409,7 @@ function exportRequest() {
     url: buildUrl(), src: f.src, format: f.format, outDir: exportDirEl.value.trim(),
     maxDepth: depth === '' ? null : Number(depth), keepImplicit: checked('export-keep-implicit'), pack, options,
     verify: $<HTMLSelectElement>('export-verify').value,
+    hierarchyErrors: $<HTMLSelectElement>('export-hierarchy-errors').value,
   };
 }
 
@@ -377,6 +428,7 @@ function exportCliArgs(r: ExportRequest = exportRequest()): { args: string[]; th
     if (r.keepImplicit) args.push('--keep-implicit');
     if (r.pack.length) args.push('--pack', r.pack.join(','));
     if (r.verify !== 'sample') args.push('--verify', r.verify);
+    if (r.hierarchyErrors !== 'error') args.push('--hierarchy-errors', r.hierarchyErrors);
     return { args };
   }
   const o = r.options as Record<string, unknown>;
@@ -388,6 +440,7 @@ function exportCliArgs(r: ExportRequest = exportRequest()): { args: string[]; th
   }
   if (o['centroidsOnly']) args.push('--centroids-only');
   if (r.verify !== 'sample') args.push('--verify', r.verify);
+  if (r.hierarchyErrors !== 'error') args.push('--hierarchy-errors', r.hierarchyErrors);
   if (!r.pack.length) return { args };
   const name = out.split(/[\\/]/).filter(Boolean).pop() || 'tileset';
   return { args, then: ['scripts/pack-3dtiles.mjs', out, `${out}/${name}`] };
@@ -466,7 +519,7 @@ $('export-start').addEventListener('click', async () => {
     if (!resp.ok) return exportSay(j.error || `HTTP ${resp.status}`, 'err');
     exportJob = j.id;
     $('export-progress').hidden = false;
-    exportBar.classList.add('indeterminate');
+    showSteps(1, 1);
     // the offline converters run in-process and can't be interrupted part-way
     setExportRunning(true, r.method !== 'convert');
     exportSay(r.method === 'convert' ? 'Converting…' : 'Reading the tileset tree…');
@@ -501,8 +554,7 @@ async function startCliExport(r: ExportRequest) {
   exportLog.textContent = '';
   $('export-log-wrap').hidden = false;
   $('export-progress').hidden = false;
-  exportBar.style.width = '0%';
-  exportBar.classList.add('indeterminate');
+  showSteps(1, 1);
   setExportRunning(true, true);   // a subprocess can always be killed, convert included
   exportSay('Starting node…');
   pollCli();
@@ -521,12 +573,9 @@ async function pollCli() {
   if (follow) exportLog.scrollTop = exportLog.scrollHeight;
   const out = s.tail.filter((l) => !l.startsWith('[desktop]') && !l.startsWith('$ '));
   const last = out[out.length - 1]?.trim() ?? '';
-  // "downloading: 3 tilesets · 14/315 files · 1.8 MB" → a real bar once the total is known
-  const m = /^(\w[\w ]*): .*?(\d+)\/(\d+) files/.exec(last);
-  if (m && m[1] === 'downloading') {
-    exportBar.classList.remove('indeterminate');
-    exportBar.style.width = `${Math.round((100 * Number(m[2])) / Math.max(1, Number(m[3])))}%`;
-  }
+  // "[2/3] Downloading tiles: 14/315 · 3 tilesets · 1.8 MB", from the last such line
+  const stepLine = [...out].reverse().map((l) => /\[(\d+)\/(\d+)\] [^:·]+?(?:: (\d+)\/(\d+))?(?: ·|\s*$)/.exec(l)).find(Boolean);
+  if (stepLine) showSteps(Number(stepLine[1]), Number(stepLine[2]), stepLine[3] ? Number(stepLine[3]) : null, stepLine[4] ? Number(stepLine[4]) : null);
   const secs = (((s.endedAt ?? Date.now()) - s.startedAt) / 1000).toFixed(s.endedAt ? 1 : 0);
   if (s.state === 'running') {
     exportSay(`${secs} s — ${last || 'running…'}`);
@@ -536,9 +585,8 @@ async function pollCli() {
   cliJob = null;
   setExportRunning(false, false);
   recordExport(s.state);
-  exportBar.classList.remove('indeterminate');
-  exportBar.style.width = '100%';
   if (s.state === 'done') {
+    showSteps(null, exportBlocks.childElementCount || 1);
     $('export-done').hidden = false;
     exportSay(`Done in ${secs} s — ${last}`, 'ok');
   } else if (s.state === 'cancelled') {
@@ -549,11 +597,6 @@ async function pollCli() {
   }
 }
 
-const PHASES: Record<string, string> = {
-  crawling: 'Crawling', downloading: 'Downloading', converting: 'Converting',
-  'expanding implicit tiling': 'Expanding implicit tiling', 'reading implicit availability': 'Reading implicit availability',
-};
-
 async function pollExport() {
   const id = exportJob;
   if (!id) return;
@@ -562,19 +605,18 @@ async function pollExport() {
   catch { setTimeout(pollExport, 1000); return; }
   const pr = j.progress ?? {};
   const discovered = pr.tilesDiscovered ?? 0, written = pr.tilesWritten ?? 0;
-  // The total is unknown while external tilesets are still being crawled, hence the indeterminate bar.
-  if (pr.phase === 'downloading' || j.state !== 'running') {
-    exportBar.classList.remove('indeterminate');
-    exportBar.style.width = `${discovered ? Math.round((100 * written) / discovered) : 100}%`;
-  }
-  const line = pr.phase === 'converting' || j.result?.method === 'convert'
-    ? (j.state === 'running' ? `${((pr.elapsedMs ?? 0) / 1000).toFixed(0)} s` : `${written} files · ${mb(pr.bytes ?? 0)}`)
+  // The total is unknown while external tilesets are still being crawled, hence an indeterminate block.
+  if (pr.steps && j.state === 'running') showSteps(pr.step, pr.steps, pr.stepDone, pr.stepTotal);
+  else if (j.state === 'done') showSteps(null, exportBlocks.childElementCount || 1);
+  const convert = (exportStarted?.method ?? j.result?.method) === 'convert';
+  const line = convert
+    ? (j.state === 'running' ? `${pr.stepTotal != null ? `${pr.stepDone}/${pr.stepTotal} · ` : ''}${((pr.elapsedMs ?? 0) / 1000).toFixed(0)} s` : `${written} files · ${mb(pr.bytes ?? 0)}`)
     : `${pr.tilesets ?? 0} tilesets · ${written}/${discovered} files · ${mb(pr.bytes ?? 0)}`
       + (pr.implicitExpanded ? ` · ${pr.implicitExpanded} implicit expanded` : '')
       + (pr.implicitKept ? ` · ${pr.implicitKept} implicit kept` : '')
       + (pr.failed ? ` · ${pr.failed} failed` : '');
   if (j.state === 'running') {
-    const phase = PHASES[pr.phase] ?? (pr.phase ? pr.phase[0].toUpperCase() + pr.phase.slice(1) : 'Working');
+    const phase = pr.stepLabel ? `Step ${pr.step} of ${pr.steps}: ${pr.stepLabel}` : 'Working';
     exportSay(`${phase} — ${line}`);
     setTimeout(pollExport, 500);
     return;
@@ -883,6 +925,13 @@ refresh();
   const statusEl = $('status');
   const portsEl = $('ports');
   portsEl.textContent = `tile-server :${tilePort ?? '—'} · preview :${staticPort ?? '—'}`;
+  if (pickerAvailable()) {
+    const info = await pickerRpc!.request.appInfo({}).catch(() => null);
+    if (info?.version) {
+      $('version').textContent = `v${buildLabel(info.version, info.hash)}`;
+      $('version').title = `Version ${info.version} (the build day), build ${info.hash ?? 'unknown'}`;
+    }
+  }
 
   const setLink = (id: string, href: string, label?: string) => {
     const a = $<HTMLAnchorElement>(id);

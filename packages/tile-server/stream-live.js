@@ -245,8 +245,11 @@ export async function handleStream(req, res, u) {
   }
   const s = u.pathname.match(/^\/stream\/subtrees\/(.+)\.subtree$/);
   if (s && adapter.subtree && COORD_RE.test(s[1])) {
+    // Awaited before the headers: a failed hierarchy read must be an error, not a 200 with an empty body, which a client
+    // takes for a subtree it cannot parse and never asks for again.
+    const subtree = await adapter.subtree(url, s[1]);
     res.writeHead(200, { 'Content-Type': 'application/octet-stream', ...CORS });
-    res.end(await adapter.subtree(url, s[1]));
+    res.end(subtree);
     return true;
   }
   res.writeHead(404, CORS); res.end('not found');

@@ -87,7 +87,11 @@ export async function convert(input, outDir, opts = {}) {
 
   // Remote input → download (with the sibling files the format needs) to a temp dir, then convert locally.
   if (isRemote(input)) {
-    const { input: localInput } = await resolveSource(input, format);
+    // onSourceFailure may throw to stop on a file it cannot read; onSourceProgress(done, total) follows the download.
+    const { input: localInput } = await resolveSource(input, format, {
+      ...(opts.onSourceFailure && { onFailure: opts.onSourceFailure }), onProgress: opts.onSourceProgress,
+    });
+    opts.onSourceDone?.();
     input = localInput;
   }
 

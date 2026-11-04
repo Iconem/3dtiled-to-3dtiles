@@ -26,6 +26,7 @@ import fs from 'node:fs';
 import fsp from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { fetchSource } from '../core/index.js';
 
 const CORS = { 'Access-Control-Allow-Origin': '*', 'Access-Control-Allow-Headers': '*' };
 
@@ -194,9 +195,7 @@ async function getSqliteDb(urlParam) {
   const SQL = await getSqlJs();
   let buf;
   if (/^https?:\/\//i.test(urlParam)) {
-    const r = await fetch(urlParam);
-    if (!r.ok) throw new Error(`fetch ${urlParam} → ${r.status}`);
-    buf = new Uint8Array(await r.arrayBuffer());
+    buf = new Uint8Array(await fetchSource(urlParam));
   } else {
     const abs = urlParam.startsWith('file://') ? fileURLToPath(urlParam) : path.resolve(urlParam);
     buf = new Uint8Array(await fsp.readFile(abs));

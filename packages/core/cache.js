@@ -15,11 +15,10 @@
  *   • The PROMISE is cached, not the settled value, so concurrent first calls for one key (a mosaic
  *     fanning out 16 `/stream` requests that all land on the same source) share ONE build instead of
  *     each running the builder.
- *   • `failureTtlMs` bounds how long a rejection is served. Default `Infinity` keeps the original
- *     behaviour; network-backed adapters pass a minute or so, because one "socket hang up" during
- *     the root read must not mark a perfectly good dataset broken until the process restarts.
+ *   • `failureTtlMs` bounds how long a rejection is served, by default a minute: one "socket hang up"
+ *     during the root read must not mark a perfectly good dataset broken until the process restarts.
  */
-export function memoizeAsync(builder, { failureTtlMs = Infinity } = {}) {
+export function memoizeAsync(builder, { failureTtlMs = 60_000 } = {}) {
   const cache = new Map();                      // key → { promise } | { error, at }
   return (key) => {
     const hit = cache.get(key);

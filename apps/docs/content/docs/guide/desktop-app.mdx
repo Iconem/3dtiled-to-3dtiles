@@ -29,7 +29,8 @@ SmartScreen warns on first run.
 - **Installer** (`3DTiled-win-x64-Setup-<date>.exe`, about 165 MB): one file. It installs per user under
   `%LOCALAPPDATA%\com.iconem.3dtiled.desktop` and adds Desktop and Start menu shortcuts, named *3D Tiled*:
   search for "3D Tiled" with the space. It updates itself: a newer build downloads in the background, and
-  an *Update ready* button restarts into it, never on its own, as a conversion may be running.
+  an *Update ready* button restarts into it, never on its own, as a conversion may be running. The footer shows the
+  build, as `v2026.11.4 · 1trdzhm`: the version is only the build day, so the hash is what tells two builds apart.
 - **Portable** (`3DTiled-win-x64-Portable-<date>.zip`, about 250 MB): unzip anywhere and start `3DTiled.cmd`.
   It does not update itself.
 
@@ -212,6 +213,30 @@ every level), and press **Export**.
   - *Sample* (default): also reads a few tiles of each level in full, up to 64: buffer views and accessors must fit,
     and uncompressed positions must be finite.
   - *Every tile*: the same on all of them, slower on a large export.
+
+  What it can say depends on the source:
+
+  | Source | Tiles reached, file lengths | Read in full | Total compared with |
+  |---|---|---|---|
+  | Potree 1.7, 1.8, 2.0 | ✅ | ✅ | `points` in `cloud.js` or `metadata.json` |
+  | Potree 1.4 | ✅ | ✅ | the counts listed in `cloud.js` |
+  | Potree 1.x older clouds with no `points` | ✅ | ✅ | none: reports the count |
+  | COPC | ✅ | ✅ | the LAS header |
+  | Splats (SOG, LCC, RAD), meshes (I3S, 3MX), any plain 3D Tiles | ✅ | ✅ for GLB tiles | none: reports the count of points or triangles |
+
+  Reading a tile in full does not decode Draco, meshopt or SPZ payloads: it checks that the buffers they sit in fit. So
+  on a splat or a mesh the check finds a tile that is missing, cut short or damaged, but not one the tileset never listed.
+- **If part of the hierarchy can't be read.** A subtree, an external tileset or a Potree `.hrc` still unread after three
+  tries takes everything below it along. **Stop the export**, the default, fails with the file's name. **Warn, and
+  export the rest** lists it under `hierarchyFailures` in `export-report.json` and carries on. A crawl reads a subtree
+  as a block of three levels, so one failed chunk costs that whole block and what lies under it, not only its own nodes.
+  A file the host says is not there (403, 404, 410) is only listed: a retry would not change it, and the source lacks it.
+  The child of a mosaic that could not be read counts too: a mosaic carries on without it, and the export says so.
+  `hierarchyErrors` over HTTP, `--hierarchy-errors` on the CLI.
+- **Progress.** The bar has one block per step of the run, and the status line names the step: *Step 2 of 3: Downloading
+  tiles*. A crawl reads the tree, downloads the tiles, checks the copy, then packs if asked. The offline converter
+  downloads a remote source, converts, checks, then packs. A block with no known total, as while converting, runs
+  without a percentage.
 - **Afterwards.** **Open folder** opens it in the OS file manager, and **Preview exported copy** loads
   the copy in the stock Cesium harness, served back by the tile-server from that folder
   (`/export/{id}/files/…`), i.e. exactly what a static host would serve.
@@ -293,12 +318,15 @@ display is the price of never losing the right-hand column.
 The same constraint is why the content column is a fixed 720 px. Widening it to 1000 px did clip the
 Browse buttons off-screen, and **no browser-based preview reveals this** — only running the real app.
 
-## Dark-theme native controls
+## Theme and native controls
 
-`:root { color-scheme: dark }` is load-bearing, not decoration. Without it WebView2 renders
-`<select>` drop-down popups, scrollbars and form controls with the **light** default — a white popup
-of pale options over a dark app, effectively unreadable. Styling `option` alone does not fix the
-popup on Windows, because the popup is an OS window rather than page content.
+The button in the header cycles between following the system, light and dark, and the choice is remembered. An inline
+script in `index.html` sets it before the first paint, so a light window does not flash dark.
+
+`color-scheme` in the CSS is load-bearing, not decoration: it follows the theme, and without it WebView2 renders `<select>`
+drop-down popups, scrollbars and form controls with the **light** default — a white popup of pale options over a dark
+app, effectively unreadable. Styling `option` alone does not fix the popup on Windows, because the popup is an OS window
+rather than page content.
 
 ## Where its links point
 
@@ -309,8 +337,4 @@ localhost URL.
 
 ## Not done yet
 
-Packaging, signing and auto-update; **pushing** an export to remote storage (S3, Azure, the Iconem
-platform) rather than a local folder, and packing it as `.3tz` from the app
-(`node scripts/pack-3dtiles.mjs <folder> <name>` does it today); and bundling Node so the app runs
-without a repo checkout — it currently locates and runs the
-tile-server from the surrounding repo. Library entries are per-install, as above.
+Signing, and **pushing** an export to remote storage (S3, Azure, the Iconem platform) rather than a local folder.

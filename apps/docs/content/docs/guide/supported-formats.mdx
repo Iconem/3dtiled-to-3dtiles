@@ -57,6 +57,19 @@ canonical source exists); formats with no public spec (reverse-engineered/undocu
 | **[COPC](https://copc.io)** (Cloud Optimized Pointcloud) · [spec repo](https://github.com/copcio/copcio.github.io) | **octree** (EPT-style) | LAZ-compressed LAS points | ADD | octree nodes (accumulate) | COPC VLR + hierarchy pages | ✅ designed for range reads |
 | **[Potree](https://github.com/potree/PotreeConverter)** (v1 and v2) · [2.0 format](https://github.com/potree/potree/blob/develop/docs/) | **octree** (named `r`/`r0`..`r7`) | points: position int32×3·scale+offset + rgb (2.0 `octree.bin` / 1.x per-node `.bin`) | ADD | octree nodes (accumulate) | 2.0 `metadata.json`+`hierarchy.bin` (22 B/node) · 1.x `cloud.js`+`.hrc` | ✅ (2.0 single octree.bin; 1.x per-node files) |
 
+**Potree 1.x point counts are not reliable.** PotreeConverter's 1.7 code writes `numAccepted` to the `.hrc`, and only an
+inner node adds to it: a leaf keeps its points in `store`. So a leaf can be recorded with **0 points while its `.bin`
+holds thousands**. On one 1.3 billion point Iconem cloud that was 169,134 of 209,474 nodes, about 3/4 of the points. It is
+common in format 1.8 and rarer in 1.7. The readers here follow Potree: a listed node exists, and its real count comes from
+the size of its `.bin` when it is read. They do not fetch that size up front, as one request per node would cost 209,474
+requests on that cloud, for a number nothing needs before the tile is read.
+
+Potree 2.0 and COPC do not have this: on `lion`, `heidentor` and `eclepens` from potree.org, every node's count matches
+its bytes and the counts add up to `metadata.json`, and COPC's hierarchy adds up to its LAS header.
+
+**A hierarchy read that fails is an error, not an empty branch**, for every format: see [When a read fails](#when-a-read-fails).
+On export, [`hierarchyErrors`](/docs/guide/desktop-app#export-to-a-folder) chooses between stopping and carrying on without it.
+
 For both, a tile's `geometricError` is the **point spacing at its depth**: Potree's declared spacing
 and COPC's info-VLR `spacing`, halved per level (fallback: the root cube / 128). A 2 px error target
 then stops refining where points are two pixels apart, and the viewers' adaptive point size reads the
@@ -136,3 +149,21 @@ not an architectural claim that `packages` lives under `/3dtiles-tools`.
 
 For full offline pipelines (merge, `mergeJson`, `upgrade`, `b3dmToGlb`/`pnts`/`i3dm`/`cmpt` → glTF),
 use **[`3d-tiles-tools`](https://github.com/CesiumGS/3d-tiles-tools)** — the canonical CesiumGS toolbox.
+
+## When a read fails
+
+This holds for every format, as every source read goes through one layer (`packages/core/source-fetch.js`), and a test runs
+the same rules against each format (`stream-contract.test.js`):
+
+| The host | What happens |
+|---|---|
+| Fails once: a reset, a timeout, a 429, a 5xx | Retried, three tries in all, with a backoff |
+| Keeps failing | `/stream` answers **502**, never a 200 with an empty body or an empty tile. A client can ask again |
+| Says the file is not there: 403, 404, 410 | `/stream` answers **404**. A subtree or a tile the source lacks stays a gap in the source |
+| Gets a burst | Paced at 32 requests at a time per host (`TILED_RANGE_MAX_PER_HOST`), not refused |
+| Ignores `Range` and sends the whole file | The right bytes are cut out of it |
+
+A dataset whose first read failed is tried again a minute later, not marked as broken until the server restarts. A hierarchy
+is complete or an error: subtrees wait for the chunks they cover, also those another request is already reading. One
+exception: on a huge I3S layer, a viewer gets what the first 3 seconds of node pages hold, marked
+`asset.extras.hierarchyIncomplete`, so that it opens quickly. An export asks for the whole tree, as does `cache=hierarchy`.

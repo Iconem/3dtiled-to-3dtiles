@@ -5,7 +5,10 @@ import { mkdtemp, mkdir, rm, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { buildPointsGlb } from '../core/index.js';
+import http from 'node:http';
+import { once } from 'node:events';
 import { checkGlb, declaredPoints, sourceOfUrl, verifyExport } from './export-verify.js';
+import { exportTileset } from './export-live.js';
 
 const box = { box: [0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 0, 1] };
 const folder = async (t) => { const d = await mkdtemp(path.join(os.tmpdir(), 'verify-')); t.after(() => rm(d, { recursive: true, force: true })); return d; };
@@ -139,4 +142,64 @@ test('reading a tile in full finds what its header cannot', async (t) => {
 test('off skips the check', async (t) => {
   const v = await verifyExport(await folder(t), { mode: 'off' });
   assert.deepEqual(v, { mode: 'off', ok: true, skipped: true });
+});
+
+test('a tileset with no content at all does not pass, unless a depth limit explains it', async (t) => {
+  const d = await folder(t);
+  await put(d, 'tileset.json', JSON.stringify({ root: { boundingVolume: box, geometricError: 1 } }));
+  assert.equal((await verifyExport(d)).ok, false);
+  assert.equal((await verifyExport(d, { partial: true })).ok, true);
+});
+
+test('a Potree 1.4 cloud.js has no total, but its inline hierarchy gives one', async (t) => {
+  const src = await folder(t);
+  await put(src, 'cloud.js', JSON.stringify({ version: '1.4', hierarchy: [['r', 5], ['r0', 2]] }));
+  assert.deepEqual(await declaredPoints({ src, format: 'potree' }), { format: 'potree', declared: 7, from: 'cloud.js hierarchy' });
+});
+
+// An implicit tileset whose only child subtree keeps failing, served as a plain host would.
+async function implicitSource(t, childStatus) {
+  const subtree = (children) => {
+    const json = JSON.stringify({
+      buffers: [{ byteLength: 8 }], bufferViews: [{ buffer: 0, byteOffset: 0, byteLength: 8 }],
+      tileAvailability: { constant: 1 }, contentAvailability: [{ constant: 1 }],
+      childSubtreeAvailability: children ? { bitstream: 0 } : { constant: 0 },
+    }).padEnd(256);
+    const head = Buffer.alloc(24); head.write('subt'); head.writeUInt32LE(1, 4); head.writeBigUInt64LE(BigInt(json.length), 8); head.writeBigUInt64LE(8n, 16);
+    const bits = Buffer.alloc(8); bits[0] = children ? 1 : 0;
+    return Buffer.concat([head, Buffer.from(json), bits]);
+  };
+  const tile = await glb();
+  const server = http.createServer((req, res) => {
+    if (req.url === '/tileset.json') {
+      res.end(JSON.stringify({ asset: { version: '1.1' }, geometricError: 1, root: { boundingVolume: box, geometricError: 1, refine: 'ADD',
+        content: { uri: 't/{level}-{x}-{y}-{z}.glb' }, implicitTiling: { subdivisionScheme: 'OCTREE', subtreeLevels: 1, availableLevels: 2, subtrees: { uri: 's/{level}-{x}-{y}-{z}.subtree' } } } }));
+    } else if (req.url === '/s/0-0-0-0.subtree') res.end(subtree(true));
+    else if (req.url.startsWith('/s/')) { res.writeHead(childStatus); res.end(); }
+    else if (req.url.startsWith('/t/')) res.end(tile);
+    else { res.writeHead(404); res.end(); }
+  }).listen(0, '127.0.0.1');
+  await once(server, 'listening');
+  t.after(() => new Promise((r) => { server.close(r); server.closeAllConnections(); }));
+  return `http://127.0.0.1:${server.address().port}/tileset.json`;
+}
+
+test('a part of the hierarchy that cannot be read stops the export, or is listed with the flag', async (t) => {
+  const url = await implicitSource(t, 503);
+  await assert.rejects(exportTileset(url, await folder(t)), /Part of the hierarchy could not be read/);
+  const r = await exportTileset(url, await folder(t), { hierarchyErrors: 'warn' });
+  assert.equal(r.hierarchyFailures.length, 1);
+  assert.match(r.verify.summary, /1 part of the hierarchy could not be read/);
+});
+
+test('a subtree the host says is not there is listed, and does not stop the export', async (t) => {
+  const r = await exportTileset(await implicitSource(t, 404), await folder(t));
+  assert.equal(r.hierarchyFailures.length, 1);
+  assert.equal(r.hierarchyFailures[0].status, 404);
+});
+
+test('an export reports its steps, in order, for a bar in that many blocks', async (t) => {
+  const seen = [];
+  await exportTileset(await implicitSource(t, 404), await folder(t), { onProgress: (p) => { if (seen.at(-1) !== p.step) seen.push(p.step); assert.equal(p.steps, 3); } });
+  assert.deepEqual(seen, [1, 2, 3]);
 });

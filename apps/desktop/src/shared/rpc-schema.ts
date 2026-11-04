@@ -76,9 +76,14 @@ export interface DesktopRPC {
         response: boolean;
       };
       /** The version of a downloaded update ready to apply, null when there is none. */
+      /** This build. The version is only the build day, so the hash is what tells two builds apart. */
+      appInfo: {
+        params: Record<string, never>;
+        response: { version: string | null; hash: string | null };
+      };
       updateStatus: {
         params: Record<string, never>;
-        response: { version: string | null };
+        response: { version: string | null; hash: string | null };
       };
       /** Stop the servers and restart into the downloaded update. */
       applyUpdate: {

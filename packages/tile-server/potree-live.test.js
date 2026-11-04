@@ -107,6 +107,44 @@ test('Potree 1.x: a chunk read that failed is an error to retry, a chunk that is
   assert.ok(src.nodes.has('r0'));
 });
 
+// Level 1 of a subtree: Potree's octant numbers are not its morton indices, so count them.
+const childrenOf = (buf) => { const { contentBit } = parseSubtreeBuffer(buf); let n = 0; for (let i = 1; i <= 8; i++) n += contentBit(i); return n; };
+
+// A root chunk with two children, each a chunk of its own; `child` answers for child 1's .hrc.
+async function twoChunkCloud(t, child) {
+  t.mock.method(console, 'log', () => {});
+  t.mock.method(console, 'warn', () => {});
+  const cloud = { version: '1.8', octreeDir: 'data', hierarchyStepSize: 1, spacing: 1, scale: 0.01,
+    boundingBox: { lx: 500000, ly: 0, lz: 0, ux: 500001, uy: 1, uz: 1 }, pointAttributes: [{ name: 'POSITION_CARTESIAN', size: 12 }] };
+  const record = (mask, count) => { const b = Buffer.alloc(5); b[0] = mask; b.writeUInt32LE(count, 1); return b; };
+  const server = http.createServer(async (req, res) => {
+    const path = new URL(req.url, 'http://x').pathname;
+    if (path.endsWith('/cloud.js')) return res.end(JSON.stringify(cloud));
+    if (path.endsWith('/r.hrc')) return res.end(record(0b11, 1));
+    if (path.endsWith('/r0.hrc')) return res.end(record(0, 1));
+    if (path.endsWith('/r1.hrc')) return child(res, record(0, 1));
+    res.writeHead(404); res.end();
+  }).listen(0, '127.0.0.1');
+  await once(server, 'listening');
+  t.after(() => new Promise((r) => { server.close(r); server.closeAllConnections(); }));
+  return `http://127.0.0.1:${server.address().port}/cloud.js`;
+}
+
+test('Potree 1.x: a subtree waits for a chunk another request has in flight', async (t) => {
+  const url = await twoChunkCloud(t, (res, body) => setTimeout(() => res.end(body), 200));
+  await potreeTileset(url, { prefetch: 1, crs: 'EPSG:32631' });   // starts the same chunks in the background
+  assert.equal(childrenOf(await potreeSubtree(url, '0-0-0-0')), 2, 'child 1 too, whose chunk was still in flight');
+});
+
+test('Potree 1.x: a subtree over a chunk that cannot be read fails, then works once it can', async (t) => {
+  let ok = false;
+  const url = await twoChunkCloud(t, (res, body) => { if (ok) return res.end(body); res.writeHead(503); res.end(); });
+  await potreeTileset(url, { prefetch: 0, crs: 'EPSG:32631' });
+  await assert.rejects(potreeSubtree(url, '0-0-0-0'), /503/);
+  ok = true;
+  assert.equal(childrenOf(await potreeSubtree(url, '0-0-0-0')), 2);
+});
+
 test('Potree 2 preserves Azure container SAS for hierarchy and octree range reads', async (t) => {
   const metadata = {
     version: '2.0', encoding: 'DEFAULT', spacing: 1,

@@ -13,7 +13,7 @@
 import path from 'node:path';
 import { readFile as readSplatFile, MemoryReadFileSystem } from '@playcanvas/splat-transform';
 import { extractRange } from '../sog-to-3dtiles/src/sogChunk.js';
-import { buildSplatTileGlb, computeBounds, memoizeAsync } from '../core/index.js';
+import { buildSplatTileGlb, computeBounds, memoizeAsync, fetchSource as fetchBuf } from '../core/index.js';
 
 // glTF Y-up → 3D Tiles Z-up box (RX +90°): centre (cx,cy,cz)→(cx,−cz,cy); half-extents y↔z.
 function boundToZUpBox(min, max) {
@@ -23,12 +23,6 @@ function boundToZUpBox(min, max) {
 }
 const boundDiagonal = (min, max) => Math.hypot(max[0]-min[0], max[1]-min[1], max[2]-min[2]) || 1e-3;
 const ROOT_GE_FACTOR = 0.05, DEPTH_RATIO = 0.5;
-
-async function fetchBuf(url) {
-  const r = await fetch(url);
-  if (!r.ok) throw new Error(`fetch ${url} → ${r.status}`);
-  return Buffer.from(await r.arrayBuffer());
-}
 
 // Per-URL context (just the lod-meta + a small decoded-chunk LRU), cached. memoizeAsync caches
 // FAILURES too — a broken source fails fast on retry (see cache.js's own comment).

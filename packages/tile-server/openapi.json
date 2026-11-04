@@ -1222,6 +1222,15 @@
                     "default": "sample",
                     "description": "Check the folder at the end. counts: walks it as a client would, reads every tile's header, and compares the points with the total a Potree or COPC source declares. sample: also reads a few tiles of each level in full. full: reads every tile in full. The result is `verify` in the report."
                   },
+                  "hierarchyErrors": {
+                    "type": "string",
+                    "enum": [
+                      "error",
+                      "warn"
+                    ],
+                    "default": "error",
+                    "description": "A part of the hierarchy still unread after retries (a subtree, an external tileset, a Potree .hrc). error: stop the export. warn: list it under `hierarchyFailures` and export the rest without that branch."
+                  },
                   "src": {
                     "type": "string",
                     "description": "convert: local path or URL of the raw source"

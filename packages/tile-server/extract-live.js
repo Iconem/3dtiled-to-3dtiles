@@ -24,7 +24,7 @@ import { crc32 } from 'node:zlib';
 import { Document, NodeIO } from '@gltf-transform/core';
 import { ALL_EXTENSIONS } from '@gltf-transform/extensions';
 import { readSpz, combine, writeSpz, writeSog, writeGlb, writePly, Transform, MemoryReadFileSystem, MemoryFileSystem } from '@playcanvas/splat-transform';
-import { decompressGlb, LasWriter, lasHeaderBuffer, lasRecordBuffer, ecefToLlh, llhToEcef, enuFrame, CORS, loadSubtree } from '../core/index.js';
+import { decompressGlb, LasWriter, lasHeaderBuffer, lasRecordBuffer, ecefToLlh, llhToEcef, enuFrame, CORS, loadSubtree, fetchSource } from '../core/index.js';
 
 // Resolve the PDAL binary for /extract/copc. Prefer $PDAL_BIN, then the pixi-global shim (`pixi global
 // install pdal` → ~/.pixi/bin/pdal[.exe]), then `pdal` on PATH. pixi is the right installer here — PDAL
@@ -151,7 +151,7 @@ function matToTransform(M) {
   return t;
 }
 
-const fetchBuf = (u) => fetch(u).then(r => { if (!r.ok) throw new Error(`fetch ${u} → ${r.status}`); return r.arrayBuffer(); }).then(a => Buffer.from(a));
+const fetchBuf = fetchSource;
 const absUrl = (uri, base) => /^https?:/i.test(uri) ? uri : new URL(uri, base).href;
 const inBbox = (lon, lat, h, bb) => lon >= bb[0] && lon <= bb[3] && lat >= bb[1] && lat <= bb[4] && h >= bb[2] && h <= bb[5];
 const overlap = (mn, mx, bb) => mx[0] >= bb[0] && mn[0] <= bb[3] && mx[1] >= bb[1] && mn[1] <= bb[4] && mx[2] >= bb[2] && mn[2] <= bb[5];

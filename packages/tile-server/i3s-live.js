@@ -40,18 +40,12 @@ import { DataViewReadableFile } from '@loaders.gl/zip';
 import { decodeDefaultGeometry, geodeticToEcef, obbToBox, childIndices } from '../i3s-to-3dtiles/src/i3sParse.js';
 import { decodeLepccRgb } from '../i3s-to-3dtiles/src/lepccDecode.js';
 import { buildGlb } from '../i3s-to-3dtiles/src/glbBuild.js';
-import { enuFrame, memoizeAsync } from '../core/index.js';
+import { enuFrame, memoizeAsync, requestSource, fetchSource as fetchBuf, fetchSourceRange } from '../core/index.js';
 
 const MESH_TYPES  = new Set(['IntegratedMesh', '3DObject']);
 const POINT_TYPES = new Set(['PointCloud']);
 
 const gunzipIfNeeded = (buf) => (buf[0] === 0x1f && buf[1] === 0x8b) ? zlib.gunzipSync(buf) : buf;
-
-async function fetchBuf(url) {
-  const r = await fetch(url);
-  if (!r.ok) throw new Error(`fetch ${url} → ${r.status}`);
-  return Buffer.from(await r.arrayBuffer());
-}
 
 // A live ArcGIS SceneServer (not a pre-extracted local mirror) uses REST resource paths + `?f=json`
 // for JSON, not a static-file tree — `nodepages/<p>.json` doesn't exist as a URL; the real endpoint is
@@ -64,9 +58,7 @@ function arcgisSceneServerReader(url) {
   return async (rel) => {
     const isJson = rel.endsWith('.json');
     const restPath = rel === '3dSceneLayer.json' ? `layers/${layerId}` : `layers/${layerId}/${rel.replace(/\.(json|bin)$/, '')}`;
-    const r = await fetch(`${base}/${restPath}${isJson ? '?f=json' : ''}`);
-    if (!r.ok) throw new Error(`ArcGIS SceneServer getFile ${rel} → ${r.status}`);
-    return Buffer.from(await r.arrayBuffer());
+    return fetchBuf(`${base}/${restPath}${isJson ? '?f=json' : ''}`);
   };
 }
 
@@ -78,16 +70,15 @@ function arcgisSceneServerReader(url) {
 // the archive's total size AND proves range support, both needed for HttpRangeReadableFile below.
 async function probeSlpk(url) {
   try {
-    const r = await fetch(url, { headers: { Range: 'bytes=0-3' } });
-    if (!r.ok && r.status !== 206) return null;
+    const r = await requestSource(url, { headers: { Range: 'bytes=0-3' } });
     const cd = r.headers.get('content-disposition') || '';
-    const b = Buffer.from(await r.arrayBuffer());
+    const b = r.body;
     const looksLikeSlpk = /\.slpk"?\s*$/i.test(cd) || (b.length >= 2 && b[0] === 0x50 && b[1] === 0x4b);
     if (!looksLikeSlpk) return null;
     const cr = r.headers.get('content-range');
     const total = cr && r.status === 206 ? Number(cr.split('/')[1]) : NaN;
     return { supportsRange: r.status === 206 && Number.isFinite(total), size: total };
-  } catch { return null; }
+  } catch (e) { if (e.transient) throw e; return null; }
 }
 
 // Minimal loaders.gl ReadableFile backed by ranged HTTP GETs instead of an in-memory buffer — lets
@@ -102,10 +93,8 @@ class HttpRangeReadableFile {
   async stat() { return { size: this.size, bigsize: this.bigsize, isDirectory: false }; }
   async read(start = 0, length) {
     const s = Number(start);
-    const e = length != null ? s + Number(length) - 1 : this.size - 1;
-    const r = await fetch(this.url, { headers: { Range: `bytes=${s}-${e}` } });
-    if (!r.ok && r.status !== 206) throw new Error(`ranged fetch ${this.url} [${s}-${e}] → ${r.status}`);
-    return r.arrayBuffer();
+    const b = await fetchSourceRange(this.url, s, length != null ? Number(length) : this.size - s);
+    return b.buffer.slice(b.byteOffset, b.byteOffset + b.byteLength);
   }
 }
 
@@ -134,7 +123,7 @@ async function makeFileReader(url) {
           const f = await archive.getFile(rel, mode);
           const bytes = f instanceof ArrayBuffer ? new Uint8Array(f) : new Uint8Array(await f.arrayBuffer());
           return gunzipIfNeeded(Buffer.from(bytes));
-        } catch (e) { last = e; }
+        } catch (e) { if (e.transient) throw e; last = e; }
       }
       throw new Error(`SLPK getFile ${rel}: ${last?.message}`);
     };
@@ -145,15 +134,16 @@ async function makeFileReader(url) {
   const base = url.replace(/\/[^/]*$/, '/');
   return async (rel) => {
     for (const cand of [rel + '.gz', rel]) {
-      const r = await fetch(base + cand);
-      if (!r.ok) continue;
+      let r;
+      try { r = await requestSource(base + cand); }
+      catch (e) { if (e.transient) throw e; continue; }
       // A static host with SPA fallback (Vite) answers a missing path with 200 + index.html.
       // Detect that via Content-Type only — NOT by sniffing the first byte: binary geometry can
       // legitimately start with 0x3C (e.g. vertexCount 66108 = 0x1023C → first LE byte 0x3C).
       if ((r.headers.get('content-type') || '').includes('text/html')) continue;
-      return gunzipIfNeeded(Buffer.from(await r.arrayBuffer()));
+      return gunzipIfNeeded(r.body);
     }
-    throw new Error(`HTTP getFile ${rel} (nor .gz) under ${base}`);
+    throw Object.assign(new Error(`HTTP getFile ${rel} (nor .gz) under ${base}`), { status: 404 });
   };
 }
 
@@ -225,31 +215,32 @@ const getCtx = memoizeAsync(async (url) => {
   // always (2026-07-02: dropped the lazy on-demand-page mode; I3S has no persisted spatial index to make
   // a partial read meaningful, and node pages are cheap JSON metadata, not geometry, so eager cold start
   // is already fast). `i3sTileset` waits up to 3s for this before falling back to whatever's loaded.
-  const _pagesDonePromise = _allPagesLoaded ? Promise.resolve() : (async () => {
-    const BATCH = 8;
-    let page = 1;
-    while (true) {
-      const results = await Promise.allSettled(
-        Array.from({ length: BATCH }, (_, i) => page + i).map(p =>
-          getFile(`nodepages/${p}.json`).then(b => ({ page: p, pg: JSON.parse(b.toString('utf8')) }))
-        )
-      );
-      let done = false;
-      for (let i = 0; i < results.length; i++) {
-        // Some SceneServers answer a missing page with HTTP 200 + an ArcGIS error envelope
-        // (`{error:{code:404,...}}`) instead of a real 404 — `getFile` sees that as success, so this
-        // isn't caught by `.status !== 'fulfilled'`. Treat a page with no `.nodes` array the same as
-        // end-of-pagination (verified against USGSNYC_2014_LiDAR, whose page 0 has exactly
-        // nodesPerPage nodes, forcing this exact boundary case).
-        if (results[i].status !== 'fulfilled' || !Array.isArray(results[i].value.pg.nodes)) { done = true; break; }
-        addNodes(results[i].value.pg);
-        if (results[i].value.pg.nodes.length < nodesPerPage) { done = true; break; }
+  // A page that could not be read is not the end of the pages: it stops the load with an error, and the next call resumes
+  // from that page. Taking it for the end lost every node after it, for the life of the process.
+  let nextPage = 1, pagesLoad = null;
+  const loadPages = () => {
+    if (_allPagesLoaded) return Promise.resolve();
+    return pagesLoad ??= (async () => {
+      const BATCH = 8;
+      while (!_allPagesLoaded) {
+        const batch = Array.from({ length: BATCH }, (_, i) => nextPage + i);
+        const results = await Promise.allSettled(batch.map(p => getFile(`nodepages/${p}.json`).then(b => JSON.parse(b.toString('utf8')))));
+        for (const r of results) {
+          if (r.status === 'rejected' && r.reason?.transient) throw r.reason;
+          // Some SceneServers answer a missing page with HTTP 200 + an ArcGIS error envelope
+          // (`{error:{code:404,...}}`) instead of a real 404 — `getFile` sees that as success, so this
+          // isn't caught by `.status !== 'fulfilled'`. Treat a page with no `.nodes` array the same as
+          // end-of-pagination (verified against USGSNYC_2014_LiDAR, whose page 0 has exactly
+          // nodesPerPage nodes, forcing this exact boundary case).
+          if (r.status !== 'fulfilled' || !Array.isArray(r.value.nodes)) { _allPagesLoaded = true; break; }
+          addNodes(r.value);
+          nextPage++;
+          if (r.value.nodes.length < nodesPerPage) { _allPagesLoaded = true; break; }
+        }
       }
-      page += BATCH;
-      if (done) break;
-    }
-    _allPagesLoaded = true;
-  })();
+    })().finally(() => { pagesLoad = null; });
+  };
+  loadPages().catch(e => console.warn(`[i3s-live] node pages stopped at ${nextPage}, the next tileset request resumes: ${e.message}`));
 
   // Shared ENU frame at the root OBB centre (geometry + boxes stored in ENU metres; only the root
   // tile carries the ENU→ECEF transform — descendants inherit it, mirroring the offline converter).
@@ -266,7 +257,7 @@ const getCtx = memoizeAsync(async (url) => {
     isPoint: POINT_TYPES.has(layerType),
     bufIdx: uncompressedBufferIndex >= 0 ? uncompressedBufferIndex : 0,
     originEcef, EAST, NORTH, UP, toEnu,
-    _pagesDonePromise, get _allPagesLoaded() { return _allPagesLoaded; },
+    loadPages, get _allPagesLoaded() { return _allPagesLoaded; },
   };
 });
 
@@ -345,8 +336,13 @@ async function serveTileGlb(ctx, idx) {
   const res = node.mesh?.geometry ? node.mesh.geometry.resource : node.resourceId;
 
   let buf;
+  // The empty tile is for a node whose geometry is not there. One that could not be read is an error, so it gets asked again.
   try { buf = await ctx.getFile(`nodes/${res}/geometries/${ctx.bufIdx}.bin`); }
-  catch { try { buf = await ctx.getFile(`geometries/${res}.bin`); } catch { return EMPTY_GLB; } }
+  catch (e) {
+    if (e.transient) throw e;
+    try { buf = await ctx.getFile(`geometries/${res}.bin`); }
+    catch (e2) { if (e2.transient) throw e2; return EMPTY_GLB; }
+  }
 
   const g = decodeDefaultGeometry(buf, ctx.schema);
   if (!g.vertexCount) return EMPTY_GLB;
@@ -414,7 +410,7 @@ async function serveTileGlb(ctx, idx) {
       const base = `nodes/${mat.resource}/textures/${fmt.name}`;
       let bytes;
       for (const cand of [base, `${base}.${fmt.ext}`]) {
-        try { const b = await ctx.getFile(cand); if (isRaster(b)) { bytes = b; break; } } catch { /* try next */ }
+        try { const b = await ctx.getFile(cand); if (isRaster(b)) { bytes = b; break; } } catch (e) { if (e.transient) throw e; /* try next */ }
       }
       if (bytes) texture = { bytes, mimeType: fmt.mimeType };
     }
@@ -431,7 +427,7 @@ async function serveTileGlb(ctx, idx) {
       const rgbBuf = await ctx.getFile(`nodes/${res}/attributes/${ctx.rgbAttrKey}`);
       const rgb = decodeLepccRgb(rgbBuf);
       if (rgb.vertexCount === g.vertexCount) colors = rgb.colors;
-    } catch { /* no RGB for this node — render uncolored */ }
+    } catch (e) { if (e.transient) throw e; /* no RGB for this node — render uncolored */ }
   }
 
   return Buffer.from(buildGlb({ mode: ctx.isPoint ? 'POINTS' : 'TRIANGLES', positions, normals, colors, uvs: g.uv0, texture }));
@@ -439,12 +435,17 @@ async function serveTileGlb(ctx, idx) {
 
 // Pure builders for the /stream dispatcher.
 export const i3sTileRe = /^\d+$/;
-export async function i3sTileset(url) {
+export async function i3sTileset(url, opts = {}) {
   const ctx = await getCtx(url);
   // Wait up to 3 s for all node pages so the explicit tree is complete; page 0 is always ready, so a
-  // huge layer still degrades to "root + whatever loaded so far" instead of failing outright.
-  if (!ctx._allPagesLoaded) await Promise.race([ctx._pagesDonePromise, new Promise(r => setTimeout(r, 3000))]);
-  return buildTileset(ctx, url);
+  // huge layer still degrades to "root + whatever loaded so far" instead of failing outright. Such a
+  // tree says so: an export asks again with cache=hierarchy, which waits for every page.
+  const pages = ctx.loadPages();
+  pages.catch(() => {});
+  await (opts.hierarchy === 'eager' ? pages : Promise.race([pages, new Promise(r => setTimeout(r, 3000))]));
+  const ts = buildTileset(ctx, url);
+  if (!ctx._allPagesLoaded) ts.asset.extras = { hierarchyIncomplete: true };
+  return ts;
 }
 export async function i3sTile(url, key) { return serveTileGlb(await getCtx(url), Number(key)); }
 

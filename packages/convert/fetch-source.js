@@ -11,16 +11,23 @@ import os from 'node:os';
 import path from 'node:path';
 import crypto from 'node:crypto';
 import { fileURLToPath } from 'node:url';
+import { parallelMap, fetchSource, isAbsent } from '3dtiles-convert-core';
+
+export { isAbsent };
 
 export const isRemote = s => /^https?:\/\//i.test(s);
 
 async function fetchTo(url, dest) {
-  const r = await fetch(url);
-  if (!r.ok) throw new Error(`fetch ${url} → ${r.status}`);
+  const body = await fetchSource(url);
   await fs.mkdir(path.dirname(dest), { recursive: true });
-  await fs.writeFile(dest, Buffer.from(await r.arrayBuffer()));
+  await fs.writeFile(dest, body);
 }
-const tryFetch = (url, dest) => fetchTo(url, dest).catch(() => {});
+/** A file the dataset may not have: only its absence is fine. */
+const fetchOptional = (url, dest) => fetchTo(url, dest).catch((e) => { if (!isAbsent(e.status)) throw e; });
+
+/** A file still not read after retries goes to `onFailure`, which may throw to stop the mirror. */
+const fetchListed = (url, dest, rel, onFailure) => fetchTo(url, dest).catch((e) => onFailure({ file: rel, status: e.status, error: String(e.message || e) }));
+const stopOnFailure = (f) => { if (!isAbsent(f.status)) throw new Error(`could not read ${f.file}: ${f.error}`); };
 
 // ── Potree 1.x full-tree mirror ─────────────────────────────────────────────
 // Potree 1.x datasets have per-node files (hundreds to thousands).  We walk the
@@ -33,10 +40,10 @@ const tryFetch = (url, dest) => fetchTo(url, dest).catch(() => {});
 //   hrc     (v1.7): `hierarchyStepSize` controls chunk depth; hierarchy in
 //                   `<octreeDir>/r/<5-char-dirs>/<name>.hrc` (5 B/node); data
 //                   files alongside each chunk dir.
-async function mirrorPotree1(base, dir) {
+async function mirrorPotree1(base, dir, { onFailure = stopOnFailure, onProgress } = {}) {
   // 1. cloud.js
   const cloudUrl = base + 'cloud.js';
-  const cloudBuf = await (async () => { const r = await fetch(cloudUrl); if (!r.ok) throw new Error(`fetch ${cloudUrl} → ${r.status}`); return Buffer.from(await r.arrayBuffer()); })();
+  const cloudBuf = await fetchSource(cloudUrl);
   await fs.mkdir(dir, { recursive: true });
   await fs.writeFile(path.join(dir, 'cloud.js'), cloudBuf);
 
@@ -61,13 +68,12 @@ async function mirrorPotree1(base, dir) {
   const inline    = Array.isArray(cloud.hierarchy);
   const ext       = isLaz ? 'laz' : 'bin';
 
-  const tryGet = (rel) => tryFetch(base + rel, path.join(dir, rel));
+  const getOne = (rel) => fetchListed(base + rel, path.join(dir, rel), rel, onFailure);
+  const files = [];                             // point files, fetched by a pool once the hierarchy is known
 
   if (inline) {
     // v1.4: all node names in cloud.js; data files are flat
-    for (const [name] of cloud.hierarchy) {
-      await tryGet(`${octreeDir}/${name}.${ext}`);
-    }
+    for (const [name] of cloud.hierarchy) files.push(`${octreeDir}/${name}.${ext}`);
   } else {
     // v1.7: chunk-dir layout; walk .hrc files to discover the full tree
     const chunkDirs = (name) => {
@@ -81,7 +87,7 @@ async function mirrorPotree1(base, dir) {
 
     async function walkHrc(name) {
       const rel = hrcRel(name);
-      await tryGet(rel);
+      await getOne(rel);
       let buf; try { buf = await fs.readFile(path.join(dir, rel)); } catch { return; }
       const depthBase = name.length;
       const queue = [name]; let rec = 0; const boundary = [];
@@ -90,7 +96,7 @@ async function mirrorPotree1(base, dir) {
         const mask = buf.readUInt8(rec * 5);
         rec++;
         // Every listed node, whatever count it records: PotreeConverter writes 0 for a leaf whose file holds its points.
-        await tryGet(nodeRel(nm));
+        files.push(nodeRel(nm));
         const depthInChunk = nm.length - depthBase;
         for (let c = 0; c < 8; c++) {
           if (!((mask >> c) & 1)) continue;
@@ -103,6 +109,8 @@ async function mirrorPotree1(base, dir) {
     }
     await walkHrc('r');
   }
+  let done = 0;
+  await parallelMap(files, async (rel) => { await getOne(rel); onProgress?.(++done, files.length); }, { concurrency: 16 });
   return dir;
 }
 
@@ -112,7 +120,7 @@ async function mirrorPotree1(base, dir) {
  * @param {string} fmt  resolved format id
  * @param {string} dir  destination directory
  */
-export async function mirrorRemote(src, fmt, dir) {
+export async function mirrorRemote(src, fmt, dir, opts = {}) {
   const clean = src.split('?')[0];
   const base = clean.slice(0, clean.lastIndexOf('/') + 1);
   const name = clean.slice(clean.lastIndexOf('/') + 1) || 'input';
@@ -123,7 +131,7 @@ export async function mirrorRemote(src, fmt, dir) {
       // Potree 1.x: walk cloud.js + .hrc hierarchy + all per-node data files.
       // Can be hundreds–thousands of files; caching means subsequent requests are instant.
       console.log(`[fetch-source] Potree 1.x: mirroring full tree from ${base} …`);
-      await mirrorPotree1(base, dir);
+      await mirrorPotree1(base, dir, opts);
       return dir;
     }
     // Potree 2.0: exactly 3 files.
@@ -131,16 +139,15 @@ export async function mirrorRemote(src, fmt, dir) {
     return dir;
   }
   if (fmt === 'lcc') {                                      // meta.lcc (+ index.bin, data.bin, optional shcoef.bin)
-    await get(name);
-    for (const f of ['index.bin', 'data.bin', 'shcoef.bin']) await tryFetch(base + f, path.join(dir, f));
+    await get(name); await get('index.bin'); await get('data.bin');
+    await fetchOptional(base + 'shcoef.bin', path.join(dir, 'shcoef.bin'));
     return dir;
   }
   if (fmt === 'sog') {                                      // lod-meta.json + per-chunk meta.json + the files each chunk references
-    const r = await fetch(base + name); if (!r.ok) throw new Error(`fetch ${base + name} → ${r.status}`);
-    const lod = JSON.parse(Buffer.from(await r.arrayBuffer()).toString('utf8'));
+    const lod = JSON.parse((await fetchSource(base + name)).toString('utf8'));
     await fs.mkdir(dir, { recursive: true });
     await fs.writeFile(path.join(dir, 'lod-meta.json'), JSON.stringify(lod));
-    if (lod.environment) await tryFetch(base + lod.environment, path.join(dir, lod.environment));
+    if (lod.environment) await fetchOptional(base + lod.environment, path.join(dir, lod.environment));
     for (const cm of lod.filenames || []) {
       await get(cm);
       const cj = JSON.parse(await fs.readFile(path.join(dir, cm), 'utf8'));
@@ -160,10 +167,10 @@ export async function mirrorRemote(src, fmt, dir) {
  * Normalise a convert() input to a local path. Local paths (incl. file://) pass through; remote URLs
  * are mirrored into a temp dir keyed by URL+format. Returns { input, format, cleanup }.
  */
-export async function resolveSource(src, fmt) {
+export async function resolveSource(src, fmt, opts = {}) {
   if (!isRemote(src)) return { input: src.startsWith('file://') ? fileURLToPath(src) : src, format: fmt, cleanup: null };
   const key = crypto.createHash('sha1').update(`${fmt}|${src}`).digest('hex').slice(0, 16);
   const dir = path.join(os.tmpdir(), '3dtiles-convert-src', key);
-  const input = await mirrorRemote(src, fmt, dir);
+  const input = await mirrorRemote(src, fmt, dir, opts);
   return { input, format: fmt, cleanup: dir };
 }

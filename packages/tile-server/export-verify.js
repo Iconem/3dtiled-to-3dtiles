@@ -49,7 +49,7 @@ async function readTileHead(file, rel) {
       const whole = Buffer.alloc(20 + jsonLength);
       await fh.read(whole, 0, whole.length, 0);
       const r = inspectGlb(whole);
-      return r.ok ? { size, points: r.points } : { size, problem: r.reason };
+      return r.ok ? { size, points: r.points, triangles: r.triangles } : { size, problem: r.reason };
     }
     if (magic === 'pnts') {
       const jsonLength = head.readUInt32LE(12);
@@ -142,8 +142,11 @@ export async function declaredPoints({ src, format }) {
   for (const rel of potreeFile ? [potreeFile] : ['cloud.js', 'metadata.json']) {
     let text;
     try { text = (await readSource(src, rel)).toString('utf8'); } catch { continue; }
-    const points = Number(parseCloudJs(text).points);
+    const meta = parseCloudJs(text);
+    const points = Number(meta.points);
     if (Number.isFinite(points) && points > 0) return { format: 'potree', declared: points, from: rel };
+    // Potree 1.4 has no total, but lists every node with its count in the same file.
+    if (Array.isArray(meta.hierarchy)) return { format: 'potree', declared: meta.hierarchy.reduce((a, e) => a + e[1], 0), from: `${rel} hierarchy` };
   }
   return null;
 }
@@ -153,7 +156,7 @@ async function compareWithSource(source, points, partial) {
   let d;
   try { d = await declaredPoints(source); }
   catch (e) { return { available: false, reason: `could not read the source: ${e.message}` }; }
-  if (!d) return { available: false, reason: 'this format declares no total' };
+  if (!d) return { available: false, reason: 'this source declares no total' };
   const out = { available: true, ...d, exported: points, missing: d.declared - points, missingRatio: d.declared ? (d.declared - points) / d.declared : 0 };
   if (partial) return { ...out, comparable: false, ok: true };   // a depth cap keeps part of the cloud on purpose
   return { ...out, comparable: true, ok: Math.abs(out.missingRatio) <= TOLERANCE };
@@ -165,10 +168,12 @@ function summaryOf(v) {
   const levels = Object.keys(v.levels).map(Number);
   const parts = [`Checked ${v.contentTiles.toLocaleString('en-US')} tiles${levels.length ? `, levels ${Math.min(...levels)}–${Math.max(...levels)}` : ''}`];
   if (v.points) parts.push(`${big(v.points)} points`);
+  if (v.triangles) parts.push(`${big(v.triangles)} triangles`);
   parts.push(`${v.missing} missing`);
   if (v.badTiles) parts.push(`${v.badTiles} damaged`);
   if (v.deepChecked) parts.push(`${v.deepChecked.toLocaleString('en-US')} read in full`);
   let s = `${parts.join(', ')}.`;
+  if (!v.contentTiles) s += v.partial ? ' The depth limit stops above the first tile with content.' : ' The tileset holds no tile content.';
   const src = v.source;
   if (src?.available && src.comparable) {
     s += src.ok
@@ -244,7 +249,7 @@ export async function verifyExport(outDir, { mode = 'sample', source = null, par
       summary: `The check could not walk the folder: ${e.message}` };
   }
 
-  let points = 0;
+  let points = 0, triangles = 0;
   async function pool(list, work) {
     let next = 0, done = 0;
     await Promise.all(Array.from({ length: Math.min(POOL, list.length) }, async () => {
@@ -263,6 +268,7 @@ export async function verifyExport(outDir, { mode = 'sample', source = null, par
     if (!head.size) { missing.push(rel); return; }
     if (head.problem) { bad.push({ file: rel, problem: head.problem }); return; }
     points += head.points;
+    triangles += head.triangles ?? 0;
     if (head.points) pointsByLevel[level] = (pointsByLevel[level] ?? 0) + head.points;
   });
 
@@ -289,8 +295,9 @@ export async function verifyExport(outDir, { mode = 'sample', source = null, par
 
   const sourceCheck = await compareWithSource(source, points, partial);
   const v = {
-    mode, ok: !missing.length && !bad.length && sourceCheck.ok !== false,
-    contentTiles: tiles.length, subtrees, levels, points, pointsByLevel, deepChecked: deep.length,
+    // Nothing at all is never a pass, unless a depth limit stopped above the first tile with content.
+    mode, ok: !missing.length && !bad.length && sourceCheck.ok !== false && (tiles.length > 0 || partial),
+    partial, contentTiles: tiles.length, subtrees, levels, points, triangles, pointsByLevel, deepChecked: deep.length,
     missing: missing.length, missingFiles: missing.slice(0, LIST_MAX),
     badTiles: bad.length, badFiles: bad.slice(0, LIST_MAX),
     source: sourceCheck,

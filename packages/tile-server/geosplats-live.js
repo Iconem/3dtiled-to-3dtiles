@@ -22,7 +22,7 @@
  * Reverse-engineered structure: docs-references/maptiler-geosplats.md.
  */
 import { readSog, MemoryReadFileSystem } from '@playcanvas/splat-transform';
-import { llhToEcef, enuFrame, buildSplatTileGlb, computeBounds } from '../core/index.js';
+import { llhToEcef, enuFrame, buildSplatTileGlb, computeBounds, fetchSource } from '../core/index.js';
 
 const SH_C0 = 0.28209479177387814;
 // readSog yields a PLY-convention DataTable (SH-DC colour, logit opacity, ln scale, quat rot_0=w). Convert
@@ -53,19 +53,10 @@ function dataTableToSplatGlb(dt) {
 }
 
 const REFERER = 'https://www.maptiler.com/';
-const sleep = (ms) => new Promise(r => setTimeout(r, ms));
 // The viewer streams many octants in parallel; MapTiler rate-limits bursts (429) and occasionally drops a
 // connection, which surfaced as sporadic "Request has failed" tile errors + visible gaps. Retry transient
 // failures (429/5xx/network) with exponential backoff so tiles fill in instead of failing.
-async function gfetch(u, tries = 4) {
-  for (let i = 0; ; i++) {
-    try {
-      const r = await fetch(u, { headers: { Referer: REFERER, Origin: 'https://www.maptiler.com' } });
-      if (r.ok || i >= tries - 1 || !(r.status === 429 || r.status >= 500)) return r;
-    } catch (e) { if (i >= tries - 1) throw e; }
-    await sleep(200 * 2 ** i);                                 // 200, 400, 800 ms
-  }
-}
+const gfetch = (u) => fetchSource(u, { attempts: 4, headers: { Referer: REFERER, Origin: 'https://www.maptiler.com' } });
 const ui = (grid) => ({ 1: 1, 8: 3, 64: 6, 512: 9 }[grid] ?? 1);   // octant-id bit width per grid (SDK ne.ui)
 
 // tiny cache so per-tile requests don't re-fetch model.json / metadata.json each time
@@ -81,9 +72,9 @@ function parseModelUrl(modelUrl) {
   const splatsBase = u.origin + '/' + parts.slice(0, parts.length - 2).join('/');  // …/splats
   return { splatsBase, modelId, key: u.searchParams.get('key') || '' };
 }
-const fetchModel = (modelUrl) => cached('model:' + modelUrl, async () => (await gfetch(modelUrl)).json());
+const fetchModel = (modelUrl) => cached('model:' + modelUrl, async () => JSON.parse(await gfetch(modelUrl)));
 const fetchMeta = (splatsBase, modelId, baseurl, key) =>
-  cached(`meta:${modelId}/${baseurl}`, async () => (await gfetch(`${splatsBase}/${modelId}/${baseurl}/metadata.json?key=${key}`)).json());
+  cached(`meta:${modelId}/${baseurl}`, async () => JSON.parse(await gfetch(`${splatsBase}/${modelId}/${baseurl}/metadata.json?key=${key}`)));
 
 // column-major 4×4 multiply (a·b)
 function matMul(a, b) { const o = new Array(16); for (let c = 0; c < 4; c++) for (let r = 0; r < 4; r++) o[c*4+r] = a[r]*b[c*4]+a[4+r]*b[c*4+1]+a[8+r]*b[c*4+2]+a[12+r]*b[c*4+3]; return o; }
@@ -208,7 +199,7 @@ async function octantDataTable(splatsBase, modelId, baseurl, key, grid, oct, lod
   if (!avail.length) throw new Error(`no entries for octant ${octBin} (grid ${grid})`);
   const useLod = avail.includes(lod) ? lod : (avail.filter(v => v <= lod).pop() ?? avail[0]);
   const want = meta.entries.filter(en => en[0].includes(`${prefix}${useLod}/`));
-  const buf = new Uint8Array(await (await gfetch(`${splatsBase}/${modelId}/${baseurl}/${grid}/${oct}/${useLod}?key=${key}`)).arrayBuffer());
+  const buf = new Uint8Array(await gfetch(`${splatsBase}/${modelId}/${baseurl}/${grid}/${oct}/${useLod}?key=${key}`));
   const fs = new MemoryReadFileSystem();
   let off = 0;                                                // bundle = entries concatenated in array order
   for (const en of want) { const name = en[0].split('/').pop(); fs.set(name, buf.subarray(off, off + en[2])); off += en[2]; }
@@ -225,7 +216,7 @@ export async function geosplatsTileset(modelUrl, opts = {}) {
   // Fetch every sub-model's metadata (voxel_grids) → per-sub-model octree + the union bbox (for centering).
   const gmin = [Infinity,Infinity,Infinity], gmax = [-Infinity,-Infinity,-Infinity];
   const subs = await Promise.all((model.models || []).map(async (sm, i) => {
-    let meta = null; try { meta = await fetchMeta(splatsBase, modelId, sm.baseurl, key); } catch {}
+    let meta = null; try { meta = await fetchMeta(splatsBase, modelId, sm.baseurl, key); } catch (e) { if (e.transient) throw e; }
     const bb = meta?.bounding_box;
     if (bb) { for (const k of [0,1,2]) { const lo=[bb.min.x,bb.min.y,bb.min.z][k], hi=[bb.max.x,bb.max.y,bb.max.z][k]; if(lo<gmin[k])gmin[k]=lo; if(hi>gmax[k])gmax[k]=hi; } }
     return { i, meta };

@@ -254,7 +254,11 @@ const rpc = defineElectrobunRPC<DesktopRPC, "bun">("bun", {
 				return true;
 			},
 
-			updateStatus: () => ({ version: updateVersion }),
+			appInfo: async () => {
+				const local = await Updater.getLocalInfo().catch(() => null);
+				return { version: local?.version ?? null, hash: local?.hash ?? null };
+			},
+			updateStatus: () => ({ version: updateVersion, hash: updateHash }),
 			applyUpdate: async () => {
 				stopChildren();   // the bundled node.exe is locked for as long as it runs
 				await Updater.applyUpdate();
@@ -296,6 +300,7 @@ Electrobun.events.on("before-quit", stopChildren);
  * beside bin/): the updater only knows the installed folder.
  */
 let updateVersion: string | null = null;
+let updateHash: string | null = null;
 async function checkForUpdate() {
 	const { existsSync } = await import("node:fs");
 	const app = (globalThis as any).process?.execPath?.replace(/[\\/]bin[\\/][^\\/]+$/, "");
@@ -306,7 +311,10 @@ async function checkForUpdate() {
 		const info = await Updater.checkForUpdate();
 		if (info.error || !(info.updateAvailable || info.updateReady)) return;
 		if (!info.updateReady) await Updater.downloadUpdate();
-		if (Updater.updateInfo().updateReady) updateVersion = info.version ?? "";
+		if (Updater.updateInfo().updateReady) {
+			updateVersion = info.version ?? "";
+			updateHash = info.hash ?? null;
+		}
 	} catch (e) {
 		console.warn("[3dtiled-desktop] update check failed:", e);
 	}

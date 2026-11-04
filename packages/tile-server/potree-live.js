@@ -12,7 +12,7 @@
  *   GET /potree/tileset.json?url=<metadata.json | cloud.js URL>
  *   GET /potree/tile/<name>.glb?url=<…>                       → that node's points as a POINTS GLB
  */
-import { buildPointsGlb, coordsToKey, keyToCoords, buildSubtreeBuffer, georefFromCrs, buildImplicitTileset, parallelMap, defaultConcurrency, progressStart, progressTick, progressDone, memoizeAsync } from '../core/index.js';
+import { buildPointsGlb, coordsToKey, keyToCoords, buildSubtreeBuffer, georefFromCrs, buildImplicitTileset, parallelMap, defaultConcurrency, progressStart, progressTick, progressDone, memoizeAsync, fetchSource, fetchSourceRange } from '../core/index.js';
 import { preparePotree2Schema, parsePotree2Hierarchy, parsePotree2Chunk, decodePotree2Node } from '../potree-to-3dtiles/src/potree2.js';
 import { loadPotree1 } from '../potree-to-3dtiles/src/potree1.js';
 import { withCrsOverride } from './copc-live.js';
@@ -28,25 +28,8 @@ function coordsOfBox(box, rootBox, depth) {
 
 const georef = (origin, crs) => georefFromCrs(origin, crs, 'potree-live');
 
-// Retries what may pass (a reset, a 429, a 5xx): one failed .hrc read costs a whole branch of the tree.
-async function fetchFull(url, attempts = 3) {
-  for (let i = 1; ; i++) {
-    let err;
-    try {
-      const r = await fetch(url);
-      if (r.ok) return Buffer.from(await r.arrayBuffer());
-      err = Object.assign(new Error(`fetch ${url} → ${r.status}`), { status: r.status });
-    } catch (e) { err = e; }
-    if (i >= attempts || (err.status && err.status < 500 && err.status !== 429)) throw err;
-    await new Promise(res => setTimeout(res, 250 * 2 ** i));
-  }
-}
-// One contiguous range read from octree.bin (the per-tile fetch — this is the streaming core).
-async function rangeGet(url, begin, length) {
-  const r = await fetch(url, { headers: { Range: `bytes=${begin}-${begin + length - 1}` } });
-  if (r.status !== 206 && r.status !== 200) throw new Error(`range ${url} → ${r.status} (server must support HTTP 206)`);
-  return Buffer.from(await r.arrayBuffer());
-}
+const fetchFull = fetchSource;
+const rangeGet = fetchSourceRange;      // one contiguous range read from octree.bin (the per-tile fetch — this is the streaming core)
 const finishCtx = (nodes, rootBox, crs, spacingMeta, readTile) => {
   const origin = [0,1,2].map(k => (rootBox.min[k] + rootBox.max[k]) / 2);
   const rootDiag = Math.hypot(rootBox.max[0]-rootBox.min[0], rootBox.max[1]-rootBox.min[1], rootBox.max[2]-rootBox.min[2]);
@@ -141,12 +124,16 @@ const getCtx = memoizeAsync(async (url) => {
       // PARALLEL chunk-root BFS: load each band of .hrc chunks concurrently, enqueue qualifying
       // boundaries (next-band roots) per `accept`. One round-trip-batch per band, not per chunk.
       const loadChunkRoots = async (roots, accept) => {
-        let frontier = [...new Set(roots)];
+        // Every chunk on the way counts, loaded or not: loadOne answers a loaded one from its cache and shares the fetch
+        // of one in flight. Skipping those lost nodes: a walk stopped at a loaded chunk never reached the ones below it,
+        // and a subtree built while a chunk was still in flight came out without it, for good.
+        const visited = new Set(roots);
+        let frontier = [...visited];
         while (frontier.length) {
           const boundaries = await parallelMap(frontier, loadOne, { concurrency: Math.min(defaultConcurrency(), 16) });
           const next = [];
-          for (const boundary of boundaries) for (const b of boundary) if (!loadedChunks.has(b.name) && !inFlight.has(b.name) && accept(b.name)) next.push(b.name);
-          frontier = [...new Set(next)];
+          for (const boundary of boundaries) for (const b of boundary) if (!visited.has(b.name) && accept(b.name)) { visited.add(b.name); next.push(b.name); }
+          frontier = next;
         }
         indexLoadedNodes();
       };
@@ -236,7 +223,8 @@ const getCtx = memoizeAsync(async (url) => {
           if (nm.length - 1 > maxLvl) continue;
           if (overlaps(p.box)) toLoad.push(nm);
         }
-        if (toLoad.length) { changed = true; await Promise.all(toLoad.map(loadChunk2)); }
+        // Bounded, as drainAll2 below: one block near the root can overlap hundreds of chunks.
+        if (toLoad.length) { changed = true; await parallelMap(toLoad, loadChunk2, { concurrency: Math.min(defaultConcurrency(), 16) }); }
       }
     };
 

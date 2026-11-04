@@ -15,8 +15,34 @@ Format loosely follows [Keep a Changelog](https://keepachangelog.com/).
 - **A failed `.hrc` read no longer loses a branch.** It counted as "no such chunk", and the server remembered the chunk
   as loaded, so one failed request dropped that branch until a restart (8 of 493 nodes, 1% of the points, in one test).
   Reads now retry, and a read that still fails is an error the next request retries.
+- **One read layer for every source format** (`core/source-fetch.js`): retries, a cap per host, errors that keep the host's
+  status. SOG, LCC, RAD, I3S and 3MX had no retries: one 503 on their first file failed the dataset until a restart, as a
+  failed first read was remembered for good. It now expires after a minute, on all of them. Exported through a host failing
+  every request once, COPC, Potree 1 and 2, SOG, LCC, RAD, I3S and plain 3D Tiles come out identical to a clean export.
+- **`/stream` says why a read failed:** 502 if the host did not answer, 404 if the file is not there. A test runs these rules
+  against every format.
+- **I3S: a node page that failed ended the pages**, and every node after it was lost until a restart. It now fails the
+  request, and the next one resumes from that page.
+- **I3S: a tile whose geometry could not be read was served as an empty tile**, and one whose texture or colours could not
+  be read lost them, with a 200. An export now also asks for the whole tree when a huge layer was still loading.
+- **LCC: a host that ignores `Range` got wrong splats**, read from the start of `data.bin`.
+- **COPC: a CRS that could not be read left the dataset unplaced until a restart.** A file deeper than level 8 whose root
+  page does not list the depth is no longer cut off there.
+- **Offline converter: LCC's `index.bin` and `data.bin` could fail unnoticed.** Every mirror now retries.
+- **An export of a mosaic that lost a child now says so**, under `hierarchyErrors`.
+- **A failed hierarchy read reached clients as an empty file**, for every octree format: `/stream` sent its 200 before
+  reading the subtree, so an error became an empty body.
+- **A crawl pruned any subtree it could not read**, with no error. An export now stops on it, or with
+  `hierarchyErrors: 'warn'` (`--hierarchy-errors warn`) lists it and carries on.
+- **Potree 2: a block near the root could fire hundreds of range reads at once**, unbounded and without retries. On
+  `lion` from potree.org, 25 of 116 subtrees failed and a client loaded 1,149 of its 1,624 nodes.
+- **Potree 1.x: a subtree built while a chunk was in flight came out without it**, and a walk stopped at any chunk
+  already loaded, missing those below it.
 
 ### Added — 2026-11-04 (desktop library)
+- **Desktop: a progress bar in one block per step**, with *Step 2 of 3* in the status line.
+- **Desktop: a theme button** (system, light, dark), shadcn-style controls, a footer at the bottom of the window, and the
+  build in it: `v2026.11.4 · 1trdzhm`.
 - **Library rows**, now the default: one line per entry, its title and buttons. A *Rows / Cards* switch brings back the cards.
 - **Exports check themselves at the end**, on by default, for both methods: `verify` = `off`, `counts`, `sample` (default)
   or `full`. It walks the finished folder as a client would, reads every tile's header, and compares the points with the

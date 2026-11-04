@@ -17,7 +17,7 @@
 
 import fs   from 'fs/promises';
 import path from 'path';
-import { keyToCoords, coordsToKey, cubeToBox, octreeSubCube, buildExplicitTree, loadSubtree, subtreeBufferUri } from '3dtiles-convert-core';
+import { keyToCoords, coordsToKey, cubeToBox, octreeSubCube, buildExplicitTree, loadSubtree, subtreeBufferUri, fetchSource, fetchSourceJson } from '3dtiles-convert-core';
 
 // ── Morton decode (BigInt, safe for any level) ─────────────────────────────────
 
@@ -229,19 +229,16 @@ export async function transcodeToExplicit(tilesetDir, outFile) {
  * Build an explicit tileset JSON from a remote implicit tileset URL.
  * Returns { tileset (the explicit JSON object), baseUrl, contentUriTemplate }.
  */
-export async function buildExplicitFromUrl(tilesetUrl, { maxLevels = null } = {}) {
-  const r = await fetch(tilesetUrl);
-  if (!r.ok) throw new Error(`fetch ${tilesetUrl} → ${r.status}`);
-  const raw = await r.json();
+export async function buildExplicitFromUrl(tilesetUrl, { maxLevels = null, onSubtreeFailure = null } = {}) {
+  const raw = await fetchSourceJson(tilesetUrl);
   const baseUrl = tilesetUrl.replace(/\/[^/]+$/, '/');
 
   const { tileset, avail, content, subtrees, buffers, availLevels } = await _buildExplicitTileset(raw, async (uri) => {
+    // A subtree still unread after retries prunes its whole branch, so the caller hears about it:
+    // `onSubtreeFailure({ uri, status, error })` may throw to stop.
     const u = new URL(uri, baseUrl).href;
-    try {
-      const resp = await fetch(u);
-      if (!resp.ok) return null;
-      return Buffer.from(await resp.arrayBuffer());
-    } catch { return null; }
+    try { return await fetchSource(u); }
+    catch (e) { onSubtreeFailure?.({ uri: u, status: e.status, error: String(e.message || e) }); return null; }
   }, maxLevels);
 
   // avail/content/subtrees: coordinate keys ("level-x-y-z") — what a copy that STAYS implicit needs

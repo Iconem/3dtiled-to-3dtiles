@@ -54,7 +54,7 @@ import { handleExport } from './export-live.js';
 import { handleAggregate } from './aggregate-live.js';
 import { handleStats } from './stats-live.js';
 import { handleHomepage } from './homepage-live.js';
-import { progressGet } from '../core/index.js';
+import { progressGet, httpStatusOf } from '../core/index.js';
 
 // Port resolution order: --port <n> (CLI, wins) → TILE_PORT → PORT → 3001. The CLI/TILE_PORT escape
 // hatches matter under dev harnesses that inject PORT=<vite port> into the whole `pnpm run dev` process
@@ -120,7 +120,9 @@ http.createServer(async (req, res) => {
     console.error('[tile-server]', e.stack || e.message);
     // A handler may have already started streaming a response — don't double-send headers (that throw
     // was itself crashing the server with ERR_HTTP_HEADERS_SENT).
-    if (!res.headersSent) res.writeHead(500, CORS);
+    // A source read that failed says so to the client (core/source-fetch.js): the file is not there, or the host did not
+    // answer. An export takes the first for a gap in the source and retries the second; anything else is our own error.
+    if (!res.headersSent) res.writeHead(httpStatusOf(e), CORS);
     res.end(res.headersSent ? '' : String(e.message || e));
   }
 // HOST=127.0.0.1 (the desktop app) stays off the network, so Windows asks no firewall question.

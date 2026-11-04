@@ -25,8 +25,8 @@
  * files in one directory. File names keep the source basename, prefixed by a short hash when two
  * different URLs share a basename (every /stream dataset has a "tile/0-0-0-0.glb").
  *
- *   POST   /export            {url, outDir, maxDepth?, keepImplicit?, pack?: ['3tz','3dtiles'], verify?: 'off'|'counts'|'sample'|'full'}   → 202 {id}
- *          /export            {method: 'convert', src, format?, outDir, options?: {tiling, scale, geScale, geLayer, centroidsOnly}, pack?, verify?}
+ *   POST   /export            {url, outDir, maxDepth?, keepImplicit?, pack?: ['3tz','3dtiles'], verify?: 'off'|'counts'|'sample'|'full', hierarchyErrors?: 'error'|'warn'}   → 202 {id}
+ *          /export            {method: 'convert', src, format?, outDir, options?: {tiling, scale, geScale, geLayer, centroidsOnly}, pack?, verify?, hierarchyErrors?}
  *   GET    /export/<id>       → progress / result
  *   DELETE /export/<id>       → cancel
  *   GET    /export/<id>/files/<path>  → a file of that export's folder (to preview the result as it
@@ -39,7 +39,7 @@
 import { createHash, randomUUID } from 'node:crypto';
 import { mkdir, readdir, readFile, writeFile, stat } from 'node:fs/promises';
 import path from 'node:path';
-import { CORS, keyToCoords } from '../core/index.js';
+import { CORS, keyToCoords, requestSource, fetchSource, fetchSourceJson, isAbsent } from '../core/index.js';
 import { buildExplicitFromUrl } from '../implicit-to-explicit/index.js';
 import { VERIFY_MODES, sourceOfUrl, verifyExport } from './export-verify.js';
 
@@ -63,9 +63,7 @@ function effectiveName(abs) {
 async function isTilesetJson(abs, signal) {
   const name = effectiveName(abs);
   if (KNOWN_EXT.test(name)) return /\.json$/i.test(name);
-  const r = await fetch(abs, { signal, headers: { Range: 'bytes=0-0' } });
-  const first = r.ok ? Buffer.from(await r.arrayBuffer())[0] : 0;
-  return first === 0x7b;                                       // '{'
+  return (await requestSource(abs, { signal, headers: { Range: 'bytes=0-0' } })).body[0] === 0x7b;      // '{'
 }
 const safeName = (s) => s.replace(/[^\w.\-]+/g, '_').slice(-80) || 'file';
 
@@ -79,25 +77,11 @@ function contentsOf(tile) {
 const uriOf = (c) => c.uri ?? c.url;
 const setUri = (c, v) => { if ('uri' in c) c.uri = v; else if ('url' in c) c.url = v; else c.uri = v; };
 
-/** GET with retries: a long export meets transient 5xx / resets (Aerometrex's S3 answers the odd 503). */
-async function fetchOk(url, signal, attempts = 3) {
-  for (let i = 1; ; i++) {
-    try {
-      const r = await fetch(url, { signal });
-      if (r.ok) return r;
-      if (r.status < 500 || i >= attempts) throw Object.assign(new Error(`${r.status} ${r.statusText} — ${url.slice(0, 160)}`), { final: true });
-    } catch (e) {
-      if (e.final || signal?.aborted || i >= attempts) throw e;
-    }
-    await new Promise((r) => setTimeout(r, 500 * 2 ** i));
-  }
-}
-
 /**
  * Export `rootUrl` into `outDir`. Resolves to the report written to export-report.json.
  * `onProgress(p)` is called as work completes; `signal` cancels.
  */
-export async function exportTileset(rootUrl, outDir, { maxDepth = Infinity, concurrency = 8, signal, onProgress, overwrite = false, keepImplicit = false, pack = [], verify: verifyMode = 'sample' } = {}) {
+export async function exportTileset(rootUrl, outDir, { maxDepth = Infinity, concurrency = 8, signal, onProgress, overwrite = false, keepImplicit = false, pack = [], verify: verifyMode = 'sample', hierarchyErrors = 'error' } = {}) {
   outDir = path.resolve(outDir);
   await mkdir(outDir, { recursive: true });
   if (!overwrite) {
@@ -107,8 +91,10 @@ export async function exportTileset(rootUrl, outDir, { maxDepth = Infinity, conc
 
   const t0 = Date.now();
   const p = { tilesets: 0, tilesDiscovered: 0, tilesWritten: 0, bytes: 0, failed: 0, implicitExpanded: 0, implicitKept: 0, phase: 'crawling' };
-  const failures = [];
-  const report = () => onProgress?.({ ...p, elapsedMs: Date.now() - t0 });
+  const failures = [], hierarchyFailures = [];
+  const report = () => onProgress?.({ ...p, ...steps.state(), elapsedMs: Date.now() - t0 });
+  const steps = stepper(['Reading the tree', 'Downloading tiles', verifyMode !== 'off' && 'Checking the copy', pack?.length && 'Packing'], report);
+  const noteHierarchyFailure = hierarchyPolicy(hierarchyErrors, hierarchyFailures);
 
   const names = new Map();                     // absolute url → local relative path (posix)
   const taken = new Set();
@@ -142,12 +128,13 @@ export async function exportTileset(rootUrl, outDir, { maxDepth = Infinity, conc
     while (active >= concurrency) await new Promise((r) => waiters.push(r));
     active++;
     try {
-      const buf = Buffer.from(await (await fetchOk(absUrl, signal)).arrayBuffer());
+      const buf = await fetchSource(absUrl, { signal });
       const dest = path.join(outDir, ...rel.split('/'));
       await mkdir(path.dirname(dest), { recursive: true });
       await writeFile(dest, buf);
       p.tilesWritten++;
       p.bytes += buf.length;
+      steps.count('Downloading tiles', p.tilesWritten, p.tilesDiscovered);
     } catch (e) {
       if (signal?.aborted) throw e;
       p.failed++;
@@ -163,7 +150,15 @@ export async function exportTileset(rootUrl, outDir, { maxDepth = Infinity, conc
   async function crawlTileset(url, rel, depth0) {
     signal?.throwIfAborted();
     crawled.add(url);
-    let json = await (await fetchOk(url, signal)).json();
+    let json = await fetchSourceJson(url, { signal });
+    // A tree its server knows is still partial (I3S node pages take a while on a huge layer): ask for the whole one.
+    if (json.asset?.extras?.hierarchyIncomplete) {
+      const whole = new URL(url);
+      whole.searchParams.set('cache', 'hierarchy');
+      json = await fetchSourceJson(whole.href, { signal });
+    }
+    // A mosaic carries on without a child it could not read, and says so in the tileset.
+    for (const f of json.asset?.extras?.failed ?? []) noteHierarchyFailure({ file: String(f.url), error: String(f.error) });
     const fromDir = path.posix.dirname(rel);
     const relTo = (target) => path.posix.relative(fromDir, target) || path.posix.basename(target);
     if (json.root?.implicitTiling) {
@@ -171,7 +166,7 @@ export async function exportTileset(rootUrl, outDir, { maxDepth = Infinity, conc
       report();
       // Only the levels the depth cap keeps: `depth0` is where this tileset's root sits.
       const maxLevels = Number.isFinite(maxDepth) ? Math.max(1, maxDepth - depth0 + 1) : null;
-      const ex = await buildExplicitFromUrl(url, { maxLevels });
+      const ex = await buildExplicitFromUrl(url, { maxLevels, onSubtreeFailure: (f) => noteHierarchyFailure({ file: f.uri, status: f.status, error: f.error ?? `HTTP ${f.status}` }) });
       if (keepImplicit) {
         json = ex.raw;
         const imp = json.root.implicitTiling;
@@ -227,7 +222,13 @@ export async function exportTileset(rootUrl, outDir, { maxDepth = Infinity, conc
         const uri = uriOf(c);
         if (!uri || /\{level\}|\{x\}|\{y\}|\{z\}/.test(uri)) continue;
         const abs = new URL(uri, url).href;
-        if (await isTilesetJson(abs, signal)) {
+        // Not known to be a tileset: downloaded as a tile, which then fails or is listed like any other.
+        const isExternal = await isTilesetJson(abs, signal).catch((e) => {
+          if (signal?.aborted) throw e;
+          if (!isAbsent(e.status)) noteHierarchyFailure({ file: abs, status: e.status, error: String(e.message || e) });
+          return false;
+        });
+        if (isExternal) {
           const childRel = localPathFor(abs, 'tilesets');
           external.push({ abs, rel: childRel, depth: depth + 1 });
           setUri(c, relTo(childRel));
@@ -258,8 +259,10 @@ export async function exportTileset(rootUrl, outDir, { maxDepth = Infinity, conc
       try { await crawlTileset(e.abs, e.rel, e.depth); }
       catch (err) {
         if (signal?.aborted) throw err;
+        if (err.hierarchyStop) throw err;
         p.failed++;
         failures.push({ url: e.abs, file: e.rel, error: String(err.message || err) });
+        noteHierarchyFailure({ file: e.abs, status: err.status, error: String(err.message || err) });
       }
     }
   }
@@ -269,23 +272,54 @@ export async function exportTileset(rootUrl, outDir, { maxDepth = Infinity, conc
   taken.add('tileset.json');
   await crawlTileset(rootUrlAbs, 'tileset.json', 0);
   p.phase = 'downloading';
-  report();
+  steps.begin('Downloading tiles', p.tilesWritten, p.tilesDiscovered);
   await Promise.all(downloads);
   signal?.throwIfAborted();
 
   // A depth-capped copy cannot hold the source's whole count; the check says so rather than call it a loss.
+  p.phase = 'checking the copy';
+  steps.begin('Checking the copy');
   const verify = await verifyExport(outDir, { mode: verifyMode, source: sourceOfUrl(rootUrlAbs), partial: Number.isFinite(maxDepth), signal,
-    onProgress: (done, total) => { p.phase = `checking the copy ${done}/${total}`; report(); } });
+    onProgress: (done, total) => steps.count('Checking the copy', done, total) });
+  if (hierarchyFailures.length && verify.summary) verify.summary += ` ${hierarchyFailures.length} part${hierarchyFailures.length > 1 ? 's' : ''} of the hierarchy could not be read.`;
+  steps.begin('Packing');
   const packages = pack?.length ? await packFolder(outDir, pack, (ph) => { p.phase = ph; report(); }) : [];
   const result = {
     method: 'crawl', source: rootUrl, outDir, ...p, phase: 'done', elapsedMs: Date.now() - t0,
-    maxDepth: Number.isFinite(maxDepth) ? maxDepth : null, keepImplicit, packages, verify,
+    maxDepth: Number.isFinite(maxDepth) ? maxDepth : null, keepImplicit, packages, verify, hierarchyErrors, hierarchyFailures: hierarchyFailures.slice(0, 200),
     // A failed tile keeps its uri: the tileset stays structurally valid and the gap is listed here,
     // so re-running the export (or fetching just these) can fill it.
     failures,
   };
   await writeFile(path.join(outDir, 'export-report.json'), JSON.stringify(result, null, 2));
   return result;
+}
+
+/**
+ * The steps of a run, for a bar in that many blocks. Names left false are steps this run does not have. `begin` moves to a
+ * step, `count` updates it, and a later step's count never moves the run back to an earlier one.
+ */
+function stepper(names, onChange) {
+  const list = names.filter(Boolean);
+  let step = 0, done = null, total = null;
+  return {
+    state: () => ({ step: step + 1, steps: list.length, stepLabel: list[step], stepDone: done, stepTotal: total }),
+    begin(name, d = null, t = null) { const i = list.indexOf(name); if (i < 0) return; step = i; done = d; total = t; onChange?.(); },
+    count(name, d, t) { if (list[step] === name) { done = d; total = t; } onChange?.(); },
+  };
+}
+
+/**
+ * What to do about a part of the hierarchy still unread after retries: a subtree, an external tileset, a .hrc. The tree
+ * below it goes missing, so by default the run stops ('error'); 'warn' lists it and carries on with the rest. A file the
+ * host says is not there is always only listed: the source itself lacks it, and a retry would not change that.
+ */
+function hierarchyPolicy(mode, failures) {
+  return (f) => {
+    failures.push(f);
+    if (mode === 'warn' || isAbsent(f.status)) return;
+    throw Object.assign(new Error(`Part of the hierarchy could not be read: ${f.file.slice(0, 160)} (${f.error}). Retry, or choose to warn and carry on, which exports the rest without that branch.`), { hierarchyStop: true });
+  };
 }
 
 /** Pack a finished folder into `<folder>/<folder name>.3tz|.3dtiles`. */
@@ -300,23 +334,35 @@ async function packFolder(outDir, formats, onPhase) {
  * Fill `outDir` with the per-format offline converter (packages/convert) — for raw sources. `options`
  * are the converter's: tiling ('implicit' | 'explicit'), scale, geScale, geLayer, centroidsOnly.
  */
-export async function convertToFolder(src, outDir, { format, options = {}, pack = [], onProgress, verify: verifyMode = 'sample' } = {}) {
+export async function convertToFolder(src, outDir, { format, options = {}, pack = [], onProgress, verify: verifyMode = 'sample', hierarchyErrors = 'error' } = {}) {
   outDir = path.resolve(outDir);
   const t0 = Date.now();
-  const tick = (phase) => onProgress?.({ phase, elapsedMs: Date.now() - t0 });
-  tick('converting');
-  const timer = setInterval(() => tick('converting'), 1000);
+  const hierarchyFailures = [];
+  const noteHierarchyFailure = hierarchyPolicy(hierarchyErrors, hierarchyFailures);
+  const remote = /^https?:\/\//i.test(src);
+  let phase = remote ? 'downloading the source' : 'converting';
+  const tick = (ph = phase) => { phase = ph; onProgress?.({ phase, ...steps.state(), elapsedMs: Date.now() - t0 }); };
+  const steps = stepper([remote && 'Downloading the source', 'Converting to 3D Tiles', verifyMode !== 'off' && 'Checking the output', pack?.length && 'Packing'], () => tick());
+  tick();
+  const timer = setInterval(() => tick(), 1000);
   let r;
   try {
     const { convert } = await import('../convert/index.js');
-    r = await convert(src, outDir, { format: format || undefined, ...options });
+    r = await convert(src, outDir, { format: format || undefined, ...options,
+      onSourceFailure: (f) => noteHierarchyFailure(f),
+      onSourceProgress: (d, t) => steps.count('Downloading the source', d, t),
+      onSourceDone: () => { phase = 'converting'; steps.begin('Converting to 3D Tiles'); } });
   } finally { clearInterval(timer); }
+  phase = 'checking the output';
+  steps.begin('Checking the output');
   const verify = await verifyExport(outDir, { mode: verifyMode, source: { src, format: r?.format ?? format },
-    onProgress: (done, total) => tick(`checking the output ${done}/${total}`) });
+    onProgress: (done, total) => steps.count('Checking the output', done, total) });
+  if (hierarchyFailures.length && verify.summary) verify.summary += ` ${hierarchyFailures.length} file${hierarchyFailures.length > 1 ? 's' : ''} of the source could not be read.`;
+  steps.begin('Packing');
   const packages = pack?.length ? await packFolder(outDir, pack, tick) : [];
   const { files, bytes } = await folderStats(outDir);
   const result = { method: 'convert', source: src, format: r?.format ?? format, options, outDir, tilesWritten: files, bytes,
-    tilesets: 1, failed: 0, phase: 'done', elapsedMs: Date.now() - t0, packages, verify };
+    tilesets: 1, failed: 0, phase: 'done', elapsedMs: Date.now() - t0, packages, verify, hierarchyErrors, hierarchyFailures: hierarchyFailures.slice(0, 200) };
   await writeFile(path.join(outDir, 'export-report.json'), JSON.stringify(result, null, 2));
   return result;
 }
@@ -362,6 +408,7 @@ export async function handleExport(req, res, u) {
     const maxDepth = body.maxDepth == null || body.maxDepth === '' ? Infinity : Number(body.maxDepth);
     const pack = (Array.isArray(body.pack) ? body.pack : []).filter((f) => f === '3tz' || f === '3dtiles');
     const verify = VERIFY_MODES.includes(body.verify) ? body.verify : 'sample';
+    const hierarchyErrors = body.hierarchyErrors === 'warn' ? 'warn' : 'error';
     if (method === 'crawl' && (!body.url || !outDir)) { json(res, 400, { error: 'body must be {"url": <tileset url>, "outDir": <absolute folder>}' }); return true; }
     if (method === 'convert' && (!body.src || !outDir)) { json(res, 400, { error: 'body must be {"method": "convert", "src": <path or url>, "outDir": <absolute folder>}' }); return true; }
     if (!path.isAbsolute(outDir)) { json(res, 400, { error: 'outDir must be an absolute path' }); return true; }
@@ -384,8 +431,8 @@ export async function handleExport(req, res, u) {
     jobs.set(job.id, job);
     const onProgress = (pr) => { job.progress = { ...job.progress, ...pr }; };
     const run = method === 'convert'
-      ? convertToFolder(body.src, outDir, { format: body.format, options: body.options ?? {}, pack, onProgress, verify })
-      : exportTileset(url, outDir, { maxDepth, overwrite: true, keepImplicit: !!body.keepImplicit, pack, verify, signal: job.ctrl.signal, onProgress });
+      ? convertToFolder(body.src, outDir, { format: body.format, options: body.options ?? {}, pack, onProgress, verify, hierarchyErrors })
+      : exportTileset(url, outDir, { maxDepth, overwrite: true, keepImplicit: !!body.keepImplicit, pack, verify, hierarchyErrors, signal: job.ctrl.signal, onProgress });
     run.then((r) => { job.state = 'done'; job.result = r; job.progress = { ...job.progress, ...r, failures: undefined }; })
       .catch((e) => { job.state = job.ctrl.signal.aborted ? 'cancelled' : 'failed'; job.error = String(e.message || e); });
     json(res, 202, { id: job.id, status: `/export/${job.id}` });

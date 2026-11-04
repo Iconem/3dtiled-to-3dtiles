@@ -20,7 +20,7 @@
  *     and slice tiles out of the decompressed buffer in memory instead of re-reading over HTTP.
  */
 import { decodeSplats } from '../lcc-to-3dtiles/src/lccDecode.js';
-import { buildSplatTileGlb, computeBounds, lccGeoref, LCC_LOCAL_UPRIGHT, memoizeAsync } from '../core/index.js';
+import { buildSplatTileGlb, computeBounds, lccGeoref, LCC_LOCAL_UPRIGHT, memoizeAsync, fetchSource as fetchBuf, fetchSourceRange } from '../core/index.js';
 import { remoteZipFileSystem } from './remote-zip.js';
 
 const ROOT_GE_FACTOR = 0.05, DEPTH_RATIO = 0.5;
@@ -32,16 +32,12 @@ function boundToZUpBox(min, max) {
   return [cx, -cz, cy, hx,0,0, 0,hz,0, 0,0,hy];
 }
 
-async function fetchBuf(url) {
-  const r = await fetch(url);
-  if (!r.ok) throw new Error(`fetch ${url} → ${r.status}`);
-  return Buffer.from(await r.arrayBuffer());
-}
 async function rangeGet(url, begin, length) {
-  const r = await fetch(url, { headers: { Range: `bytes=${begin}-${begin + length - 1}` } });
-  if (r.status === 404) throw new Error(`range ${url} → 404 (this file doesn't exist — the LCC export at this URL is missing its required sibling data.bin, not a range-request issue)`);
-  if (r.status !== 206 && r.status !== 200) throw new Error(`range ${url} → ${r.status} (server must support HTTP 206)`);
-  return Buffer.from(await r.arrayBuffer());
+  try { return await fetchSourceRange(url, begin, length); }
+  catch (e) {
+    if (e.status === 404) e.message += " (this file doesn't exist — the LCC export at this URL is missing its required sibling data.bin, not a range-request issue)";
+    throw e;
+  }
 }
 
 // Build { metaBuf, indexBuf, readData } for either source layout. `readData` is an async

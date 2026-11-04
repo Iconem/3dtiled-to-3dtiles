@@ -1,5 +1,6 @@
-/* shadcn/ui "zinc dark" tokens — same HSL triples the shadcn theme ships, so this window reads as
-   the same design language as the viewer and docs rather than a bespoke palette. */
+/* shadcn/ui "zinc" tokens, dark then light — the same HSL triples the shadcn theme ships, so this window
+   reads as the same design language as the viewer and docs rather than a bespoke palette. An inline script
+   in index.html sets data-theme before the first paint. */
 :root {
   /* Tells the engine this document is dark, which is what makes NATIVE widgets follow suit. Without
      it Chromium/WebView2 renders `<select>` drop-down popups, scrollbars and form controls with the
@@ -23,6 +24,28 @@
   --destructive: 0 72% 51%;
   --warning: 38 92% 50%;
   --radius: 0.5rem;
+  --shadow: 0 1px 2px rgb(0 0 0 / .3);
+  --bar: 199 89% 60%;
+}
+:root[data-theme="light"] {
+  color-scheme: light;
+  --background: 0 0% 100%;
+  --foreground: 240 10% 3.9%;
+  --card: 0 0% 100%;
+  --card-foreground: 240 10% 3.9%;
+  --muted: 240 4.8% 95.9%;
+  --muted-foreground: 240 3.8% 46.1%;
+  --border: 240 5.9% 90%;
+  --input: 240 5.9% 90%;
+  --primary: 240 5.9% 10%;
+  --primary-foreground: 0 0% 98%;
+  --accent: 240 4.8% 95.9%;
+  --ring: 240 5.9% 10%;
+  --success: 142 72% 29%;
+  --destructive: 0 72% 42%;
+  --warning: 32 95% 34%;
+  --shadow: 0 1px 2px rgb(0 0 0 / .06);
+  --bar: 199 89% 42%;
 }
 
 * { box-sizing: border-box; }
@@ -39,7 +62,8 @@ body {
    a 1680 px window, a 1106 CSS px viewport at devicePixelRatio 1.5, so the page sees the real window. Older
    Electrobun builds reported a viewport wider than the frame, which clipped centred content: check any
    change here in the real app, as a plain browser cannot show that. */
-.container { max-width: 720px; margin: 0 auto; padding: 24px 26px 32px; }
+/* A column at least as tall as the window, so the footer sits at the bottom of a short tab. */
+.container { max-width: 720px; min-height: 100vh; margin: 0 auto; padding: 24px 26px 14px; display: flex; flex-direction: column; }
 
 header { display: flex; align-items: center; gap: 12px; margin-bottom: 8px; flex-wrap: wrap; }
 h1 { font-size: 18px; font-weight: 600; margin: 0; letter-spacing: -0.02em; }
@@ -64,6 +88,7 @@ h1 .sub { color: hsl(var(--muted-foreground)); font-weight: 400; font-size: 13px
   background: hsl(var(--card));
   border: 1px solid hsl(var(--border));
   border-radius: var(--radius);
+  box-shadow: var(--shadow);
   padding: 18px;
   margin-bottom: 14px;
 }
@@ -88,6 +113,7 @@ input[type=text], select {
   font-size: 13px;
   width: 100%;
   min-width: 0;
+  box-shadow: var(--shadow);
   transition: border-color .15s, box-shadow .15s;
 }
 input[type=text]:focus, select:focus {
@@ -96,7 +122,11 @@ input[type=text]:focus, select:focus {
   box-shadow: 0 0 0 2px hsl(var(--ring) / 0.25);
 }
 input::placeholder { color: hsl(var(--muted-foreground) / 0.7); }
-select { appearance: none; background-image: none; cursor: pointer; }
+select {
+  appearance: none; cursor: pointer; padding-right: 30px; text-overflow: ellipsis;
+  background: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='14' height='14' fill='none' stroke='%2371717a' stroke-width='2' stroke-linecap='round' stroke-linejoin='round' viewBox='0 0 24 24'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E") no-repeat right 9px center;
+}
+input[type=checkbox] { accent-color: hsl(var(--primary)); width: 14px; height: 14px; margin: 0; }
 /* Belt-and-braces alongside `color-scheme: dark` above: the closed control paints from the page's
    own tokens, and the popup rows get an explicit dark background on engines that honour it. */
 select option { background: hsl(var(--card)); color: hsl(var(--foreground)); }
@@ -107,8 +137,15 @@ select option { background: hsl(var(--card)); color: hsl(var(--foreground)); }
   list-style: none; user-select: none;
 }
 .placement summary::-webkit-details-marker { display: none; }
-.placement summary::before { content: "▸ "; color: hsl(var(--muted-foreground)); }
-.placement[open] summary::before { content: "▾ "; }
+.placement summary::before {
+  content: ""; display: inline-block; width: 6px; height: 6px; margin: 0 9px 2px 2px;
+  border: solid hsl(var(--muted-foreground)); border-width: 0 1.5px 1.5px 0;
+  transform: rotate(-45deg); transition: transform .15s;
+}
+.placement[open] summary::before { transform: rotate(45deg); }
+.placement summary:focus-visible, .tab:focus-visible, footer a:focus-visible, .links a:focus-visible {
+  outline: none; border-radius: 4px; box-shadow: 0 0 0 2px hsl(var(--ring) / 0.6);
+}
 .hint { color: hsl(var(--muted-foreground)); font-size: 12px; font-weight: 400; }
 .placement .hint { margin: 12px 0 0; }
 
@@ -141,13 +178,14 @@ select option { background: hsl(var(--card)); color: hsl(var(--foreground)); }
 
 .actions { display: flex; gap: 8px; margin-top: 12px; flex-wrap: wrap; }
 
-/* button — shadcn variants: default / secondary / ghost */
+/* button — shadcn variants: outline (the plain .btn) / default (.btn-primary) / ghost */
 .btn {
   display: inline-flex; align-items: center; justify-content: center;
   height: 36px; padding: 0 15px;
   border-radius: calc(var(--radius) - 2px);
-  border: 1px solid hsl(var(--border));
-  background: hsl(var(--muted) / 0.55);
+  border: 1px solid hsl(var(--input));
+  background: transparent;
+  box-shadow: var(--shadow);
   color: hsl(var(--foreground));
   font: inherit; font-size: 13px; font-weight: 500;
   cursor: pointer; white-space: nowrap;
@@ -161,7 +199,10 @@ select option { background: hsl(var(--card)); color: hsl(var(--foreground)); }
   color: hsl(var(--primary-foreground)); font-weight: 600;
 }
 .btn-primary:hover { background: hsl(var(--primary) / 0.9); }
-.btn-ghost { background: transparent; border-color: transparent; color: hsl(var(--muted-foreground)); }
+.btn-ghost { background: transparent; border-color: transparent; box-shadow: none; color: hsl(var(--muted-foreground)); }
+.btn-icon { width: 32px; height: 32px; padding: 0; color: hsl(var(--muted-foreground)); }
+.btn-icon:hover { color: hsl(var(--foreground)); }
+.btn-icon svg { width: 15px; height: 15px; }
 .btn-ghost:hover { background: hsl(var(--accent)); color: hsl(var(--foreground)); }
 
 /* `hidden` must win over the display rules below (.actions is flex) */
@@ -171,8 +212,10 @@ select option { background: hsl(var(--card)); color: hsl(var(--foreground)); }
 .field.compact { min-width: 90px; flex: 0 1 120px; }
 .urlbar code.cli { white-space: pre-wrap; word-break: break-all; overflow: visible; text-overflow: clip; height: auto; font-size: 11.5px; line-height: 1.5; }
 .links { display: flex; flex-wrap: wrap; gap: 4px 14px; margin-top: 10px; font-size: 12.5px; }
-.progress { height: 6px; border-radius: 3px; background: rgba(255,255,255,.08); overflow: hidden; margin: 10px 0 4px; }
-.progress-bar { height: 100%; width: 0; background: #38bdf8; transition: width .3s ease; }
+/* one block per step of the run, each with its own fill */
+.progress { display: flex; gap: 4px; margin: 12px 0 4px; }
+.progress-step { flex: 1; height: 6px; border-radius: 3px; background: hsl(var(--muted)); overflow: hidden; }
+.progress-bar { height: 100%; width: 0; background: hsl(var(--bar)); transition: width .3s ease; }
 .progress-bar.indeterminate { width: 30% !important; animation: slide 1.2s ease-in-out infinite; }
 @keyframes slide { from { margin-left: -30%; } to { margin-left: 100%; } }
 .result { margin-top: 12px; font-size: 12.5px; min-height: 18px; word-break: break-word; color: hsl(var(--muted-foreground)); }
@@ -181,8 +224,9 @@ select option { background: hsl(var(--card)); color: hsl(var(--foreground)); }
 .result-info { color: hsl(var(--muted-foreground)); }
 
 footer {
-  display: flex; align-items: center; gap: 10px;
-  color: hsl(var(--muted-foreground)); font-size: 12px; padding-top: 2px;
+  display: flex; align-items: center; gap: 4px 12px;
+  color: hsl(var(--muted-foreground)); font-size: 12px;
+  margin-top: auto; padding-top: 12px; border-top: 1px solid hsl(var(--border));
   flex-wrap: wrap;
 }
 footer .spacer { flex: 1; }
@@ -191,9 +235,8 @@ footer a:hover { color: hsl(var(--foreground)); text-decoration: underline; }
 
 /* ── tabs — shadcn TabsList/TabsTrigger proportions ──────────────────────────────────────────── */
 .tabs {
-  display: inline-flex; gap: 2px; padding: 3px; margin-bottom: 14px;
-  background: hsl(var(--muted) / 0.5);
-  border: 1px solid hsl(var(--border));
+  display: inline-flex; align-self: flex-start; gap: 2px; padding: 3px; margin-bottom: 14px;
+  background: hsl(var(--muted));
   border-radius: calc(var(--radius) - 2px);
 }
 .tab {
@@ -205,15 +248,15 @@ footer a:hover { color: hsl(var(--foreground)); text-decoration: underline; }
   transition: background-color .15s, color .15s;
 }
 .tab:hover { color: hsl(var(--foreground)); }
-.tab-active { background: hsl(var(--card)); color: hsl(var(--foreground)); box-shadow: 0 1px 2px rgb(0 0 0 / .3); }
+.tab-active { background: hsl(var(--background)); color: hsl(var(--foreground)); box-shadow: var(--shadow); }
 .tab .count {
   font-size: 11px; line-height: 1; padding: 3px 6px; border-radius: 999px;
-  background: hsl(var(--muted)); color: hsl(var(--muted-foreground));
+  background: hsl(var(--background)); color: hsl(var(--muted-foreground));
 }
 .panel-hidden { display: none; }
 
 .card-head { display: flex; align-items: center; gap: 10px; margin-bottom: 8px; }
-.card-head-actions { margin-left: auto; display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 6px; }
+.card-head-actions { margin-left: auto; display: flex; flex-wrap: wrap; align-items: center; justify-content: flex-end; gap: 4px; }
 
 /* ── list rows (library + samples) ───────────────────────────────────────────────────────────── */
 .list, .groups { display: flex; flex-direction: column; gap: 8px; margin-top: 12px; }
@@ -233,11 +276,11 @@ footer a:hover { color: hsl(var(--foreground)); text-decoration: underline; }
   min-width: 0;
 }
 .item-compact { padding: 8px 12px; background: transparent; }
-.seg { display: inline-flex; }
-.seg .btn { border-radius: 0; }
-.seg .btn:first-child { border-radius: 6px 0 0 6px; }
-.seg .btn:last-child { border-radius: 0 6px 6px 0; margin-left: -1px; }
-.seg .btn[aria-pressed="true"] { background: hsl(var(--muted)); font-weight: 600; }
+/* a small TabsList */
+.seg { display: inline-flex; gap: 2px; padding: 2px; margin-right: 4px; background: hsl(var(--muted)); border-radius: calc(var(--radius) - 2px); }
+.seg .btn { height: 24px; padding: 0 9px; font-size: 12px; border-radius: calc(var(--radius) - 4px); }
+.seg .btn:hover { background: transparent; color: hsl(var(--foreground)); }
+.seg .btn[aria-pressed="true"] { background: hsl(var(--background)); color: hsl(var(--foreground)); box-shadow: var(--shadow); }
 .list-compact { gap: 0; }
 .list-compact .item { padding: 2px 4px 2px 8px; border-width: 0 0 1px; border-radius: 0; background: transparent; gap: 8px; align-items: center; }
 .list-compact .item:hover { background: hsl(var(--muted) / 0.5); }

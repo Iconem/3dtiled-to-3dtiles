@@ -86,7 +86,10 @@ const getCtx = memoizeAsync(async (url) => {
     const wkt = await readWkt(getter, copc);
     if (wkt) { transform = georefFromCrs(origin, wkt, 'copc-live'); crs = wkt; }
     else console.warn(`[copc-live] no WKT CRS in ${url} — local-origin (not geo-referenced)`);
-  } catch (e) { console.warn('[copc-live] georef failed:', e.message); }
+  } catch (e) {
+    if (e.transient) throw e;                              // an unread CRS is not a missing one: the context is kept for good
+    console.warn('[copc-live] georef failed:', e.message);
+  }
   const rootDiag = Math.hypot(cube[3]-cube[0], cube[4]-cube[1], cube[5]-cube[2]);
   // Point spacing of the root node (COPC info VLR), halving per level: the geometric error of a tile,
   // as for Potree streams. It used to be the node's cube DIAGONAL / 2^level — 100–200× the spacing —
@@ -229,9 +232,9 @@ function buildTilesetExplicit(ctx, urlParam, curved = null, maxDepth = Infinity)
 // Implicit octree: one root with implicitTiling + content/subtree templates (subtrees built on the fly).
 function buildTilesetImplicit(ctx, urlParam) {
   const { transform, rootDiag, spacing, cube } = ctx;
-  let maxLevel = 0;
-  for (const key of ctx.nodeMap.keys()) { const l = keyToCoords(key).level; if (l > maxLevel) maxLevel = l; }
-  if (maxLevel < 8) maxLevel = 8;   // generous floor: lazy root page may cover only a few levels
+  // A cap, not the depth: the root page may list only the top levels, and the subtrees report 0 children at the real leaves.
+  // A floor of 8 here would have cut a deeper file off at level 8.
+  const maxLevel = 24;
   const box = [0,0,0, (cube[3]-cube[0])/2,0,0, 0,(cube[4]-cube[1])/2,0, 0,0,(cube[5]-cube[2])/2];
   return buildImplicitTileset({ box, rootGeometricError: rootDiag, contentGeometricError: spacing,
     maxLevel, subtreeLevels: SUBTREE_LEVELS, transform, urlParam });

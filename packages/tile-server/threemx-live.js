@@ -18,11 +18,10 @@
  */
 import path from 'node:path';
 import { Document, NodeIO } from '@gltf-transform/core';
-import { georefFromCrs, memoizeAsync } from '../core/index.js';
+import { georefFromCrs, memoizeAsync, fetchSource as fetchBuf } from '../core/index.js';
 import { decodeCTM } from '../threemx-to-3dtiles/src/ctm-decode.js';
 
 const CTM_RE = /__\d+$/;
-const fetchBuf = async (u) => { const r = await fetch(u); if (!r.ok) throw new Error(`fetch ${u} → ${r.status}`); return Buffer.from(await r.arrayBuffer()); };
 const baseOf = (u) => u.slice(0, u.lastIndexOf('/') + 1);
 const joinRel = (relDir, child) => path.posix.normalize(path.posix.join(relDir, child));
 

@@ -183,9 +183,9 @@ camera 300 m away, 1920 × 1080:
 | 2 | 37 | 512 k | 3 |
 | 1 | 156 | 1.84 M | 4 |
 
-**Point size in Cesium for Unreal** is separate from how many points load. It lives under **Point Cloud Shading** on the
-tileset. With **Attenuation** off, the default, every point is one pixel. With it on, a point's size follows its tile's
-geometric error and its distance from the camera, up to a maximum:
+**Point size in Cesium for Unreal** is a second setting, separate from how many points load: first the target above, then
+this. It lives under **Point Cloud Shading** on the tileset. With **Attenuation** off, the default, every point is one
+pixel. With it on, a point's size follows its tile's geometric error and its distance from the camera, up to a maximum:
 
 | Setting | What it does |
 |---|---|
@@ -195,6 +195,12 @@ geometric error and its distance from the camera, up to a maximum:
 | Base Resolution | Only used for tiles whose geometric error is 0, which does not happen here. |
 
 The size depends on the tile's level, not on how dense the points around it are, so it is not Potree's adaptive size.
+
+Raise the maximum with care. Point tiles add to their parents, so the coarse tiles stay on screen under the fine ones,
+and they are the ones that reach the cap: at 10 px, close up, big coarse points sit over the detail. At a target of 1 or
+2, the finest tiles in view are that many pixels apart anyway, so 5 fills them. A higher cap helps when the camera is
+closer than the finest level can cover, as the gaps there are larger than 5 px. These follow from the code; they
+have not been compared in Unreal.
 
 So a cloud that looks sparse in Cesium for Unreal, next to the Potree lab, is usually this setting and not missing
 data: set *Maximum Screen Space Error* on the tileset to 1 or 2.
