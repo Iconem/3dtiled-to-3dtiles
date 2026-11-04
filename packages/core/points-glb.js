@@ -79,6 +79,13 @@ export async function buildPointsGlb(posLocal, colors, count, opts = {}) {
     acc.setArray(out).setNormalized(true);
   }
   p.setAttribute('COLOR_0', acc);
+  // Scalar point attributes the source carries, as glTF custom attributes (`_INTENSITY` as the LAS uint16, `_CLASSIFICATION`
+  // as the LAS uint8, raw and not normalized): a client that reads them (Blender, QGIS, a style) ramps them itself, and one
+  // that does not ignores them. Intensity is not turned into COLOR_0: its range is scanner-specific, so a fixed mapping is wrong.
+  for (const [name, arr] of Object.entries(opts.attributes ?? {})) {
+    if (!arr || arr.length < count) continue;
+    p.setAttribute(name, doc.createAccessor().setType('SCALAR').setArray(arr.length === count ? arr : arr.subarray(0, count)));
+  }
   mesh.addPrimitive(p);
   doc.createScene().addChild(doc.createNode('tile').setMesh(mesh));
   return new NodeIO().writeBinary(doc);

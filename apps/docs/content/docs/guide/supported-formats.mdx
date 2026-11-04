@@ -70,6 +70,12 @@ its bytes and the counts add up to `metadata.json`, and COPC's hierarchy adds up
 **A hierarchy read that fails is an error, not an empty branch**, for every format: see [When a read fails](#when-a-read-fails).
 On export, [`hierarchyErrors`](/docs/guide/desktop-app#export-to-a-folder) chooses between stopping and carrying on without it.
 
+**Intensity and classification travel with the points.** A COPC or Potree tile's GLB carries, next to `POSITION` and
+`COLOR_0`, the glTF custom attributes `_INTENSITY` (the LAS uint16, raw) and `_CLASSIFICATION` (the LAS uint8) when the
+source has them, from `/stream` and from the offline converters alike. A client that reads custom attributes (Blender's
+3D Tiles add-on, QGIS, a Cesium style) ramps them itself; the viewers here ignore them. Intensity is not mapped into
+`COLOR_0`: its range depends on the scanner, so a cloud without RGB stays white.
+
 For both, a tile's `geometricError` is the **point spacing at its depth**: Potree's declared spacing
 and COPC's info-VLR `spacing`, halved per level (fallback: the root cube / 128). A 2 px error target
 then stops refining where points are two pixels apart, and the viewers' adaptive point size reads the

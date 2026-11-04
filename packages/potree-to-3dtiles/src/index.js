@@ -118,7 +118,7 @@ export async function convert(inDir, outDir, opts = {}) {
       local[i*3+2] = data.positions[i*3+2] - gc[2];
     }
     // buildPointsGlb applies the Y-up swizzle (E,U,−N) internally — pass (E,N,U).
-    const glb = await buildPointsGlb(local, data.colors, data.count);
+    const glb = await buildPointsGlb(local, data.colors, data.count, { attributes: data.attributes });
     if (tiling === 'implicit') {
       const { level, x, y, z } = coordsOfBox(node.box, src.rootBox, node.depth);
       node._coord = { level, x, y, z };

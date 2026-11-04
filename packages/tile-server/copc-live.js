@@ -261,8 +261,16 @@ async function serveTileGlb(ctx, key, curved = null, colorsEnc) {
   }
   // No RGB: white (colors = null), which reads well under eye-dome lighting. Intensity as grey used to
   // stand in, but intensity is stored in 16 bits with small values (0–255 or 0–4095 for most
-  // scanners), so divided by 65535 it rendered near-black.
-  return Buffer.from(await buildPointsGlb(pos, colors, n, { colors: colorsEnc }));   // core applies the (E,U,−N) Y-up swizzle
+  // scanners), so divided by 65535 it rendered near-black. It travels as `_INTENSITY` instead, with `_CLASSIFICATION`.
+  return Buffer.from(await buildPointsGlb(pos, colors, n, { colors: colorsEnc, attributes: lasScalarAttributes(view) }));   // core applies the (E,U,−N) Y-up swizzle
+}
+
+/** `_INTENSITY` (uint16) and `_CLASSIFICATION` (uint8) of a LAS point view, for buildPointsGlb. */
+export function lasScalarAttributes(view) {
+  const n = view.pointCount, d = view.dimensions, out = {};
+  if (d.Intensity) { const g = view.getter('Intensity'), a = new Uint16Array(n); for (let i = 0; i < n; i++) a[i] = g(i); out._INTENSITY = a; }
+  if (d.Classification) { const g = view.getter('Classification'), a = new Uint8Array(n); for (let i = 0; i < n; i++) a[i] = g(i); out._CLASSIFICATION = a; }
+  return out;
 }
 
 // Pure builders the /stream dispatcher reuses. Tiles/subtrees are keyed "level-x-y-z" (explicit and

@@ -11,9 +11,8 @@
  * Attributes emitted:
  *   POSITION   Float32Array  VEC3   required
  *   COLOR_0    Float32Array  VEC4   if Red/Green/Blue present (normalised [0,1])
- *   _INTENSITY Uint16Array   SCALAR if Intensity present and no color
+ *   _INTENSITY Uint16Array   SCALAR if Intensity present (raw LAS value, not normalized)
  *   _CLASSIFICATION Uint8Array SCALAR if Classification present
- *   _RETURN_NUMBER  Uint8Array SCALAR if ReturnNumber present
  */
 
 import { Document, NodeIO } from '@gltf-transform/core';
@@ -85,6 +84,10 @@ export async function writeTileGlb(view, tileCenter, outputPath) {
     prim.setAttribute('COLOR_0',
       doc.createAccessor().setType('VEC4').setArray(colors));
   }
+
+  // Scalar attributes as glTF custom attributes, the same as the live tiles (core/points-glb.js says why not as colour).
+  if (dims.Intensity) { const g = view.getter('Intensity'), a = new Uint16Array(count); for (let i = 0; i < count; i++) a[i] = g(i); prim.setAttribute('_INTENSITY', doc.createAccessor().setType('SCALAR').setArray(a)); }
+  if (dims.Classification) { const g = view.getter('Classification'), a = new Uint8Array(count); for (let i = 0; i < count; i++) a[i] = g(i); prim.setAttribute('_CLASSIFICATION', doc.createAccessor().setType('SCALAR').setArray(a)); }
 
   mesh.addPrimitive(prim);
   doc.createScene().addChild(doc.createNode('tile').setMesh(mesh));

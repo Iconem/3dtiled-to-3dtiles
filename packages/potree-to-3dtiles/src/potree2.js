@@ -150,6 +150,10 @@ export function decodePotree2Node(meta, schema, node, raw) {
   const positions = new Float64Array(n * 3);
   const colors = colAttr ? new Float32Array(n * 4) : null;
   const sc = meta.scale, off = meta.offset;
+  // intensity (uint16) and classification (uint8) go out as glTF `_INTENSITY` / `_CLASSIFICATION`; other sizes are not read.
+  const scalars = attrs.filter(a => /^(intensity|classification)$/i.test(a.name) && (a.size === 1 || a.size === 2))
+    .map(a => ({ a, key: /^intensity$/i.test(a.name) ? '_INTENSITY' : '_CLASSIFICATION', out: a.size === 1 ? new Uint8Array(n) : new Uint16Array(n) }));
+  const attributes = scalars.length ? Object.fromEntries(scalars.map(s => [s.key, s.out])) : undefined;
 
   if (isBrotli) {
     // Attribute-planar: plane[a] starts at the cumulative size of all preceding planes (size×n).
@@ -187,7 +191,11 @@ export function decodePotree2Node(meta, schema, node, raw) {
         colors[i*4]=r/255; colors[i*4+1]=g/255; colors[i*4+2]=b/255; colors[i*4+3]=1;
       }
     }
-    return { positions, colors, count: n };
+    for (const s of scalars) {                       // raw planes: Potree's brotli encoder copies these attributes as they are
+      const b0 = planeStart[s.a.name];
+      for (let i = 0; i < n; i++) s.out[i] = s.a.size === 1 ? buf[b0 + i] : buf.readUInt16LE(b0 + i * 2);
+    }
+    return { positions, colors, count: n, attributes };
   }
 
   // DEFAULT: interleaved native records.
@@ -203,8 +211,9 @@ export function decodePotree2Node(meta, schema, node, raw) {
       const b = es >= 2 ? buf.readUInt16LE(co+2*es): buf.readUInt8(co+2);
       colors[i*4]=r/div; colors[i*4+1]=g/div; colors[i*4+2]=b/div; colors[i*4+3]=1;
     }
+    for (const s of scalars) s.out[i] = s.a.size === 1 ? buf[base + s.a._offset] : buf.readUInt16LE(base + s.a._offset);
   }
-  return { positions, colors, count: n };
+  return { positions, colors, count: n, attributes };
 }
 
 export async function loadPotree2(dir) {

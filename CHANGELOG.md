@@ -21,6 +21,8 @@ Format loosely follows [Keep a Changelog](https://keepachangelog.com/).
   every request once, COPC, Potree 1 and 2, SOG, LCC, RAD, I3S and plain 3D Tiles come out identical to a clean export.
 - **`/stream` says why a read failed:** 502 if the host did not answer, 404 if the file is not there. A test runs these rules
   against every format. GeoSplats, `.3dtiles` and `.3tz` packages pass the same export check as the others.
+- **Point tiles carry `_INTENSITY` and `_CLASSIFICATION`** as glTF custom attributes, from COPC and Potree 1.x/2.0, live
+  and offline. Nothing was sent before: a cloud without RGB had only white `COLOR_0`.
 - **The cap on requests to one host adapts:** it halves when the host fails under load (a 429, a 503, a reset) and climbs
   back as reads pass, between 4 and the configured 32.
 - **The tile-server listens in 0.5 s instead of 10–15 s:** the format adapters and the tools load after the port is bound.

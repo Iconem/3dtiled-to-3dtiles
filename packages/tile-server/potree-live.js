@@ -311,11 +311,11 @@ async function serveTileGlb(ctx, name, colorsEnc) {
   if (ctx.nodes) { const node = ctx.nodes.get(name); if (!node || !node.numPoints) return null; }
   const data = await ctx.readTile(name);                    // 2.0: range read+decode; 1.x: per-node fetch+decode
   if (!data || !data.count) return null;
-  const { positions, colors, count } = data;
+  const { positions, colors, count, attributes } = data;
   const [ox, oy, oz] = ctx.origin;                          // world → tile-local (float32-safe)
   const pos = new Float32Array(count * 3);
   for (let i = 0; i < count; i++) { pos[i*3]=positions[i*3]-ox; pos[i*3+1]=positions[i*3+1]-oy; pos[i*3+2]=positions[i*3+2]-oz; }
-  return Buffer.from(await buildPointsGlb(pos, colors, count, { colors: colorsEnc }));   // core applies the (E,U,−N) Y-up swizzle
+  return Buffer.from(await buildPointsGlb(pos, colors, count, { colors: colorsEnc, attributes }));   // core applies the (E,U,−N) Y-up swizzle
 }
 
 // ── 1.x explicit tree (&tiling=explicit): drains every .hrc chunk up front, then builds one complete

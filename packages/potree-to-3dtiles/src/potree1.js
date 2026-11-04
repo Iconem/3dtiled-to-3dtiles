@@ -96,6 +96,8 @@ export async function loadPotree1(dir, opts = {}) {
   }
   const posA = attrs.find(a => /POSITION/i.test(a.name));
   const colA = attrs.find(a => /RGBA|RGB|COLOR/i.test(a.name));
+  const intA = attrs.find(a => /^INTENSITY$/i.test(a.name) && a.size === 2);
+  const clsA = attrs.find(a => /^CLASSIFICATION$/i.test(a.name) && a.size === 1);
 
   // Node file path: flat for inline (1.4); chunked dirs for .hrc (1.7). Forward-slash relative.
   const chunkDirs = (name) => {                            // ["r","00000",…] up to the node's chunk depth
@@ -179,6 +181,9 @@ export async function loadPotree1(dir, opts = {}) {
     const gx = view.getter('X'), gy = view.getter('Y'), gz = view.getter('Z');
     let gr = null, gg = null, gb = null;   // no RGB: white (intensity as grey rendered near-black)
     try { gr = view.getter('Red'); gg = view.getter('Green'); gb = view.getter('Blue'); } catch { /* no colour */ }
+    const attributes = {};
+    try { const g = view.getter('Intensity'); const a = new Uint16Array(n); for (let i = 0; i < n; i++) a[i] = g(i); attributes._INTENSITY = a; } catch { /* none */ }
+    try { const g = view.getter('Classification'); const a = new Uint8Array(n); for (let i = 0; i < n; i++) a[i] = g(i); attributes._CLASSIFICATION = a; } catch { /* none */ }
     // LAS colour is nominally 16-bit; detect 8-bit-in-16 by sampling the max.
     let cmax = 0; if (gr) for (let i = 0; i < Math.min(n, 4096); i++) cmax = Math.max(cmax, gr(i), gg(i), gb(i));
     const cdiv = cmax > 255 ? 65535 : 255;
@@ -187,7 +192,7 @@ export async function loadPotree1(dir, opts = {}) {
       if (gr) { colors[i*4]=gr(i)/cdiv; colors[i*4+1]=gg(i)/cdiv; colors[i*4+2]=gb(i)/cdiv; colors[i*4+3]=1; }
       else    { colors[i*4]=colors[i*4+1]=colors[i*4+2]=colors[i*4+3]=1; }
     }
-    return { positions, colors, count: n };
+    return { positions, colors, count: n, attributes };
   }
 
   async function readBinNode(node) {
@@ -200,14 +205,19 @@ export async function loadPotree1(dir, opts = {}) {
     // the node's box.min — from the correct octant subdivision in childBox — places it right.
     // Verified child→root NN ≈ 0.03 m with the Potree octant convention. Root box.min == global min.)
     const nmin = node.box ? node.box.min : min;
+    const attributes = {};
+    if (intA) attributes._INTENSITY = new Uint16Array(n);
+    if (clsA) attributes._CLASSIFICATION = new Uint8Array(n);
     for (let i = 0; i < n; i++) {
       const b = i * pointSize;
       positions[i*3]   = buf.readUInt32LE(b + posA.offset)     * scale[0] + nmin[0];
       positions[i*3+1] = buf.readUInt32LE(b + posA.offset + 4) * scale[1] + nmin[1];
       positions[i*3+2] = buf.readUInt32LE(b + posA.offset + 8) * scale[2] + nmin[2];
       if (colA && colors) { const c=b+colA.offset; colors[i*4]=buf[c]/255; colors[i*4+1]=buf[c+1]/255; colors[i*4+2]=buf[c+2]/255; colors[i*4+3]=1; }
+      if (intA) attributes._INTENSITY[i] = buf.readUInt16LE(b + intA.offset);
+      if (clsA) attributes._CLASSIFICATION[i] = buf[b + clsA.offset];
     }
-    return { positions, colors, count: n };
+    return { positions, colors, count: n, attributes };
   }
 
   const readNode = isLaz ? readLazNode : readBinNode;
