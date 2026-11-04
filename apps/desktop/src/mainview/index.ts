@@ -358,6 +358,7 @@ function exportRequest() {
     method: methodEl.value as 'crawl' | 'convert',
     url: buildUrl(), src: f.src, format: f.format, outDir: exportDirEl.value.trim(),
     maxDepth: depth === '' ? null : Number(depth), keepImplicit: checked('export-keep-implicit'), pack, options,
+    verify: $<HTMLSelectElement>('export-verify').value,
   };
 }
 
@@ -375,6 +376,7 @@ function exportCliArgs(r: ExportRequest = exportRequest()): { args: string[]; th
     if (r.maxDepth != null) args.push('--max-depth', String(r.maxDepth));
     if (r.keepImplicit) args.push('--keep-implicit');
     if (r.pack.length) args.push('--pack', r.pack.join(','));
+    if (r.verify !== 'sample') args.push('--verify', r.verify);
     return { args };
   }
   const o = r.options as Record<string, unknown>;
@@ -385,6 +387,7 @@ function exportCliArgs(r: ExportRequest = exportRequest()): { args: string[]; th
     if (o[key] != null) args.push(fl, String(o[key]));
   }
   if (o['centroidsOnly']) args.push('--centroids-only');
+  if (r.verify !== 'sample') args.push('--verify', r.verify);
   if (!r.pack.length) return { args };
   const name = out.split(/[\\/]/).filter(Boolean).pop() || 'tileset';
   return { args, then: ['scripts/pack-3dtiles.mjs', out, `${out}/${name}`] };
@@ -583,8 +586,10 @@ async function pollExport() {
     exportPreview = j.preview ? `${base}${j.preview}` : '';
     $('export-done').hidden = false;
     const packs = j.result?.packages?.length ? ` Packed: ${j.result.packages.join(', ')}.` : '';
-    exportSay(`Done in ${((j.result?.elapsedMs ?? pr.elapsedMs ?? 0) / 1000).toFixed(1)} s — ${line}.${packs}`
-      + (pr.failed ? ' Failed files are listed in export-report.json; re-run into a new folder to retry.' : ''), pr.failed ? 'info' : 'ok');
+    const v = j.result?.verify;
+    const incomplete = !!pr.failed || (v && !v.ok);
+    exportSay(`Done in ${((j.result?.elapsedMs ?? pr.elapsedMs ?? 0) / 1000).toFixed(1)} s — ${line}.${packs}${v?.summary ? ` ${v.summary}` : ''}`
+      + (incomplete ? ' The details are in export-report.json; re-run into a new folder to retry.' : ''), incomplete ? 'err' : 'ok');
   } else {
     exportSay(j.state === 'cancelled' ? `Cancelled — ${line}. The folder holds a partial copy.` : `Export failed: ${j.error}`, 'err');
   }
@@ -658,6 +663,7 @@ function libraryRow(e: DatasetOptions & { name: string }, meta: HTMLElement, act
   const title = document.createElement('div');
   title.className = 'item-title';
   title.textContent = e.name;
+  title.title = `${e.name}\n${e.src}`;
   const tag = document.createElement('span');
   tag.className = 'chip';
   tag.textContent = e.format || 'auto';
@@ -688,8 +694,22 @@ const copyBtn = (e: DatasetOptions) => mkBtn('Copy', 'btn-ghost', async () => {
   try { await navigator.clipboard.writeText(buildUrlFrom(e)); say('Copied.', 'ok'); } catch { /* ignore */ }
 });
 
+// Compact rows by default: a title and its actions on one line. The choice is this machine's.
+const LIB_VIEW_KEY = '3dtiled-desktop-library-view';
+let libCompact = localStorage.getItem(LIB_VIEW_KEY) !== 'detailed';
+for (const [id, compact] of [['lib-view-rows', true], ['lib-view-cards', false]] as const) {
+  $(id).addEventListener('click', () => {
+    libCompact = compact;
+    localStorage.setItem(LIB_VIEW_KEY, compact ? 'compact' : 'detailed');
+    renderLibrary();
+  });
+}
+
 function renderLibrary() {
   $('lib-count').textContent = String(lib.bookmarks.length);
+  $('lib-view-rows').setAttribute('aria-pressed', String(libCompact));
+  $('lib-view-cards').setAttribute('aria-pressed', String(!libCompact));
+  for (const id of ['lib-list', 'hist-list']) $(id).classList.toggle('list-compact', libCompact);
   const host = hostOf('lib-list');
   if (!lib.bookmarks.length) emptyHint(host, 'Nothing bookmarked yet — enter a dataset and press Bookmark, or start from Samples.');
   for (const e of lib.bookmarks) {

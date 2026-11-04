@@ -165,3 +165,36 @@ Two refinement rules decide what is drawn along the way:
 
 Lowering *Max SSE* from 16 to 8 means opening each tile from twice as far, which on a dense tileset loads many
 more tiles.
+
+### Point clouds need a low target
+
+A point cloud's geometric error is its point spacing, so the target is roughly the gap between points you accept on
+screen. Clients default to values made for meshes: 16 in CesiumJS and Cesium for Unreal. The demo viewer uses 2 for
+points, and 3DTilesRendererJS's `PotreePlugin` uses 1.
+
+Measured in stock CesiumJS on one Iconem Potree cloud (1.3 billion points) streamed through `/stream`, the same
+camera 300 m away, 1920 × 1080:
+
+| Target | Tiles drawn | Points drawn | Deepest level |
+|---|---|---|---|
+| 16 | 3 | 29 k | 1 |
+| 8 | 5 | 46 k | 1 |
+| 4 | 14 | 164 k | 2 |
+| 2 | 37 | 512 k | 3 |
+| 1 | 156 | 1.84 M | 4 |
+
+**Point size in Cesium for Unreal** is separate from how many points load. It lives under **Point Cloud Shading** on the
+tileset. With **Attenuation** off, the default, every point is one pixel. With it on, a point's size follows its tile's
+geometric error and its distance from the camera, up to a maximum:
+
+| Setting | What it does |
+|---|---|
+| Attenuation | Sizes points from the tile's geometric error. Coarse tiles get bigger points. |
+| Geometric Error Scale | Multiplies that size. |
+| Maximum Attenuation | The largest size in pixels. At 0, a tileset refined by adding, as point clouds here are, stops at 5 px. |
+| Base Resolution | Only used for tiles whose geometric error is 0, which does not happen here. |
+
+The size depends on the tile's level, not on how dense the points around it are, so it is not Potree's adaptive size.
+
+So a cloud that looks sparse in Cesium for Unreal, next to the Potree lab, is usually this setting and not missing
+data: set *Maximum Screen Space Error* on the tileset to 1 or 2.

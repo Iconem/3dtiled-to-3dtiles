@@ -43,7 +43,7 @@ function childBox(box, oct) {
 // Parse cloud.js leniently: it's pure JSON on disk, but when served over HTTP by a dev server that
 // transforms .js (e.g. Vite appends an HMR/module footer), there's trailing non-JSON. Extract the
 // first balanced {…} object and parse that.
-function parseCloudJs(text) {
+export function parseCloudJs(text) {
   try { return JSON.parse(text); } catch { /* fall through to brace extraction */ }
   const s = text.indexOf('{');
   if (s < 0) throw new Error('cloud.js: no JSON object found');
@@ -128,14 +128,20 @@ export async function loadPotree1(dir, opts = {}) {
     // `name`; fills `nodes`; returns the boundary children [{name,box}] where the NEXT chunk begins.
     async function loadOneChunk(name, box) {
       let buf;
-      try { buf = await read(`${hrcRel(name)}/${name}.hrc`); } catch { return []; }
+      // Only a chunk that is not there is an empty branch. A read that failed must reach the caller: the live server
+      // remembers a loaded chunk, so swallowing the error dropped that whole branch until a restart.
+      try { buf = await read(`${hrcRel(name)}/${name}.hrc`); }
+      catch (e) { if (e.code === 'ENOENT' || [403, 404, 410].includes(e.status)) return []; throw e; }
       const queue = [{ name, box }]; let rec = 0; const boundary = [];
       while (queue.length && rec * 5 < buf.length) {
         const { name: nm, box: bx } = queue.shift();
         const mask = buf.readUInt8(rec * 5);
         const numPoints = buf.readUInt32LE(rec * 5 + 1);
         rec++;
-        nodes.set(nm, { name: nm, numPoints, depth: nm.length - 1, box: bx, mask });
+        // A count of 0 does not mean empty. PotreeConverter 1.x clouds can record 0 for a leaf whose .bin holds
+        // thousands of points (on one 1.3 billion point cloud, 169,134 of 209,474 nodes, about 3/4 of the points).
+        // Potree reads a node because it is listed and takes its size from the file; so do the readers here.
+        nodes.set(nm, { name: nm, numPoints: numPoints || 1, depth: nm.length - 1, box: bx, mask });
         const depthInChunk = nm.length - name.length;
         for (let c = 0; c < 8; c++) {
           if (!((mask >> c) & 1)) continue;

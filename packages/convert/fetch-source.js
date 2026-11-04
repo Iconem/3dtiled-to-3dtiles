@@ -88,9 +88,9 @@ async function mirrorPotree1(base, dir) {
       while (queue.length && rec * 5 < buf.length) {
         const nm = queue.shift();
         const mask = buf.readUInt8(rec * 5);
-        const pts  = buf.readUInt32LE(rec * 5 + 1);
         rec++;
-        if (pts > 0) await tryGet(nodeRel(nm));
+        // Every listed node, whatever count it records: PotreeConverter writes 0 for a leaf whose file holds its points.
+        await tryGet(nodeRel(nm));
         const depthInChunk = nm.length - depthBase;
         for (let c = 0; c < 8; c++) {
           if (!((mask >> c) & 1)) continue;

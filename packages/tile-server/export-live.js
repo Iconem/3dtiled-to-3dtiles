@@ -25,8 +25,8 @@
  * files in one directory. File names keep the source basename, prefixed by a short hash when two
  * different URLs share a basename (every /stream dataset has a "tile/0-0-0-0.glb").
  *
- *   POST   /export            {url, outDir, maxDepth?, keepImplicit?, pack?: ['3tz','3dtiles']}   → 202 {id}
- *          /export            {method: 'convert', src, format?, outDir, options?: {tiling, scale, geScale, geLayer, centroidsOnly}, pack?}
+ *   POST   /export            {url, outDir, maxDepth?, keepImplicit?, pack?: ['3tz','3dtiles'], verify?: 'off'|'counts'|'sample'|'full'}   → 202 {id}
+ *          /export            {method: 'convert', src, format?, outDir, options?: {tiling, scale, geScale, geLayer, centroidsOnly}, pack?, verify?}
  *   GET    /export/<id>       → progress / result
  *   DELETE /export/<id>       → cancel
  *   GET    /export/<id>/files/<path>  → a file of that export's folder (to preview the result as it
@@ -41,6 +41,7 @@ import { mkdir, readdir, readFile, writeFile, stat } from 'node:fs/promises';
 import path from 'node:path';
 import { CORS, keyToCoords } from '../core/index.js';
 import { buildExplicitFromUrl } from '../implicit-to-explicit/index.js';
+import { VERIFY_MODES, sourceOfUrl, verifyExport } from './export-verify.js';
 
 const hash = (s, n = 8) => createHash('sha1').update(s).digest('hex').slice(0, n);
 const KNOWN_EXT = /\.(json|glb|gltf|b3dm|i3dm|pnts|cmpt|subtree|bin|ktx2|png|jpe?g|webp|splat|spz)$/i;
@@ -96,7 +97,7 @@ async function fetchOk(url, signal, attempts = 3) {
  * Export `rootUrl` into `outDir`. Resolves to the report written to export-report.json.
  * `onProgress(p)` is called as work completes; `signal` cancels.
  */
-export async function exportTileset(rootUrl, outDir, { maxDepth = Infinity, concurrency = 8, signal, onProgress, overwrite = false, keepImplicit = false, pack = [] } = {}) {
+export async function exportTileset(rootUrl, outDir, { maxDepth = Infinity, concurrency = 8, signal, onProgress, overwrite = false, keepImplicit = false, pack = [], verify: verifyMode = 'sample' } = {}) {
   outDir = path.resolve(outDir);
   await mkdir(outDir, { recursive: true });
   if (!overwrite) {
@@ -272,10 +273,13 @@ export async function exportTileset(rootUrl, outDir, { maxDepth = Infinity, conc
   await Promise.all(downloads);
   signal?.throwIfAborted();
 
+  // A depth-capped copy cannot hold the source's whole count; the check says so rather than call it a loss.
+  const verify = await verifyExport(outDir, { mode: verifyMode, source: sourceOfUrl(rootUrlAbs), partial: Number.isFinite(maxDepth), signal,
+    onProgress: (done, total) => { p.phase = `checking the copy ${done}/${total}`; report(); } });
   const packages = pack?.length ? await packFolder(outDir, pack, (ph) => { p.phase = ph; report(); }) : [];
   const result = {
     method: 'crawl', source: rootUrl, outDir, ...p, phase: 'done', elapsedMs: Date.now() - t0,
-    maxDepth: Number.isFinite(maxDepth) ? maxDepth : null, keepImplicit, packages,
+    maxDepth: Number.isFinite(maxDepth) ? maxDepth : null, keepImplicit, packages, verify,
     // A failed tile keeps its uri: the tileset stays structurally valid and the gap is listed here,
     // so re-running the export (or fetching just these) can fill it.
     failures,
@@ -296,7 +300,7 @@ async function packFolder(outDir, formats, onPhase) {
  * Fill `outDir` with the per-format offline converter (packages/convert) — for raw sources. `options`
  * are the converter's: tiling ('implicit' | 'explicit'), scale, geScale, geLayer, centroidsOnly.
  */
-export async function convertToFolder(src, outDir, { format, options = {}, pack = [], onProgress } = {}) {
+export async function convertToFolder(src, outDir, { format, options = {}, pack = [], onProgress, verify: verifyMode = 'sample' } = {}) {
   outDir = path.resolve(outDir);
   const t0 = Date.now();
   const tick = (phase) => onProgress?.({ phase, elapsedMs: Date.now() - t0 });
@@ -307,10 +311,12 @@ export async function convertToFolder(src, outDir, { format, options = {}, pack 
     const { convert } = await import('../convert/index.js');
     r = await convert(src, outDir, { format: format || undefined, ...options });
   } finally { clearInterval(timer); }
+  const verify = await verifyExport(outDir, { mode: verifyMode, source: { src, format: r?.format ?? format },
+    onProgress: (done, total) => tick(`checking the output ${done}/${total}`) });
   const packages = pack?.length ? await packFolder(outDir, pack, tick) : [];
   const { files, bytes } = await folderStats(outDir);
   const result = { method: 'convert', source: src, format: r?.format ?? format, options, outDir, tilesWritten: files, bytes,
-    tilesets: 1, failed: 0, phase: 'done', elapsedMs: Date.now() - t0, packages };
+    tilesets: 1, failed: 0, phase: 'done', elapsedMs: Date.now() - t0, packages, verify };
   await writeFile(path.join(outDir, 'export-report.json'), JSON.stringify(result, null, 2));
   return result;
 }
@@ -355,6 +361,7 @@ export async function handleExport(req, res, u) {
     const method = body.method === 'convert' ? 'convert' : 'crawl';
     const maxDepth = body.maxDepth == null || body.maxDepth === '' ? Infinity : Number(body.maxDepth);
     const pack = (Array.isArray(body.pack) ? body.pack : []).filter((f) => f === '3tz' || f === '3dtiles');
+    const verify = VERIFY_MODES.includes(body.verify) ? body.verify : 'sample';
     if (method === 'crawl' && (!body.url || !outDir)) { json(res, 400, { error: 'body must be {"url": <tileset url>, "outDir": <absolute folder>}' }); return true; }
     if (method === 'convert' && (!body.src || !outDir)) { json(res, 400, { error: 'body must be {"method": "convert", "src": <path or url>, "outDir": <absolute folder>}' }); return true; }
     if (!path.isAbsolute(outDir)) { json(res, 400, { error: 'outDir must be an absolute path' }); return true; }
@@ -377,8 +384,8 @@ export async function handleExport(req, res, u) {
     jobs.set(job.id, job);
     const onProgress = (pr) => { job.progress = { ...job.progress, ...pr }; };
     const run = method === 'convert'
-      ? convertToFolder(body.src, outDir, { format: body.format, options: body.options ?? {}, pack, onProgress })
-      : exportTileset(url, outDir, { maxDepth, overwrite: true, keepImplicit: !!body.keepImplicit, pack, signal: job.ctrl.signal, onProgress });
+      ? convertToFolder(body.src, outDir, { format: body.format, options: body.options ?? {}, pack, onProgress, verify })
+      : exportTileset(url, outDir, { maxDepth, overwrite: true, keepImplicit: !!body.keepImplicit, pack, verify, signal: job.ctrl.signal, onProgress });
     run.then((r) => { job.state = 'done'; job.result = r; job.progress = { ...job.progress, ...r, failures: undefined }; })
       .catch((e) => { job.state = job.ctrl.signal.aborted ? 'cancelled' : 'failed'; job.error = String(e.message || e); });
     json(res, 202, { id: job.id, status: `/export/${job.id}` });

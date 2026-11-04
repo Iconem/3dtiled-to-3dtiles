@@ -93,6 +93,10 @@
                     <button id="save" class="btn">Bookmark</button>
                 </div>
                 <div id="result" class="result"></div>
+                <p class="hint">
+                    Point cloud in Cesium for Unreal or Unity? Set the tileset's <em>Maximum Screen Space Error</em> to 1 or 2.
+                    Its default, 16, suits meshes and loads far fewer points.
+                </p>
                 <details class="placement">
                     <summary>Advanced <span class="hint">test, API playground, hierarchy</span></summary>
                     <div class="actions">
@@ -141,6 +145,15 @@
                             <select id="export-runner">
                                 <option value="server">tile-server (default)</option>
                                 <option value="cli">CLI subprocess</option>
+                            </select>
+                        </label>
+                        <label class="field">
+                            <span>Check the result</span>
+                            <select id="export-verify">
+                                <option value="sample">Counts, and a sample of tiles read in full</option>
+                                <option value="counts">Counts only: every tile's header, and the source's total</option>
+                                <option value="full">Every tile read in full</option>
+                                <option value="off">Off</option>
                             </select>
                         </label>
                     </div>
@@ -195,6 +208,10 @@
                 <div class="card-head">
                     <span class="field-label" style="margin:0">Bookmarks</span>
                     <div class="card-head-actions">
+                        <div class="seg" role="group" aria-label="Library view">
+                            <button id="lib-view-rows" class="btn btn-ghost" title="One line per entry: its title and buttons">Rows</button>
+                            <button id="lib-view-cards" class="btn btn-ghost" title="Cards with the source, options and stats">Cards</button>
+                        </div>
                         <button id="lib-refresh" class="btn btn-ghost">Refresh stats</button>
                         <button id="lib-export" class="btn btn-ghost">Export bookmarks as JSON</button>
                         <button id="lib-import" class="btn btn-ghost">Import bookmarks as JSON</button>

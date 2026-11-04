@@ -28,10 +28,18 @@ function coordsOfBox(box, rootBox, depth) {
 
 const georef = (origin, crs) => georefFromCrs(origin, crs, 'potree-live');
 
-async function fetchFull(url) {
-  const r = await fetch(url);
-  if (!r.ok) throw new Error(`fetch ${url} → ${r.status}`);
-  return Buffer.from(await r.arrayBuffer());
+// Retries what may pass (a reset, a 429, a 5xx): one failed .hrc read costs a whole branch of the tree.
+async function fetchFull(url, attempts = 3) {
+  for (let i = 1; ; i++) {
+    let err;
+    try {
+      const r = await fetch(url);
+      if (r.ok) return Buffer.from(await r.arrayBuffer());
+      err = Object.assign(new Error(`fetch ${url} → ${r.status}`), { status: r.status });
+    } catch (e) { err = e; }
+    if (i >= attempts || (err.status && err.status < 500 && err.status !== 429)) throw err;
+    await new Promise(res => setTimeout(res, 250 * 2 ** i));
+  }
 }
 // One contiguous range read from octree.bin (the per-tile fetch — this is the streaming core).
 async function rangeGet(url, begin, length) {

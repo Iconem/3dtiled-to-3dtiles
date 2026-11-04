@@ -202,6 +202,16 @@ every level), and press **Export**.
 - **Failures.** Files that fail after three attempts are listed in `export-report.json`, along with
   counts, bytes, timings and the source URL. Their uris stay in place, so the tileset remains
   structurally valid.
+- **Checked at the end.** Both methods check the finished folder, on by default. **Check the result** under Advanced
+  picks how far, and `verify` in `export-report.json` holds the outcome, per level.
+  - *Counts*: walks the folder from its `tileset.json`, through external tilesets and implicit subtrees, as a client
+    would. Every tile must be a file as long as its header says. It adds up the points in the headers and compares them
+    with the total the source declares: `points` in a Potree `cloud.js` or `metadata.json`, the LAS header of a COPC file.
+    That comparison finds tiles that were never listed, which no walk of the folder can. Other formats declare no
+    total, and a max depth keeps only part of a cloud, so the report then gives the count without a verdict.
+  - *Sample* (default): also reads a few tiles of each level in full, up to 64: buffer views and accessors must fit,
+    and uncompressed positions must be finite.
+  - *Every tile*: the same on all of them, slower on a large export.
 - **Afterwards.** **Open folder** opens it in the OS file manager, and **Preview exported copy** loads
   the copy in the stock Cesium harness, served back by the tile-server from that folder
   (`/export/{id}/files/…`), i.e. exactly what a static host would serve.

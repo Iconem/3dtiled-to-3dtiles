@@ -1211,6 +1211,17 @@
                     },
                     "description": "also pack the folder into these single-file formats"
                   },
+                  "verify": {
+                    "type": "string",
+                    "enum": [
+                      "off",
+                      "counts",
+                      "sample",
+                      "full"
+                    ],
+                    "default": "sample",
+                    "description": "Check the folder at the end. counts: walks it as a client would, reads every tile's header, and compares the points with the total a Potree or COPC source declares. sample: also reads a few tiles of each level in full. full: reads every tile in full. The result is `verify` in the report."
+                  },
                   "src": {
                     "type": "string",
                     "description": "convert: local path or URL of the raw source"

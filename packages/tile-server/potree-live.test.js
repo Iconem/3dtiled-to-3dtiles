@@ -4,6 +4,7 @@ import { once } from 'node:events';
 import test from 'node:test';
 import { potreeTileset, potreeSubtree, potreeTile } from './potree-live.js';
 import { parseSubtreeBuffer } from '../core/index.js';
+import { loadPotree1 } from '../potree-to-3dtiles/src/potree1.js';
 
 // A private fixture server requires a synthetic Azure container SAS query on every file, including range reads.
 async function azureSasSource(t, files) {
@@ -57,6 +58,54 @@ for (const version of ['1.7', '1.8']) {
     assert.ok(source.requests.every(r => r.query === source.query));
   });
 }
+
+test('Potree 1.x: a leaf the hierarchy counts as 0 points is still streamed, as its file holds them', async (t) => {
+  const metadata = {
+    version: '1.8', octreeDir: 'data', hierarchyStepSize: 5, spacing: 1, scale: 0.01,
+    boundingBox: { lx: 500000, ly: 0, lz: 0, ux: 500001, uy: 1, uz: 1 },
+    pointAttributes: [{ name: 'POSITION_CARTESIAN', size: 12 }, { name: 'RGBA_PACKED', size: 4 }],
+  };
+  const hierarchy = Buffer.alloc(10);
+  hierarchy[0] = 1; hierarchy.writeUInt32LE(1, 1);   // the root: one point, child 0
+  hierarchy[5] = 0; hierarchy.writeUInt32LE(0, 6);   // child 0: no children, count 0
+  const point = Buffer.alloc(16);
+  point.set([255, 128, 64, 255], 12);
+  const source = await azureSasSource(t, {
+    '/cloud/cloud.js': Buffer.from(JSON.stringify(metadata)),
+    '/cloud/data/r/r.hrc': hierarchy, '/cloud/data/r/r.bin': point, '/cloud/data/r/r0.bin': point,
+  });
+  const url = `${source.root}cloud.js${source.query}`;
+  await potreeTileset(url, { prefetch: 0, crs: 'EPSG:32631' });
+  const { contentBit } = parseSubtreeBuffer(await potreeSubtree(url, '0-0-0-0'));
+  assert.equal(contentBit(1), 1, 'child 0 is available');
+  const tile = await potreeTile(url, '1-0-0-0');
+  assert.equal(tile.subarray(0, 4).toString(), 'glTF');
+});
+
+test('Potree 1.x: a chunk read that failed is an error to retry, a chunk that is not there is an empty branch', async () => {
+  const cloud = {
+    version: '1.8', octreeDir: 'data', hierarchyStepSize: 1, spacing: 1, scale: 0.01,
+    boundingBox: { lx: 0, ly: 0, lz: 0, ux: 1, uy: 1, uz: 1 },
+    pointAttributes: [{ name: 'POSITION_CARTESIAN', size: 12 }],
+  };
+  const root = Buffer.alloc(5);
+  root[0] = 0b11; root.writeUInt32LE(1, 1);          // the root, with children 0 and 1, each a chunk of its own
+  let child = () => { throw Object.assign(new Error('503'), { status: 503 }); };
+  const read = async (rel) => {
+    if (rel === 'cloud.js') return Buffer.from(JSON.stringify(cloud));
+    if (rel.endsWith('/r.hrc')) return root;
+    if (rel.endsWith('/r0.hrc')) return child();
+    throw Object.assign(new Error('404'), { status: 404 });
+  };
+  const src = await loadPotree1('', { read, lazy: true });
+  const boundary = await src.loadChunk('r', src.boxOf('r'));
+  assert.deepEqual(boundary.map((b) => b.name), ['r0', 'r1']);
+  await assert.rejects(src.loadChunk('r0', src.boxOf('r0')), /503/);
+  assert.deepEqual(await src.loadChunk('r1', src.boxOf('r1')), []);
+  child = () => Buffer.alloc(5);
+  assert.deepEqual(await src.loadChunk('r0', src.boxOf('r0')), []);
+  assert.ok(src.nodes.has('r0'));
+});
 
 test('Potree 2 preserves Azure container SAS for hierarchy and octree range reads', async (t) => {
   const metadata = {

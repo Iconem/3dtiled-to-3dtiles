@@ -213,7 +213,7 @@ footer a:hover { color: hsl(var(--foreground)); text-decoration: underline; }
 .panel-hidden { display: none; }
 
 .card-head { display: flex; align-items: center; gap: 10px; margin-bottom: 8px; }
-.card-head-actions { margin-left: auto; display: flex; gap: 6px; }
+.card-head-actions { margin-left: auto; display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 6px; }
 
 /* ── list rows (library + samples) ───────────────────────────────────────────────────────────── */
 .list, .groups { display: flex; flex-direction: column; gap: 8px; margin-top: 12px; }
@@ -233,6 +233,17 @@ footer a:hover { color: hsl(var(--foreground)); text-decoration: underline; }
   min-width: 0;
 }
 .item-compact { padding: 8px 12px; background: transparent; }
+.seg { display: inline-flex; }
+.seg .btn { border-radius: 0; }
+.seg .btn:first-child { border-radius: 6px 0 0 6px; }
+.seg .btn:last-child { border-radius: 0 6px 6px 0; margin-left: -1px; }
+.seg .btn[aria-pressed="true"] { background: hsl(var(--muted)); font-weight: 600; }
+.list-compact { gap: 0; }
+.list-compact .item { padding: 2px 4px 2px 8px; border-width: 0 0 1px; border-radius: 0; background: transparent; gap: 8px; align-items: center; }
+.list-compact .item:hover { background: hsl(var(--muted) / 0.5); }
+.list-compact .glyph, .list-compact .item-sub, .list-compact .item-meta, .list-compact .chip { display: none; }
+.list-compact .item-title { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 13px; font-weight: 400; }
+.list-compact .btn { padding: 1px 7px; font-size: 12px; }
 .item:hover { background: hsl(var(--muted) / 0.5); }
 
 /* A generated format glyph, NOT a thumbnail. Rendering a real preview would mean loading each

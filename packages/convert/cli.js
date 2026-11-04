@@ -3,7 +3,7 @@
  * 3dtiled — meta-converter CLI. Detects the input format and converts to 3D Tiles.
  *
  *   3dtiled <input> <outDir> [--format rad|sog|lcc|copc|potree|i3s]
- *           [--scale N] [--ge-scale N] [--ge-layer N] [--centroids-only] [-- <extra converter args>]
+ *           [--scale N] [--ge-scale N] [--ge-layer N] [--centroids-only] [--verify off|counts|sample|full] [-- <extra converter args>]
  *
  *   3dtiled serve [<input>] [--port 3001] [--format <fmt>] [--lon <deg> --lat <deg>] [--alt m]
  *           [--heading deg] [--place-scale N]
@@ -13,7 +13,7 @@
  *     (converted once on first request, then cached). --lon/--lat append the tileset-level globe
  *     placement params (see tile-server docs).
  *
- *   3dtiled export <tileset-url> <outDir> [--max-depth N] [--keep-implicit] [--pack 3tz,3dtiles] [--overwrite]
+ *   3dtiled export <tileset-url> <outDir> [--max-depth N] [--keep-implicit] [--pack 3tz,3dtiles] [--overwrite] [--verify off|counts|sample|full]
  *     Materialise any 3D Tiles tileset (a remote one, or a /stream, /convert or /aggregate URL of a
  *     running server) into a self-contained folder: every tileset JSON and tile file, uris made
  *     relative, implicit tilings expanded. For a raw dataset (a .copc.laz, a Potree folder…), either
@@ -35,14 +35,16 @@ const sepIdx = rawArgv.indexOf('--');
 const argv = sepIdx >= 0 ? rawArgv.slice(0, sepIdx) : rawArgv;
 const extraArgs = sepIdx >= 0 ? rawArgv.slice(sepIdx + 1) : [];
 
-const VALUE_FLAGS = new Set(['max-depth', 'pack', 'format', 'scale', 'ge-scale', 'ge-layer', 'tiling', 'port', 'lon', 'lat', 'alt', 'heading', 'place-scale']);
+const VALUE_FLAGS = new Set(['verify', 'max-depth', 'pack', 'format', 'scale', 'ge-scale', 'ge-layer', 'tiling', 'port', 'lon', 'lat', 'alt', 'heading', 'place-scale']);
 function flag(name) { const i = argv.indexOf(`--${name}`); return i >= 0 ? argv[i + 1] : undefined; }
+const verifyMode = flag('verify') ?? 'sample';
+if (!['off', 'counts', 'sample', 'full'].includes(verifyMode)) { console.error('--verify must be off, counts, sample or full'); process.exit(1); }
 
 // ── `3dtiled export` — materialise a tileset URL into a folder ─────────────────────────────────────
 if (argv[0] === 'export') {
   const [, src, out] = argv.filter((a, i) => !a.startsWith('--') && !(i > 0 && argv[i - 1].startsWith('--') && VALUE_FLAGS.has(argv[i - 1].slice(2))));
   if (!src || !out || !/^https?:\/\//.test(src)) {
-    console.error('Usage: 3dtiled export <tileset-url> <outDir> [--max-depth N] [--keep-implicit] [--pack 3tz,3dtiles] [--overwrite]');
+    console.error('Usage: 3dtiled export <tileset-url> <outDir> [--max-depth N] [--keep-implicit] [--pack 3tz,3dtiles] [--overwrite] [--verify off|counts|sample|full]');
     process.exit(1);
   }
   (async () => {
@@ -52,6 +54,7 @@ if (argv[0] === 'export') {
       maxDepth: flag('max-depth') != null ? Number(flag('max-depth')) : Infinity,
       overwrite: argv.includes('--overwrite'),
       keepImplicit: argv.includes('--keep-implicit'),
+      verify: verifyMode,
       pack: (flag('pack') ?? '').split(',').map((s) => s.trim()).filter(Boolean),
       onProgress: (p) => {
         if (Date.now() - last < 1000) return;
@@ -62,6 +65,7 @@ if (argv[0] === 'export') {
     console.log(`\n[3dtiled export] ${r.tilesets} tilesets (${r.implicitExpanded} implicit expanded, ${r.implicitKept} kept), ${r.tilesWritten} files, `
       + `${(r.bytes / 1e6).toFixed(1)} MB in ${(r.elapsedMs / 1000).toFixed(1)} s → ${r.outDir}${r.failed ? `  (${r.failed} failed — see export-report.json)` : ''}${r.packages.length ? `
   packed: ${r.packages.join(', ')}` : ''}`);
+    if (r.verify.summary) (r.verify.ok ? console.log : console.error)(`[3dtiled export] ${r.verify.summary}${r.verify.ok ? '' : ' See export-report.json.'}`);
   })().catch((e) => { console.error('\n[3dtiled export]', e.message); process.exit(1); });
 } else if (argv[0] === 'serve') {
   const input = argv.slice(1).find((a, i, arr) => !a.startsWith('--') && !(i > 0 && arr[i-1].startsWith('--') && VALUE_FLAGS.has(arr[i-1].slice(2))));
@@ -101,7 +105,7 @@ const input = positionals[0];
 const outDir = positionals[1];
 
 if (!input || !outDir) {
-  console.error(`Usage: 3dtiled <input> <outDir> [--format <fmt>] [--scale N] [--ge-scale N] [--ge-layer N] [--centroids-only] [-- extra args]
+  console.error(`Usage: 3dtiled <input> <outDir> [--format <fmt>] [--scale N] [--ge-scale N] [--ge-layer N] [--centroids-only] [--verify off|counts|sample|full] [-- extra args]
        3dtiled serve [<input>] [--port 3001] [--lon <deg> --lat <deg>] [--alt m] [--heading deg]
   formats: ${supportedFormats.join(', ')}`);
   process.exit(1);
@@ -121,7 +125,12 @@ if (!input || !outDir) {
     tiling: flag('tiling'),                             // 'implicit' | 'explicit' (copc, potree)
     extraArgs,
   };
-  await convert(input, outDir, opts);
+  const converted = await convert(input, outDir, opts);
   console.log(`[3dtiled] done → ${outDir}/tileset.json`);
+  if (verifyMode !== 'off') {
+    const { verifyExport } = await import('../tile-server/export-verify.js');
+    const v = await verifyExport(outDir, { mode: verifyMode, source: { src: input, format: converted?.format ?? format } });
+    (v.ok ? console.log : console.error)(`[3dtiled] ${v.summary}`);
+  }
 })().catch(e => { console.error('[3dtiled] error:', e.message); process.exit(1); });
 }

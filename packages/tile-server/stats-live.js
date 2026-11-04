@@ -41,7 +41,7 @@ const isTilesetUri = (uri) => /\.json(\?|$)/i.test(uri.split('#')[0]);
  * want (primitive counts, extensions, texture MIME types, compression) is declared in the JSON, so
  * this stays cheap enough to run against a live remote host.
  */
-function inspectGlb(buf) {
+export function inspectGlb(buf) {
   if (buf.length < 20 || buf.toString('latin1', 0, 4) !== 'glTF') {
     return { ok: false, reason: `not a GLB (magic "${buf.toString('latin1', 0, 4).replace(/[^\x20-\x7e]/g, '.')}")`, bytes: buf.length };
   }
