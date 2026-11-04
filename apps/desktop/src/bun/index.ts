@@ -150,6 +150,16 @@ const userDirs: Record<string, string> = userData
 	? { AGGREGATE_CACHE_DIR: `${userData}/3D Tiled/aggregate-cache`, AGGREGATE_SETS_DIR: `${userData}/3D Tiled/aggregate-sets` }
 	: {};
 
+/** The view's address: the ports and the resolved URLs travel in the query string, so the UI needs no RPC round trip to learn them. */
+const viewUrl = (q: Record<string, string | number | null>) =>
+	`views://mainview/index.html?${Object.entries(q).map(([k, v]) => `${k}=${encodeURIComponent(v ?? "")}`).join("&")}`;
+
+/**
+ * The servers come up AFTER the window is open. The tile-server used to be awaited first, so the app showed nothing for
+ * 15–20 s on a cold start (and up to 2 minutes when a port probe hung), which reads as "not starting". The view opens at
+ * once in its "starting the tile-server" state and is reloaded with the ports as soon as they are known.
+ */
+async function startServers() {
 const tilePort = await ensureServer({
 	ports: TILE_PORTS,
 	cmd: (p) => [node, "packages/tile-server/server.js", "--port", String(p)],
@@ -183,14 +193,12 @@ async function reachable(url: string): Promise<boolean> {
 	} catch { return false; }
 }
 
-const env = (globalThis as any).process?.env ?? {};
 const viewerUrl = env.VIEWER_URL || (await reachable(LOCAL_VIEWER) ? LOCAL_VIEWER : PUBLIC_VIEWER);
 const docsUrl = env.DOCS_URL || (await reachable(LOCAL_DOCS) ? LOCAL_DOCS : PUBLIC_DOCS);
+return { tilePort, staticPort, viewerUrl, docsUrl };
+}
 
-// The launcher is a bundled view; the ports and resolved URLs travel in the query string so the UI
-// needs no RPC round trip just to learn where things ended up.
-const qs = `?tilePort=${tilePort ?? ""}&staticPort=${staticPort ?? ""}`
-	+ `&viewerUrl=${encodeURIComponent(viewerUrl)}&docsUrl=${encodeURIComponent(docsUrl)}`;
+const env = (globalThis as any).process?.env ?? {};
 /**
  * Native file/folder picker, exposed to the launcher view over RPC.
  *
@@ -279,13 +287,16 @@ const rpc = defineElectrobunRPC<DesktopRPC, "bun">("bun", {
 
 const mainWindow = new BrowserWindow({
 	title: "3D Tiled — local middleware",
-	url: `views://mainview/index.html${qs}`,
+	url: viewUrl({ tilePort: "", staticPort: "", viewerUrl: env.VIEWER_URL || PUBLIC_VIEWER, docsUrl: env.DOCS_URL || PUBLIC_DOCS }),
 	frame: { width: WIN.width, height: WIN.height, x: WIN.x, y: WIN.y },
 	rpc,
 });
 
-console.log(`[3dtiled-desktop] tile-server=${tilePort ?? "FAILED"} static=${staticPort ?? "FAILED"} `
+const t0 = Date.now();
+const { tilePort, staticPort, viewerUrl, docsUrl } = await startServers();
+console.log(`[3dtiled-desktop] tile-server=${tilePort ?? "FAILED"} static=${staticPort ?? "FAILED"} after ${((Date.now() - t0) / 1000).toFixed(1)} s `
 	+ `viewer=${viewerUrl} docs=${docsUrl} root=${root} node=${node}`);
+mainWindow.webview.loadURL(viewUrl({ tilePort, staticPort, viewerUrl, docsUrl }));
 
 const stopChildren = () => children.forEach((c) => c.kill());
 for (const sig of ["SIGINT", "SIGTERM", "exit"]) {

@@ -1,7 +1,7 @@
 {
 	"extends": "./.hutch/devkit/tsconfig.json",
 	"compilerOptions": {
-		"lib": ["ESNext", "DOM"],
+		"lib": ["ESNext", "DOM", "DOM.Iterable"],
 		"target": "ESNext",
 		"module": "ESNext",
 		"moduleDetection": "force",
@@ -16,7 +16,18 @@
 		"noFallthroughCasesInSwitch": true,
 		"noUnusedLocals": true,
 		"noUnusedParameters": true,
-		"noPropertyAccessFromIndexSignature": true
+		"noPropertyAccessFromIndexSignature": true,
+		// `paths` replaces the devkit's rather than merging with it, so the Electrobun entries this
+		// app imports are repeated here next to the view's `@/` alias (vite.config.ts mirrors both).
+		// `baseUrl` stays: the devkit's tsconfig sets its own, and `paths` would resolve from there without this one.
+		// (TypeScript 6 deprecates it; this app pins 5.9 in its lockfile, so run tsc from its own node_modules.)
+		"baseUrl": ".",
+		"paths": {
+			"@/*": ["./src/mainview/*"],
+			"electrobun": ["./.hutch/devkit/api/sdks/main/index.ts"],
+			"electrobun/main": ["./.hutch/devkit/api/sdks/main/index.ts"],
+			"electrobun/view": ["./.hutch/devkit/api/browser/index.ts"]
+		}
 	},
 	"include": ["src/**/*"],
 	"exclude": ["node_modules", "dist", "build", "../../package/dist"]

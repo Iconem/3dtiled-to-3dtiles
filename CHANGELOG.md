@@ -20,7 +20,16 @@ Format loosely follows [Keep a Changelog](https://keepachangelog.com/).
   failed first read was remembered for good. It now expires after a minute, on all of them. Exported through a host failing
   every request once, COPC, Potree 1 and 2, SOG, LCC, RAD, I3S and plain 3D Tiles come out identical to a clean export.
 - **`/stream` says why a read failed:** 502 if the host did not answer, 404 if the file is not there. A test runs these rules
-  against every format.
+  against every format. GeoSplats, `.3dtiles` and `.3tz` packages pass the same export check as the others.
+- **The cap on requests to one host adapts:** it halves when the host fails under load (a 429, a 503, a reset) and climbs
+  back as reads pass, between 4 and the configured 32.
+- **The tile-server listens in 0.5 s instead of 10–15 s:** the format adapters and the tools load after the port is bound.
+- **Desktop: the window opens at once**, in its "starting the tile-server" state, and reloads with the ports when the servers
+  are up. It used to wait for them, showing nothing for 15–20 s, and up to two minutes when a port probe hung.
+- **Desktop: the view is React + Tailwind + shadcn/ui on Base UI**, built by Vite; same layout, texts and theme.
+- **Windows Defender may quarantine the app's `launcher.exe`** (`Trojan:Win32/Bearfoos.A!ml`, a false positive on the unsigned
+  Electrobun launcher, first seen 2026-11-04): the Start-menu shortcut then does nothing, an update fails while applying,
+  and the installer fails with `AntivirusInterference`. See the desktop guide for the exclusion to add until the app is signed.
 - **I3S: a node page that failed ended the pages**, and every node after it was lost until a restart. It now fails the
   request, and the next one resumes from that page.
 - **I3S: a tile whose geometry could not be read was served as an empty tile**, and one whose texture or colours could not

@@ -33,11 +33,16 @@ jobs:
       - name: Bundle Node and the tile-server
         run: node apps/desktop/scripts/prepare-bundle.mjs
 
+      # The view (React + Tailwind + shadcn) is built by Vite into dist/, which electrobun.config.ts copies
+      # into the app. Its dependencies are pnpm's, with the app's own lockfile: apps/desktop is outside the
+      # root workspace, hence --ignore-workspace (hutch.config.ts says why).
       - name: Build
         working-directory: apps/desktop
         run: |
           hutch --version
-          hutch install
+          hutch install --frozen-lockfile --ignore-workspace
+          hutch run typecheck
+          hutch run view
           $env:DESKTOP_BUNDLE_MAP = "$PWD\bundle\copy-map.json"
           $now = (Get-Date).ToUniversalTime()
           $env:BUILD_VERSION = "$($now.Year).$($now.Month).$($now.Day)"

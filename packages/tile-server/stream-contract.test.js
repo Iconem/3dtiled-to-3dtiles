@@ -8,7 +8,7 @@ import { mkdtemp, readFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { fetchSource, fetchSourceRange, httpStatusOf, memoizeAsync } from '../core/index.js';
+import { fetchSource, fetchSourceRange, httpStatusOf, hostLimit, memoizeAsync } from '../core/index.js';
 import { handleStream } from './stream-live.js';
 import { exportTileset } from './export-live.js';
 
@@ -91,6 +91,27 @@ test('reads to one host are capped, however many are asked for', async (t) => {
   t.after(() => new Promise((r) => { server.close(r); server.closeAllConnections(); }));
   await Promise.all(Array.from({ length: 200 }, (_, i) => fetchSource(`http://127.0.0.1:${server.address().port}/${i}`)));
   assert.ok(peak <= 32, `peak ${peak}`);
+});
+
+test('a host that fails under load is given fewer requests at a time, and gets them back as reads pass', async (t) => {
+  quiet(t);
+  let active = 0, peak = 0, failures = 0;
+  const server = http.createServer((req, res) => {
+    peak = Math.max(peak, ++active);
+    setTimeout(() => { active--; if (req.url.startsWith('/busy') && Math.random() < 0.5) { failures++; res.writeHead(503); return res.end(); } res.end('x'); }, 5);
+  }).listen(0, '127.0.0.1');
+  await once(server, 'listening');
+  t.after(() => new Promise((r) => { server.close(r); server.closeAllConnections(); }));
+  const host = `127.0.0.1:${server.address().port}`;
+  assert.equal(hostLimit(host), 32);
+  await Promise.allSettled(Array.from({ length: 120 }, (_, i) => fetchSource(`http://${host}/busy/${i}`)));
+  assert.ok(failures > 0);
+  assert.ok(hostLimit(host) < 32, `cap ${hostLimit(host)} after failures`);
+  assert.ok(hostLimit(host) >= 4);
+  const lowered = hostLimit(host);
+  peak = 0;
+  await Promise.all(Array.from({ length: 200 }, (_, i) => fetchSource(`http://${host}/ok/${i}`)));
+  assert.ok(hostLimit(host) > lowered, `cap ${hostLimit(host)} climbed back from ${lowered}`);
 });
 
 test('a failed build is not remembered for ever', async () => {

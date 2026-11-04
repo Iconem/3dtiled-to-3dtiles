@@ -19,17 +19,17 @@ export default {
 		cottontail: {
 			entrypoint: "src/bun/index.ts",
 		},
-		views: {
-			mainview: {
-				entrypoint: "src/mainview/index.ts",
-			},
-		},
+		// The view is React + Tailwind, built by Vite into dist/ (vite.config.ts), because Electrobun's
+		// own view bundler takes no plugins. `hutch run build` / `hutch run dev` run Vite first; a bare
+		// `hutch electrobun build` copies whatever dist/ holds.
 		copy: {
-			"src/mainview/index.html": "views/mainview/index.html",
-			"src/mainview/index.css": "views/mainview/index.css",
+			"dist/index.html": "views/mainview/index.html",
+			"dist/assets": "views/mainview/assets",
 			// A distributable carries the tile-server and Node, from scripts/prepare-bundle.mjs.
 			...(process.env.DESKTOP_BUNDLE_MAP ? JSON.parse(readFileSync(process.env.DESKTOP_BUNDLE_MAP, "utf8")) : {}),
 		},
+		// Vite's output is an input of this build, not something to watch for.
+		watchIgnore: ["dist/**"],
 		// Distributable artifacts (installers, .app/.dmg, update archives) land here. Gitignored
 		// alongside build/ — they are large binaries rebuilt from source on demand.
 		artifactFolder: "artifacts",

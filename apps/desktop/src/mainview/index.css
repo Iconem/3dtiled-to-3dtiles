@@ -1,346 +1,113 @@
+@import "tailwindcss";
+@import "tw-animate-css";
+@import "shadcn/tailwind.css";
+
+/* The theme is an attribute on <html>, set before the first paint by the inline script in index.html and
+   kept current by theme.ts, so `dark:` utilities key on it rather than on a class. */
+@custom-variant dark (&:where([data-theme="dark"], [data-theme="dark"] *));
+
 /* shadcn/ui "zinc" tokens, dark then light — the same HSL triples the shadcn theme ships, so this window
-   reads as the same design language as the viewer and docs rather than a bespoke palette. An inline script
-   in index.html sets data-theme before the first paint. */
+   reads as the same design language as the viewer and docs rather than a bespoke palette. */
 :root {
   /* Tells the engine this document is dark, which is what makes NATIVE widgets follow suit. Without
-     it Chromium/WebView2 renders `<select>` drop-down popups, scrollbars and form controls with the
-     light default — a white popup listing white-on-light options, effectively unreadable, even
-     though the page around them is dark. Styling `option` alone does not fix the popup on Windows. */
+     it Chromium/WebView2 renders scrollbars, form controls and any native popup with the light
+     default — a white popup listing white-on-light options, effectively unreadable, even though the
+     page around them is dark. The selects are Base UI popups (page content), but the scrollbars of
+     the window, the log and the textarea are still the engine's. */
   color-scheme: dark;
 
-  --background: 240 10% 3.9%;
-  --foreground: 0 0% 98%;
-  --card: 240 10% 5.5%;
-  --card-foreground: 0 0% 98%;
-  --muted: 240 3.7% 15.9%;
-  --muted-foreground: 240 5% 64.9%;
-  --border: 240 3.7% 15.9%;
-  --input: 240 3.7% 15.9%;
-  --primary: 0 0% 98%;
-  --primary-foreground: 240 5.9% 10%;
-  --accent: 240 3.7% 15.9%;
-  --ring: 240 4.9% 83.9%;
-  --success: 142 71% 45%;
-  --destructive: 0 72% 51%;
-  --warning: 38 92% 50%;
+  --background: hsl(240 10% 3.9%);
+  --foreground: hsl(0 0% 98%);
+  --card: hsl(240 10% 5.5%);
+  --card-foreground: hsl(0 0% 98%);
+  --popover: hsl(240 10% 5.5%);
+  --popover-foreground: hsl(0 0% 98%);
+  --muted: hsl(240 3.7% 15.9%);
+  --muted-foreground: hsl(240 5% 64.9%);
+  --border: hsl(240 3.7% 15.9%);
+  --input: hsl(240 3.7% 15.9%);
+  --primary: hsl(0 0% 98%);
+  --primary-foreground: hsl(240 5.9% 10%);
+  --secondary: hsl(240 3.7% 15.9%);
+  --secondary-foreground: hsl(0 0% 98%);
+  --accent: hsl(240 3.7% 15.9%);
+  --accent-foreground: hsl(0 0% 98%);
+  --ring: hsl(240 4.9% 83.9%);
+  --success: hsl(142 71% 45%);
+  --destructive: hsl(0 72% 51%);
+  --warning: hsl(38 92% 50%);
   --radius: 0.5rem;
   --shadow: 0 1px 2px rgb(0 0 0 / .3);
-  --bar: 199 89% 60%;
+  --bar: hsl(199 89% 60%);
 }
 :root[data-theme="light"] {
   color-scheme: light;
-  --background: 0 0% 100%;
-  --foreground: 240 10% 3.9%;
-  --card: 0 0% 100%;
-  --card-foreground: 240 10% 3.9%;
-  --muted: 240 4.8% 95.9%;
-  --muted-foreground: 240 3.8% 46.1%;
-  --border: 240 5.9% 90%;
-  --input: 240 5.9% 90%;
-  --primary: 240 5.9% 10%;
-  --primary-foreground: 0 0% 98%;
-  --accent: 240 4.8% 95.9%;
-  --ring: 240 5.9% 10%;
-  --success: 142 72% 29%;
-  --destructive: 0 72% 42%;
-  --warning: 32 95% 34%;
+  --background: hsl(0 0% 100%);
+  --foreground: hsl(240 10% 3.9%);
+  --card: hsl(0 0% 100%);
+  --card-foreground: hsl(240 10% 3.9%);
+  --popover: hsl(0 0% 100%);
+  --popover-foreground: hsl(240 10% 3.9%);
+  --muted: hsl(240 4.8% 95.9%);
+  --muted-foreground: hsl(240 3.8% 46.1%);
+  --border: hsl(240 5.9% 90%);
+  --input: hsl(240 5.9% 90%);
+  --primary: hsl(240 5.9% 10%);
+  --primary-foreground: hsl(0 0% 98%);
+  --secondary: hsl(240 4.8% 95.9%);
+  --secondary-foreground: hsl(240 5.9% 10%);
+  --accent: hsl(240 4.8% 95.9%);
+  --accent-foreground: hsl(240 5.9% 10%);
+  --ring: hsl(240 5.9% 10%);
+  --success: hsl(142 72% 29%);
+  --destructive: hsl(0 72% 42%);
+  --warning: hsl(32 95% 34%);
   --shadow: 0 1px 2px rgb(0 0 0 / .06);
-  --bar: 199 89% 42%;
+  --bar: hsl(199 89% 42%);
 }
 
-* { box-sizing: border-box; }
-
-body {
-  margin: 0;
-  background: hsl(var(--background));
-  color: hsl(var(--foreground));
-  font: 14px/1.5 ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
-  -webkit-font-smoothing: antialiased;
+@theme inline {
+  --font-sans: ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+  --font-mono: ui-monospace, "Cascadia Code", SFMono-Regular, Consolas, monospace;
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-ring: var(--ring);
+  --color-success: var(--success);
+  --color-destructive: var(--destructive);
+  --color-warning: var(--warning);
+  --color-bar: var(--bar);
+  /* The controls' corner is radius − 2px, as in the shadcn theme; the cards keep the full radius. */
+  --radius-sm: calc(var(--radius) - 4px);
+  --radius-md: calc(var(--radius) - 2px);
+  --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) + 4px);
+  --shadow-xs: var(--shadow);
+  --shadow-sm: var(--shadow);
 }
 
-/* Centred, in a window that opens at about this width (WIN in bun/index.ts). Measured on Windows at 150%:
-   a 1680 px window, a 1106 CSS px viewport at devicePixelRatio 1.5, so the page sees the real window. Older
-   Electrobun builds reported a viewport wider than the frame, which clipped centred content: check any
-   change here in the real app, as a plain browser cannot show that. */
-/* A column at least as tall as the window, so the footer sits at the bottom of a short tab. */
-.container { max-width: 720px; min-height: 100vh; margin: 0 auto; padding: 24px 26px 14px; display: flex; flex-direction: column; }
-
-header { display: flex; align-items: center; gap: 12px; margin-bottom: 8px; flex-wrap: wrap; }
-h1 { font-size: 18px; font-weight: 600; margin: 0; letter-spacing: -0.02em; }
-h1 .sub { color: hsl(var(--muted-foreground)); font-weight: 400; font-size: 13px; margin-left: 8px; }
-
-/* badge */
-.status {
-  margin-left: auto; font-size: 11.5px; font-weight: 500; line-height: 1;
-  padding: 5px 10px; border-radius: 999px;
-  border: 1px solid hsl(var(--border)); background: hsl(var(--muted) / 0.4);
-  color: hsl(var(--muted-foreground)); white-space: nowrap;
-}
-.status-ok   { color: hsl(var(--success));     border-color: hsl(var(--success) / 0.35);     background: hsl(var(--success) / 0.1); }
-.status-err  { color: hsl(var(--destructive)); border-color: hsl(var(--destructive) / 0.35); background: hsl(var(--destructive) / 0.1); }
-.status-wait { color: hsl(var(--warning));     border-color: hsl(var(--warning) / 0.35);     background: hsl(var(--warning) / 0.1); }
-
-.lede { color: hsl(var(--muted-foreground)); margin: 10px 0 20px; font-size: 13.5px; }
-.lede strong { color: hsl(var(--foreground)); font-weight: 500; }
-
-/* card */
-.card {
-  background: hsl(var(--card));
-  border: 1px solid hsl(var(--border));
-  border-radius: var(--radius);
-  box-shadow: var(--shadow);
-  padding: 18px;
-  margin-bottom: 14px;
+@layer base {
+  * {
+    @apply border-border outline-ring/50;
+  }
+  body {
+    @apply m-0 bg-background font-sans text-[14px]/[1.5] text-foreground antialiased;
+  }
 }
 
-/* label + field */
-.field { display: flex; flex-direction: column; gap: 6px; flex: 1 1 0; min-width: 0; }
-.field > span, .field-label {
-  font-size: 12px; font-weight: 500; line-height: 1;
-  color: hsl(var(--muted-foreground));
-}
-.field-label { display: block; margin-bottom: 9px; }
-.row { display: flex; gap: 12px; margin-top: 14px; flex-wrap: wrap; }
-
-input[type=text], select {
-  height: 36px;
-  background: transparent;
-  border: 1px solid hsl(var(--input));
-  color: hsl(var(--foreground));
-  border-radius: calc(var(--radius) - 2px);
-  padding: 0 11px;
-  font: inherit;
-  font-size: 13px;
-  width: 100%;
-  min-width: 0;
-  box-shadow: var(--shadow);
-  transition: border-color .15s, box-shadow .15s;
-}
-input[type=text]:focus, select:focus {
-  outline: none;
-  border-color: hsl(var(--ring));
-  box-shadow: 0 0 0 2px hsl(var(--ring) / 0.25);
-}
-input::placeholder { color: hsl(var(--muted-foreground) / 0.7); }
-select {
-  appearance: none; cursor: pointer; padding-right: 30px; text-overflow: ellipsis;
-  background: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='14' height='14' fill='none' stroke='%2371717a' stroke-width='2' stroke-linecap='round' stroke-linejoin='round' viewBox='0 0 24 24'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E") no-repeat right 9px center;
-}
-input[type=checkbox] { accent-color: hsl(var(--primary)); width: 14px; height: 14px; margin: 0; }
-/* Belt-and-braces alongside `color-scheme: dark` above: the closed control paints from the page's
-   own tokens, and the popup rows get an explicit dark background on engines that honour it. */
-select option { background: hsl(var(--card)); color: hsl(var(--foreground)); }
-
-.placement { margin-top: 16px; border-top: 1px solid hsl(var(--border)); padding-top: 14px; }
-.placement summary {
-  cursor: pointer; font-size: 13px; font-weight: 500; color: hsl(var(--foreground));
-  list-style: none; user-select: none;
-}
-.placement summary::-webkit-details-marker { display: none; }
-.placement summary::before {
-  content: ""; display: inline-block; width: 6px; height: 6px; margin: 0 9px 2px 2px;
-  border: solid hsl(var(--muted-foreground)); border-width: 0 1.5px 1.5px 0;
-  transform: rotate(-45deg); transition: transform .15s;
-}
-.placement[open] summary::before { transform: rotate(45deg); }
-.placement summary:focus-visible, .tab:focus-visible, footer a:focus-visible, .links a:focus-visible {
-  outline: none; border-radius: 4px; box-shadow: 0 0 0 2px hsl(var(--ring) / 0.6);
-}
-.hint { color: hsl(var(--muted-foreground)); font-size: 12px; font-weight: 400; }
-.placement .hint { margin: 12px 0 0; }
-
-/* Export → CLI subprocess output tail */
-.log { margin-top: 10px; }
-.log summary { cursor: pointer; font-size: 12.5px; color: hsl(var(--foreground)); user-select: none; }
-.log-pre {
-  margin: 8px 0 0; max-height: 220px; overflow: auto;
-  background: hsl(var(--muted) / 0.5); border: 1px solid hsl(var(--border));
-  border-radius: calc(var(--radius) - 2px); padding: 8px 10px;
-  font: 11.5px/1.45 ui-monospace, SFMono-Regular, Consolas, monospace;
-  white-space: pre-wrap; word-break: break-all;
-}
-
-.urlbar { display: flex; gap: 8px; align-items: stretch; }
-.urlbar code {
-  flex: 1; min-width: 0;
-  background: hsl(var(--muted) / 0.5);
-  border: 1px solid hsl(var(--border));
-  border-radius: calc(var(--radius) - 2px);
-  padding: 9px 11px;
-  font: 12px/1.4 ui-monospace, "Cascadia Code", Consolas, monospace;
-  overflow-x: auto; white-space: nowrap;
-  color: hsl(var(--foreground));
-}
-.urlbar code.empty { color: hsl(var(--muted-foreground)); }
-/* The dataset row reuses .urlbar for its input + Browse buttons, so the input has to take the slack
-   the same way the <code> does above. */
-.urlbar input[type=text] { flex: 1; min-width: 0; }
-
-.actions { display: flex; gap: 8px; margin-top: 12px; flex-wrap: wrap; }
-
-/* button — shadcn variants: outline (the plain .btn) / default (.btn-primary) / ghost */
-.btn {
-  display: inline-flex; align-items: center; justify-content: center;
-  height: 36px; padding: 0 15px;
-  border-radius: calc(var(--radius) - 2px);
-  border: 1px solid hsl(var(--input));
-  background: transparent;
-  box-shadow: var(--shadow);
-  color: hsl(var(--foreground));
-  font: inherit; font-size: 13px; font-weight: 500;
-  cursor: pointer; white-space: nowrap;
-  transition: background-color .15s, border-color .15s, opacity .15s;
-}
-.btn:hover { background: hsl(var(--accent)); }
-.btn:disabled { opacity: .45; cursor: default; pointer-events: none; }
-.btn:focus-visible { outline: none; box-shadow: 0 0 0 2px hsl(var(--background)), 0 0 0 4px hsl(var(--ring) / 0.6); }
-.btn-primary {
-  background: hsl(var(--primary)); border-color: hsl(var(--primary));
-  color: hsl(var(--primary-foreground)); font-weight: 600;
-}
-.btn-primary:hover { background: hsl(var(--primary) / 0.9); }
-.btn-ghost { background: transparent; border-color: transparent; box-shadow: none; color: hsl(var(--muted-foreground)); }
-.btn-icon { width: 32px; height: 32px; padding: 0; color: hsl(var(--muted-foreground)); }
-.btn-icon:hover { color: hsl(var(--foreground)); }
-.btn-icon svg { width: 15px; height: 15px; }
-.btn-ghost:hover { background: hsl(var(--accent)); color: hsl(var(--foreground)); }
-
-/* `hidden` must win over the display rules below (.actions is flex) */
-[hidden] { display: none !important; }
-.options { display: flex; flex-wrap: wrap; align-items: flex-end; gap: 6px 16px; margin: 8px 0; }
-.check { display: inline-flex; align-items: center; gap: 6px; font-size: 12.5px; cursor: pointer; }
-.field.compact { min-width: 90px; flex: 0 1 120px; }
-.urlbar code.cli { white-space: pre-wrap; word-break: break-all; overflow: visible; text-overflow: clip; height: auto; font-size: 11.5px; line-height: 1.5; }
-.links { display: flex; flex-wrap: wrap; gap: 4px 14px; margin-top: 10px; font-size: 12.5px; }
-/* one block per step of the run, each with its own fill */
-.progress { display: flex; gap: 4px; margin: 12px 0 4px; }
-.progress-step { flex: 1; height: 6px; border-radius: 3px; background: hsl(var(--muted)); overflow: hidden; }
-.progress-bar { height: 100%; width: 0; background: hsl(var(--bar)); transition: width .3s ease; }
-.progress-bar.indeterminate { width: 30% !important; animation: slide 1.2s ease-in-out infinite; }
+/* one block per step of an export, the current one sliding while its total is unknown */
 @keyframes slide { from { margin-left: -30%; } to { margin-left: 100%; } }
-.result { margin-top: 12px; font-size: 12.5px; min-height: 18px; word-break: break-word; color: hsl(var(--muted-foreground)); }
-.result-ok { color: hsl(var(--success)); }
-.result-err { color: hsl(var(--destructive)); }
-.result-info { color: hsl(var(--muted-foreground)); }
-
-footer {
-  display: flex; align-items: center; gap: 4px 12px;
-  color: hsl(var(--muted-foreground)); font-size: 12px;
-  margin-top: auto; padding-top: 12px; border-top: 1px solid hsl(var(--border));
-  flex-wrap: wrap;
-}
-footer .spacer { flex: 1; }
-footer a { color: hsl(var(--muted-foreground)); text-decoration: none; }
-footer a:hover { color: hsl(var(--foreground)); text-decoration: underline; }
-
-/* ── tabs — shadcn TabsList/TabsTrigger proportions ──────────────────────────────────────────── */
-.tabs {
-  display: inline-flex; align-self: flex-start; gap: 2px; padding: 3px; margin-bottom: 14px;
-  background: hsl(var(--muted));
-  border-radius: calc(var(--radius) - 2px);
-}
-.tab {
-  display: inline-flex; align-items: center; gap: 7px;
-  height: 30px; padding: 0 14px;
-  border: 0; border-radius: calc(var(--radius) - 4px);
-  background: transparent; color: hsl(var(--muted-foreground));
-  font: inherit; font-size: 13px; font-weight: 500; cursor: pointer;
-  transition: background-color .15s, color .15s;
-}
-.tab:hover { color: hsl(var(--foreground)); }
-.tab-active { background: hsl(var(--background)); color: hsl(var(--foreground)); box-shadow: var(--shadow); }
-.tab .count {
-  font-size: 11px; line-height: 1; padding: 3px 6px; border-radius: 999px;
-  background: hsl(var(--background)); color: hsl(var(--muted-foreground));
-}
-.panel-hidden { display: none; }
-
-.card-head { display: flex; align-items: center; gap: 10px; margin-bottom: 8px; }
-.card-head-actions { margin-left: auto; display: flex; flex-wrap: wrap; align-items: center; justify-content: flex-end; gap: 4px; }
-
-/* ── list rows (library + samples) ───────────────────────────────────────────────────────────── */
-.list, .groups { display: flex; flex-direction: column; gap: 8px; margin-top: 12px; }
-.group { display: flex; flex-direction: column; gap: 6px; }
-.group-head {
-  display: flex; align-items: center; gap: 8px;
-  font-size: 12.5px; font-weight: 600; color: hsl(var(--foreground));
-  margin-top: 10px; padding-bottom: 4px; border-bottom: 1px solid hsl(var(--border));
-}
-
-.item {
-  display: flex; align-items: center; gap: 12px;
-  padding: 10px 12px;
-  border: 1px solid hsl(var(--border));
-  border-radius: calc(var(--radius) - 2px);
-  background: hsl(var(--muted) / 0.25);
-  min-width: 0;
-}
-.item-compact { padding: 8px 12px; background: transparent; }
-/* a small TabsList */
-.seg { display: inline-flex; gap: 2px; padding: 2px; margin-right: 4px; background: hsl(var(--muted)); border-radius: calc(var(--radius) - 2px); }
-.seg .btn { height: 24px; padding: 0 9px; font-size: 12px; border-radius: calc(var(--radius) - 4px); }
-.seg .btn:hover { background: transparent; color: hsl(var(--foreground)); }
-.seg .btn[aria-pressed="true"] { background: hsl(var(--background)); color: hsl(var(--foreground)); box-shadow: var(--shadow); }
-.list-compact { gap: 0; }
-.list-compact .item { padding: 2px 4px 2px 8px; border-width: 0 0 1px; border-radius: 0; background: transparent; gap: 8px; align-items: center; }
-.list-compact .item:hover { background: hsl(var(--muted) / 0.5); }
-.list-compact .glyph, .list-compact .item-sub, .list-compact .item-meta, .list-compact .chip { display: none; }
-.list-compact .item-title { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 13px; font-weight: 400; }
-.list-compact .btn { padding: 1px 7px; font-size: 12px; }
-.item:hover { background: hsl(var(--muted) / 0.5); }
-
-/* A generated format glyph, NOT a thumbnail. Rendering a real preview would mean loading each
-   tileset in a hidden Cesium view — far too expensive for a list — so this encodes the one thing
-   that is knowable without fetching: which family of data it is. */
-.glyph {
-  flex: none; width: 38px; height: 38px; border-radius: calc(var(--radius) - 3px);
-  display: grid; place-items: center; font-size: 17px;
-  border: 1px solid hsl(var(--border));
-}
-.glyph[data-kind="pointcloud"] { background: hsl(210 70% 55% / 0.14); }
-.glyph[data-kind="splat"]      { background: hsl(280 70% 60% / 0.14); }
-.glyph[data-kind="mesh"]       { background: hsl(150 60% 45% / 0.14); }
-
-.item-body { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
-.item-title { display: flex; align-items: center; gap: 7px; font-size: 13.5px; font-weight: 500; }
-.item-sub {
-  font: 11.5px/1.4 ui-monospace, "Cascadia Code", Consolas, monospace;
-  color: hsl(var(--muted-foreground));
-  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
-}
-.item-meta { font-size: 11.5px; color: hsl(var(--muted-foreground)); }
-.item-meta-partial { color: hsl(var(--warning)); }
-.item-actions { flex: none; display: flex; gap: 4px; }
-
-.chip {
-  font-size: 10.5px; font-weight: 500; line-height: 1;
-  padding: 3px 7px; border-radius: 999px;
-  background: hsl(var(--muted)); color: hsl(var(--muted-foreground));
-  border: 1px solid hsl(var(--border));
-  white-space: nowrap;
-}
-
-.btn-sm { height: 28px; padding: 0 10px; font-size: 12px; }
-
-.io {
-  display: none; width: 100%; margin-top: 10px; min-height: 120px; resize: vertical;
-  background: hsl(var(--muted) / 0.5); color: hsl(var(--foreground));
-  border: 1px solid hsl(var(--input)); border-radius: calc(var(--radius) - 2px);
-  padding: 9px 11px;
-  font: 11.5px/1.5 ui-monospace, "Cascadia Code", Consolas, monospace;
-}
-.io:focus { outline: none; border-color: hsl(var(--ring)); box-shadow: 0 0 0 2px hsl(var(--ring) / 0.25); }
-
-/* the two flows of the Build tab */
-.flow-title { font-size: 13.5px; line-height: 1.5; color: hsl(var(--foreground)); }
-#flows-empty { margin: 0 0 14px; }
-
-/* ── preview over the launcher ─────────────────────────────────────────────────────────────── */
-.overlay { position: fixed; inset: 0; z-index: 50; display: flex; flex-direction: column; background: hsl(var(--background)); }
-.overlay[hidden] { display: none; }
-.overlay-bar { display: flex; align-items: center; gap: 8px; padding: 6px 10px; border-bottom: 1px solid hsl(var(--border)); }
-.overlay-renderers { display: flex; gap: 4px; }
-.overlay-renderers[hidden] { display: none; }
-.overlay-renderers .active { background: hsl(var(--primary)); color: hsl(var(--primary-foreground)); }
-.overlay-title { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: hsl(var(--muted-foreground)); font-size: 12px; }
-#overlay-frame { flex: 1; width: 100%; border: 0; background: #000; }
+.progress-indeterminate { width: 30% !important; animation: slide 1.2s ease-in-out infinite; }

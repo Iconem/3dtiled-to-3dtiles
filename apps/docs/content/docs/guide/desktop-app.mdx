@@ -46,9 +46,16 @@ its tile-server serves a tileset, and replaces the release.
 ```powershell
 cd apps/desktop
 $env:HUTCH_HOME = "$env:LOCALAPPDATA\hutch-home"   # Windows: give Hutch an explicit home
-hutch electrobun dev                               # build + run
-hutch electrobun build --env=stable                # distributable → build/stable-<target>/ + artifacts/
+hutch install --frozen-lockfile --ignore-workspace # the view's dependencies (pnpm, the app's own lockfile)
+hutch run dev                                      # Vite builds the view, then electrobun dev --watch
+hutch run build                                    # Vite, then electrobun build --env=stable → build/stable-<target>/ + artifacts/
 ```
+
+The view is a React 19 app with Tailwind CSS v4 and shadcn/ui on Base UI, built by Vite into `dist/`,
+which `electrobun.config.ts` copies into the app: Electrobun's own view bundler takes no plugins.
+`hutch run view` runs that Vite build alone, which a bare `hutch electrobun build` needs to have run
+first. `electrobun/view` comes from the Electrobun API Hutch unpacks into `.hutch/devkit/`, aliased in
+`vite.config.ts`; see `apps/desktop/README.md`.
 
 <Callout type="warn">
 **Run the build from PowerShell, not Git Bash/MSYS.** Hutch shells out to `tar`, and MSYS `tar`
@@ -63,6 +70,7 @@ a system Node at run time. For what the release ships, bundle them first, then p
 ```powershell
 node scripts/prepare-bundle.mjs                                # bundle/: production tile-server + Node
 $env:DESKTOP_BUNDLE_MAP = "$PWD\bundle\copy-map.json"
+hutch run view                                                 # dist/: the view, built by Vite
 hutch electrobun build --env=stable
 node scripts/package-windows.mjs                               # artifacts/Setup.exe and Portable.zip
 ```
@@ -101,7 +109,8 @@ only the configuration and the unsigned installer above.
 
 `apps/desktop` is deliberately **excluded from the pnpm workspace**, so
 `pnpm install --frozen-lockfile` — which the Dockerfile and every CI job run — is entirely unaffected
-by the desktop app.
+by the desktop app. Its view dependencies (React, Tailwind, shadcn, Vite) have their own
+`pnpm-lock.yaml` there, installed with `--ignore-workspace`.
 
 ## Process model
 
@@ -321,12 +330,13 @@ Browse buttons off-screen, and **no browser-based preview reveals this** — onl
 ## Theme and native controls
 
 The button in the header cycles between following the system, light and dark, and the choice is remembered. An inline
-script in `index.html` sets it before the first paint, so a light window does not flash dark.
+script in `index.html` sets `data-theme` on `<html>` before the first paint, so a light window does not flash dark, and
+Tailwind's `dark:` variant keys on that attribute. The tokens are shadcn's zinc palette, the same the viewer and docs use.
 
-`color-scheme` in the CSS is load-bearing, not decoration: it follows the theme, and without it WebView2 renders `<select>`
-drop-down popups, scrollbars and form controls with the **light** default — a white popup of pale options over a dark
-app, effectively unreadable. Styling `option` alone does not fix the popup on Windows, because the popup is an OS window
-rather than page content.
+`color-scheme` in the CSS is load-bearing, not decoration: it follows the theme, and without it WebView2 renders
+scrollbars, form controls and any native popup with the **light** default — a white popup of pale options over a dark
+app, effectively unreadable. The selects are Base UI popups (page content, styled by the page), but the scrollbars of the
+window, the log and the textarea are still the engine's.
 
 ## Where its links point
 
@@ -338,3 +348,22 @@ localhost URL.
 ## Not done yet
 
 Signing, and **pushing** an export to remote storage (S3, Azure, the Iconem platform) rather than a local folder.
+
+## If Windows Defender quarantines the app
+
+Since 2026-11-04 Microsoft Defender has flagged the Electrobun launcher the app is built on, `bin\launcher.exe`, as
+`Trojan:Win32/Bearfoos.A!ml`. It is a false positive on an unsigned executable, and it shows as:
+
+- the Start-menu shortcut does nothing, as `launcher.exe` is gone from `%LOCALAPPDATA%\com.iconem.3dtiled.desktop\stable\app\bin`;
+- an update downloads, then fails while applying (`.electrobun-update-<id>.result.json` says `InvalidUpdatePath`);
+- the installer ends with "The application could not be installed" (`AntivirusInterference` on its error output).
+
+`Get-MpThreatDetection` lists the quarantined files. Until the app is code-signed, exclude its folder from an
+administrator PowerShell, then install again:
+
+```powershell
+Add-MpPreference -ExclusionPath "$env:LOCALAPPDATA\com.iconem.3dtiled.desktop"
+```
+
+A dev build needs the same for `apps\desktop\build`. Signing (`signtool`, an Authenticode certificate) is the real fix;
+the repo has none.

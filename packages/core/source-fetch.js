@@ -4,7 +4,8 @@
  * One read that fails costs a tile at best and a whole branch of the hierarchy at worst, and the ways of losing one are not
  * format-specific. So what used to be per adapter, and missing from most of them, is one layer:
  *
- *   • A PER-HOST CAP on in-flight requests (`TILED_RANGE_MAX_PER_HOST`, default 32): a burst is paced, not refused.
+ *   • A PER-HOST CAP on in-flight requests (`TILED_RANGE_MAX_PER_HOST`, default 32): a burst is paced, not refused. It
+ *     halves when the host fails under load and climbs back as reads pass.
  *   • RETRY with backoff (3 attempts) on what may pass: a reset, a timeout, a 429, a 5xx.
  *   • A THROWN ERROR on anything else, never an error body taken for data. `err.status` is the host's answer, and
  *     `err.transient` says a retry might yet work: an adapter may treat a file the host lacks as optional, never one it
@@ -12,17 +13,31 @@
  *   • A range read returns the bytes asked for, even from a host that ignores Range and answers with the whole file.
  */
 const MAX_PER_HOST = Number(process.env.TILED_RANGE_MAX_PER_HOST) || 32;
+const MIN_PER_HOST = 4;
 const TRANSIENT = /ECONNRESET|ETIMEDOUT|ECONNREFUSED|EPIPE|EAI_AGAIN|socket hang up|fetch failed|other side closed|UND_ERR|network/i;
 const sleep = (ms) => new Promise(r => setTimeout(r, ms));
 
-const hosts = new Map();                            // host → { active, queue: resolve[] }
+// The cap adapts to the host, as TCP does: a failure that may be load (a 429, a 503, a reset, a timeout) halves it, down to
+// MIN_PER_HOST, and a full window of reads that all passed raises it by one, back up to the configured cap. So a host that
+// drops requests under a burst is given fewer, and one that recovers gets them back.
+const hosts = new Map();                            // host → { cap, active, queue: resolve[], passed }
+const hostOf = (host) => { let h = hosts.get(host); if (!h) hosts.set(host, h = { cap: MAX_PER_HOST, active: 0, queue: [], passed: 0 }); return h; };
 function acquire(host) {
-  let h = hosts.get(host);
-  if (!h) hosts.set(host, h = { active: 0, queue: [] });
-  const release = () => { const next = h.queue.shift(); if (next) next(); else h.active--; };
-  if (h.active < MAX_PER_HOST) { h.active++; return Promise.resolve(release); }
+  const h = hostOf(host);
+  const release = () => { h.active--; while (h.active < h.cap && h.queue.length) { h.active++; h.queue.shift()(); } };
+  if (h.active < h.cap) { h.active++; return Promise.resolve(release); }
   return new Promise(resolve => h.queue.push(() => resolve(release)));
 }
+function noteOutcome(host, transientFailure) {
+  const h = hostOf(host);
+  if (transientFailure) {
+    const cap = Math.max(MIN_PER_HOST, Math.floor(h.cap / 2));
+    if (cap < h.cap) console.warn(`[source] ${host}: lowering to ${cap} requests at a time`);
+    h.cap = cap; h.passed = 0;
+  } else if (h.cap < MAX_PER_HOST && ++h.passed >= h.cap * 2) { h.cap++; h.passed = 0; }
+}
+/** The cap a host is at now (tests, logs). */
+export const hostLimit = (host) => hostOf(host).cap;
 
 const isTransient = (e) => e.transient === true || e.name === 'TimeoutError' || e.name === 'AbortError'
   || TRANSIENT.test(e.message || '') || TRANSIENT.test(e.cause?.message || '') || TRANSIENT.test(e.cause?.code || '');
@@ -50,13 +65,14 @@ export async function requestSource(url, { headers, signal, attempts = 3, timeou
     try {
       const signals = [signal, timeoutMs && AbortSignal.timeout(timeoutMs)].filter(Boolean);
       const r = await fetch(url, { headers, signal: signals.length > 1 ? AbortSignal.any(signals) : signals[0] });
-      if (ok(r.status)) return { status: r.status, headers: r.headers, body: Buffer.from(await r.arrayBuffer()) };
+      if (ok(r.status)) { noteOutcome(host, false); return { status: r.status, headers: r.headers, body: Buffer.from(await r.arrayBuffer()) }; }
       await r.arrayBuffer().catch(() => {});        // drain so the connection can be reused
       err = Object.assign(new Error(`read ${shortUrl(url)}${headers?.Range ? ` [${headers.Range}]` : ''} → HTTP ${r.status}`), { status: r.status, transient: r.status === 429 || r.status >= 500 });
     } catch (e) { err = e; }
     finally { release(); }
     if (signal?.aborted) throw err;
     err.transient = isTransient(err);
+    if (!isAbsent(err.status)) noteOutcome(host, err.transient);
     if (!err.transient || attempt >= attempts) throw err;
     console.warn(`[source] ${shortUrl(url)} attempt ${attempt} failed: ${err.message}${err.cause ? ` (${err.cause.message || err.cause.code})` : ''}, retrying`);
     await sleep(300 * 2 ** (attempt - 1) + Math.random() * 200);

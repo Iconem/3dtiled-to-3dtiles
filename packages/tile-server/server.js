@@ -42,19 +42,30 @@ if (process.env.TLS_REJECT_UNAUTHORIZED !== '1') {
   process.removeAllListeners('warning'); // silence the one-time Node insecure-TLS warning spam
 }
 
-import { handleStream } from './stream-live.js';
-import { handleConvert } from './convert-live.js';
-import { handleSelfContained } from './3dtiles-self-contained.js';
-import { handle3dtilesTools } from './3dtiles-tools-live.js';
-import { handleGltf } from './gltf-live.js';
-import { handleBing } from './bing-live.js';
-import { handleExtract } from './extract-live.js';
-import { handleProxy } from './proxy-live.js';
-import { handleExport } from './export-live.js';
-import { handleAggregate } from './aggregate-live.js';
-import { handleStats } from './stats-live.js';
 import { handleHomepage } from './homepage-live.js';
 import { progressGet, httpStatusOf } from '../core/index.js';
+
+// The format adapters and the tools pull in a heavy module graph (splat-transform, loaders.gl, 3d-tiles-tools: 10–15 s on
+// a cold start), so they load after the port is bound, not before: the desktop app and a health check get an answer at
+// once, and the first request that needs a module waits for that module alone. They are all warmed right after listen.
+const lazy = (load, name) => { let mod; return (...args) => (mod ??= load()).then((m) => m[name](...args)); };
+const MODULES = {
+  stream: () => import('./stream-live.js'), convert: () => import('./convert-live.js'), selfContained: () => import('./3dtiles-self-contained.js'),
+  tools: () => import('./3dtiles-tools-live.js'), gltf: () => import('./gltf-live.js'), bing: () => import('./bing-live.js'),
+  extract: () => import('./extract-live.js'), proxy: () => import('./proxy-live.js'), exportLive: () => import('./export-live.js'),
+  aggregate: () => import('./aggregate-live.js'), stats: () => import('./stats-live.js'),
+};
+const handleStream = lazy(MODULES.stream, 'handleStream');
+const handleConvert = lazy(MODULES.convert, 'handleConvert');
+const handleSelfContained = lazy(MODULES.selfContained, 'handleSelfContained');
+const handle3dtilesTools = lazy(MODULES.tools, 'handle3dtilesTools');
+const handleGltf = lazy(MODULES.gltf, 'handleGltf');
+const handleBing = lazy(MODULES.bing, 'handleBing');
+const handleExtract = lazy(MODULES.extract, 'handleExtract');
+const handleProxy = lazy(MODULES.proxy, 'handleProxy');
+const handleExport = lazy(MODULES.exportLive, 'handleExport');
+const handleAggregate = lazy(MODULES.aggregate, 'handleAggregate');
+const handleStats = lazy(MODULES.stats, 'handleStats');
 
 // Port resolution order: --port <n> (CLI, wins) → TILE_PORT → PORT → 3001. The CLI/TILE_PORT escape
 // hatches matter under dev harnesses that inject PORT=<vite port> into the whole `pnpm run dev` process
@@ -127,7 +138,9 @@ http.createServer(async (req, res) => {
   }
 // HOST=127.0.0.1 (the desktop app) stays off the network, so Windows asks no firewall question.
 }).listen(PORT, process.env.HOST || undefined, () => {
-  console.log(`tile-server on http://localhost:${PORT}`);
+  console.log(`tile-server on http://localhost:${PORT} (${process.uptime().toFixed(1)} s after start)`);
+  const t0 = Date.now();
+  Promise.all(Object.values(MODULES).map((load) => load())).then(() => console.log(`  modules loaded in ${((Date.now() - t0) / 1000).toFixed(1)} s`), (e) => console.error('[tile-server] a module failed to load:', e));
   console.log(`  playground  interactive API reference (Scalar, driven by /openapi.json) → /playground (alias: /docs)`);
   console.log(`  tiles    (unified, no redirect) /tiles/tileset.json?url=<SRC>&format=<fmt>&cache=<none|hierarchy|full>[&prefetch=N][&tiling=implicit|explicit]`);
   console.log(`  stream   (cache=none/hierarchy; copc/potree/sog/lcc/rad/i3s/threemx/geosplats) /stream/tileset.json?url=<SRC>&format=<fmt>[&cache=none|hierarchy][&prefetch=N]`);

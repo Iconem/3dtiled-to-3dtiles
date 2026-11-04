@@ -161,6 +161,7 @@ the same rules against each format (`stream-contract.test.js`):
 | Keeps failing | `/stream` answers **502**, never a 200 with an empty body or an empty tile. A client can ask again |
 | Says the file is not there: 403, 404, 410 | `/stream` answers **404**. A subtree or a tile the source lacks stays a gap in the source |
 | Gets a burst | Paced at 32 requests at a time per host (`TILED_RANGE_MAX_PER_HOST`), not refused |
+| Fails under load: a 429, a 503, a reset | The cap for that host halves, down to 4, and climbs back by one for every window of reads that all passed |
 | Ignores `Range` and sends the whole file | The right bytes are cut out of it |
 
 A dataset whose first read failed is tried again a minute later, not marked as broken until the server restarts. A hierarchy

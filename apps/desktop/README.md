@@ -15,10 +15,13 @@ One installer that updates itself, and a portable zip. See the
 
 ```sh
 cd apps/desktop
-npx electrobun build     # writes build/<target>/
-# then launch build/<target>/3DTiled-dev/bin/launcher.exe   (or the platform equivalent)
+hutch install --frozen-lockfile --ignore-workspace   # the view's dependencies, from pnpm (own lockfile)
+hutch run build          # Vite builds the view, then electrobun build --env=stable → build/<target>/
+# then launch build/<target>/3DTiled/bin/launcher.exe   (or the platform equivalent)
 
-npx electrobun dev       # build + run, with watch
+hutch run dev            # Vite build + electrobun dev --watch
+hutch run view           # the Vite build alone (dist/), e.g. before a bare `hutch electrobun build`
+hutch run typecheck      # tsc --noEmit over src/ (view and main process)
 ```
 
 On Windows, Hutch wants an explicit home if your user directory already contains unrelated files:
@@ -34,9 +37,11 @@ dependency to a monorepo whose CI runs `pnpm install` on every build. Electrobun
 host (Hutch + the Cottontail JSC runtime) with official Windows 11 / macOS 14 / Ubuntu 24.04 support
 and pulls its toolchain into `.hutch/` (gitignored).
 
-`apps/desktop` is deliberately **excluded from the pnpm workspace** (see `pnpm-workspace.yaml`): its
-dependencies are Hutch-managed, so `pnpm install --frozen-lockfile` — which the Dockerfile and every
-CI job run — is completely unaffected by this app.
+`apps/desktop` is deliberately **excluded from the pnpm workspace** (see `pnpm-workspace.yaml`): it has
+its own `pnpm-lock.yaml`, installed with `--ignore-workspace`, so `pnpm install --frozen-lockfile` at
+the root — which the Dockerfile and every CI job run — is completely unaffected by this app. Hutch's
+own resolver cannot be used here: it refuses to run under a root `package.json` that declares
+`workspaces`, so `hutch.config.ts` selects pnpm as the package manager.
 
 ## How it works
 
@@ -54,13 +59,19 @@ found by walking up for `packages/tile-server/server.js`, because `electrobun de
 `apps/desktop` as cwd while the built app runs from `build/<target>/3DTiled-dev/bin` — a fixed depth
 would only ever be right for one of them.
 
-`src/mainview/` is the launcher UI — three tabs:
+`src/mainview/` is the launcher UI, a React 19 app styled with Tailwind CSS v4 and shadcn/ui
+components on Base UI (`components.json`; the components live in `components/ui/`). Three tabs:
 
 | tab | what it is |
 |---|---|
-| **Build** | dataset + format + materialization + optional globe placement → paste-ready URL, and **Export to a folder** (a static 3D Tiles copy, written by the server's `POST /export` or by a `packages/convert/cli.js` child of the main process — `src/bun/cli-runner.ts`, allow-listed scripts only) |
-| **Library** | saved datasets (`library.ts`), with a cached `/stats` check per row |
-| **Samples** | `catalog.ts` — a real public dataset per source format, one click into Build |
+| **Build** (`BuildTab.tsx`, `ExportCard.tsx`) | dataset + format + materialization + optional globe placement → paste-ready URL, and **Export to a folder** (a static 3D Tiles copy, written by the server's `POST /export` or by a `packages/convert/cli.js` child of the main process — `src/bun/cli-runner.ts`, allow-listed scripts only) |
+| **Library** (`LibraryTab.tsx`) | saved datasets (`library.ts`), with a cached `/stats` check per row |
+| **Samples** (`SamplesTab.tsx`) | `catalog.ts` — a real public dataset per source format, one click into Build |
+
+`App.tsx` is the shell (header, tabs, footer, the preview overlay, the state the tabs share);
+`host.ts` holds the RPC to the main process and the query-string parameters; `urls.ts` the pure
+helpers (tileset URL, viewer links, the CLI command equivalent to an export); `theme.ts` the
+system/light/dark cycle.
 
 Ports **and** the resolved viewer/docs URLs travel to it in the `views://` query string, since the
 main process may adopt a server and probes for a local viewer/docs — none of which is knowable at
@@ -75,11 +86,26 @@ unbounded-concurrency version of that is what cost `/aggregate` half its childre
 Row icons are generated **format glyphs, not thumbnails**: a real preview would require loading each
 tileset in a hidden Cesium view, which is far too expensive for a list.
 
+## How the view is built
+
+Electrobun's own view bundler takes no plugins, so React and Tailwind cannot go through it. As in
+Electrobun's `react-tailwind-vite` template, **Vite builds the view** (`vite.config.ts`, root
+`src/mainview`, output `dist/`) and `electrobun.config.ts` copies `dist/index.html` and `dist/assets`
+into the app as `views/mainview`. There is no `build.views` entry any more: a bare
+`hutch electrobun build` packages whatever `dist/` holds, which is why the Hutch scripts run Vite first.
+
+`electrobun/view` is not an npm package. `hutch electrobun prepare` unpacks the pinned Electrobun API
+into `.hutch/devkit/`, and the Vite config aliases the `electrobun/*` imports onto it with the
+`electrobunViteAliases` helper the devkit ships, so the view bundles the same RPC transport the main
+process speaks. `tsconfig.json` repeats the three entries it needs in `paths` next to the `@/` alias,
+because `paths` replaces the devkit's rather than merging with it.
+
 ## Two things that will bite you if you edit this
 
-- **The view needs an explicit `<script src="index.js">` tag.** The builder emits
-  `views/mainview/index.js` from the configured entrypoint but does **not** inject a tag for it. The
-  stock template's HTML has no tag either, so copying it yields a view that renders but never runs.
+- **Vite's output is an input of the Electrobun build.** Edit `src/mainview`, run `hutch run view`
+  (or `hutch run build` / `hutch run dev`, which include it), and only then `electrobun build`;
+  otherwise the app ships the previous `dist/`. `watchIgnore: ["dist/**"]` keeps `--watch` from
+  looping on it.
 - **Lay out left-aligned, not centred.** On a HiDPI Windows display the webview reports a CSS
   viewport wider than the native frame, so `margin: 0 auto` centres content against a width the user
   cannot see and clips the right-hand side.
