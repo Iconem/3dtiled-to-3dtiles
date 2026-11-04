@@ -21,8 +21,10 @@ Format loosely follows [Keep a Changelog](https://keepachangelog.com/).
   every request once, COPC, Potree 1 and 2, SOG, LCC, RAD, I3S and plain 3D Tiles come out identical to a clean export.
 - **`/stream` says why a read failed:** 502 if the host did not answer, 404 if the file is not there. A test runs these rules
   against every format. GeoSplats, `.3dtiles` and `.3tz` packages pass the same export check as the others.
-- **Point tiles carry `_INTENSITY` and `_CLASSIFICATION`** as glTF custom attributes, from COPC and Potree 1.x/2.0, live
-  and offline. Nothing was sent before: a cloud without RGB had only white `COLOR_0`.
+- **Point tiles can carry `_INTENSITY` and `_CLASSIFICATION`** as glTF custom attributes, from COPC and Potree 1.x/2.0:
+  `/stream` with `&attributes=intensity,classification` (or `all`), the offline converters always. Off by default on
+  `/stream`, so a tile stays as light as its points and colours (each adds 4 bytes a point, glTF-aligned: +40% on an Autzen tile). Nothing was sent
+  before: a cloud without RGB had only white `COLOR_0`.
 - **A crawl export of a deep implicit tree shows progress and starts at once.** Reading the availability of a 25-level
   Potree cloud (the 1.5 billion point Venice scan) walked tens of thousands of subtrees before the first download and
   reported nothing meanwhile, so the desktop app sat on "Reading the tree" with an empty bar for minutes. The walk now

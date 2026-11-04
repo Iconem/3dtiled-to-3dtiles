@@ -11,7 +11,7 @@
  */
 import { Copc } from 'copc';
 import { rangeGetter } from './range-getter.js';
-import { buildPointsGlb, keyToCoords, coordsToKey, buildSubtreeBuffer, georefFromCrs, curvedLocalizer, curvedTileLocalizer, buildImplicitTileset, memoizeAsync } from '../core/index.js';
+import { buildPointsGlb, pickAttributes, keyToCoords, coordsToKey, buildSubtreeBuffer, georefFromCrs, curvedLocalizer, curvedTileLocalizer, buildImplicitTileset, memoizeAsync } from '../core/index.js';
 
 const SUBTREE_LEVELS = 3;
 
@@ -240,7 +240,7 @@ function buildTilesetImplicit(ctx, urlParam) {
     maxLevel, subtreeLevels: SUBTREE_LEVELS, transform, urlParam });
 }
 
-async function serveTileGlb(ctx, key, curved = null, colorsEnc) {
+async function serveTileGlb(ctx, key, curved = null, colorsEnc, attributes = null) {
   const node = ctx.nodeMap.get(key);
   if (!node || !node.pointCount) return null;
   const view = await Copc.loadPointDataView(ctx.getter, ctx.copc, node);
@@ -261,8 +261,10 @@ async function serveTileGlb(ctx, key, curved = null, colorsEnc) {
   }
   // No RGB: white (colors = null), which reads well under eye-dome lighting. Intensity as grey used to
   // stand in, but intensity is stored in 16 bits with small values (0–255 or 0–4095 for most
-  // scanners), so divided by 65535 it rendered near-black. It travels as `_INTENSITY` instead, with `_CLASSIFICATION`.
-  return Buffer.from(await buildPointsGlb(pos, colors, n, { colors: colorsEnc, attributes: lasScalarAttributes(view) }));   // core applies the (E,U,−N) Y-up swizzle
+  // scanners), so divided by 65535 it rendered near-black. It travels as `_INTENSITY` instead, with `_CLASSIFICATION`,
+  // when the tile URL asks (`&attributes=`), so a tile is no heavier than its points and colours otherwise.
+  const attrs = attributes ? pickAttributes(lasScalarAttributes(view), attributes) : undefined;
+  return Buffer.from(await buildPointsGlb(pos, colors, n, { colors: colorsEnc, attributes: attrs }));   // core applies the (E,U,−N) Y-up swizzle
 }
 
 /** `_INTENSITY` (uint16) and `_CLASSIFICATION` (uint8) of a LAS point view, for buildPointsGlb. */
@@ -324,7 +326,7 @@ export function withCrsOverride(ts, ctx, crs, tag) {
 }
 export async function copcTile(url, key, opts = {}) {
   const ctx = await getCtx(url);
-  return serveTileGlb(ctx, key, curvedFor(ctx, opts.crs, opts.curved), opts.colors);   // &crs= / &curved= ride on the tile URL (stream-live tags them)
+  return serveTileGlb(ctx, key, curvedFor(ctx, opts.crs, opts.curved), opts.colors, opts.attributes);   // &crs= / &curved= / &attributes= ride on the tile URL (stream-live tags them)
 }
 export async function copcSubtree(url, key) {
   const ctx = await getCtx(url);

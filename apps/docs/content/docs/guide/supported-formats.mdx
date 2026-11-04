@@ -70,10 +70,12 @@ its bytes and the counts add up to `metadata.json`, and COPC's hierarchy adds up
 **A hierarchy read that fails is an error, not an empty branch**, for every format: see [When a read fails](#when-a-read-fails).
 On export, [`hierarchyErrors`](/docs/guide/desktop-app#export-to-a-folder) chooses between stopping and carrying on without it.
 
-**Intensity and classification travel with the points.** A COPC or Potree tile's GLB carries, next to `POSITION` and
-`COLOR_0`, the glTF custom attributes `_INTENSITY` (the LAS uint16, raw) and `_CLASSIFICATION` (the LAS uint8) when the
-source has them, from `/stream` and from the offline converters alike. A client that reads custom attributes (Blender's
-3D Tiles add-on, QGIS, a Cesium style) ramps them itself; the viewers here ignore them. Intensity is not mapped into
+**Intensity and classification travel with the points, when asked.** With `&attributes=intensity,classification` (or
+`attributes=all`) on the `/stream` tileset URL, a COPC or Potree tile's GLB carries, next to `POSITION` and `COLOR_0`,
+the glTF custom attributes `_INTENSITY` (the LAS uint16, raw) and `_CLASSIFICATION` (the LAS uint8) when the source has
+them; the tileset passes the parameter on to its tile URLs. Off by default: each adds 4 bytes a point (glTF aligns
+vertex attributes to 4 bytes, so a 61 k-point Autzen tile grows from 1.22 MB to 1.71 MB with both), and the viewers here ignore them. The offline converters always write them. A client that reads
+custom attributes (Blender's 3D Tiles add-on, QGIS, a Cesium style) ramps them itself. Intensity is not mapped into
 `COLOR_0`: its range depends on the scanner, so a cloud without RGB stays white.
 
 For both, a tile's `geometricError` is the **point spacing at its depth**: Potree's declared spacing

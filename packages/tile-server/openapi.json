@@ -334,6 +334,15 @@
             "description": "Splat formats only — centroids-only (points, no covariance) preview instead of full Gaussian splats."
           },
           {
+            "name": "attributes",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "example": "intensity,classification"
+            },
+            "description": "COPC and Potree only — the scalar attributes point tiles carry as glTF custom attributes, besides COLOR_0: `intensity` (_INTENSITY, uint16), `classification` (_CLASSIFICATION, uint8), or `all`. None by default; carried to the tile URLs."
+          },
+          {
             "name": "tiling",
             "in": "query",
             "schema": {

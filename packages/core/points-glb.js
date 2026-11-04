@@ -40,6 +40,24 @@ export function srgbToLinear(c) {
   return SRGB_TO_LINEAR[Math.round((c <= 0 ? 0 : c >= 1 ? 1 : c) * 65535)];
 }
 
+/** The scalar attributes a tile may carry, by the name a client asks for them. */
+export const POINT_ATTRIBUTES = { intensity: '_INTENSITY', classification: '_CLASSIFICATION' };
+
+/**
+ * Which of a source's scalar attributes go into a tile. `spec` is what the client asked for: a comma list of
+ * `intensity` and `classification`, or `all`; nothing asked means none, so a tile stays as light as its points and
+ * colours (each adds 4 bytes a point: glTF aligns vertex attributes to 4 bytes). Names the source lacks are simply absent.
+ * @param {Record<string, ArrayLike<number>>|null|undefined} all the source's attributes, by glTF name
+ * @param {string|null|undefined} spec
+ */
+export function pickAttributes(all, spec) {
+  if (!all || !spec) return {};
+  const names = new Set(spec.split(',').map((s) => s.trim().toLowerCase()));
+  const every = names.has('all') || names.has('1') || names.has('true');
+  const wanted = Object.entries(POINT_ATTRIBUTES).filter(([n]) => every || names.has(n)).map(([, k]) => k);
+  return Object.fromEntries(wanted.filter((k) => all[k]).map((k) => [k, all[k]]));
+}
+
 /**
  * @param {Float32Array} posLocal interleaved (E,N,U) dataset coords, tile-local
  * @param {Float32Array|null} colors interleaved rgba [0,1], or null → white

@@ -12,7 +12,7 @@
  *   GET /potree/tileset.json?url=<metadata.json | cloud.js URL>
  *   GET /potree/tile/<name>.glb?url=<…>                       → that node's points as a POINTS GLB
  */
-import { buildPointsGlb, coordsToKey, keyToCoords, buildSubtreeBuffer, georefFromCrs, buildImplicitTileset, parallelMap, defaultConcurrency, progressStart, progressTick, progressDone, memoizeAsync, fetchSource, fetchSourceRange } from '../core/index.js';
+import { buildPointsGlb, pickAttributes, coordsToKey, keyToCoords, buildSubtreeBuffer, georefFromCrs, buildImplicitTileset, parallelMap, defaultConcurrency, progressStart, progressTick, progressDone, memoizeAsync, fetchSource, fetchSourceRange } from '../core/index.js';
 import { preparePotree2Schema, parsePotree2Hierarchy, parsePotree2Chunk, decodePotree2Node } from '../potree-to-3dtiles/src/potree2.js';
 import { loadPotree1 } from '../potree-to-3dtiles/src/potree1.js';
 import { withCrsOverride } from './copc-live.js';
@@ -305,7 +305,7 @@ function buildTilesetImplicit(ctx, urlParam) {
     maxLevel, subtreeLevels: SUBTREE_LEVELS, transform, urlParam });
 }
 
-async function serveTileGlb(ctx, name, colorsEnc) {
+async function serveTileGlb(ctx, name, colorsEnc, attrSpec = null) {
   // Eager ctx has a full node map to gate on; lazy ctx (1.x .hrc) has no map — rely on readTile
   // returning null for a missing/empty node.
   if (ctx.nodes) { const node = ctx.nodes.get(name); if (!node || !node.numPoints) return null; }
@@ -315,7 +315,7 @@ async function serveTileGlb(ctx, name, colorsEnc) {
   const [ox, oy, oz] = ctx.origin;                          // world → tile-local (float32-safe)
   const pos = new Float32Array(count * 3);
   for (let i = 0; i < count; i++) { pos[i*3]=positions[i*3]-ox; pos[i*3+1]=positions[i*3+1]-oy; pos[i*3+2]=positions[i*3+2]-oz; }
-  return Buffer.from(await buildPointsGlb(pos, colors, count, { colors: colorsEnc, attributes }));   // core applies the (E,U,−N) Y-up swizzle
+  return Buffer.from(await buildPointsGlb(pos, colors, count, { colors: colorsEnc, attributes: pickAttributes(attributes, attrSpec) }));   // core applies the (E,U,−N) Y-up swizzle
 }
 
 // ── 1.x explicit tree (&tiling=explicit): drains every .hrc chunk up front, then builds one complete
@@ -411,7 +411,7 @@ export async function potreeTile(url, token, opts = {}) {
   // coords by box-containment (nameForCoord); lazy2/eager ctx uses the byCoord map (populated as chunks load).
   const name = /^[r0-7]+$/.test(token) ? token
     : (ctx.lazy ? ctx.nameForCoord(...token.split('-').map(Number)) : ctx.byCoord?.get(token));
-  return name ? serveTileGlb(ctx, name, opts.colors) : null;
+  return name ? serveTileGlb(ctx, name, opts.colors, opts.attributes) : null;
 }
 export async function potreeSubtree(url, key) {
   const ctx = await getCtx(url);
