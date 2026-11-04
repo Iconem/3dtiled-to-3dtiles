@@ -40,21 +40,61 @@ export function srgbToLinear(c) {
   return SRGB_TO_LINEAR[Math.round((c <= 0 ? 0 : c >= 1 ? 1 : c) * 65535)];
 }
 
-/** The scalar attributes a tile may carry, by the name a client asks for them. */
-export const POINT_ATTRIBUTES = { intensity: '_INTENSITY', classification: '_CLASSIFICATION' };
+/**
+ * The scalar attributes a point tile may carry besides POSITION and COLOR_0, by their PDAL dimension name (the LAS
+ * convention; matched without regard to case), with the glTF custom attribute each becomes and its storage. GpsTime is
+ * a float64 that glTF cannot hold: it travels as float32 seconds from the tile's earliest time, which the primitive's
+ * `extras.gpsTimeOffset` gives back. Boolean flags are 0/1 bytes.
+ */
+export const POINT_ATTRIBUTES = {
+  Intensity:         { name: '_INTENSITY',           array: Uint16Array },
+  Classification:    { name: '_CLASSIFICATION',      array: Uint8Array },
+  ReturnNumber:      { name: '_RETURN_NUMBER',       array: Uint8Array },
+  NumberOfReturns:   { name: '_NUMBER_OF_RETURNS',   array: Uint8Array },
+  PointSourceId:     { name: '_POINT_SOURCE_ID',     array: Uint16Array },
+  UserData:          { name: '_USER_DATA',           array: Uint8Array },
+  ScanAngle:         { name: '_SCAN_ANGLE',          array: Float32Array },
+  ScannerChannel:    { name: '_SCANNER_CHANNEL',     array: Uint8Array },
+  GpsTime:           { name: '_GPS_TIME',            array: Float32Array, relative: 'gpsTimeOffset' },
+  Infrared:          { name: '_INFRARED',            array: Uint16Array },
+  ScanDirectionFlag: { name: '_SCAN_DIRECTION_FLAG', array: Uint8Array },
+  EdgeOfFlightLine:  { name: '_EDGE_OF_FLIGHT_LINE', array: Uint8Array },
+  Synthetic:         { name: '_SYNTHETIC',           array: Uint8Array },
+  KeyPoint:          { name: '_KEY_POINT',           array: Uint8Array },
+  Withheld:          { name: '_WITHHELD',            array: Uint8Array },
+  Overlap:           { name: '_OVERLAP',             array: Uint8Array },
+};
+const BY_LOWER = Object.fromEntries(Object.keys(POINT_ATTRIBUTES).map((k) => [k.toLowerCase(), k]));
 
 /**
- * Which of a source's scalar attributes go into a tile. `spec` is what the client asked for: a comma list of
- * `intensity` and `classification`, or `all`; nothing asked means none, so a tile stays as light as its points and
- * colours (each adds 4 bytes a point: glTF aligns vertex attributes to 4 bytes). Names the source lacks are simply absent.
- * @param {Record<string, ArrayLike<number>>|null|undefined} all the source's attributes, by glTF name
+ * The PDAL names a client asked for, in the table's order: `spec` is a comma list of dimension names in any case
+ * (`Intensity,classification`), or `all`. Nothing asked means none: a tile stays as light as its points and colours
+ * (each attribute adds 4 bytes a point, as glTF aligns vertex attributes). Unknown names are ignored.
  * @param {string|null|undefined} spec
+ * @returns {string[]}
+ */
+export function wantedAttributes(spec) {
+  if (!spec) return [];
+  const names = new Set(String(spec).split(',').map((s) => s.trim().toLowerCase()).filter(Boolean));
+  const every = names.has('all') || names.has('1') || names.has('true');
+  return Object.keys(POINT_ATTRIBUTES).filter((k) => every || names.has(k.toLowerCase()));
+}
+
+/** Canonical form of `spec` for a URL: the names as the table spells them, or 'all', or ''. */
+export function attributesSpec(spec) {
+  if (!spec) return '';
+  const names = String(spec).split(',').map((s) => s.trim().toLowerCase());
+  if (names.includes('all') || names.includes('1') || names.includes('true')) return 'all';
+  return names.map((n) => BY_LOWER[n]).filter(Boolean).join(',');
+}
+
+/**
+ * Which of a source's attributes (a map by glTF name, as the readers build them) go into a tile, given what the client
+ * asked for; names the source lacks are simply absent.
  */
 export function pickAttributes(all, spec) {
-  if (!all || !spec) return {};
-  const names = new Set(spec.split(',').map((s) => s.trim().toLowerCase()));
-  const every = names.has('all') || names.has('1') || names.has('true');
-  const wanted = Object.entries(POINT_ATTRIBUTES).filter(([n]) => every || names.has(n)).map(([, k]) => k);
+  if (!all) return {};
+  const wanted = wantedAttributes(spec).map((k) => POINT_ATTRIBUTES[k].name);
   return Object.fromEntries(wanted.filter((k) => all[k]).map((k) => [k, all[k]]));
 }
 
@@ -100,7 +140,9 @@ export async function buildPointsGlb(posLocal, colors, count, opts = {}) {
   // Scalar point attributes the source carries, as glTF custom attributes (`_INTENSITY` as the LAS uint16, `_CLASSIFICATION`
   // as the LAS uint8, raw and not normalized): a client that reads them (Blender, QGIS, a style) ramps them itself, and one
   // that does not ignores them. Intensity is not turned into COLOR_0: its range is scanner-specific, so a fixed mapping is wrong.
-  for (const [name, arr] of Object.entries(opts.attributes ?? {})) {
+  const { extras: attrExtras, ...attrs } = opts.attributes ?? {};
+  if (attrExtras && Object.keys(attrExtras).length) p.setExtras({ ...(p.getExtras() ?? {}), ...attrExtras });
+  for (const [name, arr] of Object.entries(attrs)) {
     if (!arr || arr.length < count) continue;
     p.setAttribute(name, doc.createAccessor().setType('SCALAR').setArray(arr.length === count ? arr : arr.subarray(0, count)));
   }

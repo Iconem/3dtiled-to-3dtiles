@@ -43,7 +43,7 @@ import { i3sTileset, i3sTile, i3sTileRe } from './i3s-live.js';
 import { threemxTileset, threemxTile, threemxTileRe, threemxNode } from './threemx-live.js';
 import { geosplatsTileset, geosplatsTile, geosplatsTileRe } from './geosplats-live.js';
 import { handleSelfContained } from './3dtiles-self-contained.js';
-import { detectFormatByName, compressGlb, decompressGlb, applyPlacement, curvedParam, POINT_ATTRIBUTES } from '../core/index.js';
+import { detectFormatByName, compressGlb, decompressGlb, applyPlacement, curvedParam, attributesSpec } from '../core/index.js';
 
 // Per-tile glTF-Transform op applied to every streamed tile GLB, the streaming counterpart of the
 // /gltf proxy (which only reaches *explicit* tilesets). Because /stream builds each tile GLB itself,
@@ -102,13 +102,8 @@ const drainOnRefine = new Map();
 // depth of a tile token: "level-x-y-z" (implicit, COPC keys) or a Potree 1.x name ("r", "r04", …)
 const tokenLevel = (tok) => (/^r[0-7]*$/.test(tok) ? tok.length - 1 : Number(tok.split('-')[0]) || 0);
 
-/** `attributes=` as it is carried to the tiles: `all`, or the known names in a fixed order; '' when nothing valid was asked. */
-function attributesParam(v) {
-  if (!v) return '';
-  if (/^(all|1|true)$/i.test(v)) return 'all';
-  const names = new Set(v.split(',').map((s) => s.trim().toLowerCase()));
-  return Object.keys(POINT_ATTRIBUTES).filter((k) => names.has(k)).join(',');
-}
+/** `attributes=` as it is carried to the tiles: `all`, or the PDAL dimension names asked for (any case) as the table spells them; '' when nothing valid was asked. */
+const attributesParam = (v) => attributesSpec(v);
 
 // Append &format=<fmt> to every relative content/subtree URI (so the follow-up /stream/{tile,subtrees}
 // requests carry the format and dispatch to the same adapter). Handles both the explicit nested-tree
@@ -227,7 +222,7 @@ export async function handleStream(req, res, u) {
     if (fmt !== 'geosplats') applyPlacement(ts.root, u.searchParams, `stream:${fmt}`);
     // colors: COLOR_0 storage of point tiles (u16 default, u8, f32; core/points-glb.js), carried to the tiles
     const colorsQ = /^(u16|u8|f32)$/.test(u.searchParams.get('colors') || '') ? `&colors=${u.searchParams.get('colors')}` : '';
-    // attributes: the scalar attributes point tiles carry besides COLOR_0 (`intensity`, `classification`, `all`); none by default
+    // attributes: the scalar attributes point tiles carry besides COLOR_0 (PDAL names: `Intensity,Classification`, …, or `all`); none by default
     const attrsQ = attributesParam(u.searchParams.get('attributes'));
     tagContentUris(ts.root, `&format=${fmt}` + colorsQ + (attrsQ ? `&attributes=${attrsQ}` : '') + (centroids ? '&centroids=1' : '') + (crs ? `&crs=${encodeURIComponent(crs)}` : '') + (curved ? `&curved=${curved}` : '')
       + (transform ? `&transform=${transform}` + (transform === 'decompress' && tex === 'png' ? '&tex=png' : '') : ''));

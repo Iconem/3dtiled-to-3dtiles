@@ -70,10 +70,14 @@ its bytes and the counts add up to `metadata.json`, and COPC's hierarchy adds up
 **A hierarchy read that fails is an error, not an empty branch**, for every format: see [When a read fails](#when-a-read-fails).
 On export, [`hierarchyErrors`](/docs/guide/desktop-app#export-to-a-folder) chooses between stopping and carrying on without it.
 
-**Intensity and classification travel with the points, when asked.** With `&attributes=intensity,classification` (or
-`attributes=all`) on the `/stream` tileset URL, a COPC or Potree tile's GLB carries, next to `POSITION` and `COLOR_0`,
-the glTF custom attributes `_INTENSITY` (the LAS uint16, raw) and `_CLASSIFICATION` (the LAS uint8) when the source has
-them; the tileset passes the parameter on to its tile URLs. Off by default: each adds 4 bytes a point (glTF aligns
+**LAS dimensions travel with the points, when asked.** `&attributes=Intensity,Classification` on the `/stream` tileset
+URL names the dimensions by their PDAL names, in any case (`attributes=all` takes every one the source has); the tileset
+passes the parameter on to its tile URLs. A COPC tile's GLB then carries them next to `POSITION` and `COLOR_0` as glTF
+custom attributes, raw: `_INTENSITY` (uint16), `_CLASSIFICATION` (uint8), `_RETURN_NUMBER`, `_NUMBER_OF_RETURNS`,
+`_POINT_SOURCE_ID`, `_USER_DATA`, `_SCAN_ANGLE` (float32), `_SCANNER_CHANNEL`, `_INFRARED`, the flags
+`_SCAN_DIRECTION_FLAG`, `_EDGE_OF_FLIGHT_LINE`, `_SYNTHETIC`, `_KEY_POINT`, `_WITHHELD`, `_OVERLAP` as 0/1 bytes, and
+`_GPS_TIME` as float32 seconds from the tile's earliest time, which the primitive's `extras.gpsTimeOffset` gives back
+(glTF has no float64 accessor). A Potree tile has `Intensity` and `Classification`. Off by default: each adds 4 bytes a point (glTF aligns
 vertex attributes to 4 bytes, so a 61 k-point Autzen tile grows from 1.22 MB to 1.71 MB with both), and the viewers here ignore them. The offline converters always write them. A client that reads
 custom attributes (Blender's 3D Tiles add-on, QGIS, a Cesium style) ramps them itself. Intensity is not mapped into
 `COLOR_0`: its range depends on the scanner, so a cloud without RGB stays white.

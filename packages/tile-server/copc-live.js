@@ -11,7 +11,7 @@
  */
 import { Copc } from 'copc';
 import { rangeGetter } from './range-getter.js';
-import { buildPointsGlb, pickAttributes, keyToCoords, coordsToKey, buildSubtreeBuffer, georefFromCrs, curvedLocalizer, curvedTileLocalizer, buildImplicitTileset, memoizeAsync } from '../core/index.js';
+import { buildPointsGlb, wantedAttributes, POINT_ATTRIBUTES, keyToCoords, coordsToKey, buildSubtreeBuffer, georefFromCrs, curvedLocalizer, curvedTileLocalizer, buildImplicitTileset, memoizeAsync } from '../core/index.js';
 
 const SUBTREE_LEVELS = 3;
 
@@ -263,15 +263,29 @@ async function serveTileGlb(ctx, key, curved = null, colorsEnc, attributes = nul
   // stand in, but intensity is stored in 16 bits with small values (0–255 or 0–4095 for most
   // scanners), so divided by 65535 it rendered near-black. It travels as `_INTENSITY` instead, with `_CLASSIFICATION`,
   // when the tile URL asks (`&attributes=`), so a tile is no heavier than its points and colours otherwise.
-  const attrs = attributes ? pickAttributes(lasScalarAttributes(view), attributes) : undefined;
+  const attrs = attributes ? lasScalarAttributes(view, wantedAttributes(attributes)) : undefined;
   return Buffer.from(await buildPointsGlb(pos, colors, n, { colors: colorsEnc, attributes: attrs }));   // core applies the (E,U,−N) Y-up swizzle
 }
 
-/** `_INTENSITY` (uint16) and `_CLASSIFICATION` (uint8) of a LAS point view, for buildPointsGlb. */
-export function lasScalarAttributes(view) {
-  const n = view.pointCount, d = view.dimensions, out = {};
-  if (d.Intensity) { const g = view.getter('Intensity'), a = new Uint16Array(n); for (let i = 0; i < n; i++) a[i] = g(i); out._INTENSITY = a; }
-  if (d.Classification) { const g = view.getter('Classification'), a = new Uint8Array(n); for (let i = 0; i < n; i++) a[i] = g(i); out._CLASSIFICATION = a; }
+/**
+ * The LAS dimensions `keys` (PDAL names, core's POINT_ATTRIBUTES) of a point view as glTF custom attributes, for
+ * buildPointsGlb: a map by glTF name, plus `extras` for a dimension stored relative to the tile (GpsTime).
+ */
+export function lasScalarAttributes(view, keys = Object.keys(POINT_ATTRIBUTES)) {
+  const n = view.pointCount, d = view.dimensions, out = {}, extras = {};
+  for (const key of keys) {
+    const spec = POINT_ATTRIBUTES[key];
+    if (!spec || !d[key]) continue;
+    const g = view.getter(key), a = new spec.array(n);
+    if (spec.relative) {
+      let min = Infinity; for (let i = 0; i < n; i++) { const v = g(i); if (v < min) min = v; }
+      if (!Number.isFinite(min)) min = 0;
+      for (let i = 0; i < n; i++) a[i] = g(i) - min;
+      extras[spec.relative] = min;
+    } else for (let i = 0; i < n; i++) a[i] = +g(i);
+    out[spec.name] = a;
+  }
+  if (Object.keys(extras).length) out.extras = extras;
   return out;
 }
 
