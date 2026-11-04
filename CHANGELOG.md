@@ -31,8 +31,10 @@ Format loosely follows [Keep a Changelog](https://keepachangelog.com/).
   counts the subtrees read, and a copy that keeps implicit tiling downloads each subtree and its tiles as soon as that
   subtree is read. The walk reads 8 subtrees at a time instead of every child at once, so the server that generates them
   keeps answering the viewer. Cancel stops the walk, not only the downloads after it.
-- **Desktop: the folder pickers work on Windows.** Electrobun's dialog cannot pick a folder there (it opened the file
-  dialog, in which no folder can be chosen); the folder buttons now open Windows' own folder dialog.
+- **Desktop: the file and folder pickers work.** Electrobun answers a request from the view within 1 s or rejects it as
+  timed out, and a dialog waits for the user, so every pick failed ("RPC request timed out"); the dialogs now wait as
+  long as the user does. On Windows the folder buttons open Windows' own folder dialog, as Electrobun's cannot pick a
+  folder there.
 - **Desktop: the Advanced rows wrap** instead of squeezing five selects into one line.
 - **Desktop: the servers the app starts exit with it.** Windows keeps a child running when its parent is killed or
   crashes; the tile-server of a dev build stayed up after the app was gone, and the next launch adopted it, running that

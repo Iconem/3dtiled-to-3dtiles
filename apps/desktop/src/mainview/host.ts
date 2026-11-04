@@ -20,7 +20,9 @@ type PickerRPC = ReturnType<typeof Electroview.defineRPC<DesktopRPC>>;
 
 export let pickerRpc: PickerRPC | null = null;
 try {
-  const rpc = Electroview.defineRPC<DesktopRPC>({ handlers: { requests: {} } });
+  // Electrobun answers a request within 1 s by default, or rejects it as timed out. A dialog waits for the user, and
+  // the main process may be busy starting the servers, so the limit is generous here; the pickers lift it (Infinity).
+  const rpc = Electroview.defineRPC<DesktopRPC>({ maxRequestTime: 30_000, handlers: { requests: {} } });
   // Constructing the view is what wires the transport; we keep the rpc handle, not the view.
   new Electroview({ rpc });
   pickerRpc = rpc;
@@ -28,6 +30,10 @@ try {
   pickerRpc = null;
 }
 export const pickerAvailable = () => Boolean(pickerRpc && (globalThis as { __electrobun?: unknown }).__electrobun);
+
+/** A native file or folder dialog: the request is answered when the user closes it, however long that takes. */
+export const pickDataset = (params: { directory: boolean; allowedFileTypes?: string }) =>
+  pickerRpc!.request.pickDataset(params, { maxRequestTime: Infinity });
 
 const params = new URLSearchParams(location.search);
 export const tilePort = params.get('tilePort');

@@ -20,7 +20,7 @@ import { Button } from '@/components/ui/button';
 import type { AppModel } from './App';
 import { Card } from './components/Card';
 import { Actions, Advanced, Check, Choice, Code, Field, FieldLabel, Hint, Result, StepProgress, TextInput, UrlBar, type Kind, type Message } from './components/bits';
-import { base, pickerAvailable, pickerRpc } from './host';
+import { base, pickDataset, pickerAvailable, pickerRpc } from './host';
 import { noteExported, type DatasetOptions, type HistoryEntry } from './library';
 import { DEFAULT_EXPORT, DOC_LINKS, exportCli, exportCliArgs, exportRequest, mb, nameFor, stepsFromCliOutput, typeOfFormat, viewerLink, type ExportRequest, type ExportSettings, type Steps } from './urls';
 
@@ -225,7 +225,7 @@ export function ExportCard({ app }: { app: AppModel }) {
 
   async function browseOut() {
     if (!pickerAvailable()) return exportSay('The native picker needs the desktop app — type a folder path instead.', 'err');
-    const picked = await pickerRpc!.request.pickDataset({ directory: true, allowedFileTypes: '*' }).catch(() => []);
+    const picked = await pickDataset({ directory: true, allowedFileTypes: '*' }).catch(() => []);
     if (picked?.[0]) patch({ outDir: picked[0] });
   }
   async function openFolder() {

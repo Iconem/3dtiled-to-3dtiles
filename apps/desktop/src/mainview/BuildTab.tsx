@@ -7,7 +7,7 @@ import type { AppModel } from './App';
 import { Card } from './components/Card';
 import { Actions, Advanced, Choice, Code, Field, FieldLabel, Hint, Result, TextInput, UrlBar, type Message } from './components/bits';
 import { ExportCard } from './ExportCard';
-import { base, pickerAvailable, pickerRpc, viewerUrl } from './host';
+import { base, pickDataset, pickerAvailable, viewerUrl } from './host';
 import { newId } from './library';
 import { nameFor, PLACEMENT, typeOfFormat } from './urls';
 
@@ -43,10 +43,7 @@ export function BuildTab({ app, message }: { app: AppModel; message: Message | n
   async function browse(directory: boolean) {
     if (!pickerAvailable()) return say('The native picker needs the desktop app — paste a path instead.', 'err');
     try {
-      const picked = await pickerRpc!.request.pickDataset({
-        directory,
-        allowedFileTypes: directory ? '*' : DATASET_FILE_TYPES,
-      });
+      const picked = await pickDataset({ directory, allowedFileTypes: directory ? '*' : DATASET_FILE_TYPES });
       const path = picked?.[0];
       if (!path) return;                                   // user cancelled — not an error
       patchForm({ src: path });
