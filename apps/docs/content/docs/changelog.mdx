@@ -35,6 +35,9 @@ Format loosely follows [Keep a Changelog](https://keepachangelog.com/).
 - **Desktop: the folder pickers work on Windows.** Electrobun's dialog cannot pick a folder there (it opened the file
   dialog, in which no folder can be chosen); the folder buttons now open Windows' own folder dialog.
 - **Desktop: the Advanced rows wrap** instead of squeezing five selects into one line.
+- **Desktop: the servers the app starts exit with it.** Windows keeps a child running when its parent is killed or
+  crashes; the tile-server of a dev build stayed up after the app was gone, and the next launch adopted it, running that
+  old code. Both servers now follow the app's process, and closing the window stops them.
 - **The cap on requests to one host adapts:** it halves when the host fails under load (a 429, a 503, a reset) and climbs
   back as reads pass, between 4 and the configured 32.
 - **The tile-server listens in 0.5 s instead of 10–15 s:** the format adapters and the tools load after the port is bound.
