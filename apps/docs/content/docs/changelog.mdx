@@ -8,6 +8,12 @@ Format loosely follows [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+### Fixed — 2026-11-05 (desktop app: an "update" that went back to an older build)
+- **The app no longer offers a release older than itself.** The updater called any release with a different build
+  hash an update, so a build made after the last release was offered that release and, once accepted, went back to
+  it. The release now has to be at least as recent as the installed build. A build installed by hand can also opt out
+  of updates with a `no-update.txt` file beside `bin/`.
+
 ### Changed — 2026-11-05 (desktop app)
 - **Tile threads are on by default in the app** (auto), as one setting for the tiles it streams and the exports it
   runs: the same choice sits under Advanced in both the Stream and the Export tab, and the app tells its server through

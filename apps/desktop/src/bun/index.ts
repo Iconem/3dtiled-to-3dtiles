@@ -380,19 +380,34 @@ Electrobun.events.on("close", stopChildren);   // the window itself, should the 
 /**
  * Download a newer build in the background; the launcher offers to restart into it. Never restarts by
  * itself, as a conversion may be running. Not in a portable copy (package-windows.mjs leaves portable.txt
- * beside bin/): the updater only knows the installed folder.
+ * beside bin/): the updater only knows the installed folder. Not in a build installed by hand either
+ * (no-update.txt beside bin/).
+ *
+ * Electrobun calls any release whose hash differs from the installed one an update, so a build newer than the
+ * release was offered the release and went back to it. The release's version (the date it was built) has to be at
+ * least the installed one.
  */
+const versionParts = (v: unknown) => String(v ?? "").split(".").map((n) => parseInt(n, 10) || 0);
+export function olderVersion(a: unknown, b: unknown) {   // is a older than b
+	const x = versionParts(a), y = versionParts(b);
+	for (let i = 0; i < Math.max(x.length, y.length); i++) { const d = (x[i] ?? 0) - (y[i] ?? 0); if (d) return d < 0; }
+	return false;
+}
 let updateVersion: string | null = null;
 let updateHash: string | null = null;
 async function checkForUpdate() {
 	const { existsSync } = await import("node:fs");
 	const app = (globalThis as any).process?.execPath?.replace(/[\\/]bin[\\/][^\\/]+$/, "");
-	if (!bundled || !app || existsSync(`${app}/portable.txt`)) return;
+	if (!bundled || !app || existsSync(`${app}/portable.txt`) || existsSync(`${app}/no-update.txt`)) return;
 	try {
 		const local = await Updater.getLocalInfo();
 		if (!local.baseUrl || local.channel === "dev") return;
 		const info = await Updater.checkForUpdate();
 		if (info.error || !(info.updateAvailable || info.updateReady)) return;
+		if (olderVersion(info.version, local.version)) {
+			console.log(`[3dtiled-desktop] release ${info.version} is older than this build ${local.version}: not offered`);
+			return;
+		}
 		if (!info.updateReady) await Updater.downloadUpdate();
 		if (Updater.updateInfo().updateReady) {
 			updateVersion = info.version ?? "";
