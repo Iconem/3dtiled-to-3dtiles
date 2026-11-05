@@ -144,10 +144,19 @@ evaluated before assuming this would be a novel effort.
   fanvanzh/3dtiles for OSGB, WilliamLiu's 3D Tiles SPZ tooling, splat-transform), expose each tool's own arguments in
   the form, run it as a subprocess as "Run in: CLI subprocess" does today, then hand the result to the stream and
   export flows. Prior art to read first: GeoSolutions' `digital-twin-toolbox` (a self-hosted Docker set of these
-  pipelines) and py3dtiles' Docker image. Jonathan recalls a self-hosted "3dtiler" service on GitHub of this kind, mostly
-  for CityGML, with PLY mesh to 3D Tiles and py3dtiles behind it: not found by a first search, to look up by name. In the app it would be a third flow next to "Stream live" and "Export to a
+  pipelines) and py3dtiles' Docker image. The service Jonathan had in mind is of this family:
+  [`Gaia3D/mago-3d-tiler`](https://github.com/Gaia3D/mago-3d-tiler) (CityGML, IFC, OBJ, LAS and more to 3D Tiles, Java, with a
+  Docker image), next to the digital-twin-toolbox and py3dtiles. In the app it would be a third flow next to "Stream live" and "Export to a
   folder". Open questions: licences of the redistributed binaries, checksums for the downloads, and unsigned binaries
   under Windows Defender (the app's own launcher is already flagged). Not scoped, not started.
+
+- [ ] **Tile workers for the offline converters of the splat and mesh formats.** The live server runs every format's
+  tile on worker threads through one layer (`runTileTaskOr` in core, a task module per family in the tile-server). The
+  SOG, LCC, RAD, I3S and 3MX converters still loop on one thread, each with its own inline decode, encode and write.
+  The way to do it once: a `core` helper that takes the list of tiles, a task module and a function naming each
+  tile's bytes and output path, runs them on the pool with the single-thread fallback, and is the only tile loop any
+  converter has. Each converter then only supplies a pure "these bytes to this file" function, which is what the
+  live modules `splat-tile.js` and `mesh-tile.js` already are.
 
 - [ ] Further out: a browser/server tiled-splat transcoding UI in the spirit of SuperSplat's splat-transform
   tooling; a **georeferencing/geolocator** step for splats that don't ship one, along the lines of

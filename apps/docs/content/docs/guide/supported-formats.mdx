@@ -113,6 +113,32 @@ Formats that carry (or wrap) a general node/mesh hierarchy rather than a point- 
 | **[RAD](https://sparkjs.dev/docs/lod-getting-started/)** (SparkJS) · [ext-splats](https://sparkjs.dev/docs/ext-splats/) | LoD merge tree, variable fanout (Tiny-LoD base β≈1.75; Bhatt-LoD unspecified, our converter observes ~1.5 in practice) | RADC chunk: per-splat columns — `f16`/`oct88r8` **interleaved**, `ln_0r8`/`r8_delta` **planar**, `f32_lebytes` byte-transposed | REPLACE | downsampled **merged** splats | no geo metadata, root `RAD0` JSON + per-chunk `RADC` JSON | ✅ chunked `.radc` |
 | **[GeoSplats](https://www.maptiler.com/geosplats/)** (MapTiler) | **octree voxel grids** (`grid_1/8/64/512`) × 8 progressive LODs | per-octant **SOGS** (`means_l/u`, `quats`, `scales`, `sh0` WebP) or `octant_<n>.ply` | REPLACE (LOD subset) | coarser-LOD octants | georef'ed,`model.json` (georef) + per-sub-model `metadata.json` (`voxel_grids` + `entries` TOC) | ✅ per-file / range |
 
+## What decodes and encodes each format
+
+Every live tile is the same three steps: fetch the source bytes, decode them, write a GLB. This is what runs for
+each format, and whether the server and the offline converter can spread it over worker threads
+([`TILED_WORKERS`](/docs/guide/cli-usage#tile-workers-experimental)).
+
+| Format | Decoded with | Written with | Workers, live | Workers, offline |
+|---|---|---|---|---|
+| COPC | [`copc`](https://github.com/connormanning/copc.js) reader, LAZ chunks through `laz-perf` (WASM) | glTF-Transform, POINTS | yes | yes |
+| Potree 2.0 | our own reader; brotli nodes through Node's `zlib` | glTF-Transform, POINTS | yes | yes |
+| Potree 1.x | our own `.bin` reader; LAZ nodes through `copc`'s LAS reader and `laz-perf` | glTF-Transform, POINTS | yes | yes |
+| Plain LAS/LAZ | `copc`'s LAS reader and `laz-perf`, the whole file at once | glTF-Transform, POINTS | no live path | no |
+| Streamed SOG | [`@playcanvas/splat-transform`](https://github.com/playcanvas/splat-transform) (`readFile`, WebP planes) | our SPZ v2 writer, gzip through Node's `zlib`, wrapped by glTF-Transform | yes | no |
+| GeoSplats (MapTiler) | `@playcanvas/splat-transform` (`readSog`) | same SPZ writer | yes | no live-only format |
+| LCC (XGRIDS) | our own decoder (`lccDecode.js`) | same SPZ writer | yes | no |
+| RAD (Spark) | our own reader (`radHeader.js`), chunks inflated by Node's `zlib` | same SPZ writer | yes | no |
+| I3S / SLPK | our own geometry parser, a port of Esri's LEPCC codec for point clouds, `@loaders.gl/i3s` to read `.slpk` archives | our own minimal GLB writer, textures passed through as they are | yes | no |
+| 3MX (Bentley) | our own `.3mxb` parser, OpenCTM through a vendored `js-openctm` (LZMA) | glTF-Transform, TRIANGLES | yes | no |
+| Bing 3D | no decode: the `td1` manifest is rewritten, tiles pass through (optional Draco decode by glTF-Transform) | passed through | not needed | no offline path |
+| 3D Tiles to 3D Tiles | glTF-Transform for per-tile operations, `3d-tiles-tools` for whole-tileset ones | glTF-Transform | no | no |
+
+On the splat formats the workers gain little: the gzip of an SPZ payload already ran off the main thread (Node hands
+it to its own thread pool), a streamed-SOG chunk is decoded once and then cut into many tiles, and the samples measured
+were slower to fetch than to decode. The LAZ decode of a point cloud is the one step that was both heavy and stuck on
+the main thread, which is why COPC gains the most.
+
 ## 3D Tiles → 3D Tiles transcodes
 
 The input is *already* 3D Tiles — these are tileset-level transforms (the live/streaming-flavored

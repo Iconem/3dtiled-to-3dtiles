@@ -5,6 +5,20 @@ Format loosely follows [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+### Changed — 2026-11-05 (desktop app)
+- **Tile threads are on by default in the app** (auto), as one setting for the tiles it streams and the exports it
+  runs: the same choice sits under Advanced in both the Stream and the Export tab, and the app tells its server through
+  `POST /workers` (loopback, on a server started with `TILED_ALLOW_EXPORT=1`). The server's own default stays off.
+- **"Keep implicit tiling" is on by default** for exports.
+- **Export's Advanced options are in a new order:** check the result, tile threads, method, max depth, what to do when
+  part of the hierarchy cannot be read, run in.
+- **Longitude, latitude, altitude and heading are folded** under "Manual georeference of a local tileset".
+- **The Stream and Export tabs are always shown**, before a dataset is entered too.
+- **The title bar has the app's icon** on Windows, not the generic one.
+- **The footer's version opens the release on GitHub; the two ports open in the browser.** Docs is a book button next
+  to the theme switch. The library's Rows / Cards switch sits beside the tabs, since it applies to both lists. Tabs show
+  a pointer on hover.
+
 ### Added — 2026-11-05 (web viewer: Google 3D, and a view that survives a switch)
 - **A "Google 3D" tab next to "Bing 3D"**: Google Photorealistic 3D Tiles, loaded straight from Google with the
   deployment's Maps key, with the same pills (world, Roma, Washington, Berlin). Hidden where no key is configured.

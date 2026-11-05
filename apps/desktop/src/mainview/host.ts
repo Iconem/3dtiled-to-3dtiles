@@ -45,6 +45,22 @@ export const docsUrl = params.get('docsUrl') || '';
 // The version is only the build day, so two builds of one day differ by their hash alone.
 export const buildLabel = (version: string, hash: string | null) => (hash ? `${version} · ${hash.slice(0, 7)}` : version);
 
+/** The release the installed app updates from: what the version in the footer links to. */
+export const RELEASE_URL = 'https://github.com/jo-chemla/3dtiled-to-3dtiles/releases/tag/desktop-latest';
+
+/**
+ * Tell the app's tile-server how many worker threads to build tiles on ('' = one thread, 'auto', or a count):
+ * it applies to the tiles it streams and to the exports it runs. Resolves to the count in use, or null if the
+ * server did not take it (an older or adopted server).
+ */
+export async function setServerWorkers(workers: string): Promise<number | null> {
+  if (!base) return null;
+  try {
+    const r = await fetch(`${base}/workers`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ workers: workers || 0 }) });
+    return r.ok ? ((await r.json()).workers as number) : null;
+  } catch { return null; }
+}
+
 /** Open a page in the default browser: through the host when there is one, else a new tab. */
 export function openExternal(url: string) {
   if (pickerRpc) void pickerRpc.request.openExternal({ url }).catch(() => {});

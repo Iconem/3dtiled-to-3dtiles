@@ -16,6 +16,15 @@ const FLOWS = [
   ['stream', 'Stream live', 'A tileset URL converted on demand while this app runs: nothing is written to disk'],
   ['export', 'Export to a folder', 'Files on disk: crawl the stream, or run the offline converter'],
 ] as const;
+/** How many threads the app's server builds tiles on: one setting, for the tiles it streams and the exports it runs. */
+export const WORKERS = [
+  { value: 'auto', label: 'Auto, up to 8 threads (default)' },
+  { value: '', label: 'One thread' },
+  { value: '2', label: '2 worker threads' },
+  { value: '4', label: '4 worker threads' },
+  { value: '8', label: '8 worker threads' },
+];
+export const WORKERS_TITLE = 'Decode and encode tiles on worker threads: about 3 to 4 times faster on 8 cores for COPC and Potree, less for splats and meshes. The same tiles, around 50 MB more memory a worker. One setting for the tiles this app streams and the exports it runs; the offline converter uses workers for COPC and Potree only.';
 const FORMATS = [
   { value: '', label: 'auto-detect' }, { value: 'copc', label: 'COPC' }, { value: 'potree', label: 'Potree' },
   { value: 'sog', label: 'SOG (streamed)' }, { value: 'lcc', label: 'LCC' }, { value: 'rad', label: 'RAD' },
@@ -42,7 +51,6 @@ const DATASET_FILE_TYPES = 'laz,las,copc,rad,lcc,json,js,zip,3tz,slpk,glb,b3dm';
 
 export function BuildTab({ app, message }: { app: AppModel; message: Message | null }) {
   const { form, patchForm, url, say } = app;
-  const entered = form.src.trim() !== '';
   const [checking, setChecking] = useState(false);
   const [flow, setFlow] = useState<string>('stream');
 
@@ -131,25 +139,26 @@ export function BuildTab({ app, message }: { app: AppModel; message: Message | n
             <Field label="Format"><Choice id="format" value={form.format} onChange={(v) => patchForm({ format: v })} options={FORMATS} /></Field>
             <Field label="Materialization"><Choice id="cache" value={form.cache} onChange={(v) => patchForm({ cache: v })} options={CACHES} /></Field>
           </div>
-          <div className="mt-3.5 grid grid-cols-4 gap-3 max-[560px]:grid-cols-2">
-            {PLACEMENT.map((k) => (
-              <Field key={k} label={PLACEMENT_FIELDS[k].label}>
-                <TextInput id={k} value={form[k]} onChange={(e) => patchForm({ [k]: e.target.value })} placeholder={PLACEMENT_FIELDS[k].placeholder} />
-              </Field>
-            ))}
-          </div>
-          <Hint className="mt-3">
-            For sources with no georeference: applied as a root ENU transform in the tileset
-            itself, so every client gets it. Sources that carry their own georeference ignore these.
-          </Hint>
+          {/* Only for a source that carries no georeference, so it stays folded: most sources place themselves. */}
+          <Advanced id="manual-georef-local-tileset" summary="Manual georeference of a local tileset" hint="longitude, latitude, altitude, heading">
+            <div className="mt-3.5 grid grid-cols-4 gap-3 max-[560px]:grid-cols-2">
+              {PLACEMENT.map((k) => (
+                <Field key={k} label={PLACEMENT_FIELDS[k].label}>
+                  <TextInput id={k} value={form[k]} onChange={(e) => patchForm({ [k]: e.target.value })} placeholder={PLACEMENT_FIELDS[k].placeholder} />
+                </Field>
+              ))}
+            </div>
+            <Hint className="mt-3">
+              For sources with no georeference: applied as a root ENU transform in the tileset
+              itself, so every client gets it. Sources that carry their own georeference ignore these.
+            </Hint>
+          </Advanced>
         </Advanced>
       </Card>
 
-      {!entered && <Hint id="flows-empty" className="mb-3.5">Enter a dataset above, then stream it live or export it to a folder.</Hint>}
-
       {/* The two things to do with a dataset, apart: a URL that converts on demand, or files on disk. Both stay
           mounted, so an export carries on while the stream tab is open. */}
-      <Tabs id="flows" hidden={!entered} value={flow} onValueChange={(v) => setFlow(String(v))} className="gap-0">
+      <Tabs id="flows" value={flow} onValueChange={(v) => setFlow(String(v))} className="gap-0">
         <TabsList id="flow-tabs" className="mb-3 h-auto gap-0.5 self-start rounded-md p-[3px]">
           {FLOWS.map(([name, label, sub]) => (
             <TabsTrigger key={name} value={name} data-flow={name} title={sub}
@@ -176,7 +185,12 @@ export function BuildTab({ app, message }: { app: AppModel; message: Message | n
             default, 16, suits meshes and loads far fewer points. Then turn on <em>Attenuation</em> under
             <em> Point Cloud Shading</em>, or every point stays 1 px.
           </Hint>
-          <Advanced summary="Advanced" hint="test, API playground, hierarchy">
+          <Advanced summary="Advanced" hint="tile threads, test, API playground, hierarchy">
+            <div className="mt-3.5 mb-3 grid grid-cols-2 gap-3 max-[560px]:grid-cols-1">
+              <Field label={<>Tile threads <span className="text-xs font-normal text-muted-foreground">(experimental)</span></>} title={WORKERS_TITLE}>
+                <Choice id="stream-workers" value={app.workers} onChange={app.setWorkers} options={WORKERS} />
+              </Field>
+            </div>
             <Actions>
               <Button id="check" disabled={checking} onClick={check}>Test endpoint</Button>
               <Button id="playground" variant="ghost" onClick={() => { if (base) app.openTool(`${base}/playground`, 'API playground'); }}>API playground</Button>

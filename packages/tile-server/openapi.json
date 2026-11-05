@@ -1232,7 +1232,11 @@
                     "description": "Check the folder at the end. counts: walks it as a client would, reads every tile's header, and compares the points with the total a Potree or COPC source declares. sample: also reads a few tiles of each level in full. full: reads every tile in full. The result is `verify` in the report."
                   },
                   "workers": {
-                    "type": ["string", "integer", "null"],
+                    "type": [
+                      "string",
+                      "integer",
+                      "null"
+                    ],
                     "default": null,
                     "example": "auto",
                     "description": "Experimental. `auto` or a count: decode and encode this export's tiles on worker threads (about 3 to 4 times faster on 8 cores for COPC and Potree, less for splats and meshes; the same tiles, around 50 MB more memory a worker). Absent, null or 0: one thread, or what `TILED_WORKERS` says. It is the server's setting while the export runs."
@@ -1354,6 +1358,94 @@
           },
           "404": {
             "description": "No such job or file"
+          }
+        }
+      }
+    },
+    "/workers": {
+      "get": {
+        "summary": "Tile worker threads in use",
+        "description": "How many worker threads this server builds tiles on (0 = on its one thread). Loopback clients only, on a server started with TILED_ALLOW_EXPORT=1.",
+        "tags": [
+          "misc"
+        ],
+        "responses": {
+          "200": {
+            "description": "The count in use and the TILED_WORKERS environment value",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "workers": {
+                      "type": "integer"
+                    },
+                    "env": {
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Not enabled, or not a loopback client"
+          }
+        }
+      },
+      "post": {
+        "summary": "Set the tile worker threads",
+        "description": "Change, while the server runs, how many worker threads build its tiles: the tiles it streams and the exports it runs. `auto` is one per core but one, at most 8; a number is that many; 0 is the server's one thread; null gives TILED_WORKERS its say back.",
+        "tags": [
+          "misc"
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "workers": {
+                    "type": [
+                      "string",
+                      "integer",
+                      "null"
+                    ],
+                    "example": "auto"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "The count now in use",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "workers": {
+                      "type": "integer"
+                    },
+                    "env": {
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Not enabled, or not a loopback client"
           }
         }
       }

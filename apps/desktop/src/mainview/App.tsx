@@ -18,7 +18,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { cn } from '@/lib/utils';
 import { BuildTab } from './BuildTab';
 import { LINKS } from './catalog';
-import { base, buildLabel, docsUrl, fitWindowForPreview, fitWindowToContent, openExternal, pickerAvailable, pickerRpc, resetFit, staticPort, tilePort, viewerUrl } from './host';
+import { RELEASE_URL, setServerWorkers, base, buildLabel, docsUrl, fitWindowForPreview, fitWindowToContent, openExternal, pickerAvailable, pickerRpc, resetFit, staticPort, tilePort, viewerUrl } from './host';
 import { LibraryTab } from './LibraryTab';
 import { loadLibrary, noteServed, parseLibrary, saveLocal, serialize, type DatasetOptions, type Library } from './library';
 import { SamplesTab } from './SamplesTab';
@@ -46,8 +46,19 @@ export interface AppModel {
   loadIntoBuilder: (e: DatasetOptions) => void;
   /** The current dataset was served (copied, previewed, tested): note it in the history. */
   noteServedNow: () => void;
+  /** Tile worker threads of the app's server ('' = one, 'auto', or a count): one setting for streaming and exports. */
+  workers: string;
+  setWorkers: (v: string) => void;
+  /** The library's lists as one-line rows (true) or cards. */
+  libCompact: boolean;
 }
 
+// The choices this machine keeps: the library's view, and how many threads the server builds tiles on.
+const LIB_VIEW_KEY = '3dtiled-desktop-library-view';
+const WORKERS_KEY = '3dtiled-desktop-tile-workers';
+const segTab = 'h-6 flex-none rounded-sm border-0 px-[9px] text-xs font-medium text-muted-foreground shadow-none hover:text-foreground data-active:bg-background data-active:text-foreground data-active:shadow-xs dark:data-active:border-0 dark:data-active:bg-background';
+
+const footLink = 'rounded text-muted-foreground no-underline hover:text-foreground hover:underline focus-visible:ring-2 focus-visible:ring-ring/60 focus-visible:outline-none';
 const THEME_ICONS: Record<Theme, React.ReactNode> = {
   system: <><rect x="3" y="4" width="18" height="12" rx="2" /><path d="M8 20h8M12 16v4" /></>,
   light: <><circle cx="12" cy="12" r="4" /><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4" /></>,
@@ -65,6 +76,12 @@ interface Overlay {
 export function App() {
   const [theme, cycleTheme] = useTheme();
   const [tab, setTab] = useState('build');
+  const [libCompact, setLibCompact] = useState(() => localStorage.getItem(LIB_VIEW_KEY) !== 'detailed');
+  const setLibView = (c: boolean) => { setLibCompact(c); localStorage.setItem(LIB_VIEW_KEY, c ? 'compact' : 'detailed'); };
+  // Auto unless this machine chose otherwise: the server is told at start and on every change.
+  const [workers, setWorkersState] = useState(() => localStorage.getItem(WORKERS_KEY) ?? 'auto');
+  const setWorkers = (v: string) => { setWorkersState(v); localStorage.setItem(WORKERS_KEY, v); };
+  useEffect(() => { void setServerWorkers(workers); }, [workers]);
   const [form, setForm] = useState(EMPTY_FORM);
   const [message, setMessage] = useState<Message | null>(null);
   const [overlay, setOverlay] = useState<Overlay | null>(null);
@@ -175,7 +192,7 @@ export function App() {
     void pickerRpc?.request.applyUpdate({});
   };
 
-  const app: AppModel = { form, patchForm, dataset, url, lib, updateLib, replaceLib, say, showTab: setTab, previewIn, openTool, loadIntoBuilder, noteServedNow };
+  const app: AppModel = { form, patchForm, dataset, url, lib, updateLib, replaceLib, say, showTab: setTab, previewIn, openTool, loadIntoBuilder, noteServedNow, workers, setWorkers, libCompact };
 
   const themeTitle = `Theme: ${theme}. Click for ${nextTheme(theme)}.`;
   // The pill says what the server does now, not what the ports said at start: it is probed every 10 s.
@@ -199,7 +216,6 @@ export function App() {
   const links: [string, string, string][] = [
     ['link-viewer', viewerUrl, 'Web viewer'],
     ['link-explorer', viewerUrl ? `${viewerUrl}/hierarchy` : (base ? `${base}/hierarchy` : ''), 'Hierarchy explorer'],
-    ['link-docs', docsUrl, 'Docs'],
     ['link-plugins', LINKS.cesiumUnreal, 'Cesium for Unreal'],
     ['link-repo', LINKS.repo, 'Source'],
   ];
@@ -216,6 +232,11 @@ export function App() {
           <h1 className="m-0 text-lg font-semibold tracking-[-0.02em]">3D&nbsp;Tiled <span className="ml-2 text-[13px] font-normal text-muted-foreground">local middleware</span></h1>
           <div id="status" className={cn('ml-auto rounded-full border px-2.5 py-[5px] text-[11.5px] leading-none font-medium whitespace-nowrap', status.cls)}>{status.text}</div>
           <Button id="update" variant="default" hidden={!update} disabled={update?.applying} title={update?.title} onClick={applyUpdate}>Update ready: restart</Button>
+          {docsUrl && (
+            <Button id="link-docs" size="icon" type="button" title="Documentation" aria-label="Documentation" onClick={() => openExternal(docsUrl)}>
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M12 7v14" /><path d="M3 18a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1h5a4 4 0 0 1 4 4 4 4 0 0 1 4-4h5a1 1 0 0 1 1 1v13a1 1 0 0 1-1 1h-6a3 3 0 0 0-3 3 3 3 0 0 0-3-3z" /></svg>
+            </Button>
+          )}
           <Button id="theme" size="icon" type="button" title={themeTitle} aria-label={themeTitle} onClick={cycleTheme}>
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">{THEME_ICONS[theme]}</svg>
           </Button>
@@ -227,7 +248,8 @@ export function App() {
         </p>
 
         <Tabs value={tab} onValueChange={(v) => setTab(String(v))} className="gap-0">
-          <TabsList id="tabs" className="mb-3.5 h-auto gap-0.5 self-start rounded-md p-[3px]">
+          <div className="mb-3.5 flex items-center gap-3">
+          <TabsList id="tabs" className="h-auto gap-0.5 self-start rounded-md p-[3px]">
             {(['build', 'library', 'samples'] as const).map((name) => (
               <TabsTrigger key={name} value={name} data-tab={name}
                 className="h-[30px] flex-none gap-[7px] rounded-sm border-0 px-3.5 text-[13px] font-medium text-muted-foreground hover:text-foreground data-active:bg-background data-active:text-foreground data-active:shadow-xs dark:data-active:border-0 dark:data-active:bg-background">
@@ -236,6 +258,16 @@ export function App() {
               </TabsTrigger>
             ))}
           </TabsList>
+          {/* Rows or cards: for both of the library's lists, so it sits with the tabs, not in one of the lists. */}
+          {tab === 'library' && (
+            <Tabs value={libCompact ? 'rows' : 'cards'} onValueChange={(v) => setLibView(v === 'rows')} className="ml-auto gap-0">
+              <TabsList aria-label="Library view" className="h-auto gap-0.5 rounded-md p-0.5">
+                <TabsTrigger id="lib-view-rows" value="rows" title="One line per entry: its title and buttons" className={segTab}>Rows</TabsTrigger>
+                <TabsTrigger id="lib-view-cards" value="cards" title="Cards with the source, options and stats" className={segTab}>Cards</TabsTrigger>
+              </TabsList>
+            </Tabs>
+          )}
+          </div>
           {/* Kept mounted: an export carries on while you switch tabs. */}
           <TabsContent value="build" id="panel-build" keepMounted><BuildTab app={app} message={message} /></TabsContent>
           <TabsContent value="library" id="panel-library" keepMounted><LibraryTab app={app} /></TabsContent>
@@ -243,11 +275,15 @@ export function App() {
         </Tabs>
 
         <footer className="mt-auto flex flex-wrap items-center gap-x-3 gap-y-1 border-t border-border pt-3 text-xs text-muted-foreground">
-          <span id="version" title={version?.title}>{version?.label}</span>
-          <span id="ports">{`tile-server :${tilePort ?? '—'} · preview :${staticPort ?? '—'}`}</span>
+          {version && <a id="version" href={RELEASE_URL} target="_blank" rel="noreferrer" title={`${version.title}. Opens the release on GitHub.`} className={footLink}>{version.label}</a>}
+          <span id="ports">
+            {tilePort ? <a id="port-tiles" href={`${base}/`} target="_blank" rel="noreferrer" title="The tile-server's home page, in your browser" className={footLink}>{`tile-server :${tilePort}`}</a> : 'tile-server :—'}
+            {' · '}
+            {staticPort ? <a id="port-preview" href={`http://127.0.0.1:${staticPort}/`} target="_blank" rel="noreferrer" title="The preview server, in your browser" className={footLink}>{`preview :${staticPort}`}</a> : 'preview :—'}
+          </span>
           <span className="flex-1" />
           {links.map(([id, href, label]) => href && (
-            <a key={id} id={id} href={href} target="_blank" rel="noreferrer" className="rounded text-muted-foreground no-underline hover:text-foreground hover:underline focus-visible:ring-2 focus-visible:ring-ring/60 focus-visible:outline-none">{label}</a>
+            <a key={id} id={id} href={href} target="_blank" rel="noreferrer" className={footLink}>{label}</a>
           ))}
         </footer>
       </div>

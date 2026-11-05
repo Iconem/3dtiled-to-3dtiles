@@ -4,7 +4,6 @@
  */
 import { useRef, useState, type ReactNode } from 'react';
 import { Button } from '@/components/ui/button';
-import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Textarea } from '@/components/ui/textarea';
 import { cn } from '@/lib/utils';
 import type { AppModel } from './App';
@@ -14,8 +13,6 @@ import { base, pickerRpc } from './host';
 import { newId, parseLibrary, serialize, type DatasetOptions, type HistoryEntry, type LibraryEntry } from './library';
 import { buildUrlFrom, iconOf, kindOf, mb, typeOfFormat } from './urls';
 
-// Compact rows by default: a title and its actions on one line. The choice is this machine's.
-const LIB_VIEW_KEY = '3dtiled-desktop-library-view';
 
 const GLYPH_BG: Record<string, string> = {
   pointcloud: 'bg-[hsl(210_70%_55%/0.14)]',
@@ -52,12 +49,11 @@ function Row({ e, meta, metaClass, metaTitle, compact, actions }: {
 
 export function LibraryTab({ app }: { app: AppModel }) {
   const { lib, updateLib, say } = app;
-  const [compact, setCompact] = useState(() => localStorage.getItem(LIB_VIEW_KEY) !== 'detailed');
+  const compact = app.libCompact;                          // chosen next to the tabs (App.tsx): it applies to both lists
   const [io, setIo] = useState<{ open: boolean; value: string }>({ open: false, value: '' });
   const ioRef = useRef<HTMLTextAreaElement>(null);
   const [refreshing, setRefreshing] = useState<string | null>(null);
 
-  const setView = (c: boolean) => { setCompact(c); localStorage.setItem(LIB_VIEW_KEY, c ? 'compact' : 'detailed'); };
 
   const openBtn = (e: DatasetOptions) => <Button size="sm" variant="ghost" onClick={() => { app.loadIntoBuilder(e); app.showTab('build'); }}>Open</Button>;
   const copyBtn = (e: DatasetOptions) => <Button size="sm" variant="ghost" onClick={async () => {
@@ -109,7 +105,6 @@ export function LibraryTab({ app }: { app: AppModel }) {
   };
 
   const listClass = cn('mt-3 flex flex-col', compact ? 'gap-0' : 'gap-2');
-  const segTab = 'h-6 flex-none rounded-sm border-0 px-[9px] text-xs font-medium text-muted-foreground shadow-none hover:text-foreground data-active:bg-background data-active:text-foreground data-active:shadow-xs dark:data-active:border-0 dark:data-active:bg-background';
 
   return (
     <section>
@@ -117,12 +112,6 @@ export function LibraryTab({ app }: { app: AppModel }) {
         <CardHead>
           <FieldLabel>Bookmarks</FieldLabel>
           <CardHeadActions>
-            <Tabs value={compact ? 'rows' : 'cards'} onValueChange={(v) => setView(v === 'rows')} className="mr-1 gap-0">
-              <TabsList aria-label="Library view" className="h-auto gap-0.5 rounded-md p-0.5">
-                <TabsTrigger id="lib-view-rows" value="rows" title="One line per entry: its title and buttons" className={segTab}>Rows</TabsTrigger>
-                <TabsTrigger id="lib-view-cards" value="cards" title="Cards with the source, options and stats" className={segTab}>Cards</TabsTrigger>
-              </TabsList>
-            </Tabs>
             <Button id="lib-refresh" variant="ghost" disabled={refreshing != null} onClick={refreshStats}>{refreshing ?? 'Refresh stats'}</Button>
             <Button id="lib-export" variant="ghost" title="Export bookmarks and history as JSON" onClick={exportJson}>Export JSON</Button>
             <Button id="lib-import" variant="ghost" title="Import bookmarks and history from JSON" onClick={importJson}>Import JSON</Button>

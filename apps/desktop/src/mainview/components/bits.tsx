@@ -82,11 +82,11 @@ export function Check({ id, checked, onChange, title, children }: { id?: string;
 }
 
 /** The "Advanced" fold under a card: a summary line with a chevron, and a border above. */
-export function Advanced({ summary, hint, open, onOpenChange, className, children }: {
-  summary: ReactNode; hint?: ReactNode; open?: boolean; onOpenChange?: (o: boolean) => void; className?: string; children: ReactNode;
+export function Advanced({ id, summary, hint, open, onOpenChange, className, children }: {
+  id?: string; summary: ReactNode; hint?: ReactNode; open?: boolean; onOpenChange?: (o: boolean) => void; className?: string; children: ReactNode;
 }) {
   return (
-    <Collapsible open={open} onOpenChange={onOpenChange} className={cn('mt-4 border-t border-border pt-3.5', className)}>
+    <Collapsible id={id} open={open} onOpenChange={onOpenChange} className={cn('mt-4 border-t border-border pt-3.5', className)}>
       <CollapsibleTrigger className="group/fold flex cursor-pointer items-center gap-0 rounded border-0 bg-transparent p-0 text-left text-[13px] font-medium text-foreground select-none focus-visible:ring-2 focus-visible:ring-ring/60 focus-visible:outline-none">
         <ChevronRightIcon className="mr-1.5 size-3.5 text-muted-foreground transition-transform duration-150 group-data-[panel-open]/fold:rotate-90" />
         {summary}{hint && <> <span className="ml-1 text-xs font-normal text-muted-foreground">{hint}</span></>}

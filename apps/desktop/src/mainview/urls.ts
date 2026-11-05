@@ -71,7 +71,7 @@ export interface ExportSettings {
   depth: string;
   verify: string;
   hierarchyErrors: string;
-  /** Tile worker threads: '' is the single thread of today, 'auto', or a count. */
+  /** Tile worker threads: '' is one thread, 'auto' (the app's default), or a count. The app's one setting (App.tsx). */
   workers: string;
   keepImplicit: boolean;
   pack3tz: boolean;
@@ -84,8 +84,8 @@ export interface ExportSettings {
 }
 
 export const DEFAULT_EXPORT: ExportSettings = {
-  outDir: '', method: 'crawl', runner: 'server', depth: '', verify: 'sample', hierarchyErrors: 'error', workers: '',
-  keepImplicit: false, pack3tz: false, pack3dtiles: false,
+  outDir: '', method: 'crawl', runner: 'server', depth: '', verify: 'sample', hierarchyErrors: 'error', workers: 'auto',
+  keepImplicit: true, pack3tz: false, pack3dtiles: false,
   convTiling: '', convScale: '', convGeScale: '', convGeLayer: '', convCentroids: false,
 };
 

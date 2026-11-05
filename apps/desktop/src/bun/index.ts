@@ -323,6 +323,46 @@ const mainWindow = new BrowserWindow({
 	rpc,
 });
 
+/**
+ * The title bar's icon on Windows. Electrobun puts the app's icon on the launcher and the shortcuts, but the window is
+ * made by the runtime's process, which has none, so the title bar showed Windows' generic one. Set it on the window
+ * itself: WM_SETICON with the bundled app.ico, small and large. Best effort: a failure leaves the generic icon.
+ */
+async function setWindowIcon(title: string) {
+	if (!isWindows) return;
+	try {
+		const proc = (globalThis as any).process;
+		const { existsSync } = await import("node:fs");
+		let dir = String(proc?.execPath ?? "").replace(/[\\/][^\\/]+$/, ""), ico = "";
+		for (let i = 0; i < 4 && dir; i++) { if (existsSync(`${dir}/Resources/app.ico`)) { ico = `${dir}/Resources/app.ico`; break; } dir = dir.replace(/[\\/][^\\/]+$/, ""); }
+		if (!ico) return;
+		const { dlopen, FFIType, ptr } = (await import("bun:ffi" as string)) as any;
+		const u = dlopen("user32.dll", {
+			FindWindowW: { args: [FFIType.ptr, FFIType.ptr], returns: FFIType.ptr },
+			GetSystemMetrics: { args: [FFIType.i32], returns: FFIType.i32 },
+			LoadImageW: { args: [FFIType.ptr, FFIType.ptr, FFIType.u32, FFIType.i32, FFIType.i32, FFIType.u32], returns: FFIType.ptr },
+			SendMessageW: { args: [FFIType.ptr, FFIType.u32, FFIType.u64, FFIType.ptr], returns: FFIType.i64 },
+		}).symbols as any;
+		// UTF-16 strings for the W functions, kept in variables: a pointer alone does not keep its buffer alive
+		const wideBuf = (s: string) => (globalThis as any).Buffer.from(`${s}\0`, "utf16le");
+		const pathBuf = wideBuf(ico.replace(/\//g, "\\")), titleBuf = wideBuf(title);
+		const path = ptr(pathBuf), wide = (_s: string) => ptr(titleBuf);
+		for (let i = 0; i < 20; i++) {                       // the native window appears a moment after its object
+			const hwnd = u.FindWindowW(null, wide(title));
+			if (hwnd) {
+				for (const [which, metric] of [[0, 49], [1, 11]] as const) {   // ICON_SMALL at SM_CXSMICON, ICON_BIG at SM_CXICON
+					const size = u.GetSystemMetrics(metric);
+					const icon = u.LoadImageW(null, path, 1 /* IMAGE_ICON */, size, size, 0x10 /* LR_LOADFROMFILE */);
+					if (icon) u.SendMessageW(hwnd, 0x80 /* WM_SETICON */, which, icon);
+				}
+				return;
+			}
+			await new Promise((r) => setTimeout(r, 250));
+		}
+	} catch (e) { console.warn(`[3dtiled-desktop] window icon not set: ${e}`); }
+}
+void setWindowIcon("3D Tiled — local middleware");
+
 const t0 = Date.now();
 const { tilePort, staticPort, viewerUrl, docsUrl } = await startServers();
 console.log(`[3dtiled-desktop] tile-server=${tilePort ?? "FAILED"} static=${staticPort ?? "FAILED"} after ${((Date.now() - t0) / 1000).toFixed(1)} s `

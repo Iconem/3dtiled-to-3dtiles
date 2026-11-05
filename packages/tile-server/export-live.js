@@ -402,13 +402,25 @@ const publicJob = (j) => ({ id: j.id, state: j.state, url: j.url, outDir: j.outD
   preview: j.state === 'done' ? `/export/${j.id}/files/tileset.json` : null });
 
 export async function handleExport(req, res, u) {
-  if (u.pathname !== '/export' && !u.pathname.startsWith('/export/')) return false;
+  if (u.pathname !== '/export' && !u.pathname.startsWith('/export/') && u.pathname !== '/workers') return false;
   if (process.env.TILED_ALLOW_EXPORT !== '1') {
     json(res, 403, { error: 'export is disabled — start the tile-server with TILED_ALLOW_EXPORT=1 (the desktop app does)', enabled: false });
     return true;
   }
   if (!isLoopback(req)) { json(res, 403, { error: 'export only answers loopback clients' }); return true; }
 
+  // /workers: how many tile worker threads this server uses for the tiles it builds (core/parallel.js), read or set
+  // while it runs. Same gate as /export: it changes what the process spends, so loopback clients of a server that
+  // opted in. POST {"workers": "auto" | <n> | 0}; null gives TILED_WORKERS its say back.
+  if (u.pathname === '/workers') {
+    if (req.method === 'POST') {
+      let body;
+      try { body = await readBody(req); } catch (e) { json(res, 400, { error: e.message }); return true; }
+      setTileWorkers(body.workers === 0 ? '0' : body.workers);
+    }
+    json(res, 200, { workers: tileWorkerCount(), env: process.env.TILED_WORKERS ?? null });
+    return true;
+  }
   if (u.pathname === '/export' && req.method === 'GET') {
     json(res, 200, { enabled: true, jobs: [...jobs.values()].map(publicJob) });
     return true;
