@@ -43,7 +43,7 @@ if (process.env.TLS_REJECT_UNAUTHORIZED !== '1') {
 }
 
 import { handleHomepage } from './homepage-live.js';
-import { progressGet, httpStatusOf } from '../core/index.js';
+import { progressGet, httpStatusOf, tileWorkerCount } from '../core/index.js';
 
 // The format adapters and the tools pull in a heavy module graph (splat-transform, loaders.gl, 3d-tiles-tools: 10–15 s on
 // a cold start), so they load after the port is bound, not before: the desktop app and a health check get an answer at
@@ -152,6 +152,8 @@ http.createServer(async (req, res) => {
 // HOST=127.0.0.1 (the desktop app) stays off the network, so Windows asks no firewall question.
 }).listen(PORT, process.env.HOST || undefined, () => {
   console.log(`tile-server on http://localhost:${PORT} (${process.uptime().toFixed(1)} s after start)`);
+  // TILED_WORKERS (off by default): COPC and Potree tiles are decoded and encoded on worker threads, see core/parallel.js
+  console.log(tileWorkerCount() ? `  tile workers: ${tileWorkerCount()} threads (TILED_WORKERS=${process.env.TILED_WORKERS})` : '  tile workers: off (TILED_WORKERS=auto|<n> to decode and encode point tiles on worker threads)');
   const t0 = Date.now();
   Promise.all(Object.values(MODULES).map((load) => load())).then(() => console.log(`  modules loaded in ${((Date.now() - t0) / 1000).toFixed(1)} s`), (e) => console.error('[tile-server] a module failed to load:', e));
   console.log(`  playground  interactive API reference (Scalar, driven by /openapi.json) → /playground (alias: /docs)`);

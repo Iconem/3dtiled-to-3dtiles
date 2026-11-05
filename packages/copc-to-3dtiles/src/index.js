@@ -22,9 +22,10 @@ import { Copc, Las, Getter } from 'copc';
 import { writeTileGlb }                    from './glbWriter.js';
 import { convertPlainLas }                 from './plainLas.js';
 import { buildEcefTransform }              from './georef.js';
-import { parallelMap, defaultConcurrency, keyToCoords, octreeSubCube, cubeToBox,
+import { parallelMap, defaultConcurrency, tilePool, tileWorkerCount, runTileTask, keyToCoords, octreeSubCube, cubeToBox,
          buildExplicitTree, buildSubtreeBuffer, subtreeRootKeys } from '../../core/index.js';
 
+const TILE_TASK = new URL('./tile-task.js', import.meta.url).href;   // what a tile worker runs
 const SUBTREE_LEVELS = 3; // subtree covers levels d, d+1, d+2 (73 nodes max)
 
 const ensureDir = d => fs.mkdir(d, { recursive: true });
@@ -112,15 +113,21 @@ export async function convert(inputPath, outDir, opts = {}) {
   // Parallel per-node: COPC supports per-node range reads, so each task reads,
   // decodes and writes one node's points independently. Bounded concurrency keeps
   // at most N nodes' point arrays alive at once → memory stays bounded.
-  const concurrency = defaultConcurrency();
-  console.log(`Writing GLBs... (parallel: ${concurrency} lanes)`);
+  // With tile workers (TILED_WORKERS, or opts.workers) each node is read, decoded and written on a worker thread:
+  // the LAZ decode and the glTF encode are what a lane spends its time on, and one thread runs them one at a time.
+  const pool = tilePool(opts.workers != null ? tileWorkerCount(opts.workers) : undefined);
+  const concurrency = pool ? pool.size : defaultConcurrency();
+  console.log(`Writing GLBs... (parallel: ${concurrency} ${pool ? 'worker threads' : 'lanes'})`);
   const entries = [...nodeMap];
   let done = 0;
   await parallelMap(entries, async ([key, node]) => {
     const { level, x, y, z } = keyToCoords(key);
     const tilePath = path.join(outDir, 'tiles', `${level}`, `${x}`, `${y}`, `${z}.glb`);
-    const view = await Copc.loadPointDataView(inputPath, copc, node);
-    await writeTileGlb(view, origin, tilePath);
+    if (pool) await runTileTask(pool, TILE_TASK, 'copcNodeToFile', { input: inputPath, header: copc.header, eb: copc.eb, node, origin, tilePath });
+    else {
+      const view = await Copc.loadPointDataView(inputPath, copc, node);
+      await writeTileGlb(view, origin, tilePath);
+    }
     done++;
     if (done % 100 === 0) process.stdout.write(`\r  ${done}/${nodeMap.size}`);
   }, { concurrency });
@@ -178,6 +185,6 @@ export async function convert(inputPath, outDir, opts = {}) {
 if (process.argv[1] && fileURLToPath(import.meta.url) === path.resolve(process.argv[1])) {
   const args = process.argv.slice(2);
   const flag = n => { const i = args.indexOf(`--${n}`); if (i >= 0) return args[i + 1]; const eq = args.find(a => a.startsWith(`--${n}=`)); return eq ? eq.slice(n.length + 3) : undefined; };
-  const pos = []; for (let i = 0; i < args.length; i++) { if (args[i].startsWith('--')) { if (args[i] === '--tiling') i++; continue; } pos.push(args[i]); }
-  convert(pos[0], pos[1], { tiling: flag('tiling') }).then(() => process.exit(0)).catch(e => { console.error(e); process.exit(1); });
+  const pos = []; for (let i = 0; i < args.length; i++) { if (args[i].startsWith('--')) { if (args[i] === '--tiling' || args[i] === '--workers') i++; continue; } pos.push(args[i]); }
+  convert(pos[0], pos[1], { tiling: flag('tiling'), workers: flag('workers') }).then(() => process.exit(0)).catch(e => { console.error(e); process.exit(1); });
 }

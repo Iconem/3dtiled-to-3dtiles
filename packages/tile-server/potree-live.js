@@ -12,10 +12,13 @@
  *   GET /potree/tileset.json?url=<metadata.json | cloud.js URL>
  *   GET /potree/tile/<name>.glb?url=<…>                       → that node's points as a POINTS GLB
  */
-import { buildPointsGlb, pickAttributes, coordsToKey, keyToCoords, buildSubtreeBuffer, georefFromCrs, buildImplicitTileset, parallelMap, defaultConcurrency, progressStart, progressTick, progressDone, memoizeAsync, fetchSource, fetchSourceRange } from '../core/index.js';
+import { tilePool, runTileTask, ownBytes, coordsToKey, keyToCoords, buildSubtreeBuffer, georefFromCrs, buildImplicitTileset, parallelMap, defaultConcurrency, progressStart, progressTick, progressDone, memoizeAsync, fetchSource, fetchSourceRange } from '../core/index.js';
 import { preparePotree2Schema, parsePotree2Hierarchy, parsePotree2Chunk, decodePotree2Node } from '../potree-to-3dtiles/src/potree2.js';
 import { loadPotree1 } from '../potree-to-3dtiles/src/potree1.js';
 import { withCrsOverride } from './copc-live.js';
+import { potreeDataGlb } from './points-tile.js';
+
+const TILE_TASKS = new URL('./tile-tasks.js', import.meta.url).href;   // what a tile worker runs (TILED_WORKERS)
 
 const SUBTREE_LEVELS = 3;
 // Spatial octree (level,x,y,z) of a node from its box vs root box (exact ints — robust to Potree's
@@ -30,6 +33,8 @@ const georef = (origin, crs) => georefFromCrs(origin, crs, 'potree-live');
 
 const fetchFull = fetchSource;
 const rangeGet = fetchSourceRange;      // one contiguous range read from octree.bin (the per-tile fetch — this is the streaming core)
+// A Potree 1.x node's file and what decodes it, for a tile worker (see serveTileGlb).
+const raw1 = async (src, node) => { const raw = await src.readBytes(node); return raw ? { kind: '1', raw, node, spec: src.decodeSpec } : null; };
 const finishCtx = (nodes, rootBox, crs, spacingMeta, readTile) => {
   const origin = [0,1,2].map(k => (rootBox.min[k] + rootBox.max[k]) / 2);
   const rootDiag = Math.hypot(rootBox.max[0]-rootBox.min[0], rootBox.max[1]-rootBox.min[1], rootBox.max[2]-rootBox.min[2]);
@@ -150,11 +155,13 @@ const getCtx = memoizeAsync(async (url) => {
               spacing: src.spacing || rootDiag / 128, rootBox: src.rootBox,
               maxLevel: 24,                       // generous cap; subtrees report 0 children at the real leaf level
               availSet, nameForCoord, ensureBlock, drainAll,
-              readTile: name => src.readNode({ name, box: src.boxOf(name) }) };
+              readTile: name => src.readNode({ name, box: src.boxOf(name) }),
+              rawTile: name => raw1(src, { name, box: src.boxOf(name) }) };
       console.log(`[potree-live] (1.x lazy implicit) ${url} → .hrc chunked (stepSize=${stepSize}), georef=${!!ctx.transform}`);
     } else {
       // inline (1.4) layout → whole tiny hierarchy is in cloud.js already; build it eagerly.
-      ctx = { ...finishCtx(src.nodes, src.rootBox, src.crs, src.spacing, name => src.readNode(src.nodes.get(name))), src };
+      ctx = { ...finishCtx(src.nodes, src.rootBox, src.crs, src.spacing, name => src.readNode(src.nodes.get(name))), src,
+              rawTile: name => { const n = src.nodes.get(name); return n ? raw1(src, { name, box: n.box }) : null; } };
       console.log(`[potree-live] (1.4 inline) ${url} → ${src.nodes.size} nodes, georef=${!!ctx.transform}`);
     }
   } else {                                                  // ── Potree 2.0 (lazy) ──
@@ -262,7 +269,13 @@ const getCtx = memoizeAsync(async (url) => {
             rootBox, origin: origin2, transform: georef(origin2, meta.projection || meta.crs || meta.wkt || null),
             rootDiag: rootDiag2, spacing: meta.spacing || rootDiag2 / 128,
             maxLevel: 24,
-            readTile };
+            readTile,
+            rawTile: async name => {
+              const n = nodes.get(name);
+              if (!n || !n.byteSize) return null;
+              return { kind: '2', raw: await rangeGet(octreeUrl, n.byteOffset, n.byteSize), node: { numPoints: n.numPoints },
+                       meta: { scale: meta.scale, offset: meta.offset }, schema };
+            } };
     console.log(`[potree-live] (2.0 lazy) ${url} → first chunk loaded (${nodes.size} nodes), pending=${pendingChunks2.size} proxy chunks`);
   }
   return ctx;
@@ -309,13 +322,18 @@ async function serveTileGlb(ctx, name, colorsEnc, attrSpec = null) {
   // Eager ctx has a full node map to gate on; lazy ctx (1.x .hrc) has no map — rely on readTile
   // returning null for a missing/empty node.
   if (ctx.nodes) { const node = ctx.nodes.get(name); if (!node || !node.numPoints) return null; }
+  const pool = tilePool();
+  if (pool && ctx.rawTile) {
+    // TILED_WORKERS: this thread only fetches the node's bytes; a worker decodes them and builds the GLB.
+    const t = await ctx.rawTile(name);
+    if (!t) return null;
+    const raw = ownBytes(t.raw);
+    const glb = await runTileTask(pool, TILE_TASKS, 'potreeTileTask', { ...t, raw, origin: ctx.origin, colors: colorsEnc, attributes: attrSpec }, [raw.buffer]);
+    return glb ? Buffer.from(glb.buffer, glb.byteOffset, glb.byteLength) : null;
+  }
   const data = await ctx.readTile(name);                    // 2.0: range read+decode; 1.x: per-node fetch+decode
-  if (!data || !data.count) return null;
-  const { positions, colors, count, attributes } = data;
-  const [ox, oy, oz] = ctx.origin;                          // world → tile-local (float32-safe)
-  const pos = new Float32Array(count * 3);
-  for (let i = 0; i < count; i++) { pos[i*3]=positions[i*3]-ox; pos[i*3+1]=positions[i*3+1]-oy; pos[i*3+2]=positions[i*3+2]-oz; }
-  return Buffer.from(await buildPointsGlb(pos, colors, count, { colors: colorsEnc, attributes: pickAttributes(attributes, attrSpec) }));   // core applies the (E,U,−N) Y-up swizzle
+  const glb = await potreeDataGlb(data, { origin: ctx.origin, colors: colorsEnc, attributes: attrSpec });
+  return glb ? Buffer.from(glb) : null;
 }
 
 // ── 1.x explicit tree (&tiling=explicit): drains every .hrc chunk up front, then builds one complete

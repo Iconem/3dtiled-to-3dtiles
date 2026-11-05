@@ -22,9 +22,11 @@ import path from 'path';
 import { fileURLToPath } from 'node:url';
 import { loadPotree2 } from './potree2.js';
 import { loadPotree1 } from './potree1.js';
-import { buildPointsGlb, parallelMap, defaultConcurrency, georefFromCrs,
+import { nodeGlb } from './tile-task.js';
+import { parallelMap, defaultConcurrency, tilePool, tileWorkerCount, runTileTask, georefFromCrs,
          coordsToKey, octreeSubCube, cubeToBox, buildSubtreeBuffer, subtreeRootKeys } from '../../core/index.js';
 
+const TILE_TASK = new URL('./tile-task.js', import.meta.url).href;   // what a tile worker runs
 const SUBTREE_LEVELS = 3;
 
 // Spatial octree index (level,x,y,z) of a node, derived from its box vs the root box (exact integers —
@@ -102,34 +104,30 @@ export async function convert(inDir, outDir, opts = {}) {
   // Both COPC and Potree are octrees → default to IMPLICIT tiling (subtree files); explicit is opt-out.
   const tiling = opts.tiling === 'explicit' ? 'explicit' : 'implicit';
   const rootCube = [...src.rootBox.min, ...src.rootBox.max];
-  const concurrency = defaultConcurrency();
+  // With tile workers (TILED_WORKERS, or opts.workers) each node is read, decoded and written on a worker thread;
+  // a source that cannot say where a node's bytes are on disk (src.rawNode) stays on this thread.
+  const pool = src.rawNode ? tilePool(opts.workers != null ? tileWorkerCount(opts.workers) : undefined) : null;
+  const concurrency = pool ? pool.size : defaultConcurrency();
+  if (pool) console.log(`  tile workers: ${pool.size} threads`);
   let written = 0;
   const hasContent = new Set();     // explicit: names that produced a GLB
   const coordSet = new Set();       // implicit: "level-x-y-z" keys that produced a GLB
   await parallelMap(order, async (name) => {
     const node = src.nodes.get(name);
     if (!node || node.numPoints <= 0) return;
-    const data = await src.readNode(node);
-    if (!data || data.count <= 0) return;
-    const local = new Float32Array(data.count * 3);
-    for (let i = 0; i < data.count; i++) {
-      local[i*3]   = data.positions[i*3]   - gc[0];
-      local[i*3+1] = data.positions[i*3+1] - gc[1];
-      local[i*3+2] = data.positions[i*3+2] - gc[2];
-    }
-    // buildPointsGlb applies the Y-up swizzle (E,U,−N) internally — pass (E,N,U).
-    const glb = await buildPointsGlb(local, data.colors, data.count, { attributes: data.attributes });
-    if (tiling === 'implicit') {
-      const { level, x, y, z } = coordsOfBox(node.box, src.rootBox, node.depth);
-      node._coord = { level, x, y, z };
-      const tp = path.join(outDir, 'tiles', `${level}`, `${x}`, `${y}`, `${z}.glb`);
+    const coord = tiling === 'implicit' ? coordsOfBox(node.box, src.rootBox, node.depth) : null;
+    const tp = coord ? path.join(outDir, 'tiles', `${coord.level}`, `${coord.x}`, `${coord.y}`, `${coord.z}.glb`)
+                     : path.join(outDir, `tiles/${name}.glb`);
+    if (pool) {
+      if (!await runTileTask(pool, TILE_TASK, 'potreeNodeToFile', { ...src.rawNode(node), gc, tilePath: tp })) return;
+    } else {
+      const glb = await nodeGlb(await src.readNode(node), gc);
+      if (!glb) return;
       await fs.mkdir(path.dirname(tp), { recursive: true });
       await fs.writeFile(tp, glb);
-      coordSet.add(coordsToKey(level, x, y, z));
-    } else {
-      await fs.writeFile(path.join(outDir, `tiles/${name}.glb`), glb);
-      hasContent.add(name);
     }
+    if (coord) { node._coord = coord; coordSet.add(coordsToKey(coord.level, coord.x, coord.y, coord.z)); }
+    else hasContent.add(name);
     if (++written % 50 === 0) process.stdout.write(`\r  ${written} tiles`);
   }, { concurrency });
   process.stdout.write(`\r  ${written} tiles\n`);
@@ -196,6 +194,6 @@ export async function convert(inDir, outDir, opts = {}) {
 if (process.argv[1] && fileURLToPath(import.meta.url) === path.resolve(process.argv[1])) {
   const args = process.argv.slice(2);
   const flag = n => { const i = args.indexOf(`--${n}`); if (i >= 0) return args[i + 1]; const eq = args.find(a => a.startsWith(`--${n}=`)); return eq ? eq.slice(n.length + 3) : undefined; };
-  const pos = []; for (let i = 0; i < args.length; i++) { if (args[i].startsWith('--')) { if (args[i] === '--tiling') i++; continue; } pos.push(args[i]); }
-  convert(pos[0], pos[1], { tiling: flag('tiling') }).then(() => process.exit(0)).catch(e => { console.error(e); process.exit(1); });
+  const pos = []; for (let i = 0; i < args.length; i++) { if (args[i].startsWith('--')) { if (args[i] === '--tiling' || args[i] === '--workers') i++; continue; } pos.push(args[i]); }
+  convert(pos[0], pos[1], { tiling: flag('tiling'), workers: flag('workers') }).then(() => process.exit(0)).catch(e => { console.error(e); process.exit(1); });
 }

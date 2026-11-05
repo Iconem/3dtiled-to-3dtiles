@@ -58,6 +58,19 @@ into the folder. The HTTP form is `POST /export {url, outDir, maxDepth, keepImpl
 `{method: "convert", src, format, options, pack}` for the offline converter) on a server started
 with `TILED_ALLOW_EXPORT=1`.
 
+### Tile workers (experimental)
+
+Point tiles are decoded and encoded on the process's one thread by default. Set `TILED_WORKERS=auto` (one worker
+thread per core but one, at most 8) or `TILED_WORKERS=<n>` to spread that work over worker threads: on the server for
+COPC and Potree `/stream` tiles and crawl exports, and in the `copc-to-3dtiles` and `potree-to-3dtiles` converters,
+which also take `--workers <n>`. The output is identical. Expect about 3 to 4 times the tile throughput on 8 cores, a
+server that stays responsive while it builds tiles, and roughly 50 MB more memory per worker.
+
+```bash
+TILED_WORKERS=auto node packages/tile-server/server.js
+node packages/copc-to-3dtiles/src/index.js cloud.copc.laz out/ --workers 8
+```
+
 ```js
 // JS/TS API — same detection + dispatch
 import { convert, detectFormat, supportedFormats } from '3dtiles-convert';

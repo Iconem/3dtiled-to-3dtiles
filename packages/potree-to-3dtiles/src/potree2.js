@@ -236,6 +236,9 @@ export async function loadPotree2(dir) {
     // Potree 2.0 metadata may carry a CRS (`projection`/`crs`/WKT) — surface for downstream georef.
     crs: meta.projection || meta.crs || meta.wkt || null,
     readNode,
+    // where a node's bytes are and what decodes them, as plain data, for a tile worker (tile-task.js)
+    rawNode: (node) => ({ kind: '2', file: path.join(dir, 'octree.bin'), meta: { scale: meta.scale, offset: meta.offset }, schema,
+                          node: { byteOffset: node.byteOffset, byteSize: node.byteSize, numPoints: node.numPoints } }),
     close: () => fh.close(),
   };
 }

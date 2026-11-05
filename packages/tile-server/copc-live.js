@@ -11,7 +11,11 @@
  */
 import { Copc } from 'copc';
 import { rangeGetter } from './range-getter.js';
-import { buildPointsGlb, wantedAttributes, POINT_ATTRIBUTES, keyToCoords, coordsToKey, buildSubtreeBuffer, georefFromCrs, curvedLocalizer, curvedTileLocalizer, buildImplicitTileset, memoizeAsync } from '../core/index.js';
+import { copcViewGlb, lasScalarAttributes } from './points-tile.js';
+
+export { lasScalarAttributes };
+const TILE_TASKS = new URL('./tile-tasks.js', import.meta.url).href;   // what a tile worker runs (TILED_WORKERS)
+import { tilePool, runTileTask, ownBytes, keyToCoords, coordsToKey, buildSubtreeBuffer, georefFromCrs, curvedLocalizer, curvedTileLocalizer, buildImplicitTileset, memoizeAsync } from '../core/index.js';
 
 const SUBTREE_LEVELS = 3;
 
@@ -165,7 +169,7 @@ function curvedFor(ctx, crsOverride, mode = null) {
   if (ctx.curvedCache.has(crs)) return ctx.curvedCache.get(crs);
   const transform = ctx.transform ?? georefFromCrs(ctx.origin, crs, 'copc-live');
   const toLocal = transform && curvedLocalizer(ctx.origin, crs, transform, 'copc-live');
-  const curved = toLocal ? { transform, toLocal } : null;
+  const curved = toLocal ? { transform, toLocal, spec: { origin: ctx.origin, crs, transform } } : null;   // spec: what a tile worker rebuilds toLocal from
   ctx.curvedCache.set(crs, curved);
   if (curved) console.log(`[copc-live] curved placement on (${Math.round(ctx.rootDiag / 1000)} km extent)`);
   return curved;
@@ -243,50 +247,20 @@ function buildTilesetImplicit(ctx, urlParam) {
 async function serveTileGlb(ctx, key, curved = null, colorsEnc, attributes = null) {
   const node = ctx.nodeMap.get(key);
   if (!node || !node.pointCount) return null;
+  let sc = null;
+  if (curved) { const { level, x, y, z } = keyToCoords(key); sc = subCube(ctx.cube, level, x, y, z); }
+  const pool = tilePool();
+  if (pool) {
+    // TILED_WORKERS: this thread only fetches the node's compressed chunk; a worker decodes it and builds the GLB.
+    const compressed = ownBytes(await ctx.getter(node.pointDataOffset, node.pointDataOffset + node.pointDataLength));
+    const glb = await runTileTask(pool, TILE_TASKS, 'copcTileTask', {
+      compressed, header: ctx.copc.header, eb: ctx.copc.eb, pointCount: node.pointCount, origin: ctx.origin,
+      colors: colorsEnc, attributes, curved: curved?.spec ?? null, subCube: sc,
+    }, [compressed.buffer]);
+    return Buffer.from(glb.buffer, glb.byteOffset, glb.byteLength);
+  }
   const view = await Copc.loadPointDataView(ctx.getter, ctx.copc, node);
-  const n = view.pointCount, [ox, oy, oz] = ctx.origin;
-  const gx = view.getter('X'), gy = view.getter('Y'), gz = view.getter('Z');
-  const pos = new Float32Array(n * 3);
-  if (curved) {
-    const { level, x, y, z } = keyToCoords(key);
-    const place = curvedTileLocalizer(curved.toLocal, subCube(ctx.cube, level, x, y, z));
-    for (let i = 0; i < n; i++) place(gx(i), gy(i), gz(i), pos, i*3);
-  }
-  else for (let i = 0; i < n; i++) { pos[i*3] = gx(i)-ox; pos[i*3+1] = gy(i)-oy; pos[i*3+2] = gz(i)-oz; }
-  const d = view.dimensions; let colors = null;
-  if (d.Red && d.Green && d.Blue) {
-    const gr = view.getter('Red'), gg = view.getter('Green'), gb = view.getter('Blue'), s = d.Red.size === 2 ? 1/65535 : 1/255;
-    colors = new Float32Array(n * 4);
-    for (let i = 0; i < n; i++) { colors[i*4]=gr(i)*s; colors[i*4+1]=gg(i)*s; colors[i*4+2]=gb(i)*s; colors[i*4+3]=1; }
-  }
-  // No RGB: white (colors = null), which reads well under eye-dome lighting. Intensity as grey used to
-  // stand in, but intensity is stored in 16 bits with small values (0–255 or 0–4095 for most
-  // scanners), so divided by 65535 it rendered near-black. It travels as `_INTENSITY` instead, with `_CLASSIFICATION`,
-  // when the tile URL asks (`&attributes=`), so a tile is no heavier than its points and colours otherwise.
-  const attrs = attributes ? lasScalarAttributes(view, wantedAttributes(attributes)) : undefined;
-  return Buffer.from(await buildPointsGlb(pos, colors, n, { colors: colorsEnc, attributes: attrs }));   // core applies the (E,U,−N) Y-up swizzle
-}
-
-/**
- * The LAS dimensions `keys` (PDAL names, core's POINT_ATTRIBUTES) of a point view as glTF custom attributes, for
- * buildPointsGlb: a map by glTF name, plus `extras` for a dimension stored relative to the tile (GpsTime).
- */
-export function lasScalarAttributes(view, keys = Object.keys(POINT_ATTRIBUTES)) {
-  const n = view.pointCount, d = view.dimensions, out = {}, extras = {};
-  for (const key of keys) {
-    const spec = POINT_ATTRIBUTES[key];
-    if (!spec || !d[key]) continue;
-    const g = view.getter(key), a = new spec.array(n);
-    if (spec.relative) {
-      let min = Infinity; for (let i = 0; i < n; i++) { const v = g(i); if (v < min) min = v; }
-      if (!Number.isFinite(min)) min = 0;
-      for (let i = 0; i < n; i++) a[i] = g(i) - min;
-      extras[spec.relative] = min;
-    } else for (let i = 0; i < n; i++) a[i] = +g(i);
-    out[spec.name] = a;
-  }
-  if (Object.keys(extras).length) out.extras = extras;
-  return out;
+  return Buffer.from(await copcViewGlb(view, { origin: ctx.origin, colors: colorsEnc, attributes, toLocal: curved?.toLocal ?? null, subCube: sc }));
 }
 
 // Pure builders the /stream dispatcher reuses. Tiles/subtrees are keyed "level-x-y-z" (explicit and

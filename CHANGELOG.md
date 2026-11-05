@@ -5,6 +5,18 @@ Format loosely follows [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+### Added — 2026-11-05 (tile workers, behind a flag)
+- **`TILED_WORKERS=auto|<n>` decodes and encodes point tiles on worker threads.** Off by default: nothing changes
+  unless it is set. With it, the live server's COPC and Potree tiles (1.x and 2.0, `/stream` and crawl exports) and the
+  offline `copc-to-3dtiles` and `potree-to-3dtiles` converters (also `--workers <n>`) hand each tile to a pool of
+  `worker_threads`: the server's thread only fetches the bytes, a worker runs the LAZ or brotli decode and writes the GLB.
+  `auto` is one worker per core but one, at most 8. Tiles are byte for byte the same either way (a test checks it).
+- **Measured on the 10.6 million point Autzen COPC (278 tiles, local source, 20 cores):** every tile through `/stream`
+  in 13.9 s on one thread and 3.5 s with 8 workers; the offline converter 15.7 s and 5.3 s. 4 workers already give
+  2.6 to 2.9 times, and more than 8 gave nothing. While the single thread worked, another request to the server waited
+  up to 1.8 s; with workers, 10 ms. The cost is memory: the server went from about 270 MB to about 680 MB with 8 workers.
+- Splat formats (SOG, LCC, RAD) and plain LAS/LAZ still run on one thread; a curved COPC placement is rebuilt in each worker.
+
 ### Fixed — 2026-11-04 (Potree 1.x lost most of a cloud's finest points)
 - **Potree 1.x leaves counted as 0 points were dropped.** PotreeConverter writes a count of 0 in the `.hrc` for a leaf
   whose `.bin` holds thousands of points: a leaf's points go to its `store`, and only an inner node adds to `numAccepted`. `/stream`, crawl exports and the offline converter all skipped them. On a
