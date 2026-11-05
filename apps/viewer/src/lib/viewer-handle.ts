@@ -3,6 +3,7 @@ import type { DatasetMarker } from './aggregate';
 import type { DatasetStyle } from './datasetStyle';
 import type { BasemapId } from './basemaps';
 import type { TerrainMode } from './terrainModes';
+import type { CameraPose } from './cameraPose';
 
 /**
  * Renderer-agnostic contract both CesiumViewer and ThreeDTRjsViewer implement via
@@ -39,6 +40,10 @@ export interface ViewerHandle {
   setCropToView(): [number, number, number, number, number, number] | null; // w,s,minH,e,n,maxH
   getExtractMatrix(): number[] | null;
   flyToCity(lon: number, lat: number, height: number): void;
+  /** Where the camera is on the globe and how it looks (cameraPose.ts); null off a globe (a local scene) or before the viewer exists. */
+  getCameraPose?(): CameraPose | null;
+  /** Put the camera exactly there. Like flyToCity, it may be called right after load(): pass skipAutoFrame to load(). */
+  setCameraPose?(pose: CameraPose): void;
   autoZoomToTileset(): void;
   // Aggregate mosaics (optional — both renderers implement them; callers fall back when absent).
   /** Show one "there is data here" marker per dataset, or clear them with null. */

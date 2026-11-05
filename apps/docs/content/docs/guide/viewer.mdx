@@ -258,6 +258,17 @@ manual URL entry in the viewer instead. See [`maptiler-geosplats.md`](/docs/refe
 and the [Bentley 3MX and Bing Maps 3D](/docs/guide/planning/streaming-architecture-design-log) section of the
 design log for what each adapter does.
 
+### Google 3D 🌍, and the same view on two globes
+
+**Google 3D** is Google Photorealistic 3D Tiles, loaded straight from Google with the deployment's Maps key
+(`VITE_GOOGLE_MAPS_API_KEY`, or `GOOGLE_MAPS_API_KEY` on the container); the tab is hidden without one. It has the
+same pills as **Bing 3D**: world, Roma, Washington, Berlin. Going from one of these two tabs to the other keeps the
+camera exactly where it is, position and orientation, so the two can be compared at the same place.
+
+The camera is also in the address bar, as `view=lon,lat,height,heading,pitch,roll` (degrees and metres above the
+ellipsoid; heading clockwise from north, pitch negative looking down), updated as it moves. A link opens on that exact
+view, whatever the dataset and in either renderer. `fly=lon,lat,height` still wins when a link has both.
+
 ### Aggregate 🧩
 
 `/aggregate` mosaics: one 3D Tiles endpoint over many datasets (see

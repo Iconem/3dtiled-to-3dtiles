@@ -206,6 +206,7 @@ export const PSEUDO_FORMATS: [string, string][] = [
   ['3dtiles', '◈ 3D Tiles'],
   ['packages', '📦 Packages'],
   ['bing', '🗺 Bing 3D'],
+  ['google', '🌍 Google 3D'],
   ['threemx', '🏛 3MX'],
   ['geosplats', '✨ GeoSplats'],
   ['aggregate', '🧩 Aggregate'],
@@ -217,7 +218,7 @@ export const PSEUDO_FORMATS: [string, string][] = [
 // in array order. `group` drives the visual separators TopBar renders between clusters:
 //   0: point-cloud octrees (COPC, Potree)
 //   1: splat formats (SOG, LCC, GeoSplats, RAD)
-//   2: tileset-native / mesh formats (3D Tiles, Packages, I3S, 3MX, Bing)
+//   2: tileset-native / mesh formats (3D Tiles, Packages, I3S, 3MX, Bing, Google)
 //   3: meta-tilesets — /aggregate mosaics that mix all of the above
 export const FORMAT_PILL_ORDER: { id: string; group: number }[] = [
   { id: 'copc', group: 0 },
@@ -231,6 +232,7 @@ export const FORMAT_PILL_ORDER: { id: string; group: number }[] = [
   { id: 'i3s', group: 2 },
   { id: 'threemx', group: 2 },
   { id: 'bing', group: 2 },
+  { id: 'google', group: 2 },
   { id: 'aggregate', group: 3 },
 ];
 

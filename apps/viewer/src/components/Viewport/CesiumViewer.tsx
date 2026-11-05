@@ -1,6 +1,7 @@
 import { forwardRef, useEffect, useImperativeHandle, useRef } from 'react';
 import * as Cesium from 'cesium';
 import type { ViewerHandle } from '@/lib/viewer-handle';
+import { ecefToPose, poseToEcef, type CameraPose } from '@/lib/cameraPose';
 import type { DatasetMarker } from '@/lib/aggregate';
 import type { AssetType } from '@/lib/formats';
 import { CESIUM_ION_TOKEN } from '@/lib/ion';
@@ -92,6 +93,7 @@ const CesiumViewer = forwardRef<ViewerHandle, Props>(function CesiumViewer({ vis
   const markerDataRef = useRef<DatasetMarker[] | null>(null);
   const tooltipRef: TooltipChannel = useRef(null);
   const pendingFlyRef = useRef<{ lon: number; lat: number; height: number } | null>(null);
+  const pendingPoseRef = useRef<CameraPose | null>(null);
   const datasetStyleRef = useRef<DatasetStyle | null>(null);
   // Debug 'cells': the loaded tileset's own declared tiles, as polylines (lib/mosaicOutlines.ts).
   const outlinesRef = useRef<Cesium.PolylineCollection | null>(null);
@@ -385,6 +387,7 @@ const CesiumViewer = forwardRef<ViewerHandle, Props>(function CesiumViewer({ vis
       pendingFlyRef.current = null;
       lookAtFrom(v, lon, lat, height);
     }
+    if (pendingPoseRef.current) { const pose = pendingPoseRef.current; pendingPoseRef.current = null; applyCameraPose(v, pose); }
   }
 
   /**
@@ -901,6 +904,19 @@ const CesiumViewer = forwardRef<ViewerHandle, Props>(function CesiumViewer({ vis
       if (!mm || Cesium.Matrix4.equalsEpsilon(mm, Cesium.Matrix4.IDENTITY, 1e-9)) return null;
       return Cesium.Matrix4.toArray(mm) as unknown as number[];
     },
+    getCameraPose() {
+      const v = getViewer();
+      if (!v) return null;
+      const p = v.camera.positionWC, d = v.camera.directionWC, u = v.camera.upWC;
+      const r = Cesium.Cartesian3.magnitude(p);
+      if (r < 6.2e6 || r > 1e8) return null;                 // inside the globe: a local scene, which has no pose
+      return ecefToPose([p.x, p.y, p.z], [d.x, d.y, d.z], [u.x, u.y, u.z]);
+    },
+    setCameraPose(pose) {
+      const v = getViewer();
+      if (!v) { pendingPoseRef.current = pose; return; }     // kept until the viewer exists, like flyToCity
+      applyCameraPose(v, pose);
+    },
     flyToCity(lon, lat, height) {
       const v = getViewer();
       // Before the viewer exists (a `?load=…&fly=…` start, a preset clicked during init) keep the
@@ -945,6 +961,16 @@ const CesiumViewer = forwardRef<ViewerHandle, Props>(function CesiumViewer({ vis
     }
     return wrapped as ViewerHandle;
   }, []);
+
+  /** An exact camera pose (viewer-handle's setCameraPose): position, direction and up, as given. */
+  function applyCameraPose(v: Cesium.Viewer, pose: CameraPose) {
+    const { position, direction, up } = poseToEcef(pose);
+    v.camera.cancelFlight();
+    v.camera.setView({
+      destination: new Cesium.Cartesian3(position[0], position[1], position[2]),
+      orientation: { direction: new Cesium.Cartesian3(direction[0], direction[1], direction[2]), up: new Cesium.Cartesian3(up[0], up[1], up[2]) },
+    });
+  }
 
   function applyLocalFrameInternal(lon: number, lat: number, alt: number, range: number) {
     const v = getViewer();

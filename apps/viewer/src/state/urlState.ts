@@ -36,6 +36,9 @@ const urlStateParsers = {
   // COPC on /stream (also every COPC child of a mosaic): points on the ellipsoid (proj4 → ECEF per
   // tile grid) instead of the tangent plane. auto = on past a 20 km extent.
   curved: parseAsStringEnum<'auto' | 'on' | 'off'>(['auto', 'on', 'off']).withDefault('auto'),
+  // The camera: `lon,lat,height,heading,pitch,roll` (lib/cameraPose.ts), kept up to date as it moves, so a link opens
+  // on the same view and a switch between two globes (Bing 3D, Google 3D) lands on the same place.
+  view: parseAsString.withDefault(''),
 };
 
 /** One hook, one URL sync — everything in the "shareable" slice. */

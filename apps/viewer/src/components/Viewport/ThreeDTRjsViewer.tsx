@@ -53,6 +53,7 @@ import type { ViewerHandle } from '@/lib/viewer-handle';
 import { MW, type AssetType } from '@/lib/formats';
 import { CESIUM_ION_TOKEN } from '@/lib/ion';
 import { GOOGLE_MAPS_API_KEY } from '@/lib/google';
+import { ecefToPose, poseToEcef, type CameraPose } from '@/lib/cameraPose';
 import { installB3dmClientFixes } from '@/lib/b3dmClientFix';
 import { useViewerStore } from '@/state/store';
 import { RASTER_TERRAINS, resolveTerrainMode, sampleRasterTerrain, snapRasterFor, terrariumFromAncestor, type RasterTerrainId } from '@/lib/terrarium';
@@ -636,6 +637,7 @@ const Scene = forwardRef<ViewerHandle, { loadArgs: LoadArgs; tooltip: TooltipCha
   const store = useViewerStore;
   const sceneHandleRef = useRef<ViewerHandle | null>(null);       // the devtools hook's way to the handle
   const [pendingFlyTo, setPendingFlyTo] = useState<{ lon: number; lat: number; height: number } | null>(null);
+  const [pendingPose, setPendingPose] = useState<CameraPose | null>(null);
   const [markers, setMarkers] = useState<DatasetMarker[] | null>(null);
   const controlsRef = useRef<any>(null);
   // Cached local "up" (ellipsoid surface normal) at the loaded tileset's own location — set once in
@@ -1820,6 +1822,14 @@ const Scene = forwardRef<ViewerHandle, { loadArgs: LoadArgs; tooltip: TooltipCha
       return Array.from(g.matrix.elements);
     },
     flyToCity(lon, lat, height) { setPendingFlyTo({ lon, lat, height }); },
+    getCameraPose() {
+      // the scene's frame is ECEF on a globe; a camera nowhere near the ellipsoid is in a local scene, which has no pose
+      const p = camera.position, r = p.length();
+      if (r < 6.2e6 || r > 1e8) return null;
+      const d = camera.getWorldDirection(new THREE.Vector3()), u = new THREE.Vector3(0, 1, 0).applyQuaternion(camera.quaternion);
+      return ecefToPose([p.x, p.y, p.z], [d.x, d.y, d.z], [u.x, u.y, u.z]);
+    },
+    setCameraPose(pose) { setPendingPose(pose); },
     setDatasetMarkers(list) { setMarkers(list); },
     setDatasetStyle(style) {
       datasetStyleRef.current = style;
@@ -1885,6 +1895,24 @@ const Scene = forwardRef<ViewerHandle, { loadArgs: LoadArgs; tooltip: TooltipCha
     invalidate();
   }
 
+  // An exact camera pose (viewer-handle's setCameraPose): position, direction and up, as given.
+  function applyCameraPose(pose: CameraPose) {
+    const { position, direction, up } = poseToEcef(pose);
+    camera.position.set(position[0], position[1], position[2]);
+    camera.up.set(up[0], up[1], up[2]);
+    camera.lookAt(position[0] + direction[0], position[1] + direction[1], position[2] + direction[2]);
+    camera.updateMatrixWorld();
+    invalidate();
+  }
+  const pendingPoseRef = useRef<CameraPose | null>(null);
+  useEffect(() => {
+    if (!pendingPose) return;
+    pendingPoseRef.current = pendingPose;
+    applyCameraPose(pendingPose);
+    setPendingPose(null);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [pendingPose, loadArgs]);
+
   // Fly at once, and again when the root tileset arrives (onLoadRootTileset below), so the controls
   // pick up the new pivot rather than the one from before the tileset existed.
   const pendingFlyToRef = useRef<typeof pendingFlyTo>(null);
@@ -1939,6 +1967,12 @@ const Scene = forwardRef<ViewerHandle, { loadArgs: LoadArgs; tooltip: TooltipCha
             pendingFlyToRef.current = null;
             if (fly && loadArgs?.skipAutoFrame) {
               flyToLocalFrameInternal(fly.lon, fly.lat, fly.height, 800);
+              setControlsPivot(camera.position.clone().setLength(6378137), true);
+            }
+            const pose = pendingPoseRef.current;
+            pendingPoseRef.current = null;
+            if (pose && loadArgs?.skipAutoFrame) {
+              applyCameraPose(pose);
               setControlsPivot(camera.position.clone().setLength(6378137), true);
             }
           }}
@@ -2081,6 +2115,8 @@ const ThreeDTRjsViewer = forwardRef<ViewerHandle, Props>(function ThreeDTRjsView
     setCropToView: () => sceneRef.current?.setCropToView() ?? null,
     getExtractMatrix: () => sceneRef.current?.getExtractMatrix() ?? null,
     flyToCity: (...a) => whenScene((h) => h.flyToCity(...a)),
+    getCameraPose: () => sceneRef.current?.getCameraPose?.() ?? null,
+    setCameraPose: (...a) => whenScene((h) => h.setCameraPose?.(...a)),
     autoZoomToTileset: () => sceneRef.current?.autoZoomToTileset(),
     setDatasetMarkers: (list) => whenScene((h) => h.setDatasetMarkers?.(list)),
     setDatasetStyle: (style) => whenScene((h) => h.setDatasetStyle?.(style)),

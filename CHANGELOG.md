@@ -5,6 +5,14 @@ Format loosely follows [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+### Added — 2026-11-05 (web viewer: Google 3D, and a view that survives a switch)
+- **A "Google 3D" tab next to "Bing 3D"**: Google Photorealistic 3D Tiles, loaded straight from Google with the
+  deployment's Maps key, with the same pills (world, Roma, Washington, Berlin). Hidden where no key is configured.
+- **Switching between the two globes keeps the camera exactly where it is**, position and orientation, in CesiumJS
+  and in 3DTilesRendererJS, so one can be compared with the other at the same place. A city pill still flies there.
+- **The camera is in the address bar**: `view=lon,lat,height,heading,pitch,roll`, updated as it moves. A link opens on
+  that exact view, whatever the dataset; `fly=` still wins when both are given.
+
 ### Added — 2026-11-05 (tile workers, behind a flag)
 - **`TILED_WORKERS=auto|<n>` decodes and encodes point tiles on worker threads.** Off by default: nothing changes
   unless it is set. With it, the live server's COPC and Potree tiles (1.x and 2.0, `/stream` and crawl exports) and the

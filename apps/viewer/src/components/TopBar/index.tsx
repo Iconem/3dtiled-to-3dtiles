@@ -8,6 +8,8 @@ import { useViewerStore } from '@/state/store';
 import { PSEUDO_FORMATS, FORMAT_PILL_ORDER, pillMeta, fmtMeta, canCentroids, MW } from '@/lib/formats';
 import { buildMiddlewareUrl, currentPresets, type MiddlewareParams, type Preset } from '@/lib/middleware';
 import type { ViewerHandle } from '@/lib/viewer-handle';
+import { formatPose, parsePose, type CameraPose } from '@/lib/cameraPose';
+import { GOOGLE_MAPS_API_KEY } from '@/lib/google';
 import { cn } from '@/lib/utils';
 import { aggregateIndexUrl, isAggregateUrl, loadMosaic, forgetUploadedSet, noteUploadedUrl, restoreUploadedSet, uploadManifest, uploadedSetOf, useAvailableSets, useUploadedSets } from '@/lib/aggregate';
 
@@ -26,6 +28,10 @@ const START_FLY = (() => {
   const [lon, lat, height] = (START.get('fly') ?? '').split(',').map(Number);
   return [lon, lat, height].every(Number.isFinite) ? { lon, lat, height } : undefined;
 })();
+
+// `&view=<lon,lat,height,heading,pitch,roll>` — the exact camera the page opens on (urlState.ts keeps it current).
+// An explicit `&fly=` wins.
+const START_VIEW = START_FLY ? null : parsePose(START.get('view'));
 
 const MODE_PILLS: [string, string][] = [
   ['stream', '⚡ Live streaming'],
@@ -141,6 +147,24 @@ export default function TopBar({ activeHandleRef }: { activeHandleRef: React.Ref
   const inputRef = useRef<HTMLInputElement>(null);
   const manifestRef = useRef<HTMLInputElement>(null);
   const startFlyRef = useRef(START_FLY);
+  const startViewRef = useRef<CameraPose | null>(START_VIEW);
+  const lastGlobalRef = useRef(false);                       // whether the dataset on screen is a whole globe
+
+  // Keep `view=` in the address bar as the camera moves (once a second is plenty for a link, and it costs a
+  // re-render of this bar only when the pose changed).
+  useEffect(() => {
+    const t = setInterval(() => {
+      // The page's own view stays the one in the address bar until its first load had time to apply it.
+      if (startViewRef.current) { if (performance.now() - mountedAt.current < 8000) return; startViewRef.current = null; }
+      const pose = activeHandleRef.current?.getCameraPose?.();
+      const text = pose ? formatPose(pose) : '';
+      if (text && text !== urlViewRef.current) { urlViewRef.current = text; setUrl({ view: text }); }
+    }, 1000);
+    return () => clearInterval(t);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+  const urlViewRef = useRef(url.view);
+  const mountedAt = useRef(performance.now());
 
   // Your own set manifest (e.g. the Iconem share-link list from scripts/iconem-share-links.mjs), from
   // a local file: uploaded to the server, then a pill of the Aggregate row like any server set. The
@@ -195,10 +219,11 @@ export default function TopBar({ activeHandleRef }: { activeHandleRef: React.Ref
   // same as before this was unified into one ordered list instead of two back-to-back arrays.
   const visibleFormatPills = FORMAT_PILL_ORDER
     .filter((item) => !(url.mode === 'offline' && PSEUDO_FORMATS.some(([v]) => v === item.id)))
+    .filter((item) => item.id !== 'google' || !!GOOGLE_MAPS_API_KEY)   // Google 3D needs the deployment's Maps key
     .map((item) => ({ ...item, meta: pillMeta(item.id) }))
     .filter((item): item is typeof item & { meta: NonNullable<typeof item.meta> } => item.meta != null);
 
-  function doLoad(loadUrl: string, type: Preset['type'], flyTo?: Preset['flyTo']) {
+  function doLoad(loadUrl: string, type: Preset['type'], flyTo?: Preset['flyTo'], pose?: CameraPose | null) {
     // &curved=on|off on this server's /stream and /aggregate URLs (auto = the server's extent rule)
     if (/\/(stream|aggregate)\/tileset\.json\?/.test(loadUrl)) {
       const w = new URL(loadUrl, location.href);
@@ -208,11 +233,18 @@ export default function TopBar({ activeHandleRef }: { activeHandleRef: React.Ref
     store.getState().setCurrentType(type);
     store.getState().setLastLoadUrl(loadUrl);
     store.getState().tlogReset(`${url.mode} · ${url.format}${flyTo ? ' [fly]' : ''}`);
-    void loadMosaic(activeHandleRef.current, loadUrl, type, { skipAutoFrame: !!flyTo });
+    // A pose comes from the page's own `view=` on its first load, or from a switch between two globes
+    // (selectPreset). A city pill's fly-to wins over it.
+    const keep = flyTo ? null : pose;
+    void loadMosaic(activeHandleRef.current, loadUrl, type, { skipAutoFrame: !!flyTo || !!keep });
     if (flyTo) activeHandleRef.current?.flyToCity(flyTo.lon, flyTo.lat, flyTo.height);
+    else if (keep) activeHandleRef.current?.setCameraPose?.(keep);
   }
 
-  function selectPreset(p: Preset) {
+  // fromStart: the load the page opens with (the effect below), as opposed to a click on a pill. Only that one
+  // takes the page's `view=`; it can run twice (StrictMode), so the view is dropped by the first click instead.
+  function selectPreset(p: Preset, fromStart = false) {
+    if (!fromStart) startViewRef.current = null;
     setUrl({ preset: p.id });
     if (p.custom) {
       store.getState().setUrlField('');
@@ -224,16 +256,22 @@ export default function TopBar({ activeHandleRef }: { activeHandleRef: React.Ref
     // Bing 3D's mesh has baked/pre-lit textures like most photogrammetry — lit shading double-darkens
     // it the same way plain b3dm mesh does elsewhere in this app. Default shadeless ON when picking any
     // Bing preset; the sidebar checkbox still lets you turn it back off manually afterward.
-    if (url.format === 'bing') store.getState().setShadeless(true);
+    if (url.format === 'bing' || url.format === 'google') store.getState().setShadeless(true);
+    // From one whole globe to another (Bing 3D to Google 3D, or its "world" pill again): stay exactly where the
+    // camera is, so the two can be compared at the same place.
+    const pose = fromStart && startViewRef.current ? startViewRef.current
+      : p.global && lastGlobalRef.current && !p.flyTo ? activeHandleRef.current?.getCameraPose?.() ?? null : null;
+    lastGlobalRef.current = !!p.global;
     const field = rawUrlMode && p.rawSrc ? p.rawSrc : p.url;
     store.getState().setUrlField(field);
     const loadUrl = rawUrlMode && p.rawSrc ? buildMiddlewareUrl(p.rawSrc, params) : p.url;
     // an uploaded manifest's mosaic: the server may have restarted since, so re-send the file first
     // a `?load=…&fly=` link to an uploaded set reaches here through its pill: keep its viewpoint
-    const flyTo = p.flyTo ?? (uploadedSetOf(loadUrl) && startFlyRef.current ? startFlyRef.current : undefined);
+    // a link's own `view=` is where its author was looking: it wins over the pill's city
+    const flyTo = fromStart && startViewRef.current ? undefined : p.flyTo ?? (uploadedSetOf(loadUrl) && startFlyRef.current ? startFlyRef.current : undefined);
     startFlyRef.current = undefined;
     if (uploadedSetOf(loadUrl)) restoreUploadedSet(loadUrl).finally(() => doLoad(loadUrl, p.type, flyTo));
-    else doLoad(loadUrl, p.type, flyTo);
+    else doLoad(loadUrl, p.type, flyTo, pose);
   }
 
   function handleLoadClick() {
@@ -305,12 +343,12 @@ export default function TopBar({ activeHandleRef }: { activeHandleRef: React.Ref
         setUrl({ preset: `agg-${upSet}` });
         store.getState().setRawUrlMode(false);
         store.getState().setUrlField(START_LOAD);
-        restoreUploadedSet(START_LOAD).finally(() => doLoad(START_LOAD, START_TYPE, START_FLY));
+        restoreUploadedSet(START_LOAD).finally(() => doLoad(START_LOAD, START_TYPE, START_FLY, startViewRef.current));
         return;
       }
       store.getState().setRawUrlMode(false);
       store.getState().setUrlField(START_LOAD);
-      doLoad(START_LOAD, START_TYPE, START_FLY);
+      doLoad(START_LOAD, START_TYPE, START_FLY, startViewRef.current);
       return;
     }
     // Aggregate presets backed by a server set are hidden until /aggregate/demo.json answers. Picking
@@ -319,7 +357,7 @@ export default function TopBar({ activeHandleRef }: { activeHandleRef: React.Ref
     if (url.format === 'aggregate' && !setsKnown) return;
     const wanted = url.preset && presets.find((p) => p.id === url.preset && p.url);
     const target = wanted || presets.find((p) => p.url);
-    if (target) selectPreset(target);
+    if (target) selectPreset(target, depsKey === startKey.current);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [url.mode, url.format, url.tool, url.tilesetOp, url.cache, url.tiling, url.centroids, url.transform, url.curved, setsKnown]);
 

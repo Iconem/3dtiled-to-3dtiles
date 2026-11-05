@@ -1,6 +1,7 @@
 // Ported as pure functions from viewer.html's buildMiddlewareUrl/streamParams/assetUrl/srcUrl
 // (lines ~694-797) — same algorithms, but read an explicit params object instead of globals.
 import { MW, SDATA, FORMATS, DIRECT, TOOLS_DATASETS, PSEUDO_FORMATS, fmtMeta, canCentroids, type Asset, type AssetType, type FormatMeta } from './formats';
+import { GOOGLE_MAPS_API_KEY } from './google';
 
 export type TilesetOp = 'implicit-to-explicit' | 'upgrade' | '';
 
@@ -61,6 +62,8 @@ export interface Preset {
   custom?: boolean;
   octree?: boolean;
   flyTo?: { lon: number; lat: number; height: number };
+  /** A whole-globe dataset (Bing 3D, Google 3D): switching between two of them keeps the camera where it is. */
+  global?: boolean;
   /** Only offer this preset when the tile-server reports this aggregate set (see useAvailableSets). */
   requiresSet?: string;
   /** Only offer this preset when the tile-server does NOT have this set (a public stand-in for a local one). */
@@ -117,13 +120,19 @@ export function currentPresets(p: MiddlewareParams & { toolName: ToolName; tiles
       { id: 'agg-open', label: '🧩 Open data — RESOURCES.md + Aerometrex + flai + Vexcel', type: 'mesh', url: agg('set=open&nest=geodetic') },
     ];
   }
-  if (p.selectedFormat === 'bing') {
-    const bingUrl = `${MW}/bing/tileset.json?g=15530`;
+  if (p.selectedFormat === 'bing' || p.selectedFormat === 'google') {
+    // Two whole-globe photogrammetry meshes with the same pills, so that one can be checked against the other at
+    // the same place. Bing goes through the middleware (/bing unwraps its td1 manifest); Google Photorealistic 3D
+    // Tiles are already 3D Tiles and load straight from Google with the deployment's own Maps key (google.ts).
+    const bing = p.selectedFormat === 'bing';
+    if (!bing && !GOOGLE_MAPS_API_KEY) return [];
+    const globeUrl = bing ? `${MW}/bing/tileset.json?g=15530` : `https://tile.googleapis.com/v1/3dtiles/root.json?key=${GOOGLE_MAPS_API_KEY}`;
+    const id = bing ? 'bing' : 'google', name = bing ? '🗺 Bing 3D' : '🌍 Google 3D';
     return [
-      { id: 'bing-world', label: '🗺 Bing 3D — world (td1)', type: 'mesh', url: bingUrl },
-      { id: 'bing-roma', label: '🗺 Bing 3D — Roma', type: 'mesh', url: bingUrl, flyTo: { lon: 12.4924, lat: 41.8902, height: 1200 } },
-      { id: 'bing-washington', label: '🗺 Bing 3D — Washington', type: 'mesh', url: bingUrl, flyTo: { lon: -77.0353, lat: 38.8895, height: 1600 } },
-      { id: 'bing-berlin', label: '🗺 Bing 3D — Berlin', type: 'mesh', url: bingUrl, flyTo: { lon: 13.3777, lat: 52.5163, height: 1200 } },
+      { id: `${id}-world`, label: `${name} — ${bing ? 'world (td1)' : 'world'}`, type: 'mesh', url: globeUrl, global: true },
+      { id: `${id}-roma`, label: `${name} — Roma`, type: 'mesh', url: globeUrl, global: true, flyTo: { lon: 12.4924, lat: 41.8902, height: 1200 } },
+      { id: `${id}-washington`, label: `${name} — Washington`, type: 'mesh', url: globeUrl, global: true, flyTo: { lon: -77.0353, lat: 38.8895, height: 1600 } },
+      { id: `${id}-berlin`, label: `${name} — Berlin`, type: 'mesh', url: globeUrl, global: true, flyTo: { lon: 13.3777, lat: 52.5163, height: 1200 } },
     ];
   }
   if (p.selectedFormat === 'threemx') {
