@@ -175,7 +175,7 @@ export async function globeTileGlb(region, level, basemap) {
   const texture = await fetchRaster(tmpl, rt);
   // No raster? Emit an untextured matte patch rather than failing: a plain shell still gives the
   // horizon and silhouette that the whole feature exists to provide.
-  const glb = Buffer.from(buildGlb({ mode: 'TRIANGLES', positions, normals, uvs, ...(texture ? { texture } : {}) }));
+  const glb = Buffer.from(await buildGlb({ mode: 'TRIANGLES', positions, normals, uvs, ...(texture ? { texture } : {}) }));
   if (glbCache.size >= 512) glbCache.clear();
   glbCache.set(key, glb);
   return glb;

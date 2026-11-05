@@ -137,7 +137,7 @@ evaluated before assuming this would be a novel effort.
   as a personal dataset library, not a one-shot CLI wrapper. Purely an idea at this point — no design
   work, no scoping, not started.
 
-- [ ] **Next on the roadmap (2 of 2): the desktop app as a one-stop tiler for raw, untiled input** (noted 2026-11-05). Today it takes sources
+- [ ] **Next on the roadmap: the desktop app as a one-stop tiler for raw, untiled input** (noted 2026-11-05). Today it takes sources
   that are already tiled (COPC, Potree, SOG, LCC, RAD, I3S, 3MX) and streams or exports them. The next shape: give it
   a raw LAS/LAZ/E57, a mesh (OBJ, glTF, OSGB) or a splat PLY, and it runs the right third-party tiler for you.
   It would fetch the tool's binary for the platform when a release exists (PotreeConverter, GoTiler, py3dtiles,
@@ -150,13 +150,18 @@ evaluated before assuming this would be a novel effort.
   folder". Open questions: licences of the redistributed binaries, checksums for the downloads, and unsigned binaries
   under Windows Defender (the app's own launcher is already flagged). Not scoped, not started.
 
-- [ ] **Next on the roadmap (1 of 2): tile workers for the offline converters of the splat and mesh formats.** The live server runs every format's
-  tile on worker threads through one layer (`runTileTaskOr` in core, a task module per family in the tile-server). The
-  SOG, LCC, RAD, I3S and 3MX converters still loop on one thread, each with its own inline decode, encode and write.
-  The way to do it once: a `core` helper that takes the list of tiles, a task module and a function naming each
-  tile's bytes and output path, runs them on the pool with the single-thread fallback, and is the only tile loop any
-  converter has. Each converter then only supplies a pure "these bytes to this file" function, which is what the
-  live modules `splat-tile.js` and `mesh-tile.js` already are.
+- [x] **Tile workers for the offline converters of the splat and mesh formats** (done 2026-11-05). One tile loop in
+  core, `convertTiles`: a converter gives it its items, a task module for the workers and the same build for its own
+  thread; the loop runs them on the pool, with the single-thread pass for tiles a worker had no memory for. SOG (per
+  chunk), LCC, RAD and I3S use it. Left as they were: COPC and Potree keep their own two loops, which do the same
+  thing and could move onto it; 3MX and GeoSplats have no offline converter; plain LAS/LAZ decodes a whole file at
+  once and would need a reader that works chunk by chunk.
+- [ ] **Electrobun 2.0.6 for the desktop app** (noted 2026-11-05; the app is on 2.0.2 with Hutch 0.26). 2.0.6 no longer
+  keeps a full copy of the app as a tar beside the installed one (750 MB here): the updater rebuilds it from the
+  installed files, and checks a SHA-256 of the archive through a second manifest (`*-update-v2.json`, published by
+  Hutch 0.29, to add to the release's assets). 2.0.4 already fixed the Windows relaunch after an update and frees
+  disk during patch chains. None of them compares versions, so the build stamp that stops an older release being
+  offered stays ours. To do with an upgrade test from an installed 2.0.2 build, since the updater migrates its cache.
 
 - [ ] Further out: a browser/server tiled-splat transcoding UI in the spirit of SuperSplat's splat-transform
   tooling; a **georeferencing/geolocator** step for splats that don't ship one, along the lines of

@@ -8,6 +8,26 @@ Format loosely follows [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+### Added — 2026-11-05 (tile workers in the offline converters of SOG, LCC, RAD and I3S)
+- **`--workers` / `TILED_WORKERS` now apply to the SOG, LCC, RAD and I3S converters**, through one tile loop in core
+  (`convertTiles`) that each converter hands its tiles to. Same files, byte for byte. Measured on 20 cores, one thread
+  against 8 workers: I3S 95 s to 33 s, RAD 33 to 17, LCC 9.6 to 4.6, SOG 90 to 55 on a large scene. Off by default,
+  as before. 3MX and GeoSplats have no offline converter.
+- **The I3S converter builds its nodes in parallel on one thread too**: it used to read, decode and write one node at
+  a time.
+- **`TILED_SOG_CHUNK_CACHE`**: how many decoded chunks the live server keeps per streamed-SOG scene (default 24, as
+  before).
+
+### Changed — 2026-11-05 (I3S and Bing globe tiles are written with glTF-Transform)
+- **The hand-written GLB container is gone**: I3S nodes, offline and live, and the Bing globe's own low-level tiles are
+  written with glTF-Transform like every other tile. Same attributes, material and texture bytes, checked against
+  the old files. It is about twice as slow to write as the container was (glTF-Transform copies vertex data
+  element by element): an I3S conversion on one thread takes longer than before, and less with tile workers.
+
+### Fixed — 2026-11-05 (tile workers)
+- **A task that could not be sent to a worker left that worker busy for good.** It now fails alone and the worker
+  takes the next task.
+
 ### Fixed — 2026-11-05 (desktop app: an "update" that went back to an older build)
 - **The app no longer offers a release older than itself.** The updater called any release with a different build
   hash an update, so a build made after the last release was offered that release and, once accepted, went back to

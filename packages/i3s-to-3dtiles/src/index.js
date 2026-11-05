@@ -24,8 +24,11 @@
 import fs   from 'fs/promises';
 import path from 'path';
 import { fileURLToPath } from 'node:url';
-import { readSceneLayer, loadNodePages, decodeDefaultGeometry, obbToBox, readMaybeGzip, geodeticToEcef, childIndices } from './i3sParse.js';
-import { buildGlb } from './glbBuild.js';
+import { readSceneLayer, loadNodePages, geodeticToEcef, childIndices } from './i3sParse.js';
+import { i3sNodeToFile } from './tile-task.js';
+import { convertTiles } from '../../core/index.js';
+
+const TILE_TASK = new URL('./tile-task.js', import.meta.url).href;
 
 const MESH_TYPES  = new Set(['IntegratedMesh', '3DObject']);
 const POINT_TYPES = new Set(['PointCloud']);
@@ -109,9 +112,41 @@ export async function convert(inDir, outDir, opts = {}) {
   const unionAabb = (a, b) => { for (let k=0;k<3;k++){ if(b.min[k]<a.min[k])a.min[k]=b.min[k]; if(b.max[k]>a.max[k])a.max[k]=b.max[k]; } };
   const aabbToBox = (a) => { const c=[0,1,2].map(k=>(a.min[k]+a.max[k])/2); const h=[0,1,2].map(k=>Math.max((a.max[k]-a.min[k])/2,0.5)); return [c[0],c[1],c[2], h[0],0,0, 0,h[1],0, 0,0,h[2]]; };
 
-  // Build a 3D Tiles tile per I3S node (recursively). Returns { tile, aabb } so the parent can
-  // grow its bounding box to enclose all descendants (3D Tiles requires parent ⊇ children).
-  const buildTile = async (idx) => {
+  // ── Phase 1: every node reachable from the root that has geometry → its GLB (tile-task.js), on this thread in
+  // lanes or on tile workers (TILED_WORKERS, --workers, opts.workers). Each hands back the box of what it wrote. ──
+  // Mesh layers (v1.7+) reference geometry via node.mesh.geometry.resource (validated on
+  // Buildings_NewYork_v18). Uncompressed point clouds carry a top-level resourceId and no `mesh`
+  // block (cf. Autzen) — support both. The uncompressed buffer is geometries/<bufferIndex>.bin.
+  const bufIdx = layer.uncompressedBufferIndex >= 0 ? layer.uncompressedBufferIndex : 0;
+  const resOf = (node) => (node.mesh?.geometry ? node.mesh.geometry.resource : (Number.isInteger(node.resourceId) ? node.resourceId : null));
+  const reach = [];
+  for (const stack = [0], seen = new Set(); stack.length;) {
+    const i = stack.pop();
+    if (seen.has(i) || !nodes[i]) continue;
+    seen.add(i); reach.push(i);
+    for (const ci of childIndices(nodes[i])) stack.push(ci);
+  }
+  const withGeometry = reach.filter((i) => resOf(nodes[i]) != null);
+  const inRoot = path.resolve(inDir);
+  const taskOf = (idx) => {
+    const node = nodes[idx], mesh = node.mesh;
+    const hasMaterial = !!(mesh?.material && mesh.material.resource >= 0);
+    const fmt = hasMaterial ? textureFormatFor(mesh.material.definition ?? 0) : null;   // null: only dds/ktx2/basis on offer
+    return { inDir: inRoot, res: resOf(node), bufIdx, schema, isGeographic, isPoint, center: node.obb?.center, originEcef, EAST, NORTH, UP,
+      hasMaterial, texture: fmt ? { resource: mesh.material.resource, ...fmt } : null, outPath: path.join(outDir, `tiles/node_${idx}.glb`) };
+  };
+  const built = new Map();   // node index → { found, written, textureSkipped, aabb }
+  const { workers } = await convertTiles(withGeometry, {
+    module: TILE_TASK, fn: 'i3sNodeToFile', workers: opts.workers,
+    task: taskOf, here: (idx) => i3sNodeToFile(taskOf(idx)),
+    onResult: (idx, r) => built.set(idx, r),
+    onProgress: (d, t) => { if (d % 100 === 0 || d === t) process.stdout.write(`\r  ${d}/${t} nodes`); },
+  });
+  process.stdout.write(` (${workers ? `${workers} worker threads` : 'this thread'})\n`);
+
+  // ── Phase 2: the tile tree, from those boxes. Returns { tile, aabb } so the parent can grow its bounding box to
+  // enclose all descendants (3D Tiles requires parent ⊇ children). ──
+  const buildTile = (idx) => {
     const node = nodes[idx];
     if (!node) return null;
     const aabb = newAabb();
@@ -120,63 +155,20 @@ export async function convert(inDir, outDir, opts = {}) {
       refine: 'REPLACE',
     };
 
-    // Mesh layers (v1.7+) reference geometry via node.mesh.geometry.resource (validated on
-    // Buildings_NewYork_v18). Uncompressed point clouds carry a top-level resourceId and no `mesh`
-    // block (cf. Autzen) — support both. The uncompressed buffer is geometries/<bufferIndex>.bin.
-    const bufIdx = layer.uncompressedBufferIndex >= 0 ? layer.uncompressedBufferIndex : 0;
-    const mesh = node.mesh;
-    const res = mesh?.geometry ? mesh.geometry.resource
-              : (Number.isInteger(node.resourceId) ? node.resourceId : null);
-    if (res != null) {
-      if (mesh?.attribute) attrSkips++;           // per-feature attributes present → dropped
-      const buf = await readMaybeGzip(inDir, `nodes/${res}/geometries/${bufIdx}.bin`)
-        .catch(() => readMaybeGzip(inDir, `geometries/${res}.bin`).catch(() => null));
-      if (!buf) { warn(`node ${idx}: geometry resource ${res} not found; emitting empty node`); emptyNodes++; }
-      else {
-        const g = decodeDefaultGeometry(buf, schema);
-        if (g.vertexCount > 0) {
-          // I3S geographic vertices = (Δlon°, Δlat°, Δheight_m) rel. to the node OBB centre →
-          // per-vertex geodetic → ECEF → local ENU metres (East,North,Up). The bounding box is stored
-          // in the tileset ENU frame (E,N,U); the glTF POSITION is pre-swizzled to (E, U, −N) so the
-          // renderer's glTF-Y-up → tileset-Z-up RX(+90°) yields (E,N,U), and the root ENU→ECEF transform
-          // places it upright on the globe. (Storing ECEF axes instead left content tilted ~40° vs the
-          // local horizon — the "boxes rotated / plane perpendicular to ground" artefact.)
-          let positions = g.position;
-          if (isGeographic) {
-            const c = node.obb.center;
-            positions = new Float32Array(g.vertexCount * 3);
-            for (let i = 0; i < g.vertexCount; i++) {
-              const e = geodeticToEcef([c[0] + g.position[i*3], c[1] + g.position[i*3+1], c[2] + g.position[i*3+2]]);
-              const u = toEnu(e);                                  // (East, North, Up) — tileset frame
-              expand(aabb, u[0], u[1], u[2]);                      // box in tileset ENU frame
-              positions[i*3] = u[0]; positions[i*3+1] = u[2]; positions[i*3+2] = -u[1];  // glTF: (E, U, −N)
-            }
-          } else {
-            for (let i = 0; i < g.vertexCount; i++) expand(aabb, positions[i*3], positions[i*3+1], positions[i*3+2]);
-          }
-          let texture;
-          if (mesh?.material && mesh.material.resource >= 0) {
-            const fmt = textureFormatFor(mesh.material.definition ?? 0);
-            if (!fmt) textureSkips++;   // only compressed (dds/ktx2/basis) formats available — no decoder
-            else {
-              // Real extension, not a generic `.bin` — a texture's on-disk/in-archive name carries its
-              // actual format (`.jpg`/`.png`), unlike geometry (always literally `<n>.bin`). See
-              // i3s-live.js's serveTileGlb for the live-mode verification of this.
-              try { texture = { bytes: await readMaybeGzip(inDir, `nodes/${mesh.material.resource}/textures/${fmt.name}.${fmt.ext}`), mimeType: fmt.mimeType }; }
-              catch { /* texture resource missing — fall back to untextured */ }
-            }
-          }
-          const glb = buildGlb({ mode: isPoint ? 'POINTS' : 'TRIANGLES', positions, normals: g.normal, colors: g.color, uvs: g.uv0, texture });
-          const uri = `tiles/node_${idx}.glb`;
-          await fs.writeFile(path.join(outDir, uri), glb);
-          tile.content = { uri };
-          written++;
-        }
+    const r = built.get(idx);
+    if (r) {
+      if (node.mesh?.attribute) attrSkips++;           // per-feature attributes present → dropped
+      if (!r.found) { warn(`node ${idx}: geometry resource ${resOf(node)} not found; emitting empty node`); emptyNodes++; }
+      else if (r.written) {
+        unionAabb(aabb, r.aabb);
+        if (r.textureSkipped) textureSkips++;   // only compressed (dds/ktx2/basis) formats available — no decoder
+        tile.content = { uri: `tiles/node_${idx}.glb` };
+        written++;
       }
     }
 
     const kids = [];
-    for (const ci of childIndices(node)) { const r = await buildTile(ci); if (r) { kids.push(r.tile); unionAabb(aabb, r.aabb); } }
+    for (const ci of childIndices(node)) { const k = buildTile(ci); if (k) { kids.push(k.tile); unionAabb(aabb, k.aabb); } }
     if (kids.length) tile.children = kids;
 
     // Fallback for an empty node (no geometry, no children): a small box at its OBB centre (ENU).
@@ -193,7 +185,7 @@ export async function convert(inDir, outDir, opts = {}) {
     return { tile, aabb };
   };
 
-  const rootResult = await buildTile(0);
+  const rootResult = buildTile(0);
   if (!rootResult) die('root node (index 0) missing');
   const root = rootResult.tile;
 

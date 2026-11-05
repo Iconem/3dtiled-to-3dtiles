@@ -20,9 +20,11 @@ import fs   from 'fs/promises';
 import path from 'path';
 import { fileURLToPath } from 'node:url';
 import { decodeSplats } from './lccDecode.js';
+
+const TILE_TASK = new URL('./tile-task.js', import.meta.url).href;
 // Shared, parallel-friendly encoder from 3dtiles-convert-core (async gzip) + bounded-concurrency map.
 // (Relative path during the monorepo migration; becomes `3dtiles-convert-core` once lcc moves to packages/.)
-import { buildSplatTileGlb, computeBounds, parallelMap, defaultConcurrency, lccGeoref, LCC_LOCAL_UPRIGHT } from '../../core/index.js';
+import { buildSplatTileGlb, computeBounds, defaultConcurrency, convertTiles, lccGeoref, LCC_LOCAL_UPRIGHT } from '../../core/index.js';
 
 const ROOT_GE_FACTOR = 0.05;   // root GE = sceneDiagonal × this (matches sog/reference magnitude)
 const DEPTH_RATIO    = 0.5;    // GE halves per LOD step down
@@ -58,7 +60,10 @@ export async function convert(input, outDir, opts = {}) {
 
   const t0 = Date.now();
   const indexBuf = Buffer.from(await fs.readFile(path.join(dir, 'index.bin')));
-  const dataBuf  = Buffer.from(await fs.readFile(path.join(dir, 'data.bin')));
+  // data.bin is read whole only where this thread builds tiles; a tile worker reads its own range (tile-task.js)
+  const dataPath = path.resolve(dir, 'data.bin');
+  let dataRead = null;
+  const data = () => (dataRead ??= fs.readFile(dataPath));
   const numUnits = indexBuf.length / indexDataSize;
   console.log(`  ${numUnits} units; est ~${Math.ceil(numUnits * totalLevel * 0.05)}s`);
   await ensureDir(path.join(outDir, 'tiles'));
@@ -100,14 +105,20 @@ export async function convert(input, outDir, opts = {}) {
   // gzip runs on the libuv threadpool (async), so `concurrency` tiles encode at once.
   let tilesWritten = 0;
   const concurrency = Math.min(defaultConcurrency(), 12);
-  await parallelMap(tasks, async ({ tile, off, pts }) => {
-    const { positions, alphas, rgb, scales, rotations } = decodeSplats(dataBuf, off, pts, scaleAttr.min, scaleAttr.max);
-    const bounds = computeBounds(positions, pts);
-    const glb = await buildSplatTileGlb({ positions, alphas, rgb, scales, rotations }, pts, bounds, opts.centroidsOnly);
-    await fs.writeFile(path.join(outDir, tile.content.uri), glb);
-    tile.boundingVolume.box = boundToZUpBox(bounds);
-  }, { concurrency, onProgress: (d, t) => { tilesWritten = d; if (d % 20 === 0 || d === t) process.stdout.write(`\r  ${d}/${t} tiles (×${concurrency})`); } });
-  process.stdout.write('\n');
+  const { workers } = await convertTiles(tasks, {
+    module: TILE_TASK, fn: 'lccTileToFile', workers: opts.workers, concurrency,
+    task: ({ tile, off, pts }) => ({ dataPath, off, pts, scaleMin: scaleAttr.min, scaleMax: scaleAttr.max, centroids: !!opts.centroidsOnly, outPath: path.join(outDir, tile.content.uri) }),
+    here: async ({ tile, off, pts }) => {
+      const { positions, alphas, rgb, scales, rotations } = decodeSplats(await data(), off, pts, scaleAttr.min, scaleAttr.max);
+      const bounds = computeBounds(positions, pts);
+      const glb = await buildSplatTileGlb({ positions, alphas, rgb, scales, rotations }, pts, bounds, opts.centroidsOnly);
+      await fs.writeFile(path.join(outDir, tile.content.uri), glb);
+      return bounds;
+    },
+    onResult: ({ tile }, bounds) => { tile.boundingVolume.box = boundToZUpBox(bounds); },
+    onProgress: (d, t) => { tilesWritten = d; if (d % 20 === 0 || d === t) process.stdout.write(`\r  ${d}/${t} tiles`); },
+  });
+  process.stdout.write(` (${workers ? `${workers} worker threads` : `×${concurrency}`})\n`);
 
   // Root: union of unit boxes, holds all unit chains. Empty content (grouping node).
   let mn = [Infinity,Infinity,Infinity], mx = [-Infinity,-Infinity,-Infinity];

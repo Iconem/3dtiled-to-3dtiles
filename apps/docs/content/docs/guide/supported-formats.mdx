@@ -115,8 +115,8 @@ Formats that carry (or wrap) a general node/mesh hierarchy rather than a point- 
 
 ## What decodes and encodes each format
 
-Every live tile is the same three steps: fetch the source bytes, decode them, write a GLB. This is what runs for
-each format, and whether the server and the offline converter can spread it over worker threads
+Every tile is the same three steps: read the source bytes, decode them, write a GLB. This is what runs for each
+format, and whether the server and the offline converter can spread it over worker threads
 ([`TILED_WORKERS`](/docs/guide/cli-usage#tile-workers-experimental)).
 
 | Format | Decoded with | Written with | Workers, live | Workers, offline |
@@ -125,19 +125,52 @@ each format, and whether the server and the offline converter can spread it over
 | Potree 2.0 | our own reader; brotli nodes through Node's `zlib` | glTF-Transform, POINTS | yes | yes |
 | Potree 1.x | our own `.bin` reader; LAZ nodes through `copc`'s LAS reader and `laz-perf` | glTF-Transform, POINTS | yes | yes |
 | Plain LAS/LAZ | `copc`'s LAS reader and `laz-perf`, the whole file at once | glTF-Transform, POINTS | no live path | no |
-| Streamed SOG | [`@playcanvas/splat-transform`](https://github.com/playcanvas/splat-transform) (`readFile`, WebP planes) | our SPZ v2 writer, gzip through Node's `zlib`, wrapped by glTF-Transform | yes | no |
-| GeoSplats (MapTiler) | `@playcanvas/splat-transform` (`readSog`) | same SPZ writer | yes | no live-only format |
-| LCC (XGRIDS) | our own decoder (`lccDecode.js`) | same SPZ writer | yes | no |
-| RAD (Spark) | our own reader (`radHeader.js`), chunks inflated by Node's `zlib` | same SPZ writer | yes | no |
-| I3S / SLPK | our own geometry parser, a port of Esri's LEPCC codec for point clouds, `@loaders.gl/i3s` to read `.slpk` archives | our own minimal GLB writer, textures passed through as they are | yes | no |
-| 3MX (Bentley) | our own `.3mxb` parser, OpenCTM through a vendored `js-openctm` (LZMA) | glTF-Transform, TRIANGLES | yes | no |
-| Bing 3D | no decode: the `td1` manifest is rewritten, tiles pass through (optional Draco decode by glTF-Transform) | passed through | not needed | no offline path |
+| Streamed SOG | [`@playcanvas/splat-transform`](https://github.com/playcanvas/splat-transform) (`readFile`, WebP planes) | our SPZ v2 writer, gzip through Node's `zlib`, wrapped by glTF-Transform | yes | yes, per chunk |
+| GeoSplats (MapTiler) | `@playcanvas/splat-transform` (`readSog`) | same SPZ writer | yes | no offline converter |
+| LCC (XGRIDS) | our own decoder (`lccDecode.js`) | same SPZ writer | yes | yes |
+| RAD (Spark) | our own reader (`radHeader.js`), chunks inflated by Node's `zlib` | same SPZ writer | yes | yes |
+| I3S / SLPK | our own geometry parser, a port of Esri's LEPCC codec for point clouds, `@loaders.gl/i3s` to read `.slpk` archives | glTF-Transform, textures passed through as they are | yes | yes |
+| 3MX (Bentley) | our own `.3mxb` parser, OpenCTM through a vendored `js-openctm` (LZMA) | glTF-Transform, TRIANGLES | yes | no offline converter |
+| Bing 3D | no decode: the `td1` manifest is rewritten, tiles pass through (optional Draco decode by glTF-Transform) | passed through; the globe's own low levels by glTF-Transform | not needed | no offline path |
 | 3D Tiles to 3D Tiles | glTF-Transform for per-tile operations, `3d-tiles-tools` for whole-tileset ones | glTF-Transform | no | no |
 
-On the splat formats the workers gain little: the gzip of an SPZ payload already ran off the main thread (Node hands
-it to its own thread pool), a streamed-SOG chunk is decoded once and then cut into many tiles, and the samples measured
-were slower to fetch than to decode. The LAZ decode of a point cloud is the one step that was both heavy and stuck on
-the main thread, which is why COPC gains the most.
+### Where the code is our own, and why
+
+| Format | What exists | Why it is not what runs here |
+|---|---|---|
+| Potree 1.x and 2.0 | Potree's own loaders, written for three.js in a browser | They load into a renderer's scene, node by node on its camera. A converter needs one node's bytes turned into arrays, with no scene; the readers are a few hundred lines. |
+| LCC (XGRIDS) | XGRIDS' LCC Web SDK; `@playcanvas/splat-transform` reads `.lcc` and LCC2 (since 0.14) | The SDK is a renderer: it unpacks splats in a shader and exposes no decode call (our byte layout is taken from that shader). `splat-transform` reads a whole LCC, or whole LOD levels of it, into one table; a tile here is one unit at one LOD, a byte range named by `index.bin`, which is what lets it be streamed over range requests. The data is uncompressed, 32 bytes a splat, so the decoder is a loop. LCC2 is not read yet: `splat-transform` is the way in when it is needed. |
+| RAD (Spark) | Spark's own reader, in Rust, compiled to WebAssembly inside the renderer's package | It is not published as a decoder: the WASM module is embedded in the Spark bundle and its exports are the renderer's. Compiling Spark's Rust crate to our own WASM module is feasible, and would track the format as it changes; it means a Rust toolchain in the build and a binary to ship. The format is a JSON header and deflated columns, which Node's `zlib` inflates natively, so a JS reader was the smaller thing to own. To revisit if the format moves faster than we follow. |
+| SPZ (output) | Niantic's `spz` library (C++, with WASM builds by others) | Only the writer is needed, for one version of the format (v2, which the glTF extension names): pack the columns, gzip. No native module to build or ship. |
+| I3S | `@loaders.gl/i3s`, Cesium's I3S provider | `loaders.gl` is used to open `.slpk` archives. Its tile loader returns renderer-ready, already reprojected content for whole layers; a converter needs each node's raw buffers, and we found no LEPCC point-cloud decoder in it, hence the port of Esri's reference decoder. |
+| 3MX | none in JavaScript that we found; Bentley's SDK is native and closed | The `.3mxb` container is a JSON header and a list of buffers; its meshes are OpenCTM, decoded by the vendored `js-openctm`. |
+
+### What tile workers gain, measured
+
+The same tiles, byte for byte, with and without workers. Offline converters, 20 cores, local disk, in seconds:
+
+| Converter | Dataset | One thread | 4 workers | 8 workers |
+|---|---|---|---|---|
+| COPC | Autzen, 278 tiles | 15.7 | | 5.3 |
+| I3S | New York buildings, 5 882 tiles, 7.8 GB | 95 | | 33 |
+| RAD | Coit tower, 778 tiles | 33 | 23 | 17 |
+| LCC | Guan temple, 154 tiles | 9.6 | 5.2 | 4.6 |
+| Streamed SOG | skatepark, 20 chunks, 2 054 tiles | 23 | 12 | 13 |
+| Streamed SOG | Roman parish, 131 chunks, 37 725 tiles | 90 | | 55 |
+
+The gain follows how much of a run is the per-tile work. COPC and I3S are almost only that. A RAD run first reads
+the whole file and builds its tree on one thread. Every worker of a SOG run first loads `splat-transform`, nearly two
+seconds each, which a small scene never earns back. On the live server the splat formats gain least: the gzip of an
+SPZ payload already ran off the main thread (Node hands it to its own thread pool), and the remote samples measured
+were slower to fetch than to decode.
+
+**A streamed-SOG chunk is decoded once, not once per tile.** A chunk is a set of WebP images holding half a million
+splats or so, and dozens to hundreds of tiles are ranges of it. Offline, tiles are grouped by chunk and each chunk
+is decoded once (once on whichever worker takes it, with workers). On the live server the decoded chunk is cached,
+while it is still decoding too, so tiles of one chunk asked for together share one decode. That cache holds 24
+chunks per scene (`TILED_SOG_CHUNK_CACHE`): a decoded chunk is 30 to 45 MB, so 24 is already up to a gigabyte, and a
+chunk evicted and needed again costs a third of a second to decode. A crawl export that walks more than 24 chunks
+at once therefore decodes some of them twice; raising the setting trades memory for that.
 
 ## 3D Tiles → 3D Tiles transcodes
 

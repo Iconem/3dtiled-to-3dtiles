@@ -20,10 +20,13 @@ import fs   from 'fs/promises';
 import path from 'path';
 import { fileURLToPath } from 'node:url';
 import { decodeChunk, extractRange } from './sogChunk.js';
+import { sogChunkToFiles } from './tile-task.js';
+
+const TILE_TASK = new URL('./tile-task.js', import.meta.url).href;
 // Shared, parallel-friendly encoder from core (async gzip on the libuv threadpool) +
 // bounded-concurrency map — same import lcc uses. (Replaced the former local synchronous
 // ./spzGlb.js, which was byte-identical and is now deleted.)
-import { buildSplatTileGlb, computeBounds, parallelMap, defaultConcurrency } from '../../core/index.js';
+import { buildSplatTileGlb, computeBounds, defaultConcurrency, convertTiles } from '../../core/index.js';
 
 // Geometric error: anchored to the ROOT bound diagonal and halved at every step down
 // the tree (interior level AND each LOD-chain step), matching the reference
@@ -117,24 +120,21 @@ export async function convert(input, outDir, opts = {}) {
     byFile.get(p.run.file).push(p);
   }
   console.log(`Writing ${pending.length} tiles from ${byFile.size} chunks…`);
-  const concurrency = defaultConcurrency();
+  // The unit of work is the chunk (tile-task.js): its WebP planes are decoded once, then every tile cut from it is
+  // encoded and written. On this thread: one chunk at a time, its tiles in lanes, so memory stays bounded to one
+  // decoded table. With tile workers (TILED_WORKERS, --workers, opts.workers): one chunk per worker at a time.
+  const lanes = defaultConcurrency();
   let tilesWritten = 0, chunksDone = 0;
-  for (const [fileIdx, tasks] of byFile) {
-    const table = await decodeChunk(path.join(sceneDir, lod.filenames[fileIdx]));
-    // Fan this chunk's tiles through bounded-concurrency encode+write (async gzip runs
-    // on the libuv threadpool). `table` stays alive only for this chunk, then is released
-    // before the next decode — memory stays bounded to one chunk DataTable at a time.
-    await parallelMap(tasks, async ({ uri, run }) => {
-      const { positions, alphas, rgb, scales, rotations } = extractRange(table, run.offset, run.count);
-      const bounds = computeBounds(positions, run.count);
-      const glb = await buildSplatTileGlb({ positions, alphas, rgb, scales, rotations }, run.count, bounds, opts.centroidsOnly);
-      await fs.writeFile(path.join(outDir, uri), glb);
-      tilesWritten++;
-    }, { concurrency });
-    chunksDone++;
-    process.stdout.write(`\r  ${chunksDone}/${byFile.size} chunks, ${tilesWritten} tiles`);
-    // `table` goes out of scope next iteration; nothing retains it → GC can reclaim it.
-  }
+  const chunks = [...byFile].map(([fileIdx, tasks]) => ({
+    metaPath: path.join(sceneDir, lod.filenames[fileIdx]), outDir, centroids: !!opts.centroidsOnly,
+    tiles: tasks.map(({ uri, run }) => ({ uri, offset: run.offset, count: run.count })),
+  }));
+  await convertTiles(chunks, {
+    module: TILE_TASK, fn: 'sogChunkToFiles', workers: opts.workers, concurrency: 1,
+    task: (chunk) => ({ ...chunk, concurrency: 2 }),
+    here: (chunk) => sogChunkToFiles({ ...chunk, concurrency: lanes }),
+    onResult: (_chunk, n) => { tilesWritten += n; chunksDone++; process.stdout.write(`\r  ${chunksDone}/${byFile.size} chunks, ${tilesWritten} tiles`); },
+  });
   process.stdout.write('\n');
 
   // Optional environment SOG → one always-coarse child so it streams in early.

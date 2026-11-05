@@ -18,7 +18,10 @@ import { buildTileset } from './tilesetBuilder.js';
 // Shared, parallel-friendly encoder from core (async gzip on the libuv threadpool) +
 // bounded-concurrency map — same import lcc uses. Replaces rad's inline synchronous
 // SPZ-v2/GLB encoder (verified byte-identical to the prior gzipSync output).
-import { buildSplatTileGlb, computeBounds, parallelMap, defaultConcurrency } from '../../core/index.js';
+import { buildSplatTileGlb, computeBounds, defaultConcurrency, convertTiles } from '../../core/index.js';
+import { isMainThread } from 'node:worker_threads';
+
+const TILE_TASK = new URL('./tile-task.js', import.meta.url).href;
 
 // Conversion options (settable per-call by `convert()`; the CLI shim builds them from argv).
 //  scaleMult        --scale=N           uniform σ multiplier (A/B splat size)
@@ -29,6 +32,7 @@ import { buildSplatTileGlb, computeBounds, parallelMap, defaultConcurrency } fro
 //  opacityMin       --opacity-filter=N  OPT-IN: drop splats with alpha < N (default 0 = off, matches SparkJS)
 //  scaleOutlierMult --max-scale-mult=N  OPT-IN: drop splats with maxScale > median×N (default 0 = off)
 const OPTS = { scaleMult: 1, alphaScale: 1, geScale: 1, geLayer: 1, geBasis: 'spatial', opacityMin: 0, scaleOutlierMult: 0, centroidsOnly: false };
+const OPT_KEYS = Object.keys(OPTS);   // what a tile worker is handed: these, not whatever else a caller's opts carry
 
 /** Parse `--flag=value` argv into an opts object (for the CLI shim). */
 function parseArgvOpts(argv) {
@@ -407,15 +411,22 @@ export async function convert(radPath, outDir, opts = {}) {
   // bounded-concurrency parallelMap. radBuf is already fully loaded; peak memory is
   // bounded by concurrency × one tile's decoded arrays. Output is unchanged: each
   // node writes the same bytes to the same path regardless of order.
+  // With tile workers (TILED_WORKERS, --workers, opts.workers) each chunk is read from the file, inflated, encoded
+  // and written on a worker thread (tile-task.js), which hands back what is recorded on the node.
   const concurrency = defaultConcurrency();
-  await parallelMap(nodes, async (node) => {
-    const chunk    = header.chunks[node.chunkIndex];
-    const tilePath = path.join(outDir, 'tiles', `node_${node.nodeIndex}.glb`);
-    const { bounds, featureSize, kept } = await writeChunkGlb(radBuf, chunk, payloadBase, tilePath);
-    node.bounds         = [bounds.cx, bounds.cy, bounds.cz, bounds.hx, bounds.hy, bounds.hz];
-    node.geometricError = featureSize;   // legacy featureSize basis (--ge-basis=featuresize)
-    node.splatCount     = kept;          // for the default spatial GE basis (diag / ∛count)
-  }, { concurrency, onProgress: (d, t) => { if (d % 50 === 0 || d === t) process.stdout.write(`\r  ${d}/${t}`); } });
+  const tilePathOf = (node) => path.join(outDir, 'tiles', `node_${node.nodeIndex}.glb`);
+  const radFile = path.resolve(radPath);
+  await convertTiles(nodes, {
+    module: TILE_TASK, fn: 'radChunkToFile', workers: opts.workers, concurrency,
+    task: (node) => { const chunk = header.chunks[node.chunkIndex]; return { radPath: radFile, start: payloadBase + chunk.offset, bytes: chunk.bytes, outPath: tilePathOf(node), opts: Object.fromEntries(OPT_KEYS.map((k) => [k, OPTS[k]])) }; },
+    here: (node) => writeChunkGlb(radBuf, header.chunks[node.chunkIndex], payloadBase, tilePathOf(node)),
+    onResult: (node, { bounds, featureSize, kept }) => {
+      node.bounds         = [bounds.cx, bounds.cy, bounds.cz, bounds.hx, bounds.hy, bounds.hz];
+      node.geometricError = featureSize;   // legacy featureSize basis (--ge-basis=featuresize)
+      node.splatCount     = kept;          // for the default spatial GE basis (diag / ∛count)
+    },
+    onProgress: (d, t) => { if (d % 50 === 0 || d === t) process.stdout.write(`\r  ${d}/${t}`); },
+  });
   console.log(`\r  ${nodes.length}/${nodes.length} tiles`);
 
   const tileset = buildTileset(nodes, { tileUriTemplate: 'tiles/node_{index}.glb', geScale: OPTS.geScale, geLayer: OPTS.geLayer, geBasis: OPTS.geBasis });
@@ -442,7 +453,7 @@ export async function convert(radPath, outDir, opts = {}) {
 }
 
 // ── CLI shim: run only when invoked directly (not when imported by the meta-converter) ──
-if (process.argv[1] && fileURLToPath(import.meta.url) === path.resolve(process.argv[1])) {
+if (isMainThread && process.argv[1] && fileURLToPath(import.meta.url) === path.resolve(process.argv[1])) {
   const argv = process.argv.slice(2);
   const pos = argv.filter(a => !a.startsWith('--'));
   convert(pos[0], pos[1], parseArgvOpts(argv))

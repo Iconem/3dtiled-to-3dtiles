@@ -60,12 +60,14 @@ with `TILED_ALLOW_EXPORT=1`.
 
 ### Tile workers (experimental)
 
-Point tiles are decoded and encoded on the process's one thread by default. Set `TILED_WORKERS=auto` (one worker
+Tiles are decoded and encoded on the process's one thread by default. Set `TILED_WORKERS=auto` (one worker
 thread per core but one, at most 8) or `TILED_WORKERS=<n>` to spread that work over worker threads: on the server for
 `/stream` tiles and crawl exports of every streamed format (COPC, Potree, SOG, LCC, RAD, GeoSplats, I3S, 3MX), and in
-the `copc-to-3dtiles` and `potree-to-3dtiles` converters, which also take `--workers <n>`. The output is identical. Expect about 3 to 4 times the tile throughput on 8 cores for point clouds (less for splats and meshes), a
-server that stays responsive while it builds tiles, and roughly 50 MB more memory per worker. One export can ask for
-it alone: `workers` on `POST /export`, `--workers` on the `3dtiled` CLI, or **Advanced → Tile threads** in the desktop app.
+the offline converters (COPC, Potree, SOG, LCC, RAD, I3S), which also take `--workers <n>`. The output is identical.
+Expect about 3 times the throughput on 8 cores for point clouds and I3S meshes, 1.6 to 2 times for splats
+([measured](/docs/guide/supported-formats#what-tile-workers-gain-measured)), a server that stays responsive while it
+builds tiles, and roughly 50 MB more memory per worker. One export can ask for it alone: `workers` on `POST /export`,
+`--workers` on the `3dtiled` CLI, or **Advanced → Tile threads** in the desktop app.
 
 ```bash
 TILED_WORKERS=auto node packages/tile-server/server.js

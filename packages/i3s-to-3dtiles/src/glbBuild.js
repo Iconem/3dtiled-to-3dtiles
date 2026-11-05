@@ -1,126 +1,62 @@
 /**
- * glbBuild.js  (i3s-to-3dtiles)  — DRAFT, UNTESTED
+ * glbBuild.js  (i3s-to-3dtiles)
  *
- * Minimal binary glTF 2.0 (.glb) writer for the I3S payloads this draft emits:
+ * The binary glTF 2.0 (.glb) of one mesh or point tile, written with glTF-Transform like the other converters' tiles
+ * (it was a hand-written GLB container until 2026-11: same content, but nothing glTF-Transform offers could be
+ * applied to it). Used for I3S nodes (offline and live) and for the Bing 3D globe's tiles:
  *   - TRIANGLES (mode 4): POSITION [+ NORMAL] [+ COLOR_0] [+ TEXCOORD_0 + baseColorTexture],
  *     non-indexed (I3S geometry is a flat per-attribute vertex array; we draw it as a triangle soup).
  *   - POINTS    (mode 0): POSITION [+ COLOR_0].
  * No Draco — that path is gated out in index.js/i3s-live.js. The texture image (JPEG/PNG bytes,
  * already the raw file — no re-encode) is embedded as-is; DDS/KTX2/Basis-encoded textures are gated
- * out by the caller before reaching here (no decoder in this adapter, same as Draco/LEPCC geometry).
- * Vertices are written in a node-LOCAL frame; the 3D Tiles tile transform (from the node OBB centre)
- * places them in ECEF.
+ * out by the caller before reaching here (no decoder in this adapter, same as Draco geometry).
+ * Vertices are written in a node-LOCAL frame; the 3D Tiles tile transform places them in ECEF.
  */
+import { Document, NodeIO, VertexLayout } from '@gltf-transform/core';
 
-const COMP = { F32: 5126, U8: 5121 };  // glTF componentType
-
-function pad4(n) { return (n + 3) & ~3; }
+// One bufferView per attribute, as the hand-written container had. glTF-Transform copies vertex data element by
+// element either way, which makes it about twice as slow to write as that container was on these tiles (a
+// megabyte and more each); tile workers are what makes up for it.
+const io = new NodeIO().setVertexLayout(VertexLayout.SEPARATE);
 
 /**
  * @param {Object} g  { mode:'TRIANGLES'|'POINTS', positions:Float32Array(3N) (LOCAL),
  *                       normals?:Float32Array(3N), colors?:Uint8Array(4N), uvs?:Float32Array(2N),
- *                       texture?:{bytes:Buffer, mimeType:'image/jpeg'|'image/png'} }
+ *                       texture?:{bytes:Uint8Array, mimeType:'image/jpeg'|'image/png'} }
+ * @returns {Promise<Buffer>} the GLB
  */
-export function buildGlb(g) {
+export async function buildGlb(g) {
   const N = g.positions.length / 3;
-  const accessors = [];
-  const bufferViews = [];
-  const attributes = {};
+  const doc = new Document();
+  doc.getRoot().getAsset().generator = 'i3s-to-3dtiles';
+  const buffer = doc.createBuffer();
+  const accessor = (type, array) => doc.createAccessor().setType(type).setArray(array).setBuffer(buffer);
+  // glTF-Transform keeps the array it is given: a view over a larger buffer (a Node Buffer slice) is handed as its own typed array
+  const f32 = (a) => (a instanceof Float32Array ? a : new Float32Array(a.buffer, a.byteOffset, a.byteLength / 4));
+  const u8 = (a) => (a instanceof Uint8Array && a.constructor === Uint8Array ? a : new Uint8Array(a.buffer, a.byteOffset, a.byteLength));
 
-  // bounds for POSITION accessor min/max (required by spec)
-  let mn = [Infinity, Infinity, Infinity], mx = [-Infinity, -Infinity, -Infinity];
-  for (let i = 0; i < N; i++) for (let k = 0; k < 3; k++) {
-    const v = g.positions[i * 3 + k]; if (v < mn[k]) mn[k] = v; if (v > mx[k]) mx[k] = v;
-  }
-
-  const addView = (data) => { bufferViews.push({ data }); return bufferViews.length - 1; };
-
-  // POSITION
-  attributes.POSITION = accessors.length;
-  accessors.push({ bufferView: addView(Buffer.from(g.positions.buffer, g.positions.byteOffset, g.positions.byteLength)),
-                   componentType: COMP.F32, count: N, type: 'VEC3', min: mn, max: mx });
-  // NORMAL
-  if (g.normals) {
-    attributes.NORMAL = accessors.length;
-    accessors.push({ bufferView: addView(Buffer.from(g.normals.buffer, g.normals.byteOffset, g.normals.byteLength)),
-                     componentType: COMP.F32, count: N, type: 'VEC3' });
-  }
-  // COLOR_0 (normalized u8 vec4)
-  if (g.colors) {
-    attributes.COLOR_0 = accessors.length;
-    accessors.push({ bufferView: addView(Buffer.from(g.colors.buffer, g.colors.byteOffset, g.colors.byteLength)),
-                     componentType: COMP.U8, count: N, type: 'VEC4', normalized: true });
-  }
+  const prim = doc.createPrimitive().setMode(g.mode === 'POINTS' ? 0 : 4)
+    .setAttribute('POSITION', accessor('VEC3', f32(g.positions)));   // min/max are written from the data
+  if (g.normals) prim.setAttribute('NORMAL', accessor('VEC3', f32(g.normals)));
+  if (g.colors) prim.setAttribute('COLOR_0', accessor('VEC4', u8(g.colors)).setNormalized(true));
   // TEXCOORD_0 (only meaningful alongside a texture, but harmless to emit alone)
-  if (g.uvs && g.uvs.length === N * 2) {
-    attributes.TEXCOORD_0 = accessors.length;
-    accessors.push({ bufferView: addView(Buffer.from(g.uvs.buffer, g.uvs.byteOffset, g.uvs.byteLength)),
-                     componentType: COMP.F32, count: N, type: 'VEC2' });
-  }
+  const hasUv = !!(g.uvs && g.uvs.length === N * 2);
+  if (hasUv) prim.setAttribute('TEXCOORD_0', accessor('VEC2', f32(g.uvs)));
 
-  // Embedded base-color texture: image bytes (untouched — already a browser-native JPEG/PNG) as their
-  // own bufferView, referenced by an image/texture/material trio.
-  let imageViewIdx = -1;
-  if (g.texture && attributes.TEXCOORD_0 !== undefined) {
-    imageViewIdx = addView(g.texture.bytes);
-  }
-
-  // assemble single binary buffer + bufferView byteOffsets
-  let offset = 0;
-  const chunks = [];
-  for (const bv of bufferViews) {
-    bv.byteOffset = offset; bv.byteLength = bv.data.length; bv.buffer = 0;
-    chunks.push(bv.data);
-    const padded = pad4(bv.data.length);
-    if (padded > bv.data.length) chunks.push(Buffer.alloc(padded - bv.data.length));
-    // BUGFIX (2026-07-02): this was `offset = padded` — resetting to the CURRENT view's padded length
-    // instead of accumulating, so every bufferView from the 3rd onward got the wrong byteOffset (silently
-    // "worked" for 2-view outputs like POSITION+COLOR_0 point clouds, since offset-after-view-1 happens to
-    // equal the correct cumulative sum there). With 3+ views (mesh POSITION+NORMAL+COLOR_0[+TEXCOORD_0+image])
-    // COLOR_0 and everything after it pointed at the wrong bytes — root cause of "black/garbled textures".
-    offset += padded;
-  }
-  const bin = Buffer.concat(chunks);
-
-  const gltf = {
-    asset: { version: '2.0', generator: 'i3s-to-3dtiles (draft)' },
-    scene: 0, scenes: [{ nodes: [0] }], nodes: [{ mesh: 0 }],
-    meshes: [{ primitives: [{ attributes, mode: g.mode === 'POINTS' ? 0 : 4, material: 0 }] }],
-    accessors,
-    bufferViews: bufferViews.map(bv => ({ buffer: 0, byteOffset: bv.byteOffset, byteLength: bv.byteLength })),
-    buffers: [{ byteLength: bin.length }],
-  };
-  // Always emit an EXPLICIT material — for BOTH mesh and point tiles. A primitive with no `material`
+  // Always an EXPLICIT material — for BOTH mesh and point tiles. A primitive with no `material`
   // falls back to glTF's spec-mandated default (metallicFactor:1, roughnessFactor:1) — a fully metallic
   // surface that renders pure black without an environment/IBL map. That default was silently landing on
   // every node whose texture fetch failed (i3s-live.js's own "SceneServer returns fake-200 JSON errors
-  // intermittently" case) or whose format has no raster decoder — this is the "wrong material, all
-  // black" bug, not a geometry/decode problem. A matte (metallicFactor:0) material with no texture still
-  // shows COLOR_0 vertex colors / plain white instead of black metal.
-  //
-  // POINTS tiles need this EXACT same fix, not just mesh ones (found 2026-07-06, LEPCC-RGB point
-  // clouds): omitting `material` on a POINTS primitive left it on the same black metallic default —
-  // real per-vertex COLOR_0 decoded correctly (verified independently against the raw GLB bytes) but
-  // rendered as flat black regardless, because there was no material for a renderer to multiply COLOR_0
-  // against. Point clouds have no meaningful metallic/roughness surface response, but the material
-  // object itself (not its specific PBR values) is what makes COLOR_0 actually reach the shader.
-  gltf.materials = [{ pbrMetallicRoughness: { metallicFactor: 0, roughnessFactor: 1, ...(imageViewIdx >= 0 ? { baseColorTexture: { index: 0 } } : {}) } }];
-  if (imageViewIdx >= 0) {
-    gltf.images = [{ bufferView: imageViewIdx, mimeType: g.texture.mimeType }];
-    gltf.textures = [{ source: 0 }];
-  }
+  // intermittently" case) or whose format has no raster decoder — the "wrong material, all black" bug.
+  // A matte (metallicFactor:0) material with no texture still shows COLOR_0 vertex colors / plain white.
+  // POINTS tiles need it too (found 2026-07-06, LEPCC-RGB point clouds): without a material, COLOR_0
+  // decoded correctly but rendered flat black, as there was nothing for a renderer to multiply it against.
+  const material = doc.createMaterial().setMetallicFactor(0).setRoughnessFactor(1);
+  // Embedded base-color texture: the image bytes untouched (already a browser-native JPEG/PNG).
+  if (g.texture && hasUv) material.setBaseColorTexture(doc.createTexture().setImage(u8(g.texture.bytes)).setMimeType(g.texture.mimeType));
+  prim.setMaterial(material);
 
-  // GLB container
-  const json = Buffer.from(JSON.stringify(gltf), 'utf8');
-  const jsonPad = Buffer.alloc(pad4(json.length) - json.length, 0x20);
-  const binPad  = Buffer.alloc(pad4(bin.length) - bin.length, 0x00);
-  const jsonChunk = Buffer.concat([json, jsonPad]);
-  const binChunk  = Buffer.concat([bin, binPad]);
-  const header = Buffer.alloc(12);
-  header.writeUInt32LE(0x46546c67, 0);                                   // 'glTF'
-  header.writeUInt32LE(2, 4);
-  header.writeUInt32LE(12 + 8 + jsonChunk.length + 8 + binChunk.length, 8);
-  const jsonHdr = Buffer.alloc(8); jsonHdr.writeUInt32LE(jsonChunk.length, 0); jsonHdr.writeUInt32LE(0x4e4f534a, 4); // 'JSON'
-  const binHdr  = Buffer.alloc(8); binHdr.writeUInt32LE(binChunk.length, 0);  binHdr.writeUInt32LE(0x004e4942, 4);  // 'BIN\0'
-  return Buffer.concat([header, jsonHdr, jsonChunk, binHdr, binChunk]);
+  doc.createScene().addChild(doc.createNode().setMesh(doc.createMesh().addPrimitive(prim)));
+  const glb = await io.writeBinary(doc);
+  return Buffer.from(glb.buffer, glb.byteOffset, glb.byteLength);
 }

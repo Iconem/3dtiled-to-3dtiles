@@ -44,6 +44,10 @@ const getCtx = memoizeAsync(async (url) => {
 // first decode finishes — caching only post-decode let each one kick off its own ~1s WebP-decode
 // independently, multiplying real CPU-bound work. Caching the promise means every concurrent caller
 // awaits the one decode already underway.
+// How many decoded chunks a scene keeps (TILED_SOG_CHUNK_CACHE, default 24). A decoded chunk is its splats as 14
+// float columns, 30 to 45 MB for the usual half-million splats, so 24 is already up to a gigabyte for one scene: a
+// chunk evicted and asked for again costs a third of a second, which is cheaper than holding many more of them.
+const CHUNK_CACHE = Math.max(1, Math.floor(Number(process.env.TILED_SOG_CHUNK_CACHE)) || 24);
 async function getChunkTable(ctx, fileIdx) {
   if (ctx.chunks.has(fileIdx)) { const p = ctx.chunks.get(fileIdx); ctx.chunks.delete(fileIdx); ctx.chunks.set(fileIdx, p); return p; }
   const promise = (async () => {
@@ -69,7 +73,7 @@ async function getChunkTable(ctx, fileIdx) {
   })();
   promise.catch(() => ctx.chunks.delete(fileIdx));   // don't poison the cache with a failed decode
   ctx.chunks.set(fileIdx, promise);
-  if (ctx.chunks.size > 24) ctx.chunks.delete(ctx.chunks.keys().next().value);   // evict oldest
+  if (ctx.chunks.size > CHUNK_CACHE) ctx.chunks.delete(ctx.chunks.keys().next().value);   // evict oldest
   return promise;
 }
 

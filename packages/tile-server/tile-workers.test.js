@@ -113,3 +113,54 @@ test('a tile the workers had no memory for is built on this thread, one at a tim
     assert.equal(await runTileTaskOr(pool, mod, 'ok', 7, undefined, fallback(6)), 7, 'the pool is whole again');
   } finally { await pool.destroy(); }
 });
+
+test('convertTiles: the same results on this thread and on workers; a tile short of memory is built here afterwards', async (t) => {
+  t.mock.method(console, 'log', () => {});
+  const { convertTiles } = await import('../core/index.js');
+  const mod = 'data:text/javascript,' + encodeURIComponent(
+    'export const sq = ({ n }) => { if (n === 3) throw new RangeError("Array buffer allocation failed"); if (n === -1) throw new Error("bad tile"); return n * n; };');
+  const run = async (workers, items = [1, 2, 3, 4, 5]) => {
+    const got = new Map(); let last = 0;
+    const r = await convertTiles(items, { module: mod, fn: 'sq', workers, task: (n) => ({ n }), here: async (n) => n * n,
+      onResult: (n, v) => got.set(n, v), onProgress: (d) => { last = d; } });
+    return { ...r, got: [...got].sort((a, b) => a[0] - b[0]), last };
+  };
+  const here = await run(0), there = await run(2);
+  assert.deepEqual(there.got, here.got);
+  assert.deepEqual(here.got.map(([, v]) => v), [1, 4, 9, 16, 25]);
+  assert.deepEqual([here.workers, here.deferred, here.last], [0, 0, 5]);
+  assert.deepEqual([there.workers, there.deferred, there.last], [2, 1, 5], 'tile 3 ran out of memory on its worker and was built here');
+  await assert.rejects(run(2, [1, -1]), /bad tile/);
+});
+
+test('a task that cannot be sent to a worker fails alone and leaves the worker free', async () => {
+  const mod = 'data:text/javascript,' + encodeURIComponent('export const ok = (a) => a?.n ?? a;');
+  const pool = new WorkerPool(WORKER, 1);
+  try {
+    await assert.rejects(runTileTask(pool, mod, 'ok', { n: 1, f: () => {} }), /could not be cloned/);
+    assert.equal(await runTileTask(pool, mod, 'ok', { n: 2 }), 2);
+  } finally { await pool.destroy(); }
+});
+
+test('the I3S and Bing globe GLB writer (glTF-Transform): attributes, material and texture bytes as given', async () => {
+  const { buildGlb } = await import('../i3s-to-3dtiles/src/glbBuild.js');
+  const { NodeIO } = await import('@gltf-transform/core');
+  const png = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==', 'base64');
+  const g = { mode: 'TRIANGLES', positions: new Float32Array([0, 0, 0, 1, 0, 0, 0, 2, 0]), normals: new Float32Array([0, 0, 1, 0, 0, 1, 0, 0, 1]),
+    colors: new Uint8Array([255, 0, 0, 255, 0, 255, 0, 255, 0, 0, 255, 255]), uvs: new Float32Array([0, 0, 1, 0, 0, 1]), texture: { bytes: png, mimeType: 'image/png' } };
+  const doc = await new NodeIO().readBinary(new Uint8Array(await buildGlb(g)));
+  const prim = doc.getRoot().listMeshes()[0].listPrimitives()[0];
+  assert.equal(prim.getMode(), 4);
+  assert.deepEqual([...prim.getAttribute('POSITION').getArray()], [...g.positions]);
+  assert.deepEqual(prim.getAttribute('POSITION').getMax([]), [1, 2, 0]);
+  assert.deepEqual([...prim.getAttribute('COLOR_0').getArray()], [...g.colors]);
+  assert.equal(prim.getAttribute('COLOR_0').getNormalized(), true);
+  assert.deepEqual([...prim.getAttribute('TEXCOORD_0').getArray()], [...g.uvs]);
+  const mat = prim.getMaterial();
+  assert.deepEqual([mat.getMetallicFactor(), mat.getRoughnessFactor()], [0, 1], 'matte: the glTF default is metallic and renders black');
+  assert.ok(Buffer.from(mat.getBaseColorTexture().getImage()).equals(png), 'the image is embedded untouched');
+  const pts = await new NodeIO().readBinary(new Uint8Array(await buildGlb({ mode: 'POINTS', positions: g.positions })));
+  const p = pts.getRoot().listMeshes()[0].listPrimitives()[0];
+  assert.equal(p.getMode(), 0);
+  assert.ok(p.getMaterial(), 'points carry a material too');
+});

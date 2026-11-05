@@ -8,6 +8,7 @@
   },
   "main": "src/index.js",
   "dependencies": {
+    "@gltf-transform/core": "^4.4.0",
     "@loaders.gl/core": "^4.4.3",
     "@loaders.gl/i3s": "^4.4.3",
     "@loaders.gl/polyfills": "^4.4.3",

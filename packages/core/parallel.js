@@ -76,7 +76,11 @@ export class WorkerPool {
     while (this.queue.length && this.idle.length) {
       const w = this.idle.pop(); const { id, task, transfer } = this.queue.shift();
       w._task = id; w.ref();
-      w.postMessage({ id, task }, transfer || []);
+      try { w.postMessage({ id, task }, transfer || []); }
+      catch (e) {   // a task that cannot be cloned: its own failure, and the worker is free again
+        w._task = null; w.unref(); this.idle.push(w);
+        const p = this._pending.get(id); this._pending.delete(id); p?.reject(e);
+      }
     }
   }
   /** run a task object on a free worker; `transfer` = ArrayBuffers to move (zero-copy). */
@@ -151,6 +155,39 @@ export async function runTileTaskOr(pool, module, fn, args, transfer, fallback) 
     return run;
   }
 }
+/**
+ * The tile loop of an offline converter: every item built once, on the tile workers when there are some (the
+ * `TILED_WORKERS` flag, the CLI's `--workers`, or `workers` here), else on this thread in `concurrency` lanes.
+ * A converter supplies the two ways to build one item, which must write the same bytes:
+ *   - `task(item)`: the plain description a worker is handed, for `module`'s export `fn` (a file URL and a name);
+ *     the worker reads its own input and writes its own output, so nothing heavy crosses threads;
+ *   - `here(item)`: the same build on this thread.
+ * An item a worker had no memory for (isMemoryFailure) is set aside and built by `here` after the others, one at a
+ * time. Any other failure is the item's own and is thrown.
+ * @param {any[]} items
+ * @param {{module:string|URL, fn:string, task:(item:any)=>object, here:(item:any)=>Promise<any>, workers?:any,
+ *          concurrency?:number, onResult?:(item:any, result:any)=>void, onProgress?:(done:number,total:number)=>void}} o
+ * @returns {Promise<{workers:number, deferred:number}>} worker threads used (0: this thread), items built late
+ */
+export async function convertTiles(items, { module, fn, task, here, workers, concurrency, onResult, onProgress }) {
+  const pool = tilePool(workers != null ? tileWorkerCount(workers) : undefined);
+  const later = [];
+  let done = 0;
+  const finish = (item, result) => { onResult?.(item, result); done++; onProgress?.(done, items.length); };
+  await parallelMap(items, async (item) => {
+    if (!pool) return finish(item, await here(item));
+    let result;
+    try { result = await runTileTask(pool, module, fn, task(item)); }
+    catch (e) { if (!isMemoryFailure(e)) throw e; later.push(item); return; }
+    finish(item, result);
+  }, { concurrency: pool ? pool.size : concurrency });
+  if (later.length) {
+    console.log(`\n  ${later.length} tiles ran out of memory on a worker: building them on one thread`);
+    for (const item of later) finish(item, await here(item));
+  }
+  return { workers: pool ? pool.size : 0, deferred: later.length };
+}
+
 /** How many tiles fell back to the caller's thread since the process started (a health figure, and for tests). */
 export const tileFallbacks = { count: 0 };
 
