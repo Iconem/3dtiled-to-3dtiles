@@ -47,4 +47,10 @@ fs.writeFileSync(path.join(app, 'portable.txt'), '3D Tiled, portable: no install
 const zip = path.join(artifacts, 'Portable.zip');
 fs.rmSync(zip, { force: true });
 execFileSync(tar, ['-a', '-c', '-f', zip, '-C', portable, path.basename(app)], { stdio: 'inherit' });
+// The release's build stamp, beside the update feed: prepare-bundle's build.json plus the bundle hash it describes.
+const stamp = path.join(desktop, 'bundle', 'repo', 'build.json');
+if (fs.existsSync(stamp)) {
+  const { hash } = JSON.parse(fs.readFileSync(path.join(artifacts, 'stable-win-x64-update.json'), 'utf8'));
+  fs.writeFileSync(path.join(artifacts, 'stable-win-x64-build.json'), JSON.stringify({ ...JSON.parse(fs.readFileSync(stamp, 'utf8')), hash }));
+}
 for (const f of ['Setup.exe', 'Portable.zip']) console.log(`[package-windows] ${f}: ${(fs.statSync(path.join(artifacts, f)).size / 1e6).toFixed(0)} MB`);

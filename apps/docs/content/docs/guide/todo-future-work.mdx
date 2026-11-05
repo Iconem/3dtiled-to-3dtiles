@@ -137,7 +137,7 @@ evaluated before assuming this would be a novel effort.
   as a personal dataset library, not a one-shot CLI wrapper. Purely an idea at this point — no design
   work, no scoping, not started.
 
-- [ ] **The desktop app as a one-stop tiler for raw, untiled input** (noted 2026-11-05). Today it takes sources
+- [ ] **Next on the roadmap (2 of 2): the desktop app as a one-stop tiler for raw, untiled input** (noted 2026-11-05). Today it takes sources
   that are already tiled (COPC, Potree, SOG, LCC, RAD, I3S, 3MX) and streams or exports them. The next shape: give it
   a raw LAS/LAZ/E57, a mesh (OBJ, glTF, OSGB) or a splat PLY, and it runs the right third-party tiler for you.
   It would fetch the tool's binary for the platform when a release exists (PotreeConverter, GoTiler, py3dtiles,
@@ -150,7 +150,7 @@ evaluated before assuming this would be a novel effort.
   folder". Open questions: licences of the redistributed binaries, checksums for the downloads, and unsigned binaries
   under Windows Defender (the app's own launcher is already flagged). Not scoped, not started.
 
-- [ ] **Tile workers for the offline converters of the splat and mesh formats.** The live server runs every format's
+- [ ] **Next on the roadmap (1 of 2): tile workers for the offline converters of the splat and mesh formats.** The live server runs every format's
   tile on worker threads through one layer (`runTileTaskOr` in core, a task module per family in the tile-server). The
   SOG, LCC, RAD, I3S and 3MX converters still loop on one thread, each with its own inline decode, encode and write.
   The way to do it once: a `core` helper that takes the list of tiles, a task module and a function naming each

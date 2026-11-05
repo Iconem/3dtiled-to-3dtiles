@@ -7,7 +7,7 @@
  * The layout stays the repo's, as the server and the two CLI scripts import each other by relative path.
  * Run with the Node to ship: its binary is the one copied, and the native dependencies are built for it.
  */
-import { execSync } from 'node:child_process';
+import { execFileSync, execSync } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -60,6 +60,12 @@ const modules = path.join(out, 'node_modules');
 
 fs.mkdirSync(path.join(out, 'runtime'));
 fs.copyFileSync(process.execPath, path.join(out, 'runtime', path.basename(process.execPath)));
+
+// When and from what this build was made: the app compares it with the release's own (stable-win-x64-build.json) before
+// it calls that release an update, as two builds of one day share a version.
+let commit = null;
+try { commit = execFileSync('git', ['rev-parse', 'HEAD'], { cwd: desktop, encoding: 'utf8' }).trim(); } catch { /* not a checkout */ }
+fs.writeFileSync(path.join(out, 'build.json'), JSON.stringify({ builtAt: new Date().toISOString(), commit }));
 
 // Electrobun's build.copy takes files, not folders, so the config reads this map (electrobun.config.ts).
 const copy = {};

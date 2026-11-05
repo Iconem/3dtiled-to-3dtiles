@@ -384,8 +384,9 @@ Electrobun.events.on("close", stopChildren);   // the window itself, should the 
  * (no-update.txt beside bin/).
  *
  * Electrobun calls any release whose hash differs from the installed one an update, so a build newer than the
- * release was offered the release and went back to it. The release's version (the date it was built) has to be at
- * least the installed one.
+ * release was offered the release and went back to it. So the release has to have been built after this build:
+ * both carry a build stamp (build.json in the bundle, stable-win-x64-build.json in the release, from
+ * prepare-bundle.mjs and package-windows.mjs). Where either stamp is missing, the versions (the build day) decide.
  */
 const versionParts = (v: unknown) => String(v ?? "").split(".").map((n) => parseInt(n, 10) || 0);
 export function olderVersion(a: unknown, b: unknown) {   // is a older than b
@@ -404,8 +405,13 @@ async function checkForUpdate() {
 		if (!local.baseUrl || local.channel === "dev") return;
 		const info = await Updater.checkForUpdate();
 		if (info.error || !(info.updateAvailable || info.updateReady)) return;
-		if (olderVersion(info.version, local.version)) {
-			console.log(`[3dtiled-desktop] release ${info.version} is older than this build ${local.version}: not offered`);
+		const { readFile } = await import("node:fs/promises");
+		const mine = await readFile(`${bundled}/build.json`, "utf8").then(JSON.parse).catch(() => null);
+		const theirs = await fetch(`${local.baseUrl}/stable-win-x64-build.json`).then((r) => (r.ok ? r.json() : null)).catch(() => null) as any;
+		const stamped = mine?.builtAt && theirs?.builtAt && theirs.hash === info.hash;
+		const stale = stamped ? Date.parse(theirs.builtAt) <= Date.parse(mine.builtAt) : olderVersion(info.version, local.version);
+		if (stale) {
+			console.log(`[3dtiled-desktop] release ${info.version} (${theirs?.builtAt ?? "no stamp"}) is not newer than this build ${local.version} (${mine?.builtAt ?? "no stamp"}): not offered`);
 			return;
 		}
 		if (!info.updateReady) await Updater.downloadUpdate();
