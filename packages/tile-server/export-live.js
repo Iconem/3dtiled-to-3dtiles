@@ -443,7 +443,7 @@ export async function handleExport(req, res, u) {
     const job = { id: randomUUID(), state: 'running', url, outDir, startedAt: new Date().toISOString(), progress: null, ctrl: new AbortController() };
     jobs.set(job.id, job);
     const onProgress = (pr) => { job.progress = { ...job.progress, ...pr }; };
-    // workers: 'auto' or a count runs this export's COPC and Potree tiles on worker threads (see core/parallel.js),
+    // workers: 'auto' or a count runs this export's tiles on worker threads (see core/parallel.js),
     // for the tiles this server builds while the crawl reads them and for the offline converter alike. It is the
     // process's setting while the export runs, then what it was before.
     const asksWorkers = body.workers != null && body.workers !== '';

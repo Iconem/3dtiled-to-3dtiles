@@ -37,10 +37,9 @@
 import zlib from 'node:zlib';
 import { parseSLPKArchive } from '@loaders.gl/i3s';
 import { DataViewReadableFile } from '@loaders.gl/zip';
-import { decodeDefaultGeometry, geodeticToEcef, obbToBox, childIndices } from '../i3s-to-3dtiles/src/i3sParse.js';
-import { decodeLepccRgb } from '../i3s-to-3dtiles/src/lepccDecode.js';
-import { buildGlb } from '../i3s-to-3dtiles/src/glbBuild.js';
-import { enuFrame, memoizeAsync, requestSource, fetchSource as fetchBuf, fetchSourceRange } from '../core/index.js';
+import { geodeticToEcef, obbToBox, childIndices } from '../i3s-to-3dtiles/src/i3sParse.js';
+import { i3sNodeGlb } from './mesh-tile.js';
+import { tilePool, runTileTaskOr, ownBytes, enuFrame, memoizeAsync, requestSource, fetchSource as fetchBuf, fetchSourceRange } from '../core/index.js';
 
 const MESH_TYPES  = new Set(['IntegratedMesh', '3DObject']);
 const POINT_TYPES = new Set(['PointCloud']);
@@ -330,6 +329,8 @@ const EMPTY_GLB = (() => {
   return out;
 })();
 
+const MESH_TASKS = new URL('./tile-tasks-mesh.js', import.meta.url).href;   // what a tile worker runs (TILED_WORKERS)
+
 async function serveTileGlb(ctx, idx) {
   const node = ctx.nodes[idx];
   if (!node || !nodeHasGeometry(node)) return EMPTY_GLB;
@@ -344,93 +345,52 @@ async function serveTileGlb(ctx, idx) {
     catch (e2) { if (e2.transient) throw e2; return EMPTY_GLB; }
   }
 
-  const g = decodeDefaultGeometry(buf, ctx.schema);
-  if (!g.vertexCount) return EMPTY_GLB;
-
-  let positions = g.position;
-  let normals = g.normal;
-  if (ctx.isGeographic) {
-    // Uncompressed DefaultGeometrySchema stores per-vertex offsets relative to the node OBB centre;
-    // LEPCC (g.absolutePosition) decodes straight to absolute (lon, lat, height) — see
-    // decodeDefaultGeometry's doc comment in i3sParse.js.
-    const c = node.obb.center;
-    positions = new Float32Array(g.vertexCount * 3);
-    for (let i = 0; i < g.vertexCount; i++) {
-      const lon = g.absolutePosition ? g.position[i*3]   : c[0] + g.position[i*3];
-      const lat = g.absolutePosition ? g.position[i*3+1] : c[1] + g.position[i*3+1];
-      const h   = g.absolutePosition ? g.position[i*3+2] : c[2] + g.position[i*3+2];
-      const e = geodeticToEcef([lon, lat, h]);
-      const u = ctx.toEnu(e);
-      positions[i*3] = u[0]; positions[i*3+1] = u[2]; positions[i*3+2] = -u[1]; // glTF (E, U, −N)
-    }
-    // Positions get the full geodetic→ECEF→ENU→glTF-axis remap above; normals are pure directions
-    // already expressed in the SAME local (East, North, Up) tangent frame I3S stores position offsets
-    // in (per-node, no earth-curvature correction needed at building/node scale) — they only need the
-    // SAME final glTF-axis relabel, not the geographic reprojection.
-    if (g.normal) {
-      normals = new Float32Array(g.vertexCount * 3);
-      for (let i = 0; i < g.vertexCount; i++) {
-        normals[i*3] = g.normal[i*3]; normals[i*3+1] = g.normal[i*3+2]; normals[i*3+2] = -g.normal[i*3+1];
+  const spec = { schema: ctx.schema, isGeographic: ctx.isGeographic, center: node.obb?.center, originEcef: ctx.originEcef,
+    EAST: ctx.EAST, NORTH: ctx.NORTH, UP: ctx.UP, isPoint: ctx.isPoint, wantsRgb: ctx.isPoint && ctx.rgbAttrKey != null };
+  const getTexture = async () => {
+    // Texture: node.mesh.material.{definition,resource} — resource is the SAME per-node resource
+    // bucket geometry uses, definition indexes materialDefinitions[] for the format lookup. Unlike
+    // geometry (always literally `<n>.bin`), a texture's on-disk name convention differs by source mode:
+    // a live ArcGIS SceneServer accepts the BARE name (`nodes/<res>/textures/0`, its REST layer strips
+    // any `.bin`/`.json` suffix but otherwise serves whatever's asked); an SLPK archive has NO bare-name
+    // alias at all (@loaders.gl's SLPKArchive only knows `.jpg`/`.png`/`.ktx`/… — verified: bare 404s,
+    // `.jpg` succeeds), and an extracted-SLPK mirror keeps the same real on-disk filenames. Try bare
+    // first (the common case), fall back to the real extension.
+    let texture;
+    const mat = node.mesh?.material;
+    if (mat && mat.resource >= 0) {
+      const fmt = ctx.textureFormatFor(mat.definition ?? 0);
+      if (fmt) {
+        // Some ArcGIS SceneServer CDN responses come back HTTP 200 with a JSON error BODY instead of a
+        // real 404 (observed intermittently against the live Rancho Mesh service) — validate the magic
+        // bytes before trusting either candidate, so a flaky/mismatched response falls through to
+        // "untextured" instead of embedding `{"error":...}` as if it were image data.
+        const isRaster = (b) => b && b.length > 4 && (
+          (b[0] === 0xff && b[1] === 0xd8 && b[2] === 0xff) ||                          // JPEG
+          (b[0] === 0x89 && b[1] === 0x50 && b[2] === 0x4e && b[3] === 0x47));          // PNG
+        const base = `nodes/${mat.resource}/textures/${fmt.name}`;
+        let bytes;
+        for (const cand of [base, `${base}.${fmt.ext}`]) {
+          try { const b = await ctx.getFile(cand); if (isRaster(b)) { bytes = b; break; } } catch (e) { if (e.transient) throw e; /* try next */ }
+        }
+        if (bytes) texture = { bytes, mimeType: fmt.mimeType };
       }
     }
-  }
-  // Root-caused the "I3S mesh needs brightness ~2048 to look right" report against the real Rancho
-  // Mesh dataset: its geometry buffer stores an all-ZERO normal for every vertex (verified — positions
-  // decode to real, sane values from the SAME buffer, ruling out an offset/decode bug; this is a
-  // genuine characteristic of this Drone2Map/photogrammetry export). A zero-length normal makes the
-  // lighting dot product (N·L) zero for every light direction under ANY dynamic lighting model — only
-  // a thin ambient/emissive sliver shows through, and cranking the app's own brightness multiplier just
-  // amplifies that sliver rather than fixing the shading. glTF's own spec answer for "no usable
-  // normals" is to OMIT the attribute entirely: a conformant loader (Cesium, three.js) then computes
-  // correct flat per-face normals itself. Detect and drop degenerate all-zero normal data instead of
-  // embedding it — the alternative (shading it "shadeless"/unlit) is also valid and already exposed as
-  // a toggle in the sidebar, but per-face normals let real dynamic lighting work correctly too.
-  if (normals && normals.every((v) => v === 0)) normals = undefined;
-
-  // Texture: node.mesh.material.{definition,resource} — resource is the SAME per-node resource
-  // bucket geometry uses, definition indexes materialDefinitions[] for the format lookup. Unlike
-  // geometry (always literally `<n>.bin`), a texture's on-disk name convention differs by source mode:
-  // a live ArcGIS SceneServer accepts the BARE name (`nodes/<res>/textures/0`, its REST layer strips
-  // any `.bin`/`.json` suffix but otherwise serves whatever's asked); an SLPK archive has NO bare-name
-  // alias at all (@loaders.gl's SLPKArchive only knows `.jpg`/`.png`/`.ktx`/… — verified: bare 404s,
-  // `.jpg` succeeds), and an extracted-SLPK mirror keeps the same real on-disk filenames. Try bare
-  // first (the common case), fall back to the real extension.
-  let texture;
-  const mat = node.mesh?.material;
-  if (mat && mat.resource >= 0) {
-    const fmt = ctx.textureFormatFor(mat.definition ?? 0);
-    if (fmt) {
-      // Some ArcGIS SceneServer CDN responses come back HTTP 200 with a JSON error BODY instead of a
-      // real 404 (observed intermittently against the live Rancho Mesh service) — validate the magic
-      // bytes before trusting either candidate, so a flaky/mismatched response falls through to
-      // "untextured" instead of embedding `{"error":...}` as if it were image data.
-      const isRaster = (b) => b && b.length > 4 && (
-        (b[0] === 0xff && b[1] === 0xd8 && b[2] === 0xff) ||                          // JPEG
-        (b[0] === 0x89 && b[1] === 0x50 && b[2] === 0x4e && b[3] === 0x47));          // PNG
-      const base = `nodes/${mat.resource}/textures/${fmt.name}`;
-      let bytes;
-      for (const cand of [base, `${base}.${fmt.ext}`]) {
-        try { const b = await ctx.getFile(cand); if (isRaster(b)) { bytes = b; break; } } catch (e) { if (e.transient) throw e; /* try next */ }
-      }
-      if (bytes) texture = { bytes, mimeType: fmt.mimeType };
-    }
-  }
-
-  // PointCloud RGB: a separate per-node attribute resource, not part of DefaultGeometrySchema (mesh
-  // layers' inline `g.color` already covers their case). `nodes/<res>/attributes/<key>` — NO trailing
-  // `/0`/page segment (see lepccDecode.js's header comment: that extra segment is what silently 404'd
-  // this for a while). Missing/undecodable per-node resource degrades to no color, not a crash — same
-  // "gate, don't crash" philosophy as Draco/textures.
-  let colors = g.color;
-  if (!colors && ctx.isPoint && ctx.rgbAttrKey != null) {
-    try {
-      const rgbBuf = await ctx.getFile(`nodes/${res}/attributes/${ctx.rgbAttrKey}`);
-      const rgb = decodeLepccRgb(rgbBuf);
-      if (rgb.vertexCount === g.vertexCount) colors = rgb.colors;
-    } catch (e) { if (e.transient) throw e; /* no RGB for this node — render uncolored */ }
-  }
-
-  return Buffer.from(buildGlb({ mode: ctx.isPoint ? 'POINTS' : 'TRIANGLES', positions, normals, colors, uvs: g.uv0, texture }));
+    return texture;
+  };
+  // PointCloud RGB: a separate per-node attribute resource (`nodes/<res>/attributes/<key>`, no trailing page segment).
+  const getRgb = () => ctx.getFile(`nodes/${res}/attributes/${ctx.rgbAttrKey}`);
+  const here = async () => { const glb = await i3sNodeGlb(buf, spec, getTexture, getRgb); return glb ? Buffer.from(glb) : EMPTY_GLB; };
+  const pool = tilePool();
+  if (!pool) return here();
+  // TILED_WORKERS: this thread fetches what the node may need (geometry, texture, RGB attribute); a worker decodes
+  // and builds the GLB. A tile the workers had no memory for is built here instead (runTileTaskOr).
+  const texture = await getTexture();
+  let rgbBuf = null;
+  if (spec.wantsRgb) { try { rgbBuf = await getRgb(); } catch (e) { if (e.transient) throw e; } }
+  const geometry = ownBytes(buf);
+  const glb = await runTileTaskOr(pool, MESH_TASKS, 'i3sTileTask', { buf: geometry, spec, texture, rgbBuf }, [geometry.buffer], here);
+  return !glb ? EMPTY_GLB : Buffer.isBuffer(glb) ? glb : Buffer.from(glb.buffer, glb.byteOffset, glb.byteLength);
 }
 
 // Pure builders for the /stream dispatcher.

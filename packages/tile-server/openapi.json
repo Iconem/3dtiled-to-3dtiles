@@ -1235,7 +1235,7 @@
                     "type": ["string", "integer", "null"],
                     "default": null,
                     "example": "auto",
-                    "description": "Experimental. `auto` or a count: decode and encode this export's COPC and Potree tiles on worker threads (about 3 to 4 times faster on 8 cores, the same tiles, around 50 MB more memory a worker). Absent, null or 0: one thread, or what `TILED_WORKERS` says. It is the server's setting while the export runs."
+                    "description": "Experimental. `auto` or a count: decode and encode this export's tiles on worker threads (about 3 to 4 times faster on 8 cores for COPC and Potree, less for splats and meshes; the same tiles, around 50 MB more memory a worker). Absent, null or 0: one thread, or what `TILED_WORKERS` says. It is the server's setting while the export runs."
                   },
                   "hierarchyErrors": {
                     "type": "string",

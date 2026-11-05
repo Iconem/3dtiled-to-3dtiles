@@ -13,7 +13,10 @@
 import path from 'node:path';
 import { readFile as readSplatFile, MemoryReadFileSystem } from '@playcanvas/splat-transform';
 import { extractRange } from '../sog-to-3dtiles/src/sogChunk.js';
-import { buildSplatTileGlb, computeBounds, memoizeAsync, fetchSource as fetchBuf } from '../core/index.js';
+import { memoizeAsync, fetchSource as fetchBuf, tilePool, runTileTaskOr, ownBytes } from '../core/index.js';
+import { splatArraysGlb } from './splat-tile.js';
+
+const SPLAT_TASKS = new URL('./tile-tasks-splats.js', import.meta.url).href;   // what a tile worker runs (TILED_WORKERS)
 
 // glTF Y-up → 3D Tiles Z-up box (RX +90°): centre (cx,cy,cz)→(cx,−cz,cy); half-extents y↔z.
 function boundToZUpBox(min, max) {
@@ -49,13 +52,20 @@ async function getChunkTable(ctx, fileIdx) {
     const metaBuf = await fetchBuf(ctx.base + rel);
     const meta = JSON.parse(metaBuf.toString('utf8'));
     const fileSystem = new MemoryReadFileSystem();
-    const put = (name, bytes) => { fileSystem.set(name, bytes); fileSystem.set('./' + name, bytes); };
+    const raw = new Map();                                // name → bytes, as fetched (what a tile worker is handed)
+    const put = (name, bytes) => { raw.set(name, bytes); fileSystem.set(name, bytes); fileSystem.set('./' + name, bytes); };
     put('meta.json', new Uint8Array(metaBuf));
     const names = new Set();
     for (const k of Object.keys(meta)) { const f = meta[k]?.files; if (Array.isArray(f)) for (const n of f) names.add(n); }
     await Promise.all([...names].map(async n => put(n, new Uint8Array(await fetchBuf(ctx.base + path.posix.join(chunkDir, n))))));
-    const tables = await readSplatFile({ filename: 'meta.json', inputFormat: 'sog', options: {}, params: [], fileSystem });
-    return tables[0];
+    const here = async () => (await readSplatFile({ filename: 'meta.json', inputFormat: 'sog', options: {}, params: [], fileSystem }))[0];
+    const pool = tilePool();
+    if (!pool) return here();
+    // TILED_WORKERS: the chunk's WebP decode (about a second) runs on a worker, which hands its columns back; the
+    // table stays cached on this thread as before, since many leaf tiles read ranges of the same chunk.
+    const files = Object.fromEntries([...raw].map(([n, bytes]) => [n, ownBytes(bytes)]));
+    const cols = await runTileTaskOr(pool, SPLAT_TASKS, 'sogChunkTask', { files }, Object.values(files).map((b) => b.buffer), async () => null);
+    return cols ? { numRows: cols.numRows, getColumnByName: (name) => (cols[name] ? { data: cols[name] } : undefined) } : here();
   })();
   promise.catch(() => ctx.chunks.delete(fileIdx));   // don't poison the cache with a failed decode
   ctx.chunks.set(fileIdx, promise);
@@ -108,8 +118,14 @@ function buildTileset(ctx, urlParam, centroids = false) {
 async function serveTileGlb(ctx, file, offset, count, centroids = false) {
   const table = await getChunkTable(ctx, file);
   const { positions, alphas, rgb, scales, rotations } = extractRange(table, offset, count);
-  const bounds = computeBounds(positions, count);
-  return Buffer.from(await buildSplatTileGlb({ positions, alphas, rgb, scales, rotations }, count, bounds, centroids));
+  const here = async () => Buffer.from(await splatArraysGlb({ positions, alphas, rgb, scales, rotations }, count, centroids));
+  const pool = tilePool();
+  if (!pool) return here();
+  // TILED_WORKERS: the range is cut out here (the chunk's table lives on this thread), a worker encodes it.
+  const copy = (a) => (a ? a.slice() : a);   // the worker takes its own copies: `here` may still need these
+  const arrays = { positions: copy(positions), alphas: copy(alphas), rgb: copy(rgb), scales: copy(scales), rotations: copy(rotations) };
+  const glb = await runTileTaskOr(pool, SPLAT_TASKS, 'splatArraysTask', { arrays, count, centroids }, Object.values(arrays).filter(Boolean).map((a) => a.buffer), here);
+  return Buffer.isBuffer(glb) ? glb : Buffer.from(glb.buffer, glb.byteOffset, glb.byteLength);
 }
 
 // Pure builders for the /stream dispatcher.

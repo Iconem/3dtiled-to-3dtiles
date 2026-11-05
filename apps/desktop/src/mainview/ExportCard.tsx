@@ -301,8 +301,8 @@ export function ExportCard({ app }: { app: AppModel }) {
           <Field label="If part of the hierarchy can't be read" title="A subtree, external tileset or Potree .hrc still unread after three tries. The tree below it goes missing.">
             <Choice id="export-hierarchy-errors" value={s.hierarchyErrors} onChange={(v) => patch({ hierarchyErrors: v })} options={HIERARCHY_ERRORS} />
           </Field>
-          <Field label={<>Tile threads <span className="text-xs font-normal text-muted-foreground">(experimental; COPC, Potree)</span></>}
-            title="Decode and encode point tiles on worker threads: about 3 to 4 times faster on 8 cores, the same tiles, around 50 MB more memory a worker. Other formats are not affected.">
+          <Field label={<>Tile threads <span className="text-xs font-normal text-muted-foreground">(experimental)</span></>}
+            title="Decode and encode tiles on worker threads: about 3 to 4 times faster on 8 cores for COPC and Potree, less for splats and meshes. The same tiles, around 50 MB more memory a worker. The offline converter uses them for COPC and Potree only.">
             <Choice id="export-workers" value={workersNa ? '' : s.workers} onChange={(v) => patch({ workers: v })} options={WORKERS} disabled={job.running || workersNa}
               title={workersNa ? 'A crawl run as a CLI subprocess reads tiles the tile-server builds: choose "Run in: tile-server", or the offline converter' : undefined} />
           </Field>

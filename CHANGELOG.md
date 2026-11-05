@@ -23,7 +23,14 @@ Format loosely follows [Keep a Changelog](https://keepachangelog.com/).
 - **A tile the workers have no memory for is not lost.** If a worker dies or an allocation fails in it, that tile is
   built on the main thread instead, one at a time: straight away on the server, after all the others in the converters.
   A warning says how many, and that fewer workers would avoid it. A tile that fails for its own data still fails.
-- Splat formats (SOG, LCC, RAD) and plain LAS/LAZ still run on one thread; a curved COPC placement is rebuilt in each worker.
+- **Every streamed format has it on the live server:** streamed SOG, LCC, RAD, GeoSplats, I3S and 3MX as well as
+  COPC and Potree, so `/stream` and crawl exports of all of them. For SOG the chunk's WebP decode and each tile's
+  encode run on workers while the decoded chunk stays cached on the main thread. Checked on two samples of most
+  formats: tiles are byte for byte those of the previous release, with the flag off and with 4 workers. The gain is
+  smaller than for point clouds, since splat tiles already compressed off the main thread and these sources are
+  slower to fetch than to decode: 1.6 times on a streamed SOG, 1.35 on an I3S mesh, about 1.1 on RAD and LCC.
+- Still on one thread: the offline converters other than COPC and Potree, and plain LAS/LAZ. A curved COPC placement
+  is rebuilt in each worker.
 
 ### Fixed — 2026-11-04 (Potree 1.x lost most of a cloud's finest points)
 - **Potree 1.x leaves counted as 0 points were dropped.** PotreeConverter writes a count of 0 in the `.hrc` for a leaf

@@ -17,9 +17,8 @@
  * containing `.3mxb`'s directory → remote-friendly (we URL-join against the master's base).
  */
 import path from 'node:path';
-import { Document, NodeIO } from '@gltf-transform/core';
-import { georefFromCrs, memoizeAsync, fetchSource as fetchBuf } from '../core/index.js';
-import { decodeCTM } from '../threemx-to-3dtiles/src/ctm-decode.js';
+import { georefFromCrs, memoizeAsync, fetchSource as fetchBuf, tilePool, runTileTaskOr, ownBytes } from '../core/index.js';
+import { parse3mxb, threemxNodeGlb } from './mesh-tile.js';
 
 const CTM_RE = /__\d+$/;
 const baseOf = (u) => u.slice(0, u.lastIndexOf('/') + 1);
@@ -42,24 +41,6 @@ const getCtx = memoizeAsync(async (url) => {
   console.log(`[threemx-live] ${url} → root=${rootRel}, georef=${!!transform}`);
   return { base, rootRel, transform };
 });
-
-// Parse a .3mxb → { nodes, payload:Map<resourceId,{format,data}> }.
-function parse3mxb(buf) {
-  if (buf.toString('latin1', 0, 5) !== '3MXBO') throw new Error('not a 3MXBO file');
-  let hs = buf.readUInt32LE(5), jsonEnd = 9 + hs;
-  if (jsonEnd > buf.length) {                  // some files (e.g. hand-authored roots) carry a bogus size
-    const txt = buf.toString('latin1'); const s = txt.indexOf('{'); let d = 0, e = -1;
-    for (let i = s; i < txt.length; i++) { const c = txt[i]; if (c === '{') d++; else if (c === '}' && --d === 0) { e = i; break; } }
-    jsonEnd = e + 1;
-  }
-  const header = JSON.parse(buf.toString('utf8', 9, jsonEnd));
-  const payload = new Map();
-  let off = jsonEnd;
-  // Each resource def carries id/type/format and, for geometryBuffer, a `texture` ref → its textureBuffer
-  // id (the texture is NOT listed in node.resources, only referenced here). Keep all fields + the bytes.
-  for (const r of header.resources || []) { payload.set(r.id, { id: r.id, type: r.type, format: r.format, texture: r.texture, data: r.size ? buf.subarray(off, off + r.size) : null }); off += (r.size || 0); }
-  return { nodes: header.nodes || [], payload };
-}
 
 // 3D Tiles box [cx,cy,cz, hx,0,0, 0,hy,0, 0,0,hz] from bbMin/bbMax (3MX SRS-origin-relative coords).
 const boxOf = (mn, mx) => {
@@ -105,58 +86,18 @@ async function buildFragment(ctx, relPath, masterUrl, isRoot) {
 }
 
 // ── per-node textured GLB (OpenCTM → glTF + JPEG/PNG baseColor) ──────────────────
-// A 3MX node can carry MULTIPLE geometryBuffer resources (each its own CTM, optionally its own texture)
-// — render one primitive per geometry. The texture is NOT in node.resources; the geometryBuffer's
-// `texture` field references its textureBuffer id (resolved from the payload).
+const MESH_TASKS = new URL('./tile-tasks-mesh.js', import.meta.url).href;   // what a tile worker runs (TILED_WORKERS)
+
+// One node of a .3mxb → GLB: the CTM decode (LZMA) and the glTF write are in mesh-tile.js, on this thread or, with
+// TILED_WORKERS, on a tile worker; a tile the workers had no memory for is built here instead (runTileTaskOr).
 async function buildNodeGlb(ctx, relPath, nodeIdx) {
-  const { nodes, payload } = parse3mxb(await fetchBuf(ctx.base + relPath));
-  const node = nodes[nodeIdx];
-  if (!node) return null;
-
-  const doc = new Document();
-  const buffer = doc.createBuffer();
-  const mesh = doc.createMesh();
-  const texCache = new Map();                               // textureBuffer id → glTF Texture (dedup)
-  let primCount = 0;
-
-  for (const id of node.resources || []) {
-    const r = payload.get(id);
-    if (!r || r.format !== 'ctm' || !r.data) continue;      // geometryBuffer only
-    const g = decodeCTM(r.data);
-    // 3MX mesh verts are SRS Z-up (E,N,U) relative to SRSOrigin, but 3D Tiles glTF content is Y-up
-    // (Cesium auto-rotates +Y→+Z). Swizzle (E,N,U)→(E,U,−N) so after that rotation the mesh lands back
-    // in the (E,N,U) frame the root ENU transform + bounding box expect (else it sits 90° vertical).
-    const srcPos = g.positions instanceof Float32Array ? g.positions : new Float32Array(g.positions);
-    const swPos = new Float32Array(srcPos.length);
-    for (let i = 0; i < srcPos.length; i += 3) { swPos[i] = srcPos[i]; swPos[i + 1] = srcPos[i + 2]; swPos[i + 2] = -srcPos[i + 1]; }
-    const pos = doc.createAccessor().setType('VEC3').setArray(swPos).setBuffer(buffer);
-    const idx = doc.createAccessor().setType('SCALAR').setArray(g.indices instanceof Uint32Array ? g.indices : new Uint32Array(g.indices)).setBuffer(buffer);
-    const prim = doc.createPrimitive().setAttribute('POSITION', pos).setIndices(idx);
-
-    // texture: follow the geometryBuffer's `texture` ref → its textureBuffer resource (jpg/png).
-    const texRes = r.texture ? payload.get(r.texture) : null;
-    if (g.uvs && texRes && texRes.data && (texRes.format === 'jpg' || texRes.format === 'png')) {
-      // 3MX/OpenCTM UVs use a bottom-left origin (V up); glTF uses top-left (V down) → flip V (v→1−v),
-      // else textures map upside-down / mis-indexed vs the Bentley viewer.
-      const srcUv = g.uvs instanceof Float32Array ? g.uvs : new Float32Array(g.uvs);
-      const flipUv = new Float32Array(srcUv.length);
-      for (let k = 0; k < srcUv.length; k += 2) { flipUv[k] = srcUv[k]; flipUv[k + 1] = 1 - srcUv[k + 1]; }
-      const uv = doc.createAccessor().setType('VEC2').setArray(flipUv).setBuffer(buffer);
-      prim.setAttribute('TEXCOORD_0', uv);
-      let tex = texCache.get(r.texture);
-      if (!tex) {
-        tex = doc.createTexture().setImage(texRes.data instanceof Uint8Array ? texRes.data : new Uint8Array(texRes.data))
-          .setMimeType(texRes.format === 'png' ? 'image/png' : 'image/jpeg');
-        texCache.set(r.texture, tex);
-      }
-      prim.setMaterial(doc.createMaterial().setBaseColorTexture(tex).setMetallicFactor(0).setRoughnessFactor(1));
-    }
-    mesh.addPrimitive(prim);
-    primCount++;
-  }
-  if (!primCount) return null;
-  doc.createScene().addChild(doc.createNode().setMesh(mesh));
-  return Buffer.from(await new NodeIO().writeBinary(doc));
+  const file = await fetchBuf(ctx.base + relPath);
+  const here = async () => { const glb = await threemxNodeGlb(file, nodeIdx); return glb ? Buffer.from(glb) : null; };
+  const pool = tilePool();
+  if (!pool) return here();
+  const bytes = ownBytes(file);
+  const glb = await runTileTaskOr(pool, MESH_TASKS, 'threemxTileTask', { bytes, nodeIdx }, [bytes.buffer], here);
+  return !glb || Buffer.isBuffer(glb) ? glb : Buffer.from(glb.buffer, glb.byteOffset, glb.byteLength);
 }
 
 // Pure builders for the /stream dispatcher.

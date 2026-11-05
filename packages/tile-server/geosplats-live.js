@@ -21,36 +21,10 @@
  * `Referer: https://www.maptiler.com/` (server-side); the browser only ever talks to this middleware.
  * Reverse-engineered structure: docs-references/maptiler-geosplats.md.
  */
-import { readSog, MemoryReadFileSystem } from '@playcanvas/splat-transform';
-import { llhToEcef, enuFrame, buildSplatTileGlb, computeBounds, fetchSource } from '../core/index.js';
+import { llhToEcef, enuFrame, fetchSource, tilePool, runTileTaskOr, ownBytes } from '../core/index.js';
+import { geosplatsBundleGlb } from './splat-tile.js';
 
-const SH_C0 = 0.28209479177387814;
-// readSog yields a PLY-convention DataTable (SH-DC colour, logit opacity, ln scale, quat rot_0=w). Convert
-// to the renderer-ready linear arrays buildSplatTileGlb wants and emit a KHR_gaussian_splatting_compression
-// _spz_2 GLB — the SAME format every other splat tile in this repo uses (the uncompressed writeGlb variant
-// is not read by our viewer's GaussianSplat plugin, which is why those tiles failed to load).
-function dataTableToSplatGlb(dt) {
-  const n = dt.numRows;
-  const col = (nm) => dt.getColumnByName(nm)?.data;
-  const x=col('x'), y=col('y'), z=col('z'), op=col('opacity');
-  const s0=col('scale_0'), s1=col('scale_1'), s2=col('scale_2');
-  const c0=col('f_dc_0'), c1=col('f_dc_1'), c2=col('f_dc_2');
-  const r0=col('rot_0'), r1=col('rot_1'), r2=col('rot_2'), r3=col('rot_3');   // rot_0 = w
-  const positions=new Float32Array(n*3), alphas=new Float32Array(n), rgb=new Float32Array(n*3), scales=new Float32Array(n*3), rotations=new Float32Array(n*4);
-  const cl01=(v)=>v<0?0:v>1?1:v;
-  for (let i=0;i<n;i++){
-    positions[i*3]=x[i]; positions[i*3+1]=y[i]; positions[i*3+2]=z[i];
-    alphas[i]= op ? 1/(1+Math.exp(-op[i])) : 1;                               // logit → [0,1]
-    rgb[i*3]  = c0 ? cl01(0.5+SH_C0*c0[i]) : 0.5;                             // SH-DC → linear colour
-    rgb[i*3+1]= c1 ? cl01(0.5+SH_C0*c1[i]) : 0.5;
-    rgb[i*3+2]= c2 ? cl01(0.5+SH_C0*c2[i]) : 0.5;
-    scales[i*3]  = s0 ? Math.exp(s0[i]) : 0.01;                               // ln → linear
-    scales[i*3+1]= s1 ? Math.exp(s1[i]) : 0.01;
-    scales[i*3+2]= s2 ? Math.exp(s2[i]) : 0.01;
-    rotations[i*4]= r1?r1[i]:0; rotations[i*4+1]= r2?r2[i]:0; rotations[i*4+2]= r3?r3[i]:0; rotations[i*4+3]= r0?r0[i]:1;  // xyzw
-  }
-  return buildSplatTileGlb({ positions, alphas, rgb, scales, rotations }, n, computeBounds(positions, n));
-}
+const SPLAT_TASKS = new URL('./tile-tasks-splats.js', import.meta.url).href;   // what a tile worker runs (TILED_WORKERS)
 
 const REFERER = 'https://www.maptiler.com/';
 // The viewer streams many octants in parallel; MapTiler rate-limits bursts (429) and occasionally drops a
@@ -186,8 +160,8 @@ function buildSubmodelOctree(meta, m, modelUrl, enc) {
   return null;
 }
 
-// Fetch one octant bundle and decode it to a splat DataTable via readSog.
-async function octantDataTable(splatsBase, modelId, baseurl, key, grid, oct, lod) {
+// Fetch one octant bundle: its bytes, and the files it holds in order ([name, size]), for geosplatsBundleGlb.
+async function octantBundle(splatsBase, modelId, baseurl, key, grid, oct, lod) {
   const meta = await fetchMeta(splatsBase, modelId, baseurl, key);
   const octBin = oct.toString(2).padStart(ui(grid), '0');
   const prefix = `grid_${grid}/octant_${octBin}_LOD`;
@@ -200,10 +174,7 @@ async function octantDataTable(splatsBase, modelId, baseurl, key, grid, oct, lod
   const useLod = avail.includes(lod) ? lod : (avail.filter(v => v <= lod).pop() ?? avail[0]);
   const want = meta.entries.filter(en => en[0].includes(`${prefix}${useLod}/`));
   const buf = new Uint8Array(await gfetch(`${splatsBase}/${modelId}/${baseurl}/${grid}/${oct}/${useLod}?key=${key}`));
-  const fs = new MemoryReadFileSystem();
-  let off = 0;                                                // bundle = entries concatenated in array order
-  for (const en of want) { const name = en[0].split('/').pop(); fs.set(name, buf.subarray(off, off + en[2])); off += en[2]; }
-  return readSog(fs, 'meta.json');
+  return { buf, files: want.map((en) => [en[0].split('/').pop(), en[2]]) };   // bundle = entries concatenated in array order
 }
 
 // Pure builders for the /stream dispatcher.
@@ -274,9 +245,15 @@ export async function geosplatsTile(modelUrl, key) {
   const model = await fetchModel(modelUrl);
   const sm = (model.models || [])[m];
   if (!sm) return null;
-  const dt = await octantDataTable(splatsBase, modelId, sm.baseurl, apiKey, grid, oct, lod);
-  const glb = await dataTableToSplatGlb(dt);                  // _spz_2 splat GLB (viewer-renderable)
-  return Buffer.isBuffer(glb) ? glb : Buffer.from(glb);
+  const { buf, files } = await octantBundle(splatsBase, modelId, sm.baseurl, apiKey, grid, oct, lod);
+  // _spz_2 splat GLB (viewer-renderable): the SOG decode and the SPZ encode are in splat-tile.js, on this thread or,
+  // with TILED_WORKERS, on a tile worker; a tile the workers had no memory for is built here instead.
+  const here = async () => Buffer.from(await geosplatsBundleGlb(buf, files));
+  const pool = tilePool();
+  if (!pool) return here();
+  const bytes = ownBytes(buf);
+  const glb = await runTileTaskOr(pool, SPLAT_TASKS, 'geosplatsTileTask', { buf: bytes, files }, [bytes.buffer], here);
+  return Buffer.isBuffer(glb) ? glb : Buffer.from(glb.buffer, glb.byteOffset, glb.byteLength);
 }
 
 // Direct /geosplats/* HTTP routes were removed 2026-07-02 — /stream/tileset.json?format=geosplats&url=<…>

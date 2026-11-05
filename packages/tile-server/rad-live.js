@@ -42,10 +42,13 @@
  *   GET /stream/rad/subtree/<chunkIndex>.json?url=<.rad URL>   (cache=none continuation)
  */
 import { inflateRawSync } from 'node:zlib';
-import { chunkBoundsAndTopology, encodeChunkGlb, topologyFromProps } from '../rad-to-3dtiles/src/index.js';
+import { chunkBoundsAndTopology, topologyFromProps } from '../rad-to-3dtiles/src/index.js';
 import { parseRadcChunkHeader } from '../rad-to-3dtiles/src/radHeader.js';
 import { buildTileset } from '../rad-to-3dtiles/src/tilesetBuilder.js';
-import { parallelMap, defaultConcurrency, Source, memoizeAsync } from '../core/index.js';
+import { parallelMap, defaultConcurrency, Source, memoizeAsync, tilePool, runTileTaskOr, ownBytes } from '../core/index.js';
+import { radChunkGlb } from './splat-tile.js';
+
+const SPLAT_TASKS = new URL('./tile-tasks-splats.js', import.meta.url).href;   // what a tile worker runs (TILED_WORKERS)
 
 const pad8 = (n) => Math.ceil(n / 8) * 8;
 const HEADER_PROBE = 1 << 18;   // 256 KiB — enough for the RAD0 JSON header of large clouds
@@ -235,8 +238,13 @@ async function serveTileGlb(hctx, nodeIndex, centroids = false) {
   const cbuf = await hctx.readChunk(chunk);
   const local = hctx.rangeSupported ? { offset: 0, bytes: chunk.bytes } : chunk;
   const base  = hctx.rangeSupported ? 0 : hctx.payloadBase;
-  const { glb } = await encodeChunkGlb(cbuf, local, base, { centroidsOnly: centroids });
-  return Buffer.from(glb);
+  const here = async () => Buffer.from(await radChunkGlb(cbuf, local, base, centroids));
+  const pool = tilePool();
+  if (!pool) return here();
+  // TILED_WORKERS: a worker inflates the chunk and encodes the GLB; a tile it had no memory for is built here instead.
+  const bytes = ownBytes(cbuf);
+  const glb = await runTileTaskOr(pool, SPLAT_TASKS, 'radTileTask', { cbuf: bytes, local, base, centroids }, [bytes.buffer], here);
+  return Buffer.isBuffer(glb) ? glb : Buffer.from(glb.buffer, glb.byteOffset, glb.byteLength);
 }
 
 // Pure builders for the /stream dispatcher.

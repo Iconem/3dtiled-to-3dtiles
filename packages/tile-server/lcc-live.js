@@ -19,8 +19,8 @@
  *     stream can't work. We fetch+inflate data.bin ONCE (cached on ctx, same lifetime as meta/index)
  *     and slice tiles out of the decompressed buffer in memory instead of re-reading over HTTP.
  */
-import { decodeSplats } from '../lcc-to-3dtiles/src/lccDecode.js';
-import { buildSplatTileGlb, computeBounds, lccGeoref, LCC_LOCAL_UPRIGHT, memoizeAsync, fetchSource as fetchBuf, fetchSourceRange } from '../core/index.js';
+import { lccSplatGlb } from './splat-tile.js';
+import { tilePool, runTileTaskOr, ownBytes, lccGeoref, LCC_LOCAL_UPRIGHT, memoizeAsync, fetchSource as fetchBuf, fetchSourceRange } from '../core/index.js';
 import { remoteZipFileSystem } from './remote-zip.js';
 
 const ROOT_GE_FACTOR = 0.05, DEPTH_RATIO = 0.5;
@@ -147,11 +147,17 @@ function buildTileset(ctx, urlParam, centroids = false) {
   return ts;
 }
 
+const SPLAT_TASKS = new URL('./tile-tasks-splats.js', import.meta.url).href;   // what a tile worker runs (TILED_WORKERS)
+
 async function serveTileGlb(ctx, off, size, pts, centroids = false) {
   const buf = await ctx.readData(off, size);
-  const { positions, alphas, rgb, scales, rotations } = decodeSplats(buf, 0, pts, ctx.scaleMin, ctx.scaleMax);
-  const bounds = computeBounds(positions, pts);
-  return Buffer.from(await buildSplatTileGlb({ positions, alphas, rgb, scales, rotations }, pts, bounds, centroids));
+  const here = async () => Buffer.from(await lccSplatGlb(buf, pts, ctx.scaleMin, ctx.scaleMax, centroids));
+  const pool = tilePool();
+  if (!pool) return here();
+  // TILED_WORKERS: a worker decodes the splats and encodes the GLB; a tile it had no memory for is built here instead.
+  const bytes = ownBytes(buf);
+  const glb = await runTileTaskOr(pool, SPLAT_TASKS, 'lccTileTask', { buf: bytes, pts, scaleMin: ctx.scaleMin, scaleMax: ctx.scaleMax, centroids }, [bytes.buffer], here);
+  return Buffer.isBuffer(glb) ? glb : Buffer.from(glb.buffer, glb.byteOffset, glb.byteLength);
 }
 
 // Pure builders for the /stream dispatcher.
