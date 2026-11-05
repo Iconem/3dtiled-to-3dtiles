@@ -20,6 +20,8 @@ fs.rmSync(path.join(desktop, 'bundle'), { recursive: true, force: true });
 fs.mkdirSync(path.join(out, 'scripts'), { recursive: true });
 
 for (const f of ['package.json', '.npmrc', 'pnpm-lock.yaml', 'LICENSE']) fs.copyFileSync(path.join(repo, f), path.join(out, f));
+// the patches package.json names (pnpm.patchedDependencies): the install below applies them, and fails without them
+fs.cpSync(path.join(repo, 'patches'), path.join(out, 'patches'), { recursive: true });
 for (const f of ['static-server.mjs', 'pack-3dtiles.mjs', 'cesium-harness.html']) fs.copyFileSync(path.join(repo, 'scripts', f), path.join(out, 'scripts', f));
 fs.cpSync(path.join(repo, 'packages'), path.join(out, 'packages'), {
   recursive: true,

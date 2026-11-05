@@ -22,7 +22,7 @@ import { Copc, Las, Getter } from 'copc';
 import { writeTileGlb }                    from './glbWriter.js';
 import { convertPlainLas }                 from './plainLas.js';
 import { buildEcefTransform }              from './georef.js';
-import { parallelMap, defaultConcurrency, tilePool, tileWorkerCount, runTileTask, isMemoryFailure, keyToCoords, octreeSubCube, cubeToBox,
+import { defaultConcurrency, convertTiles, keyToCoords, octreeSubCube, cubeToBox,
          buildExplicitTree, buildSubtreeBuffer, subtreeRootKeys } from '../../core/index.js';
 
 const TILE_TASK = new URL('./tile-task.js', import.meta.url).href;   // what a tile worker runs
@@ -115,27 +115,17 @@ export async function convert(inputPath, outDir, opts = {}) {
   // at most N nodes' point arrays alive at once → memory stays bounded.
   // With tile workers (TILED_WORKERS, or opts.workers) each node is read, decoded and written on a worker thread:
   // the LAZ decode and the glTF encode are what a lane spends its time on, and one thread runs them one at a time.
-  const pool = tilePool(opts.workers != null ? tileWorkerCount(opts.workers) : undefined);
-  const concurrency = pool ? pool.size : defaultConcurrency();
-  console.log(`Writing GLBs... (parallel: ${concurrency} ${pool ? 'worker threads' : 'lanes'})`);
+  // core's convertTiles is that loop, the same one every converter uses.
   const entries = [...nodeMap];
-  let done = 0;
   const tilePathOf = (key) => { const { level, x, y, z } = keyToCoords(key); return path.join(outDir, 'tiles', `${level}`, `${x}`, `${y}`, `${z}.glb`); };
-  const here = async (key, node) => writeTileGlb(await Copc.loadPointDataView(inputPath, copc, node), origin, tilePathOf(key));
-  const later = [];   // nodes a worker had no memory for: built after the others, one at a time on this thread
-  await parallelMap(entries, async ([key, node]) => {
-    if (pool) {
-      try { await runTileTask(pool, TILE_TASK, 'copcNodeToFile', { input: inputPath, header: copc.header, eb: copc.eb, node, origin, tilePath: tilePathOf(key) }); }
-      catch (e) { if (!isMemoryFailure(e)) throw e; later.push([key, node]); return; }
-    } else await here(key, node);
-    done++;
-    if (done % 100 === 0) process.stdout.write(`\r  ${done}/${nodeMap.size}`);
-  }, { concurrency });
-  if (later.length) {
-    console.log(`\n  ${later.length} tiles ran out of memory on a worker: building them on one thread`);
-    for (const [key, node] of later) { await here(key, node); done++; }
-  }
-  console.log(`\r  ${done}/${nodeMap.size} tiles`);
+  console.log('Writing GLBs...');
+  const { workers } = await convertTiles(entries, {
+    module: TILE_TASK, fn: 'copcNodeToFile', workers: opts.workers,
+    task: ([key, node]) => ({ input: inputPath, header: copc.header, eb: copc.eb, node, origin, tilePath: tilePathOf(key) }),
+    here: async ([key, node]) => writeTileGlb(await Copc.loadPointDataView(inputPath, copc, node), origin, tilePathOf(key)),
+    onProgress: (d, t) => { if (d % 100 === 0 || d === t) process.stdout.write(`\r  ${d}/${t}`); },
+  });
+  console.log(`\r  ${nodeMap.size}/${nodeMap.size} tiles (${workers ? `${workers} worker threads` : `${defaultConcurrency()} lanes`})`);
 
   const rootError = rootGeometricError(cube);
   const tiling = opts.tiling === 'explicit' ? 'explicit' : 'implicit';

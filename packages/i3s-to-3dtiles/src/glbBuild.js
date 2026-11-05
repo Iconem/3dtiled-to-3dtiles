@@ -14,9 +14,9 @@
  */
 import { Document, NodeIO, VertexLayout } from '@gltf-transform/core';
 
-// One bufferView per attribute, as the hand-written container had. glTF-Transform copies vertex data element by
-// element either way, which makes it about twice as slow to write as that container was on these tiles (a
-// megabyte and more each); tile workers are what makes up for it.
+// One bufferView per attribute, as the hand-written container had. glTF-Transform writes vertex data component by
+// component through a DataView, which made these tiles (a megabyte and more each) seven times slower to write than
+// a plain copy; patches/@gltf-transform__core@*.patch adds that plain copy for this layout. Same bytes either way.
 const io = new NodeIO().setVertexLayout(VertexLayout.SEPARATE);
 
 /**

@@ -17,6 +17,8 @@ export default {
 	electrobun: {
 		// 2.0.2 is the first stable that can package on Windows: 2.0.1 pinned a cottontail whose
 		// windows-x64 release has no `cottontail-core`, so `electrobun build` died with `CopySourceMissing`.
-		version: "2.0.2",
+		// 2.0.6: the updater no longer keeps a full tar of the app beside the installed one (it rebuilds it from the
+		// installed files) and checks the archive's SHA-256 through a second manifest, *-update-v2.json. Needs Hutch 0.29.
+		version: "2.0.6",
 	},
 };

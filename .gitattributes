@@ -2,3 +2,4 @@
 # ("/bin/sh^M: bad interpreter") if checked out with Windows line endings. Force LF unconditionally,
 # regardless of core.autocrlf on whatever machine clones/builds this repo.
 *.sh text eol=lf
+patches/*.patch text eol=lf

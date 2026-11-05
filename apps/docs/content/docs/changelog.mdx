@@ -8,6 +8,18 @@ Format loosely follows [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+### Changed — 2026-11-06 (desktop app on Electrobun 2.0.6)
+- **The app no longer keeps a second, full copy of itself for updates** (750 MB): Electrobun 2.0.6 rebuilds it from
+  the installed files when an update comes, and checks the downloaded archive against a SHA-256. The release carries
+  a second manifest for it, `stable-win-x64-update-v2.json`; installs made before today keep reading the first one.
+
+### Changed — 2026-11-06 (one tile loop for every converter, and faster mesh tiles)
+- **COPC and Potree use core's `convertTiles` too**, like SOG, LCC, RAD and I3S: one loop, one place where tile
+  workers and the low-memory pass live. Same files, byte for byte.
+- **I3S and Bing globe tiles are written seven times faster.** glTF-Transform wrote vertex data component by
+  component; a patch of it (`patches/`, applied by pnpm at install) copies a lone accessor whole. Same bytes. This
+  takes back what the move to glTF-Transform had cost.
+
 ### Added — 2026-11-05 (tile workers in the offline converters of SOG, LCC, RAD and I3S)
 - **`--workers` / `TILED_WORKERS` now apply to the SOG, LCC, RAD and I3S converters**, through one tile loop in core
   (`convertTiles`) that each converter hands its tiles to. Same files, byte for byte. Measured on 20 cores, one thread

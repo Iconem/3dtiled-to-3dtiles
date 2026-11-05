@@ -153,15 +153,24 @@ evaluated before assuming this would be a novel effort.
 - [x] **Tile workers for the offline converters of the splat and mesh formats** (done 2026-11-05). One tile loop in
   core, `convertTiles`: a converter gives it its items, a task module for the workers and the same build for its own
   thread; the loop runs them on the pool, with the single-thread pass for tiles a worker had no memory for. SOG (per
-  chunk), LCC, RAD and I3S use it. Left as they were: COPC and Potree keep their own two loops, which do the same
-  thing and could move onto it; 3MX and GeoSplats have no offline converter; plain LAS/LAZ decodes a whole file at
+  chunk), LCC, RAD, I3S, COPC and Potree all use it. 3MX and GeoSplats have no offline converter; plain LAS/LAZ decodes a whole file at
   once and would need a reader that works chunk by chunk.
-- [ ] **Electrobun 2.0.6 for the desktop app** (noted 2026-11-05; the app is on 2.0.2 with Hutch 0.26). 2.0.6 no longer
-  keeps a full copy of the app as a tar beside the installed one (750 MB here): the updater rebuilds it from the
-  installed files, and checks a SHA-256 of the archive through a second manifest (`*-update-v2.json`, published by
-  Hutch 0.29, to add to the release's assets). 2.0.4 already fixed the Windows relaunch after an update and frees
-  disk during patch chains. None of them compares versions, so the build stamp that stops an older release being
-  offered stays ours. To do with an upgrade test from an installed 2.0.2 build, since the updater migrates its cache.
+- [x] **Electrobun 2.0.6 for the desktop app** (done 2026-11-06, from 2.0.2; Hutch 0.29). The updater no longer keeps
+  a full copy of the app as a tar beside the installed one (750 MB): it rebuilds it from the installed files, and
+  checks a SHA-256 of the archive through a second manifest, `stable-win-x64-update-v2.json`, now among the release's
+  assets beside the first one, which older installs still read. It does not compare versions, so the build stamp
+  that stops an older release being offered stays ours.
+- [ ] **Send the glTF-Transform fast path upstream.** `patches/@gltf-transform__core@4.4.0.patch` copies a lone vertex
+  accessor whole instead of component by component (`VertexLayout.SEPARATE`): seven times faster on megabyte tiles,
+  same bytes. It is ten lines in `interleaveAccessors`; as a pull request to donmccurdy/glTF-Transform it would let
+  the patch go. The patch is pinned to 4.4.0: pnpm refuses to install if the version moves without it.
+- [ ] **`@playcanvas/splat-transform` 3.x** (we are on 2.6; 3.0 was a rewrite announced as several times faster, and it
+  reads LCC2). Loading 2.6 costs each thread nearly two seconds, which is what caps the SOG converter's gain from
+  workers on small scenes. To try on the SOG and GeoSplats paths, with the tiles compared before and after.
+- [ ] **RAD through Spark's own Rust reader, as WebAssembly.** Spark's `rust/spark-lib` crate has a `rad` feature and
+  build scripts for WASM. A module with only that feature is about a day's work (build, a thin binding, tiles
+  compared with today's), plus a Rust toolchain in CI or a committed `.wasm` of a few hundred kilobytes. It would
+  follow the format as Spark changes it; today's JS reader is ours to keep up.
 
 - [ ] Further out: a browser/server tiled-splat transcoding UI in the spirit of SuperSplat's splat-transform
   tooling; a **georeferencing/geolocator** step for splats that don't ship one, along the lines of

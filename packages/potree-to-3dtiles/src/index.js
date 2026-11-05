@@ -23,7 +23,7 @@ import { fileURLToPath } from 'node:url';
 import { loadPotree2 } from './potree2.js';
 import { loadPotree1 } from './potree1.js';
 import { nodeGlb } from './tile-task.js';
-import { parallelMap, defaultConcurrency, tilePool, tileWorkerCount, runTileTask, isMemoryFailure, georefFromCrs,
+import { defaultConcurrency, convertTiles, georefFromCrs,
          coordsToKey, octreeSubCube, cubeToBox, buildSubtreeBuffer, subtreeRootKeys } from '../../core/index.js';
 
 const TILE_TASK = new URL('./tile-task.js', import.meta.url).href;   // what a tile worker runs
@@ -106,39 +106,39 @@ export async function convert(inDir, outDir, opts = {}) {
   const rootCube = [...src.rootBox.min, ...src.rootBox.max];
   // With tile workers (TILED_WORKERS, or opts.workers) each node is read, decoded and written on a worker thread;
   // a source that cannot say where a node's bytes are on disk (src.rawNode) stays on this thread.
-  const pool = src.rawNode ? tilePool(opts.workers != null ? tileWorkerCount(opts.workers) : undefined) : null;
-  const concurrency = pool ? pool.size : defaultConcurrency();
-  if (pool) console.log(`  tile workers: ${pool.size} threads`);
+  // core's convertTiles is that loop, the same one every converter uses.
   let written = 0;
   const hasContent = new Set();     // explicit: names that produced a GLB
   const coordSet = new Set();       // implicit: "level-x-y-z" keys that produced a GLB
-  const one = async (name, onWorker) => {
+  const coordOf = new Map();        // name → its implicit coordinates, worked out once
+  const tilePathOf = (name) => {
     const node = src.nodes.get(name);
-    if (!node || node.numPoints <= 0) return;
     const coord = tiling === 'implicit' ? coordsOfBox(node.box, src.rootBox, node.depth) : null;
-    const tp = coord ? path.join(outDir, 'tiles', `${coord.level}`, `${coord.x}`, `${coord.y}`, `${coord.z}.glb`)
-                     : path.join(outDir, `tiles/${name}.glb`);
-    if (onWorker) {
-      if (!await runTileTask(pool, TILE_TASK, 'potreeNodeToFile', { ...src.rawNode(node), gc, tilePath: tp })) return;
-    } else {
-      const glb = await nodeGlb(await src.readNode(node), gc);
-      if (!glb) return;
+    coordOf.set(name, coord);
+    return coord ? path.join(outDir, 'tiles', `${coord.level}`, `${coord.x}`, `${coord.y}`, `${coord.z}.glb`)
+                 : path.join(outDir, `tiles/${name}.glb`);
+  };
+  const names = order.filter((name) => { const node = src.nodes.get(name); return node && node.numPoints > 0; });
+  const { workers } = await convertTiles(names, {
+    module: TILE_TASK, fn: 'potreeNodeToFile', workers: src.rawNode ? opts.workers : 0,
+    task: (name) => ({ ...src.rawNode(src.nodes.get(name)), gc, tilePath: tilePathOf(name) }),
+    here: async (name) => {
+      const tp = tilePathOf(name);
+      const glb = await nodeGlb(await src.readNode(src.nodes.get(name)), gc);
+      if (!glb) return false;
       await fs.mkdir(path.dirname(tp), { recursive: true });
       await fs.writeFile(tp, glb);
-    }
-    if (coord) { node._coord = coord; coordSet.add(coordsToKey(coord.level, coord.x, coord.y, coord.z)); }
-    else hasContent.add(name);
-    if (++written % 50 === 0) process.stdout.write(`\r  ${written} tiles`);
-  };
-  const later = [];   // nodes a worker had no memory for: built after the others, one at a time on this thread
-  await parallelMap(order, async (name) => {
-    if (!pool) return one(name, false);
-    try { await one(name, true); } catch (e) { if (!isMemoryFailure(e)) throw e; later.push(name); }
-  }, { concurrency });
-  if (later.length) {
-    console.log(`\n  ${later.length} tiles ran out of memory on a worker: building them on one thread`);
-    for (const name of later) await one(name, false);
-  }
+      return true;
+    },
+    onResult: (name, ok) => {   // a node with no points left after decoding writes nothing
+      if (!ok) return;
+      const coord = coordOf.get(name);
+      if (coord) { src.nodes.get(name)._coord = coord; coordSet.add(coordsToKey(coord.level, coord.x, coord.y, coord.z)); }
+      else hasContent.add(name);
+      if (++written % 50 === 0) process.stdout.write(`\r  ${written} tiles`);
+    },
+  });
+  if (workers) console.log(`  tile workers: ${workers} threads`);
   process.stdout.write(`\r  ${written} tiles\n`);
 
   // ── 3) Assemble the tileset ──────────────────────────────────────────────────

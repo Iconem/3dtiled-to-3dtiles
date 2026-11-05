@@ -29,6 +29,8 @@ WORKDIR /app
 # failing postinstall here fails `pnpm install` for every target, not just docs.
 FROM base AS deps
 COPY package.json pnpm-lock.yaml pnpm-workspace.yaml .npmrc ./
+# pnpm applies these during the install (package.json's pnpm.patchedDependencies) and refuses to install without them
+COPY patches patches
 COPY packages packages
 COPY apps/viewer apps/viewer
 COPY apps/docs apps/docs

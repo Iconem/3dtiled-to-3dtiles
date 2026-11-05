@@ -1,0 +1,56 @@
+diff --git a/dist/index.cjs b/dist/index.cjs
+index f67c82d1867426843cde02b75d5569665c29bc45..1f62d2b2f5dc16841ea5170dc11b9bf2f1079892 100644
+--- a/dist/index.cjs
++++ b/dist/index.cjs
+@@ -4641,7 +4641,14 @@ var GLTFWriter = class {
+ 				json.accessors.push(accessorDef);
+ 			}
+ 			const byteLength = vertexCount * byteStride;
+-			const buffer = new ArrayBuffer(byteLength);
++			let buffer;
++			const lone = accessors.length === 1 ? accessors[0].getArray() : null;
++			if (lone && lone.BYTES_PER_ELEMENT === accessors[0].getComponentSize() && byteStride === accessors[0].getElementSize() * lone.BYTES_PER_ELEMENT && lone.byteLength >= byteLength) {
++				// 3dtiled patch: one accessor with no padding inside an element (VertexLayout.SEPARATE) is copied whole,
++				// not component by component through a DataView. Same bytes: typed arrays are little-endian wherever JS runs.
++				buffer = new Uint8Array(lone.buffer, lone.byteOffset, byteLength).slice().buffer;
++			} else {
++			buffer = new ArrayBuffer(byteLength);
+ 			const view = new DataView(buffer);
+ 			for (let i = 0; i < vertexCount; i++) {
+ 				let vertexByteOffset = 0;
+@@ -4684,6 +4691,7 @@ var GLTFWriter = class {
+ 					vertexByteOffset += BufferUtils.padNumber(elementSize * componentSize);
+ 				}
+ 			}
++			}
+ 			const bufferViewDef = {
+ 				buffer: bufferIndex,
+ 				byteOffset: bufferByteOffset,
+diff --git a/dist/index.js b/dist/index.js
+index 4d304cf10d7ce6ffbc7123c838b30f5259e18028..48a006e046ce18cbd59f4519366266a408b7217c 100644
+--- a/dist/index.js
++++ b/dist/index.js
+@@ -4640,7 +4640,14 @@ var GLTFWriter = class {
+ 				json.accessors.push(accessorDef);
+ 			}
+ 			const byteLength = vertexCount * byteStride;
+-			const buffer = new ArrayBuffer(byteLength);
++			let buffer;
++			const lone = accessors.length === 1 ? accessors[0].getArray() : null;
++			if (lone && lone.BYTES_PER_ELEMENT === accessors[0].getComponentSize() && byteStride === accessors[0].getElementSize() * lone.BYTES_PER_ELEMENT && lone.byteLength >= byteLength) {
++				// 3dtiled patch: one accessor with no padding inside an element (VertexLayout.SEPARATE) is copied whole,
++				// not component by component through a DataView. Same bytes: typed arrays are little-endian wherever JS runs.
++				buffer = new Uint8Array(lone.buffer, lone.byteOffset, byteLength).slice().buffer;
++			} else {
++			buffer = new ArrayBuffer(byteLength);
+ 			const view = new DataView(buffer);
+ 			for (let i = 0; i < vertexCount; i++) {
+ 				let vertexByteOffset = 0;
+@@ -4683,6 +4690,7 @@ var GLTFWriter = class {
+ 					vertexByteOffset += BufferUtils.padNumber(elementSize * componentSize);
+ 				}
+ 			}
++			}
+ 			const bufferViewDef = {
+ 				buffer: bufferIndex,
+ 				byteOffset: bufferByteOffset,
