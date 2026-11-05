@@ -88,12 +88,19 @@ export class WorkerPool {
   async destroy() { this._closed = true; const ws = this.workers; this.workers = []; this.idle = []; await Promise.all(ws.map(w => w.terminate())); }
 }
 
+let override;   // setTileWorkers: what a run asked for, over the environment
+/**
+ * Ask for tile workers from inside the process (an export's `workers`, the CLI's `--workers`), over `TILED_WORKERS`:
+ * same values as the flag; null or undefined gives the environment its say back. Returns what was set before, to restore.
+ */
+export function setTileWorkers(v) { const was = override; override = v == null || v === '' ? undefined : v; return was; }
+
 /**
  * How many tile workers the `TILED_WORKERS` flag asks for: unset, `0` or `off` is none (today's single-thread
  * path, the default), `auto` is one per core but one and at most 8 (more did not go faster when measured, and each
  * worker holds its own decoder and buffers), a number is that many.
  */
-export function tileWorkerCount(v = process.env.TILED_WORKERS) {
+export function tileWorkerCount(v = override ?? process.env.TILED_WORKERS) {
   if (v == null || v === '' || /^(0|off|false|no)$/i.test(String(v))) return 0;
   if (/^(auto|on|true|yes)$/i.test(String(v))) return Math.min(8, defaultConcurrency());
   const n = Math.floor(Number(v));
@@ -117,6 +124,35 @@ export function tilePool(size = tileWorkerCount()) {
  * `args` must survive a structured clone (no functions), and `transfer` lists the ArrayBuffers to hand over.
  */
 export const runTileTask = (pool, module, fn, args, transfer) => pool.run({ module: String(module), fn, args }, transfer);
+
+/**
+ * Whether a tile task failed for want of memory rather than for its data: the worker died (V8 ends a worker thread
+ * that passes its heap limit), or an allocation failed inside it (typed arrays and the LAZ decoder's WASM heap live
+ * outside that limit and throw instead). Such a tile is worth building again with nothing else running beside it.
+ */
+export const isMemoryFailure = (e) => /tile worker died|allocation failed|out of memory|cannot enlarge memory|invalid (typed )?array length/i.test(e?.message || '');
+
+let lane = Promise.resolve();   // the caller's thread, one fallback at a time
+/**
+ * runTileTask, with a way out when the workers are short of memory: a tile that failed that way (isMemoryFailure) is
+ * built by `fallback` on the caller's thread instead, and those run one after the other, never beside each other, so
+ * the tile gets the memory a single-thread run would give it. Any other failure is the tile's own and is thrown.
+ * @param {() => Promise<any>} fallback the single-thread build of the same tile
+ */
+export async function runTileTaskOr(pool, module, fn, args, transfer, fallback) {
+  try { return await runTileTask(pool, module, fn, args, transfer); }
+  catch (e) {
+    if (!isMemoryFailure(e)) throw e;
+    tileFallbacks.count++;
+    if (tileFallbacks.count === 1 || tileFallbacks.count % 100 === 0)
+      console.warn(`[tile workers] a tile ran out of memory on a worker (${String(e.message).split('\n')[0].slice(0, 120)}); built on the main thread instead, one at a time (${tileFallbacks.count} so far). Fewer workers would avoid it.`);
+    const run = lane.then(fallback);
+    lane = run.catch(() => {});
+    return run;
+  }
+}
+/** How many tiles fell back to the caller's thread since the process started (a health figure, and for tests). */
+export const tileFallbacks = { count: 0 };
 
 /** A copy of `bytes` that owns its ArrayBuffer, so it can be transferred without taking a cache's buffer with it. */
 export const ownBytes = (bytes) => new Uint8Array(bytes.buffer, bytes.byteOffset, bytes.byteLength).slice();

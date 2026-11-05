@@ -1,8 +1,9 @@
 /**
- * Build — a dataset, then two flows: live-stream (a paste-ready URL) or export to disk.
+ * Build — a dataset, then two flows, each in its own tab: live-stream (a paste-ready URL) or export to disk.
  */
 import { useState } from 'react';
 import { Button } from '@/components/ui/button';
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import type { AppModel } from './App';
 import { Card } from './components/Card';
 import { Actions, Advanced, Choice, Code, Field, FieldLabel, Hint, Result, TextInput, UrlBar, type Message } from './components/bits';
@@ -11,6 +12,10 @@ import { base, pickDataset, pickerAvailable, viewerUrl } from './host';
 import { newId } from './library';
 import { nameFor, PLACEMENT, typeOfFormat } from './urls';
 
+const FLOWS = [
+  ['stream', 'Stream live', 'A tileset URL converted on demand while this app runs: nothing is written to disk'],
+  ['export', 'Export to a folder', 'Files on disk: crawl the stream, or run the offline converter'],
+] as const;
 const FORMATS = [
   { value: '', label: 'auto-detect' }, { value: 'copc', label: 'COPC' }, { value: 'potree', label: 'Potree' },
   { value: 'sog', label: 'SOG (streamed)' }, { value: 'lcc', label: 'LCC' }, { value: 'rad', label: 'RAD' },
@@ -39,6 +44,7 @@ export function BuildTab({ app, message }: { app: AppModel; message: Message | n
   const { form, patchForm, url, say } = app;
   const entered = form.src.trim() !== '';
   const [checking, setChecking] = useState(false);
+  const [flow, setFlow] = useState<string>('stream');
 
   async function browse(directory: boolean) {
     if (!pickerAvailable()) return say('The native picker needs the desktop app — paste a path instead.', 'err');
@@ -141,7 +147,18 @@ export function BuildTab({ app, message }: { app: AppModel; message: Message | n
 
       {!entered && <Hint id="flows-empty" className="mb-3.5">Enter a dataset above, then stream it live or export it to a folder.</Hint>}
 
-      <div id="flows" hidden={!entered}>
+      {/* The two things to do with a dataset, apart: a URL that converts on demand, or files on disk. Both stay
+          mounted, so an export carries on while the stream tab is open. */}
+      <Tabs id="flows" hidden={!entered} value={flow} onValueChange={(v) => setFlow(String(v))} className="gap-0">
+        <TabsList id="flow-tabs" className="mb-3 h-auto gap-0.5 self-start rounded-md p-[3px]">
+          {FLOWS.map(([name, label, sub]) => (
+            <TabsTrigger key={name} value={name} data-flow={name} title={sub}
+              className="h-[30px] flex-none rounded-sm border-0 px-3.5 text-[13px] font-medium text-muted-foreground hover:text-foreground data-active:bg-background data-active:text-foreground data-active:shadow-xs dark:data-active:border-0 dark:data-active:bg-background">
+              {label}
+            </TabsTrigger>
+          ))}
+        </TabsList>
+        <TabsContent value="stream" id="flow-stream" keepMounted>
         <Card>
           <FieldLabel className="mb-[9px] text-[13.5px] leading-normal text-foreground">Live-stream <span className="text-xs font-normal text-muted-foreground">— a URL for Cesium for Unreal/Unity, QGIS or CesiumJS, converted on demand while this app runs</span></FieldLabel>
           <UrlBar>
@@ -167,9 +184,9 @@ export function BuildTab({ app, message }: { app: AppModel; message: Message | n
             </Actions>
           </Advanced>
         </Card>
-
-        <ExportCard app={app} />
-      </div>
+        </TabsContent>
+        <TabsContent value="export" id="flow-export" keepMounted><ExportCard app={app} /></TabsContent>
+      </Tabs>
     </section>
   );
 }

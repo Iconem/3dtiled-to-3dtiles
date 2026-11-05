@@ -64,7 +64,8 @@ Point tiles are decoded and encoded on the process's one thread by default. Set 
 thread per core but one, at most 8) or `TILED_WORKERS=<n>` to spread that work over worker threads: on the server for
 COPC and Potree `/stream` tiles and crawl exports, and in the `copc-to-3dtiles` and `potree-to-3dtiles` converters,
 which also take `--workers <n>`. The output is identical. Expect about 3 to 4 times the tile throughput on 8 cores, a
-server that stays responsive while it builds tiles, and roughly 50 MB more memory per worker.
+server that stays responsive while it builds tiles, and roughly 50 MB more memory per worker. One export can ask for
+it alone: `workers` on `POST /export`, `--workers` on the `3dtiled` CLI, or **Advanced → Tile threads** in the desktop app.
 
 ```bash
 TILED_WORKERS=auto node packages/tile-server/server.js

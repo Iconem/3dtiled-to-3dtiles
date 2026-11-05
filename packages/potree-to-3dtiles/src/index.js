@@ -23,7 +23,7 @@ import { fileURLToPath } from 'node:url';
 import { loadPotree2 } from './potree2.js';
 import { loadPotree1 } from './potree1.js';
 import { nodeGlb } from './tile-task.js';
-import { parallelMap, defaultConcurrency, tilePool, tileWorkerCount, runTileTask, georefFromCrs,
+import { parallelMap, defaultConcurrency, tilePool, tileWorkerCount, runTileTask, isMemoryFailure, georefFromCrs,
          coordsToKey, octreeSubCube, cubeToBox, buildSubtreeBuffer, subtreeRootKeys } from '../../core/index.js';
 
 const TILE_TASK = new URL('./tile-task.js', import.meta.url).href;   // what a tile worker runs
@@ -112,13 +112,13 @@ export async function convert(inDir, outDir, opts = {}) {
   let written = 0;
   const hasContent = new Set();     // explicit: names that produced a GLB
   const coordSet = new Set();       // implicit: "level-x-y-z" keys that produced a GLB
-  await parallelMap(order, async (name) => {
+  const one = async (name, onWorker) => {
     const node = src.nodes.get(name);
     if (!node || node.numPoints <= 0) return;
     const coord = tiling === 'implicit' ? coordsOfBox(node.box, src.rootBox, node.depth) : null;
     const tp = coord ? path.join(outDir, 'tiles', `${coord.level}`, `${coord.x}`, `${coord.y}`, `${coord.z}.glb`)
                      : path.join(outDir, `tiles/${name}.glb`);
-    if (pool) {
+    if (onWorker) {
       if (!await runTileTask(pool, TILE_TASK, 'potreeNodeToFile', { ...src.rawNode(node), gc, tilePath: tp })) return;
     } else {
       const glb = await nodeGlb(await src.readNode(node), gc);
@@ -129,7 +129,16 @@ export async function convert(inDir, outDir, opts = {}) {
     if (coord) { node._coord = coord; coordSet.add(coordsToKey(coord.level, coord.x, coord.y, coord.z)); }
     else hasContent.add(name);
     if (++written % 50 === 0) process.stdout.write(`\r  ${written} tiles`);
+  };
+  const later = [];   // nodes a worker had no memory for: built after the others, one at a time on this thread
+  await parallelMap(order, async (name) => {
+    if (!pool) return one(name, false);
+    try { await one(name, true); } catch (e) { if (!isMemoryFailure(e)) throw e; later.push(name); }
   }, { concurrency });
+  if (later.length) {
+    console.log(`\n  ${later.length} tiles ran out of memory on a worker: building them on one thread`);
+    for (const name of later) await one(name, false);
+  }
   process.stdout.write(`\r  ${written} tiles\n`);
 
   // ── 3) Assemble the tileset ──────────────────────────────────────────────────

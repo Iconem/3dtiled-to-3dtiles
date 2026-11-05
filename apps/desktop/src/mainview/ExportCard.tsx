@@ -38,6 +38,13 @@ const HIERARCHY_ERRORS = [
   { value: 'error', label: 'Stop the export' },
   { value: 'warn', label: 'Warn, and export the rest' },
 ];
+const WORKERS = [
+  { value: '', label: 'One thread (default)' },
+  { value: 'auto', label: 'Auto: one per core but one, at most 8' },
+  { value: '2', label: '2 worker threads' },
+  { value: '4', label: '4 worker threads' },
+  { value: '8', label: '8 worker threads' },
+];
 const TILINGS = [{ value: '', label: 'converter default' }, { value: 'implicit', label: 'implicit' }, { value: 'explicit', label: 'explicit' }];
 
 interface Job {
@@ -77,7 +84,9 @@ export function ExportCard({ app }: { app: AppModel }) {
   const convert = s.method === 'convert';
   // The CLI runner lives in the main process; a plain browser (verification bundle) has no host.
   const runner = cli && s.runner === 'cli' ? 'server' : s.runner;
-  const req = exportRequest(app.dataset(), { ...s, runner });
+  // A crawl in a CLI subprocess reads tiles the server builds, so the subprocess has no say on their threads.
+  const workersNa = runner === 'cli' && s.method === 'crawl';
+  const req = exportRequest(app.dataset(), { ...s, runner, workers: workersNa ? '' : s.workers });
   const live = viewerLink(url, typeOfFormat(form.format));
 
   // A server started without TILED_ALLOW_EXPORT (e.g. an adopted `pnpm dev` one) can't export; say so
@@ -291,6 +300,11 @@ export function ExportCard({ app }: { app: AppModel }) {
           <Field label="Check the result"><Choice id="export-verify" value={s.verify} onChange={(v) => patch({ verify: v })} options={VERIFY} /></Field>
           <Field label="If part of the hierarchy can't be read" title="A subtree, external tileset or Potree .hrc still unread after three tries. The tree below it goes missing.">
             <Choice id="export-hierarchy-errors" value={s.hierarchyErrors} onChange={(v) => patch({ hierarchyErrors: v })} options={HIERARCHY_ERRORS} />
+          </Field>
+          <Field label={<>Tile threads <span className="text-xs font-normal text-muted-foreground">(experimental; COPC, Potree)</span></>}
+            title="Decode and encode point tiles on worker threads: about 3 to 4 times faster on 8 cores, the same tiles, around 50 MB more memory a worker. Other formats are not affected.">
+            <Choice id="export-workers" value={workersNa ? '' : s.workers} onChange={(v) => patch({ workers: v })} options={WORKERS} disabled={job.running || workersNa}
+              title={workersNa ? 'A crawl run as a CLI subprocess reads tiles the tile-server builds: choose "Run in: tile-server", or the offline converter' : undefined} />
           </Field>
         </div>
         <Hint id="export-runner-hint" className="mt-3">

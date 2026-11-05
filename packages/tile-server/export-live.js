@@ -39,7 +39,7 @@
 import { createHash, randomUUID } from 'node:crypto';
 import { mkdir, readdir, readFile, writeFile, stat } from 'node:fs/promises';
 import path from 'node:path';
-import { CORS, keyToCoords, requestSource, fetchSource, fetchSourceJson, isAbsent } from '../core/index.js';
+import { CORS, keyToCoords, requestSource, fetchSource, fetchSourceJson, isAbsent, setTileWorkers, tileWorkerCount } from '../core/index.js';
 import { buildExplicitFromUrl } from '../implicit-to-explicit/index.js';
 import { VERIFY_MODES, sourceOfUrl, verifyExport } from './export-verify.js';
 
@@ -443,9 +443,16 @@ export async function handleExport(req, res, u) {
     const job = { id: randomUUID(), state: 'running', url, outDir, startedAt: new Date().toISOString(), progress: null, ctrl: new AbortController() };
     jobs.set(job.id, job);
     const onProgress = (pr) => { job.progress = { ...job.progress, ...pr }; };
-    const run = method === 'convert'
+    // workers: 'auto' or a count runs this export's COPC and Potree tiles on worker threads (see core/parallel.js),
+    // for the tiles this server builds while the crawl reads them and for the offline converter alike. It is the
+    // process's setting while the export runs, then what it was before.
+    const asksWorkers = body.workers != null && body.workers !== '';
+    const workersWere = asksWorkers ? setTileWorkers(body.workers) : undefined;
+    if (asksWorkers) job.workers = tileWorkerCount();
+    const run = (method === 'convert'
       ? convertToFolder(body.src, outDir, { format: body.format, options: body.options ?? {}, pack, onProgress, verify, hierarchyErrors })
-      : exportTileset(url, outDir, { maxDepth, overwrite: true, keepImplicit: !!body.keepImplicit, pack, verify, hierarchyErrors, signal: job.ctrl.signal, onProgress });
+      : exportTileset(url, outDir, { maxDepth, overwrite: true, keepImplicit: !!body.keepImplicit, pack, verify, hierarchyErrors, signal: job.ctrl.signal, onProgress })
+    ).finally(() => { if (asksWorkers) setTileWorkers(workersWere); });
     run.then((r) => { job.state = 'done'; job.result = r; job.progress = { ...job.progress, ...r, failures: undefined }; })
       .catch((e) => { job.state = job.ctrl.signal.aborted ? 'cancelled' : 'failed'; job.error = String(e.message || e); });
     json(res, 202, { id: job.id, status: `/export/${job.id}` });

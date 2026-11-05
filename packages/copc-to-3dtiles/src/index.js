@@ -22,7 +22,7 @@ import { Copc, Las, Getter } from 'copc';
 import { writeTileGlb }                    from './glbWriter.js';
 import { convertPlainLas }                 from './plainLas.js';
 import { buildEcefTransform }              from './georef.js';
-import { parallelMap, defaultConcurrency, tilePool, tileWorkerCount, runTileTask, keyToCoords, octreeSubCube, cubeToBox,
+import { parallelMap, defaultConcurrency, tilePool, tileWorkerCount, runTileTask, isMemoryFailure, keyToCoords, octreeSubCube, cubeToBox,
          buildExplicitTree, buildSubtreeBuffer, subtreeRootKeys } from '../../core/index.js';
 
 const TILE_TASK = new URL('./tile-task.js', import.meta.url).href;   // what a tile worker runs
@@ -120,17 +120,21 @@ export async function convert(inputPath, outDir, opts = {}) {
   console.log(`Writing GLBs... (parallel: ${concurrency} ${pool ? 'worker threads' : 'lanes'})`);
   const entries = [...nodeMap];
   let done = 0;
+  const tilePathOf = (key) => { const { level, x, y, z } = keyToCoords(key); return path.join(outDir, 'tiles', `${level}`, `${x}`, `${y}`, `${z}.glb`); };
+  const here = async (key, node) => writeTileGlb(await Copc.loadPointDataView(inputPath, copc, node), origin, tilePathOf(key));
+  const later = [];   // nodes a worker had no memory for: built after the others, one at a time on this thread
   await parallelMap(entries, async ([key, node]) => {
-    const { level, x, y, z } = keyToCoords(key);
-    const tilePath = path.join(outDir, 'tiles', `${level}`, `${x}`, `${y}`, `${z}.glb`);
-    if (pool) await runTileTask(pool, TILE_TASK, 'copcNodeToFile', { input: inputPath, header: copc.header, eb: copc.eb, node, origin, tilePath });
-    else {
-      const view = await Copc.loadPointDataView(inputPath, copc, node);
-      await writeTileGlb(view, origin, tilePath);
-    }
+    if (pool) {
+      try { await runTileTask(pool, TILE_TASK, 'copcNodeToFile', { input: inputPath, header: copc.header, eb: copc.eb, node, origin, tilePath: tilePathOf(key) }); }
+      catch (e) { if (!isMemoryFailure(e)) throw e; later.push([key, node]); return; }
+    } else await here(key, node);
     done++;
     if (done % 100 === 0) process.stdout.write(`\r  ${done}/${nodeMap.size}`);
   }, { concurrency });
+  if (later.length) {
+    console.log(`\n  ${later.length} tiles ran out of memory on a worker: building them on one thread`);
+    for (const [key, node] of later) { await here(key, node); done++; }
+  }
   console.log(`\r  ${done}/${nodeMap.size} tiles`);
 
   const rootError = rootGeometricError(cube);

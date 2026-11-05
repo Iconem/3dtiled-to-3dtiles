@@ -215,6 +215,9 @@ every level), and press **Export**.
 - **Failures.** Files that fail after three attempts are listed in `export-report.json`, along with
   counts, bytes, timings and the source URL. Their uris stay in place, so the tileset remains
   structurally valid.
+- **Tile threads (experimental).** Under Advanced, **Tile threads** runs the decode and encode of COPC and Potree tiles
+  on worker threads for that export: about 3 to 4 times faster on 8 cores, the same tiles, around 50 MB more memory per
+  worker. A tile the workers have no memory for is built on one thread instead. Off by default.
 - **Checked at the end.** Both methods check the finished folder, on by default. **Check the result** under Advanced
   picks how far, and `verify` in `export-report.json` holds the outcome, per level.
   - *Counts*: walks the folder from its `tileset.json`, through external tilesets and implicit subtrees, as a client

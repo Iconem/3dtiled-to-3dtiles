@@ -5,7 +5,7 @@
  */
 export { buildSpzBuffer, buildSpzGlb, buildSplatTileGlb, computeBounds } from './spz-glb.js';
 export { buildPointsGlb, srgbToLinear, pickAttributes, wantedAttributes, attributesSpec, POINT_ATTRIBUTES } from './points-glb.js';
-export { parallelMap, WorkerPool, defaultConcurrency, tileWorkerCount, tilePool, runTileTask, ownBytes } from './parallel.js';
+export { parallelMap, WorkerPool, defaultConcurrency, tileWorkerCount, setTileWorkers, tilePool, runTileTask, runTileTaskOr, isMemoryFailure, tileFallbacks, ownBytes } from './parallel.js';
 export { detectFormat, detectFormatByName } from './detect.js';
 export { keyToCoords, coordsToKey, octreeChildKeys, octreeSubCube, cubeToBox,
          buildExplicitTree, buildSubtreeBuffer, subtreeRootKeys,

@@ -12,7 +12,7 @@
  *   GET /potree/tileset.json?url=<metadata.json | cloud.js URL>
  *   GET /potree/tile/<name>.glb?url=<…>                       → that node's points as a POINTS GLB
  */
-import { tilePool, runTileTask, ownBytes, coordsToKey, keyToCoords, buildSubtreeBuffer, georefFromCrs, buildImplicitTileset, parallelMap, defaultConcurrency, progressStart, progressTick, progressDone, memoizeAsync, fetchSource, fetchSourceRange } from '../core/index.js';
+import { tilePool, runTileTaskOr, ownBytes, coordsToKey, keyToCoords, buildSubtreeBuffer, georefFromCrs, buildImplicitTileset, parallelMap, defaultConcurrency, progressStart, progressTick, progressDone, memoizeAsync, fetchSource, fetchSourceRange } from '../core/index.js';
 import { preparePotree2Schema, parsePotree2Hierarchy, parsePotree2Chunk, decodePotree2Node } from '../potree-to-3dtiles/src/potree2.js';
 import { loadPotree1 } from '../potree-to-3dtiles/src/potree1.js';
 import { withCrsOverride } from './copc-live.js';
@@ -322,18 +322,20 @@ async function serveTileGlb(ctx, name, colorsEnc, attrSpec = null) {
   // Eager ctx has a full node map to gate on; lazy ctx (1.x .hrc) has no map — rely on readTile
   // returning null for a missing/empty node.
   if (ctx.nodes) { const node = ctx.nodes.get(name); if (!node || !node.numPoints) return null; }
+  const here = async () => {
+    const data = await ctx.readTile(name);                  // 2.0: range read+decode; 1.x: per-node fetch+decode
+    const glb = await potreeDataGlb(data, { origin: ctx.origin, colors: colorsEnc, attributes: attrSpec });
+    return glb ? Buffer.from(glb) : null;
+  };
   const pool = tilePool();
-  if (pool && ctx.rawTile) {
-    // TILED_WORKERS: this thread only fetches the node's bytes; a worker decodes them and builds the GLB.
-    const t = await ctx.rawTile(name);
-    if (!t) return null;
-    const raw = ownBytes(t.raw);
-    const glb = await runTileTask(pool, TILE_TASKS, 'potreeTileTask', { ...t, raw, origin: ctx.origin, colors: colorsEnc, attributes: attrSpec }, [raw.buffer]);
-    return glb ? Buffer.from(glb.buffer, glb.byteOffset, glb.byteLength) : null;
-  }
-  const data = await ctx.readTile(name);                    // 2.0: range read+decode; 1.x: per-node fetch+decode
-  const glb = await potreeDataGlb(data, { origin: ctx.origin, colors: colorsEnc, attributes: attrSpec });
-  return glb ? Buffer.from(glb) : null;
+  if (!pool || !ctx.rawTile) return here();
+  // TILED_WORKERS: this thread only fetches the node's bytes; a worker decodes them and builds the GLB. A tile the
+  // workers had no memory for is built here instead, one at a time (runTileTaskOr).
+  const t = await ctx.rawTile(name);
+  if (!t) return null;
+  const raw = ownBytes(t.raw);
+  const glb = await runTileTaskOr(pool, TILE_TASKS, 'potreeTileTask', { ...t, raw, origin: ctx.origin, colors: colorsEnc, attributes: attrSpec }, [raw.buffer], here);
+  return !glb || Buffer.isBuffer(glb) ? glb : Buffer.from(glb.buffer, glb.byteOffset, glb.byteLength);
 }
 
 // ── 1.x explicit tree (&tiling=explicit): drains every .hrc chunk up front, then builds one complete

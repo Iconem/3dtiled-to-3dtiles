@@ -15,7 +15,7 @@ import { copcViewGlb, lasScalarAttributes } from './points-tile.js';
 
 export { lasScalarAttributes };
 const TILE_TASKS = new URL('./tile-tasks.js', import.meta.url).href;   // what a tile worker runs (TILED_WORKERS)
-import { tilePool, runTileTask, ownBytes, keyToCoords, coordsToKey, buildSubtreeBuffer, georefFromCrs, curvedLocalizer, curvedTileLocalizer, buildImplicitTileset, memoizeAsync } from '../core/index.js';
+import { tilePool, runTileTaskOr, ownBytes, keyToCoords, coordsToKey, buildSubtreeBuffer, georefFromCrs, curvedLocalizer, curvedTileLocalizer, buildImplicitTileset, memoizeAsync } from '../core/index.js';
 
 const SUBTREE_LEVELS = 3;
 
@@ -249,18 +249,20 @@ async function serveTileGlb(ctx, key, curved = null, colorsEnc, attributes = nul
   if (!node || !node.pointCount) return null;
   let sc = null;
   if (curved) { const { level, x, y, z } = keyToCoords(key); sc = subCube(ctx.cube, level, x, y, z); }
+  const here = async () => {
+    const view = await Copc.loadPointDataView(ctx.getter, ctx.copc, node);
+    return Buffer.from(await copcViewGlb(view, { origin: ctx.origin, colors: colorsEnc, attributes, toLocal: curved?.toLocal ?? null, subCube: sc }));
+  };
   const pool = tilePool();
-  if (pool) {
-    // TILED_WORKERS: this thread only fetches the node's compressed chunk; a worker decodes it and builds the GLB.
-    const compressed = ownBytes(await ctx.getter(node.pointDataOffset, node.pointDataOffset + node.pointDataLength));
-    const glb = await runTileTask(pool, TILE_TASKS, 'copcTileTask', {
-      compressed, header: ctx.copc.header, eb: ctx.copc.eb, pointCount: node.pointCount, origin: ctx.origin,
-      colors: colorsEnc, attributes, curved: curved?.spec ?? null, subCube: sc,
-    }, [compressed.buffer]);
-    return Buffer.from(glb.buffer, glb.byteOffset, glb.byteLength);
-  }
-  const view = await Copc.loadPointDataView(ctx.getter, ctx.copc, node);
-  return Buffer.from(await copcViewGlb(view, { origin: ctx.origin, colors: colorsEnc, attributes, toLocal: curved?.toLocal ?? null, subCube: sc }));
+  if (!pool) return here();
+  // TILED_WORKERS: this thread only fetches the node's compressed chunk; a worker decodes it and builds the GLB. A
+  // tile the workers had no memory for is built here instead, one at a time (runTileTaskOr).
+  const compressed = ownBytes(await ctx.getter(node.pointDataOffset, node.pointDataOffset + node.pointDataLength));
+  const glb = await runTileTaskOr(pool, TILE_TASKS, 'copcTileTask', {
+    compressed, header: ctx.copc.header, eb: ctx.copc.eb, pointCount: node.pointCount, origin: ctx.origin,
+    colors: colorsEnc, attributes, curved: curved?.spec ?? null, subCube: sc,
+  }, [compressed.buffer], here);
+  return Buffer.isBuffer(glb) ? glb : Buffer.from(glb.buffer, glb.byteOffset, glb.byteLength);
 }
 
 // Pure builders the /stream dispatcher reuses. Tiles/subtrees are keyed "level-x-y-z" (explicit and

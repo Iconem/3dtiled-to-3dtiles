@@ -89,3 +89,27 @@ test('potree-to-3dtiles writes the same tileset with and without tile workers', 
   assert.deepEqual(await list(path.join(dir, 'on')), files);
   for (const f of files) assert.ok((await fs.readFile(path.join(dir, 'off', f))).equals(await fs.readFile(path.join(dir, 'on', f))), f);
 });
+
+test('a tile the workers had no memory for is built on this thread, one at a time; any other failure is thrown', async (t) => {
+  t.mock.method(console, 'warn', () => {});
+  const { runTileTaskOr, tileFallbacks } = await import('../core/index.js');
+  const mod = 'data:text/javascript,' + encodeURIComponent(
+    'export const die = () => process.exit(134); export const alloc = () => { throw new RangeError("Array buffer allocation failed"); };'
+    + 'export const bad = () => { throw new Error("not a LAS chunk"); }; export const ok = (a) => a;');
+  const pool = new WorkerPool(WORKER, 3);
+  try {
+    let running = 0, most = 0; const before = tileFallbacks.count;
+    const fallback = (n) => async () => { most = Math.max(most, ++running); await new Promise((r) => setTimeout(r, 15)); running--; return `here ${n}`; };
+    const out = await Promise.all([
+      runTileTaskOr(pool, mod, 'die', null, undefined, fallback(1)),
+      runTileTaskOr(pool, mod, 'alloc', null, undefined, fallback(2)),
+      runTileTaskOr(pool, mod, 'die', null, undefined, fallback(3)),
+      runTileTaskOr(pool, mod, 'ok', 'there', undefined, fallback(4)),
+    ]);
+    assert.deepEqual(out, ['here 1', 'here 2', 'here 3', 'there']);
+    assert.equal(most, 1, 'fallbacks never run beside each other');
+    assert.equal(tileFallbacks.count - before, 3);
+    await assert.rejects(runTileTaskOr(pool, mod, 'bad', null, undefined, fallback(5)), /not a LAS chunk/);
+    assert.equal(await runTileTaskOr(pool, mod, 'ok', 7, undefined, fallback(6)), 7, 'the pool is whole again');
+  } finally { await pool.destroy(); }
+});

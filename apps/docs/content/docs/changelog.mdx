@@ -18,6 +18,14 @@ Format loosely follows [Keep a Changelog](https://keepachangelog.com/).
   in 13.9 s on one thread and 3.5 s with 8 workers; the offline converter 15.7 s and 5.3 s. 4 workers already give
   2.6 to 2.9 times, and more than 8 gave nothing. While the single thread worked, another request to the server waited
   up to 1.8 s; with workers, 10 ms. The cost is memory: the server went from about 270 MB to about 680 MB with 8 workers.
+- **The desktop app's Export card has it under Advanced, "Tile threads":** one thread (default), auto, 2, 4 or 8. It
+  applies to that export only, crawl or offline converter, through `workers` on `POST /export` and `--workers` on the
+  `3dtiled` CLI. A crawl run as a CLI subprocess reads tiles the tile-server builds, so the choice is greyed out there.
+- **The desktop app's Build tab has a tab per flow**, "Stream live" and "Export to a folder", under the dataset
+  form, instead of one card under the other. An export carries on while the other tab is open.
+- **A tile the workers have no memory for is not lost.** If a worker dies or an allocation fails in it, that tile is
+  built on the main thread instead, one at a time: straight away on the server, after all the others in the converters.
+  A warning says how many, and that fewer workers would avoid it. A tile that fails for its own data still fails.
 - Splat formats (SOG, LCC, RAD) and plain LAS/LAZ still run on one thread; a curved COPC placement is rebuilt in each worker.
 
 ### Fixed — 2026-11-04 (Potree 1.x lost most of a cloud's finest points)

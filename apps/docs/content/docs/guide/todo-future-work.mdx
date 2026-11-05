@@ -137,6 +137,17 @@ evaluated before assuming this would be a novel effort.
   as a personal dataset library, not a one-shot CLI wrapper. Purely an idea at this point — no design
   work, no scoping, not started.
 
+- [ ] **The desktop app as a one-stop tiler for raw, untiled input** (noted 2026-11-05). Today it takes sources
+  that are already tiled (COPC, Potree, SOG, LCC, RAD, I3S, 3MX) and streams or exports them. The next shape: give it
+  a raw LAS/LAZ/E57, a mesh (OBJ, glTF, OSGB) or a splat PLY, and it runs the right third-party tiler for you.
+  It would fetch the tool's binary for the platform when a release exists (PotreeConverter, GoTiler, py3dtiles,
+  fanvanzh/3dtiles for OSGB, WilliamLiu's 3D Tiles SPZ tooling, splat-transform), expose each tool's own arguments in
+  the form, run it as a subprocess as "Run in: CLI subprocess" does today, then hand the result to the stream and
+  export flows. Prior art to read first: GeoSolutions' `digital-twin-toolbox` (a self-hosted Docker set of these
+  pipelines) and py3dtiles' Docker image. In the app it would be a third flow next to "Stream live" and "Export to a
+  folder". Open questions: licences of the redistributed binaries, checksums for the downloads, and unsigned binaries
+  under Windows Defender (the app's own launcher is already flagged). Not scoped, not started.
+
 - [ ] Further out: a browser/server tiled-splat transcoding UI in the spirit of SuperSplat's splat-transform
   tooling; a **georeferencing/geolocator** step for splats that don't ship one, along the lines of
   WilliamLiu's `3dtiles-inspector` or MapTiler GeoSplats'; and an **aggregator** unifying the

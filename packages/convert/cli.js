@@ -35,8 +35,10 @@ const sepIdx = rawArgv.indexOf('--');
 const argv = sepIdx >= 0 ? rawArgv.slice(0, sepIdx) : rawArgv;
 const extraArgs = sepIdx >= 0 ? rawArgv.slice(sepIdx + 1) : [];
 
-const VALUE_FLAGS = new Set(['verify', 'hierarchy-errors', 'max-depth', 'pack', 'format', 'scale', 'ge-scale', 'ge-layer', 'tiling', 'port', 'lon', 'lat', 'alt', 'heading', 'place-scale']);
+const VALUE_FLAGS = new Set(['workers', 'verify', 'hierarchy-errors', 'max-depth', 'pack', 'format', 'scale', 'ge-scale', 'ge-layer', 'tiling', 'port', 'lon', 'lat', 'alt', 'heading', 'place-scale']);
 function flag(name) { const i = argv.indexOf(`--${name}`); return i >= 0 ? argv[i + 1] : undefined; }
+// --workers auto|<n>: decode and encode COPC and Potree tiles on worker threads (same as TILED_WORKERS)
+if (flag('workers') != null) { const { setTileWorkers } = await import('3dtiles-convert-core'); setTileWorkers(flag('workers')); }
 const verifyMode = flag('verify') ?? 'sample';
 if (!['off', 'counts', 'sample', 'full'].includes(verifyMode)) { console.error('--verify must be off, counts, sample or full'); process.exit(1); }
 const hierarchyErrors = flag('hierarchy-errors') ?? 'error';

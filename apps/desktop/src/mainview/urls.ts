@@ -71,6 +71,8 @@ export interface ExportSettings {
   depth: string;
   verify: string;
   hierarchyErrors: string;
+  /** Tile worker threads: '' is the single thread of today, 'auto', or a count. */
+  workers: string;
   keepImplicit: boolean;
   pack3tz: boolean;
   pack3dtiles: boolean;
@@ -82,7 +84,7 @@ export interface ExportSettings {
 }
 
 export const DEFAULT_EXPORT: ExportSettings = {
-  outDir: '', method: 'crawl', runner: 'server', depth: '', verify: 'sample', hierarchyErrors: 'error',
+  outDir: '', method: 'crawl', runner: 'server', depth: '', verify: 'sample', hierarchyErrors: 'error', workers: '',
   keepImplicit: false, pack3tz: false, pack3dtiles: false,
   convTiling: '', convScale: '', convGeScale: '', convGeLayer: '', convCentroids: false,
 };
@@ -103,6 +105,7 @@ export function exportRequest(f: DatasetOptions, s: ExportSettings) {
     maxDepth: depth === '' ? null : Number(depth), keepImplicit: s.keepImplicit, pack, options,
     verify: s.verify,
     hierarchyErrors: s.hierarchyErrors,
+    workers: s.workers || null,
   };
 }
 
@@ -124,6 +127,7 @@ export function exportCliArgs(r: ExportRequest): { args: string[]; then?: string
     if (r.pack.length) args.push('--pack', r.pack.join(','));
     if (r.verify !== 'sample') args.push('--verify', r.verify);
     if (r.hierarchyErrors !== 'error') args.push('--hierarchy-errors', r.hierarchyErrors);
+    // no --workers: a crawl's tiles are built by the server it reads from, not by this process
     return { args };
   }
   const o = r.options;
@@ -136,6 +140,7 @@ export function exportCliArgs(r: ExportRequest): { args: string[]; then?: string
   if (o['centroidsOnly']) args.push('--centroids-only');
   if (r.verify !== 'sample') args.push('--verify', r.verify);
   if (r.hierarchyErrors !== 'error') args.push('--hierarchy-errors', r.hierarchyErrors);
+  if (r.workers) args.push('--workers', r.workers);
   if (!r.pack.length) return { args };
   const name = out.split(/[\\/]/).filter(Boolean).pop() || 'tileset';
   return { args, then: ['scripts/pack-3dtiles.mjs', out, `${out}/${name}`] };
