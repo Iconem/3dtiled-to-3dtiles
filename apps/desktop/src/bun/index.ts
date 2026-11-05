@@ -406,7 +406,7 @@ async function checkForUpdate() {
 		const info = await Updater.checkForUpdate();
 		if (info.error || !(info.updateAvailable || info.updateReady)) return;
 		const { readFile } = await import("node:fs/promises");
-		const mine = await readFile(`${bundled}/build.json`, "utf8").then(JSON.parse).catch(() => null);
+		const mine = await readFile(`${root}/build.json`, "utf8").then(JSON.parse).catch(() => null);
 		const theirs = await fetch(`${local.baseUrl}/stable-win-x64-build.json`).then((r) => (r.ok ? r.json() : null)).catch(() => null) as any;
 		const stamped = mine?.builtAt && theirs?.builtAt && theirs.hash === info.hash;
 		const stale = stamped ? Date.parse(theirs.builtAt) <= Date.parse(mine.builtAt) : olderVersion(info.version, local.version);
