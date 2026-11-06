@@ -5,10 +5,11 @@ Format loosely follows [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
-### Changed — 2026-11-06 (desktop app on Electrobun 2.0.6)
-- **The app no longer keeps a second, full copy of itself for updates** (750 MB): Electrobun 2.0.6 rebuilds it from
-  the installed files when an update comes, and checks the downloaded archive against a SHA-256. The release carries
-  a second manifest for it, `stable-win-x64-update-v2.json`; installs made before today keep reading the first one.
+### Fixed — 2026-11-06 (desktop app: back to Electrobun 2.0.2)
+- **Electrobun 2.0.6 was released for two hours and taken back.** An app on it could not update again: the updater's
+  helper held a processor core without ever finishing. A copy installed or updated between 23:45 UTC on 5 November
+  and the next release that night shows build `21mxvcs` or `1uvp5nt` in its footer and has to be reinstalled from
+  the release page; every other copy updates as usual.
 
 ### Changed — 2026-11-06 (one tile loop for every converter, and faster mesh tiles)
 - **COPC and Potree use core's `convertTiles` too**, like SOG, LCC, RAD and I3S: one loop, one place where tile

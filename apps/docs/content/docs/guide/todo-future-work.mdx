@@ -155,11 +155,16 @@ evaluated before assuming this would be a novel effort.
   thread; the loop runs them on the pool, with the single-thread pass for tiles a worker had no memory for. SOG (per
   chunk), LCC, RAD, I3S, COPC and Potree all use it. 3MX and GeoSplats have no offline converter; plain LAS/LAZ decodes a whole file at
   once and would need a reader that works chunk by chunk.
-- [x] **Electrobun 2.0.6 for the desktop app** (done 2026-11-06, from 2.0.2; Hutch 0.29). The updater no longer keeps
-  a full copy of the app as a tar beside the installed one (750 MB): it rebuilds it from the installed files, and
-  checks a SHA-256 of the archive through a second manifest, `stable-win-x64-update-v2.json`, now among the release's
-  assets beside the first one, which older installs still read. It does not compare versions, so the build stamp
-  that stops an older release being offered stays ours.
+- [ ] **Electrobun past 2.0.2 for the desktop app** (2.0.6 tried and taken back on 2026-11-06). What 2.0.6 offers: no
+  full copy of the app kept as a tar beside the installed one (750 MB), and a SHA-256 check of the update archive
+  through a second manifest (`stable-win-x64-update-v2.json`, to publish beside the first). What happened: the app
+  built and ran, and an install on 2.0.2 updated to it. The next update, the first one done by the 2.0.6 updater,
+  never finished. Its helper (`uninstall.exe --prepare-update`) read the tar the 2.0.2 install had kept, then held
+  one core for 49 minutes without writing a byte. With that tar removed it downloaded and staged the new app
+  (705 MB written), then held a core again for ten minutes and more. Not Defender: the helper ran, nothing was
+  flagged. Our bundle is 14 000 files; a cost that grows with the square of the file count would look like this.
+  Before trying a later release: install it, publish a second build, let the first update to the second, and only
+  then release. And report it to Electrobun with these figures.
 - [ ] **Send the glTF-Transform fast path upstream.** `patches/@gltf-transform__core@4.4.0.patch` copies a lone vertex
   accessor whole instead of component by component (`VertexLayout.SEPARATE`): seven times faster on megabyte tiles,
   same bytes. It is ten lines in `interleaveAccessors`; as a pull request to donmccurdy/glTF-Transform it would let

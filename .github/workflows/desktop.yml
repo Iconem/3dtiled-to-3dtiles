@@ -122,8 +122,8 @@ jobs:
           Copy-Item artifacts/Setup.exe $setup
           Copy-Item artifacts/Portable.zip $portable
           # The two feed files keep their names: an installed app fetches them from this release to update itself.
-          $assets = @($setup, $portable, 'artifacts/stable-win-x64-update.json', 'artifacts/stable-win-x64-update-v2.json', 'artifacts/stable-win-x64-build.json', 'artifacts/stable-win-x64-3DTiled.tar.zst')
-          $notes = "Windows x64 build of $sha, $date. **$setup** installs for your user, with no admin rights, and updates itself. **$portable** runs from any folder after unzipping: start ``3DTiled.cmd``; it does not update itself. Unsigned, so SmartScreen warns on first run (More info, Run anyway). Includes Node and the tile-server; nothing else to install. The other four files are the update feed."
+          $assets = @($setup, $portable, 'artifacts/stable-win-x64-update.json', 'artifacts/stable-win-x64-build.json', 'artifacts/stable-win-x64-3DTiled.tar.zst')
+          $notes = "Windows x64 build of $sha, $date. **$setup** installs for your user, with no admin rights, and updates itself. **$portable** runs from any folder after unzipping: start ``3DTiled.cmd``; it does not update itself. Unsigned, so SmartScreen warns on first run (More info, Run anyway). Includes Node and the tile-server; nothing else to install. The other three files are the update feed."
           gh release view desktop-latest *> $null
           if ($LASTEXITCODE -ne 0) { gh release create desktop-latest --title "Desktop app ($date)" --notes $notes --target $env:GITHUB_SHA --latest=false }
           gh release upload desktop-latest @assets --clobber
