@@ -14,8 +14,8 @@
  *               Spec: Maxar MAXAR_content_3tz extension + CesiumGS/3d-tiles-tools#86.
  *
  * .3dtiles format: SQLite database with a `media` table (key TEXT PRIMARY KEY, content BLOB).
- *               Requires `better-sqlite3` to be installed (`pnpm add better-sqlite3`).
- *               Without it the server still handles .3tz; .3dtiles returns 501 with instructions.
+ *               Uses `better-sqlite3`, a root dependency since 2026-11-07 (v13 ships prebuilt binaries).
+ *               Should it be missing, the server still handles .3tz; .3dtiles returns 501 with instructions.
  */
 import fs from 'node:fs';
 import fsp from 'node:fs/promises';

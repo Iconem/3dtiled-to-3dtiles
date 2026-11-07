@@ -5,6 +5,12 @@ Format loosely follows [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+### Changed — 2026-11-07 (.3dtiles packages out of the box)
+- **`better-sqlite3` is a root dependency** (v13, with prebuilt binaries for Node 22 and 24, no compiler needed), so
+  `.3dtiles` SQLite packages are served by `/3dtiles-self-contained` and written by `--pack` / `POST /export` on every
+  install. Before, they needed a manual `pnpm add -w better-sqlite3`, and the v11 that 3d-tiles-tools pulls in has no
+  Node 24 build.
+
 ### Fixed — 2026-11-06 (desktop app: back to Electrobun 2.0.2)
 - **Electrobun 2.0.6 was released for two hours and taken back.** An app on it could not update again: the updater's
   helper held a processor core without ever finishing. A copy installed or updated between 23:45 UTC on 5 November
