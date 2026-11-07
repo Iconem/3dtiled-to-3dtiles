@@ -18,6 +18,9 @@
     "serve:live": "node packages/tile-server/server.js --port 3001",
     "build": "pnpm --filter 3d-tiled build"
   },
+  "dependencies": {
+    "better-sqlite3": "^13.0.3"
+  },
   "devDependencies": {
     "concurrently": "^9.1.0"
   },
