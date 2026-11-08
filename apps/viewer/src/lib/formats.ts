@@ -122,6 +122,7 @@ export const FORMATS: FormatMeta[] = [
     { id: 'oval-interior', label: 'Oval Interior Spaces ⬀', src: 'https://d28zzqy0iyovbz.cloudfront.net/b7c8d8c5/v1/lod-meta.json' },
     { id: 'grace-cathedral-ext', label: 'Grace Cathedral SF ext (Vincent Woo) ⬀', src: 'https://d28zzqy0iyovbz.cloudfront.net/b8b1fd14/v1/lod-meta.json' },
     { id: 'cathedral-interior', label: 'Cathedral Interior ⬀', src: 'https://d28zzqy0iyovbz.cloudfront.net/02d5f4eb/v3/lod-meta.json' },
+    { id: 'vysehrad-prague', label: 'Vyšehrad Basilica & parks, Prague (D. Dworschak, 83M) ⬀', src: 'https://d28zzqy0iyovbz.cloudfront.net/1b7afbf6/v1/lod-meta.json' },
   ] },
   { fmt: 'lcc', icon: '◆', label: 'LCC', type: 'splat', octree: false, stream: true, assets: [
     // Real public .lcc downloads (found via XGRIDS' own sample-data page,

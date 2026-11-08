@@ -5,6 +5,11 @@ Format loosely follows [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+### Added — 2026-11-08 (an 83-million-splat streamed SOG in the library)
+- **Vyšehrad Basilica and parks, Prague** (Daniel Dworschak, [superspl.at/scene/1b7afbf6](https://superspl.at/scene/1b7afbf6)): a
+  splat-transform streamed SOG of 82.9 M splats in 7 LOD levels, streamed from SuperSplat's CDN through `/stream?format=sog`.
+  Its root tileset is 20 MB and 65 975 tiles, the largest SOG in the library.
+
 ### Fixed — 2026-11-08 (why Electrobun 2.0.6 could not update: found)
 - **The 2.0.6 updater hang has a one-line cause in Electrobun**, `archive_recipe.zig:716`: a `@min` against a
   comptime 65 536 narrows a byte count to 17 bits, `count * 2` wraps to 0 for any run of tar headers of 64 KB or
