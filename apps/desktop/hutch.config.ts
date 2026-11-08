@@ -18,9 +18,12 @@ export default {
 		// 2.0.2 is the first stable that can package on Windows: 2.0.1 pinned a cottontail whose
 		// windows-x64 release has no `cottontail-core`, so `electrobun build` died with `CopySourceMissing`.
 		// Stay on 2.0.2. 2.0.6 was tried on 2026-11-06 and taken back the same night: its update helper (uninstall.exe
-		// --prepare-update) never finished on this app (14 000 files, 750 MB). From an install that came from 2.0.2 it read
-		// the retained tar and then held a core for 49 minutes without writing anything; with that tar removed it downloaded
-		// and staged the new app, then held a core again. Try a later release on an installed copy before moving.
+		// --prepare-update) never finished on this app. Root cause found on 2026-11-08 by rebuilding its archive code in
+		// Debug: package/src/extractor/archive_recipe.zig:716, `const count = @min(buffer.len, (literal.len - offset) / 2)`
+		// is narrowed to a 17-bit integer by the comptime 65536, so `count * 2` wraps to 0 once a literal span (a run of
+		// tar headers with no file content) reaches 64 KB, and the loop never advances. Our bundle has a run of 295
+		// directories and empty files in node_modules/3d-tiles-tools (148 KB). `const count: usize = …` fixes it. Move
+		// past 2.0.2 only once a release carries that fix, and test it with DESKTOP_UPDATE_BASE first (see docs).
 		version: "2.0.2",
 	},
 };

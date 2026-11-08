@@ -8,6 +8,14 @@ Format loosely follows [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+### Fixed — 2026-11-08 (why Electrobun 2.0.6 could not update: found)
+- **The 2.0.6 updater hang has a one-line cause in Electrobun**, `archive_recipe.zig:716`: a `@min` against a
+  comptime 65 536 narrows a byte count to 17 bits, `count * 2` wraps to 0 for any run of tar headers of 64 KB or
+  more, and the loop that rebuilds the archive never advances. Our bundle has a 148 KB run of directory entries
+  under `node_modules`. Reproduced between two local builds, confirmed by a Debug panic at that line, and the fix
+  verified. The desktop app stays on 2.0.2 until a release carries it; `DESKTOP_UPDATE_BASE` lets a local build
+  update from a folder on localhost, which is how the next attempt will be tested before anything is released.
+
 ### Changed — 2026-11-08 (splat-transform 3.x, no flat LAS/LAZ, the SOG cap explained)
 - **`@playcanvas/splat-transform` 2.6 → 3.10.3.** Same SOG tile bytes; the extract endpoint's SPZ read goes through
   the new chunk sources. Node 22 or later is required, as it already was in Docker and the desktop bundle.

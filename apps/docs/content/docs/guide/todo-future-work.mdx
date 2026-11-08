@@ -158,27 +158,27 @@ evaluated before assuming this would be a novel effort.
   octree) is refused since 2026-11-08 with a message naming PDAL and untwine: it had been cut into flat sibling
   tiles with no levels of detail, untested, and building a tiling from raw points is the one-stop tiler's job below,
   not this converter's.
-- [ ] **Electrobun past 2.0.2 for the desktop app** (2.0.6 tried and taken back on 2026-11-06). What 2.0.6 offers: no
-  full copy of the app kept as a tar beside the installed one (750 MB), and a SHA-256 check of the update archive
-  through a second manifest (`stable-win-x64-update-v2.json`, to publish beside the first). What happened: the app
-  built and ran, and an install on 2.0.2 updated to it. The next update, the first one done by the 2.0.6 updater,
-  never finished. Its helper (`uninstall.exe --prepare-update`) read the tar the 2.0.2 install had kept, then held
-  one core for 49 minutes without writing a byte. With that tar removed it downloaded and staged the new app
-  (705 MB written), then held a core again for ten minutes and more. Not Defender: the helper ran, nothing was
-  flagged. What a reading of Electrobun's source at v2.0.6 says (2026-11-08): the feature landed on `main` in four
-  commits over 29 hours with no pull request or review (`2c4c965d1` "Reconstruct updater archives in memory and
-  stream staged updates", then three fix commits for the streamed reads); nobody has reported this on their tracker
-  (issues #535, #300, #586 are near but not it); no release after 2.0.6 exists. The helper's steps are: index the
-  retained tar (two SHA-256 passes over it), rebuild the tar in memory from the installed files, write a recipe,
-  then download and extract the new archive under one ten-minute deadline with an `fsync` per file, then hash
-  every staged file again. Nothing in it is quadratic in the file count; the candidates are an unbounded retry
-  loop in Zig's `deleteTree` on a file still held open (fits the second case, after an error), the ten-minute
-  deadline tripping on 14 000 `fsync`s and sending it into that cleanup, or an assertion compiled out in
-  `ReleaseFast` in the streamed reader. Next time: build two local 2.0.6 copies, point the first at a folder served
-  on localhost holding the second (`DESKTOP_UPDATE_BASE`), update, and take two or three stack samples of the
-  spinning `electrobun-update-<txid>.exe` with Process Explorer; frames in `ntdll!NtCreateFile` or
-  `NtSetInformationFile` mean the delete loop, user-mode frames mean the reader or the recipe code. Then report it
-  with those samples.
+- [ ] **Electrobun past 2.0.2 for the desktop app** (2.0.6 tried and taken back on 2026-11-06; root cause found on
+  2026-11-08). What 2.0.6 offers: no full copy of the app kept as a tar beside the installed one (750 MB), and a
+  SHA-256 check of the update archive through a second manifest (`stable-win-x64-update-v2.json`). What happened:
+  the next update after 2.0.6, the first one done by its own updater, never finished; its helper
+  (`uninstall.exe --prepare-update`) held one core without writing a byte, both when migrating the tar a 2.0.2
+  install keeps and after staging a fresh download.
+  **The cause**, found by reproducing the update between two local builds (`DESKTOP_UPDATE_BASE` pointed at a folder
+  served on localhost), sampling the spinning helper's stack with `cdb` (a tight loop over 40-byte records with a
+  `memmove`, no I/O, after all 771 MB were staged), then building Electrobun's own `archive_recipe.zig` from the
+  v2.0.6 tag with Zig 0.17.0 in Debug and running its `verifyTree` on the staged tree: a panic, "integer overflow",
+  at `archive_recipe.zig:717` in `reconstruct`. The line before it reads
+  `const count = @min(buffer.len, (literal.len - offset) / 2)`; `buffer.len` is the comptime 65 536, so Zig narrows
+  `count` to a 17-bit integer, and `count * 2` wraps to 0 whenever a literal span (a run of tar headers with no file
+  content between them) is 64 KB or longer. `offset += count * 2` then adds nothing and the loop never ends; in
+  Debug it panics instead. Our bundle has a run of 295 directories and empty files under
+  `node_modules/3d-tiles-tools/`, 148 KB of headers, which no small test app has. One line fixes it,
+  `const count: usize = @min(…)`: with it, `verifyTree` on our tree takes 53 s. The same function runs when a
+  retained tar is migrated, which is the first case. Nothing on their tracker reports it; the feature landed on
+  `main` in four commits over 29 hours with no pull request. The report to Electrobun is drafted
+  (`.local/electrobun-issue.md`) and waits for a go-ahead. Move past 2.0.2 once a release carries the fix, and test
+  it the same way first.
 - [ ] **Send the glTF-Transform fast path upstream.** `patches/@gltf-transform__core@4.4.0.patch` copies a lone vertex
   accessor whole instead of component by component (`VertexLayout.SEPARATE`): seven times faster on megabyte tiles,
   same bytes ([what it does and why](/docs/guide/supported-formats#the-gltf-transform-patch-explained)). The pull
