@@ -1,0 +1,84 @@
+---
+title: "Gaussian-splat tools compared"
+description: "splat-transform, GaussForge, gsbox, Niantic spz, Spark's Rust crate and ffsplat: formats read and written, features, and which ones this repo uses"
+---
+
+<InlineTOC items={toc} />
+
+The splat formats this repo converts (streamed SOG, LCC, RAD, GeoSplats) and the one it writes (SPZ v2 inside
+`KHR_gaussian_splatting_compression_spz_2` GLBs) are also handled by a handful of general-purpose tools. This page
+is the survey behind our choices, taken on 2026-11-08 from each project's repository, README and published package.
+What we use: [`@playcanvas/splat-transform`](https://github.com/playcanvas/splat-transform) 3.x to decode SOG
+(streamed-SOG chunks and GeoSplats octants) and, on the extract endpoint, to read SPZ and write SPZ, SOG, PLY and
+glTF; our own readers for LCC and RAD and our own SPZ v2 writer (the
+[formats guide](/docs/guide/supported-formats#where-the-code-is-our-own-and-why) says why).
+
+## The tools
+
+| Tool | Repository | Licence | Language, runtime | Latest release | Activity |
+|---|---|---|---|---|---|
+| splat-transform | [playcanvas/splat-transform](https://github.com/playcanvas/splat-transform) | MIT | TypeScript; Node ≥ 22 CLI and library (ESM and CJS); browser-capable through `UrlReadFileSystem` and `MemoryFileSystem` | 3.10.3, 2026-10-21 | very active |
+| GaussForge | [3dgscloud/GaussForge](https://github.com/3dgscloud/GaussForge) | Apache-2.0 | C++17 library and `gfconvert` CLI; `@gaussforge/wasm` for browser and Node; `pip install gaussforge` | 0.6.0, 2026-05-12 | last commit 2026-05-25 |
+| gsbox | [gotoeasy/gsbox](https://github.com/gotoeasy/gsbox) | GPL-3.0 | Go, CLI only | 4.8.4, 2026-06-18 | pushed 2026-10-28 |
+| Niantic spz | [nianticlabs/spz](https://github.com/nianticlabs/spz) | MIT | C++ library; Emscripten build with TypeScript types; Python bindings; `ply_to_spz`, `spz_to_ply` CLIs | 3.0.0, 2026-05-05 (library; file format at v4) | active |
+| Spark `rust/` | [sparkjsdev/spark](https://github.com/sparkjsdev/spark) | MIT | Rust: `spark-lib` (codecs), `spark-rs` (wasm-bindgen), `build-lod` (native CLI) | npm `@sparkjsdev/spark` 2.4.0, 2026-10-20; crates unpublished | active |
+| ffsplat | [w-m/ffsplat](https://github.com/w-m/ffsplat) | Apache-2.0 | Python, needs CUDA 12; "pre-alpha" | no release | last commit 2025-07-10 |
+
+`@adobe/spz` (ISC) is the WASM SPZ module `splat-transform` depends on; it points back at the Niantic repository.
+The GPL of gsbox rules it out as a library in this repo; it is a CLI anyway.
+
+## Formats
+
+R = reads, W = writes, – = neither.
+
+| Format | splat-transform 3.10 | GaussForge 0.6 | gsbox 4.8 | Niantic spz | Spark (WASM and `build-lod`) | ffsplat |
+|---|---|---|---|---|---|---|
+| `.ply` (INRIA) | R W | R W | R W | R W | R | R W |
+| `.compressed.ply` | R W | R W | R | – | R | – |
+| `.splat` | R | R W | R W | – | R | – |
+| `.ksplat` | R | R W | R | – | R | – |
+| `.spz` | R v2 to v4, W v3 or v4 | R; W v2, v3, v4 | R W (v3, v4) | R v1 to v4, W v4 | R; W v2 or v3 | – |
+| SOG (`meta.json` + WebP) | R W | R W | R W | – | R | templates |
+| streamed SOG (`lod-meta.json`) | R W | – | R W | – | – | – |
+| LCC (XGRIDS) | R | – | – | – | – | – |
+| LCC2 | R | – | – | – | – | – |
+| RAD (Spark) | – | – | – | – | R; W from the native CLI only | – |
+| `.spx` (Reall3d) | – | – | R W | – | – | – |
+| glTF `KHR_gaussian_splatting` | W | – | R W | – | – | – |
+| glTF `…compression_spz_2` | – | – | W | – | – | – |
+| 3D Tiles | – | – | – | – | – | – |
+| csv, HTML viewer, voxels, rendered WebP | W | – | text dump | – | – | – |
+
+Nobody in this list writes 3D Tiles, and only `splat-transform` reads LCC. This repo writes 3D Tiles from four
+splat formats, and its SPZ writer stays at v2 because that is the version the glTF extension names.
+
+## Features
+
+| | splat-transform | GaussForge | gsbox | Niantic spz | Spark | ffsplat |
+|---|---|---|---|---|---|---|
+| Builds levels of detail | streamed SOG; uniform and adaptive decimation | – | `cut`, `autocut` to `lod-meta.json` | – | tiny-LoD and Bhatt-LoD trees | – |
+| Spatial chunking | `--lod-chunk-count/-extent/-min` | – | cut size | – | `chunk_tree`, chunked RAD and SPZ | – |
+| Filter and crop | NaN, box, sphere, by value, floaters, clusters | – | minimum alpha | – | boxes, distance, opacity threshold | – |
+| Transforms | translate, rotate, scale | – | rotate, scale, translate | coordinate-system conversion | translate, quaternion, scale | – |
+| Spherical-harmonic bands | keep 0 to 3 | – | keep 0 to 3 | quantisation bits | `--max-sh`, SH clustering | – |
+| Merge inputs | yes | – | `join` | – | `concat` | – |
+| GPU | WebGPU through Dawn for SOG compression, voxel filters, decimation, rendering; CPU fallback | – | – | – | optional `wgpu` in `build-lod` | CUDA required |
+| Streams large inputs | yes since 3.0, bounded by chunk size | whole buffer in memory | not documented | streaming load with callbacks | push-based chunk decoder | – |
+| Reads one chunk or byte range | yes: `ChunkSource.read` by chunk index or gathered indices; LCC records by range | – | – | – | yes: RAD header and per-chunk ranges | – |
+| Usable from Node as a library | yes | yes (`createGaussForge()`) | no | yes, through the WASM build | not as published (see the formats guide) | no |
+
+## splat-transform 2.6 to 3.x, as it touched this repo
+
+3.0 (pull request [#276](https://github.com/playcanvas/splat-transform/pull/276)) rewrote the library around lazy
+*chunk sources* backed by a pool, instead of whole tables. The "7× faster" of its announcement is one benchmark
+there: a 10-million-splat PLY read, `--filter-nan`, write, in a fifth of the memory. It says nothing about SOG
+decode, which is what we use, and that measured the same before and after (17.4 against 17.8 s on the skatepark
+scene; the same bytes out). Loading the module still costs each thread 1.8 s, as it brings the PlayCanvas engine
+in at import.
+
+What we changed to move: SOG chunks go through `readSog(fileSystem, 'meta.json')`, which still returns a table
+(`readFile` now returns sources); the extract endpoint reads SPZ through `readSpz(source, pool)` and
+`materializeToDataTable`; `writeSog` takes an `iterations` count; `MemoryFileSystem.results` holds the output.
+`readLcc` and `readLcc2` are no longer root exports (they sit behind `readFile({ inputFormat })`), which does not
+matter to us as LCC is decoded by our own reader. The read path uses no GPU; `webgpu` (Dawn) is a dependency the
+package installs but only the CLI imports. Node 22 or later is required.

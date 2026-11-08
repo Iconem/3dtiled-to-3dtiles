@@ -125,10 +125,12 @@ export async function convert(input, outDir, opts = {}) {
   // decoded table. With tile workers (TILED_WORKERS, --workers, opts.workers): one chunk per worker at a time.
   const lanes = defaultConcurrency();
   let tilesWritten = 0, chunksDone = 0;
+  // Biggest chunks first (by splat count): a chunk is one worker's unit of work, and a 4 000-tile chunk handed out last
+  // would run alone at the end while the other workers sit idle.
   const chunks = [...byFile].map(([fileIdx, tasks]) => ({
     metaPath: path.join(sceneDir, lod.filenames[fileIdx]), outDir, centroids: !!opts.centroidsOnly,
     tiles: tasks.map(({ uri, run }) => ({ uri, offset: run.offset, count: run.count })),
-  }));
+  })).sort((a, b) => b.tiles.reduce((n, t) => n + t.count, 0) - a.tiles.reduce((n, t) => n + t.count, 0));
   await convertTiles(chunks, {
     module: TILE_TASK, fn: 'sogChunkToFiles', workers: opts.workers, concurrency: 1,
     task: (chunk) => ({ ...chunk, concurrency: 2 }),

@@ -20,7 +20,6 @@ import { fileURLToPath } from 'node:url';
 import { Copc, Las, Getter } from 'copc';
 
 import { writeTileGlb }                    from './glbWriter.js';
-import { convertPlainLas }                 from './plainLas.js';
 import { buildEcefTransform }              from './georef.js';
 import { defaultConcurrency, convertTiles, keyToCoords, octreeSubCube, cubeToBox,
          buildExplicitTree, buildSubtreeBuffer, subtreeRootKeys } from '../../core/index.js';
@@ -65,31 +64,27 @@ async function loadAllNodes(filename, copc) {
 }
 
 /**
- * Try to open as COPC. Returns the Copc instance, or null if the file is a plain
- * (non-COPC) LAS/LAZ — detected via copc's 'COPC info VLR is required' error.
+ * Open as COPC. A LAS/LAZ file with no COPC octree is refused: it has no tiling to convert, and this toolbox converts
+ * tilings, it does not build them. (It used to be cut into flat sibling tiles of 2 million points with no levels of
+ * detail, untested and unusable past a few million points; removed 2026-11-06.)
  */
-async function tryOpenCopc(filename) {
+async function openCopc(filename) {
   try {
     return await Copc.create(filename);
   } catch (e) {
-    if (/COPC info VLR is required/i.test(e?.message || '')) return null;
-    throw e; // any other failure is a genuine error — surface it
+    if (/COPC info VLR is required/i.test(e?.message || ''))
+      throw new Error(`${filename} is a plain LAS/LAZ file, not a COPC: it has no octree to convert. Build one first, e.g. \`pdal translate in.laz out.copc.laz\` or untwine, then convert the .copc.laz.`);
+    throw e;
   }
 }
 
-/** Uniform in-process entry: convert a COPC (or plain LAS/LAZ) file → 3D Tiles. */
+/** Uniform in-process entry: convert a COPC file → 3D Tiles. */
 export async function convert(inputPath, outDir, opts = {}) {
-  if (!inputPath || !outDir) throw new Error('Usage: copc-to-3dtiles <input.copc.laz | .las/.laz> <outDir>');
+  if (!inputPath || !outDir) throw new Error('Usage: copc-to-3dtiles <input.copc.laz> <outDir>');
   await ensureDir(outDir);
 
   console.log(`Loading COPC: ${inputPath}`);
-  const copc = await tryOpenCopc(inputPath);
-
-  if (!copc) {
-    // Plain LAS/LAZ (no COPC octree) → single / flat POINTS tiling, no native LoD.
-    await ensureDir(path.join(outDir, 'tiles'));
-    return convertPlainLas(inputPath, outDir, buildEcefTransform, bboxToBox, defaultConcurrency());
-  }
+  const copc = await openCopc(inputPath);
 
   const { cube } = copc.info;
 

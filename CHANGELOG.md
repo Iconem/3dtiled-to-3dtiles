@@ -5,6 +5,21 @@ Format loosely follows [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+### Changed — 2026-11-08 (splat-transform 3.x, no flat LAS/LAZ, the SOG cap explained)
+- **`@playcanvas/splat-transform` 2.6 → 3.10.3.** Same SOG tile bytes; the extract endpoint's SPZ read goes through
+  the new chunk sources. Node 22 or later is required, as it already was in Docker and the desktop bundle.
+- **A plain LAS/LAZ file is refused**, with a message naming PDAL and untwine. It used to be cut into flat sibling
+  tiles with no levels of detail, a path never tested on a real file: the toolbox converts tilings, it does not
+  build them (see the one-stop tiler on the roadmap).
+- **Streamed-SOG conversion hands chunks out largest first, and tile workers gzip in place** rather than through the
+  thread pool the whole process shares. Same bytes. The remaining cap on the big scene is measured and explained in
+  the formats guide: file creation on Windows, and the per-thread slowdown of a laptop CPU under eight threads.
+- **COPC and Potree on the shared tile loop, measured against the former loops**: same bytes, same times.
+- Docs: what LCC2 changes against LCC; a page comparing splat-transform, GaussForge, gsbox, Niantic spz, Spark's
+  Rust crate and ffsplat; the glTF-Transform patch explained; where LEPCC decoders exist; what a reading of
+  Electrobun 2.0.6's updater says about the hang, and how to test the next attempt locally
+  (`DESKTOP_UPDATE_BASE`).
+
 ### Fixed — 2026-11-06 (desktop app: back to Electrobun 2.0.2)
 - **Electrobun 2.0.6 was released for two hours and taken back.** An app on it could not update again: the updater's
   helper held a processor core without ever finishing. A copy installed or updated between 23:45 UTC on 5 November

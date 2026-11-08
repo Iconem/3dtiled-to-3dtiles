@@ -23,7 +23,10 @@ import { spawn } from 'node:child_process';
 import { crc32 } from 'node:zlib';
 import { Document, NodeIO } from '@gltf-transform/core';
 import { ALL_EXTENSIONS } from '@gltf-transform/extensions';
-import { readSpz, combine, writeSpz, writeSog, writeGlb, writePly, Transform, MemoryReadFileSystem, MemoryFileSystem } from '@playcanvas/splat-transform';
+import { readSpz, combine, writeSpz, writeSog, writeGlb, writePly, Transform, MemoryReadFileSystem, MemoryFileSystem, createChunkDataPool, materializeToDataTable } from '@playcanvas/splat-transform';
+
+// splat-transform 3.x reads into lazy chunk sources backed by this pool; a tile is small, so it is read whole.
+const chunkPool = createChunkDataPool();
 import { decompressGlb, LasWriter, lasHeaderBuffer, lasRecordBuffer, ecefToLlh, llhToEcef, enuFrame, CORS, loadSubtree, fetchSource } from '../core/index.js';
 
 // Resolve the PDAL binary for /extract/copc. Prefer $PDAL_BIN, then the pixi-global shim (`pixi global
@@ -386,7 +389,7 @@ export async function handleExtract(req, res, u) {
         let glb; try { glb = await fetchBuf(glbUrl); } catch { return; }
         const sp = extractSpz(glb); if (!sp) return;
         const rfs = new MemoryReadFileSystem(); rfs.set('t.spz', new Uint8Array(sp.blob));
-        let dt; try { dt = await readSpz(await rfs.createSource('t.spz')); } catch (e) { return void console.warn('[extract-live] readSpz:', e.message); }
+        let dt; try { const src = await readSpz(await rfs.createSource('t.spz'), chunkPool); dt = await materializeToDataTable(src, chunkPool); await src.close?.(); } catch (e) { return void console.warn('[extract-live] readSpz:', e.message); }
         totRaw += dt.numRows;
         // SPZ positions are node-local: the full tile-local → ECEF chain is worldM · YUP_ZUP · nodeM
         // (nodeM carries the spz→glTF axis fix + per-tile translation). Verified: SPZ centroids land in
@@ -411,7 +414,7 @@ export async function handleExtract(req, res, u) {
       if (!dts.length) { res.writeHead(404, CORS); res.end('no splat tiles in bbox (is this a splat source?)'); return true; }
       const merged = combine(dts);
       const mfs = new MemoryFileSystem(), name = `crop.${fmt}`;
-      if (fmt === 'sog') await writeSog({ filename: name, dataTable: merged, bundle: true }, mfs);   // bundle:true → single self-contained .sog zip (else loose .webp+meta → "EOCD not found")
+      if (fmt === 'sog') await writeSog({ filename: name, dataTable: merged, bundle: true, iterations: 10, logging: 'silent' }, mfs);   // bundle:true → single self-contained .sog zip (else loose .webp+meta → "EOCD not found")
       else if (fmt === 'glb') await writeGlb({ filename: name, dataTable: merged }, mfs);   // KHR_gaussian_splatting GLB
       else if (fmt === 'ply') await writePly({ filename: name, plyData: { comments: [], elements: [{ name: 'vertex', dataTable: merged }] } }, mfs);   // uncompressed PLY (was wrongly SPZ bytes in a .ply)
       else await writeSpz({ filename: name, dataTable: merged }, mfs);

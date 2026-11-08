@@ -12,9 +12,13 @@
  */
 import zlib from 'zlib';
 import { promisify } from 'util';
+import { isMainThread } from 'node:worker_threads';
 import { buildPointsGlb } from './points-glb.js';
 
-const gzip = promisify(zlib.gzip);
+// On the main thread gzip goes to libuv's pool so many tiles compress at once. A tile worker is a thread of its own,
+// and the pool (4 threads, shared by the whole process) would only queue its tiles behind every other worker's: it
+// compresses in place. Same bytes.
+const gzip = isMainThread ? promisify(zlib.gzip) : async (buf) => zlib.gzipSync(buf);
 
 const SPZ_MAGIC = 0x5053474E, SPZ_VERSION = 2, SH_C0 = 0.28209479177387814;
 const SPZ_FRAC_BITS = 12, SPZ_FRACTION = 1 << SPZ_FRAC_BITS;

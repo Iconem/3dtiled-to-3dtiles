@@ -11,7 +11,7 @@
  *   GET /sog/tile/<file>_<offset>_<count>.glb?url=<lod-meta.json URL>   (run encoded in the name)
  */
 import path from 'node:path';
-import { readFile as readSplatFile, MemoryReadFileSystem } from '@playcanvas/splat-transform';
+import { readSog, MemoryReadFileSystem } from '@playcanvas/splat-transform';
 import { extractRange } from '../sog-to-3dtiles/src/sogChunk.js';
 import { memoizeAsync, fetchSource as fetchBuf, tilePool, runTileTaskOr, ownBytes } from '../core/index.js';
 import { splatArraysGlb } from './splat-tile.js';
@@ -62,7 +62,7 @@ async function getChunkTable(ctx, fileIdx) {
     const names = new Set();
     for (const k of Object.keys(meta)) { const f = meta[k]?.files; if (Array.isArray(f)) for (const n of f) names.add(n); }
     await Promise.all([...names].map(async n => put(n, new Uint8Array(await fetchBuf(ctx.base + path.posix.join(chunkDir, n))))));
-    const here = async () => (await readSplatFile({ filename: 'meta.json', inputFormat: 'sog', options: {}, params: [], fileSystem }))[0];
+    const here = () => readSog(fileSystem, 'meta.json', { logging: 'silent' });
     const pool = tilePool();
     if (!pool) return here();
     // TILED_WORKERS: the chunk's WebP decode (about a second) runs on a worker, which hands its columns back; the

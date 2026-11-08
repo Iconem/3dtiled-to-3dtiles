@@ -10,8 +10,10 @@ export default {
 		version: process.env.BUILD_VERSION ?? "0.1.0",
 	},
 	// The feed the installed app updates from: what .github/workflows/desktop.yml publishes, in the repo building it.
+	// DESKTOP_UPDATE_BASE points a local build at another feed, e.g. a folder served on localhost, to try an update
+	// from one local build to the next before anything is released.
 	release: {
-		baseUrl: `https://github.com/${process.env.GITHUB_REPOSITORY ?? "jo-chemla/3dtiled-to-3dtiles"}/releases/download/desktop-latest`,
+		baseUrl: process.env.DESKTOP_UPDATE_BASE ?? `https://github.com/${process.env.GITHUB_REPOSITORY ?? "jo-chemla/3dtiled-to-3dtiles"}/releases/download/desktop-latest`,
 		generatePatch: false,
 	},
 	build: {

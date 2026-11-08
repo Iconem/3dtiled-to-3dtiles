@@ -7,7 +7,7 @@
     "sog-to-3dtiles": "src/index.js"
   },
   "dependencies": {
-    "@playcanvas/splat-transform": "^2.6.0"
+    "@playcanvas/splat-transform": "^3.10.3"
   },
   "main": "src/index.js"
 }

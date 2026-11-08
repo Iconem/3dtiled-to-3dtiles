@@ -153,8 +153,11 @@ evaluated before assuming this would be a novel effort.
 - [x] **Tile workers for the offline converters of the splat and mesh formats** (done 2026-11-05). One tile loop in
   core, `convertTiles`: a converter gives it its items, a task module for the workers and the same build for its own
   thread; the loop runs them on the pool, with the single-thread pass for tiles a worker had no memory for. SOG (per
-  chunk), LCC, RAD, I3S, COPC and Potree all use it. 3MX and GeoSplats have no offline converter; plain LAS/LAZ decodes a whole file at
-  once and would need a reader that works chunk by chunk.
+  chunk), LCC, RAD, I3S, COPC and Potree all use it. 3MX and GeoSplats have no offline converter. COPC and Potree were
+  measured against their former loops after the move: same bytes, same times. Plain LAS/LAZ (a file with no COPC
+  octree) is refused since 2026-11-08 with a message naming PDAL and untwine: it had been cut into flat sibling
+  tiles with no levels of detail, untested, and building a tiling from raw points is the one-stop tiler's job below,
+  not this converter's.
 - [ ] **Electrobun past 2.0.2 for the desktop app** (2.0.6 tried and taken back on 2026-11-06). What 2.0.6 offers: no
   full copy of the app kept as a tar beside the installed one (750 MB), and a SHA-256 check of the update archive
   through a second manifest (`stable-win-x64-update-v2.json`, to publish beside the first). What happened: the app
@@ -162,20 +165,42 @@ evaluated before assuming this would be a novel effort.
   never finished. Its helper (`uninstall.exe --prepare-update`) read the tar the 2.0.2 install had kept, then held
   one core for 49 minutes without writing a byte. With that tar removed it downloaded and staged the new app
   (705 MB written), then held a core again for ten minutes and more. Not Defender: the helper ran, nothing was
-  flagged. Our bundle is 14 000 files; a cost that grows with the square of the file count would look like this.
-  Before trying a later release: install it, publish a second build, let the first update to the second, and only
-  then release. And report it to Electrobun with these figures.
+  flagged. What a reading of Electrobun's source at v2.0.6 says (2026-11-08): the feature landed on `main` in four
+  commits over 29 hours with no pull request or review (`2c4c965d1` "Reconstruct updater archives in memory and
+  stream staged updates", then three fix commits for the streamed reads); nobody has reported this on their tracker
+  (issues #535, #300, #586 are near but not it); no release after 2.0.6 exists. The helper's steps are: index the
+  retained tar (two SHA-256 passes over it), rebuild the tar in memory from the installed files, write a recipe,
+  then download and extract the new archive under one ten-minute deadline with an `fsync` per file, then hash
+  every staged file again. Nothing in it is quadratic in the file count; the candidates are an unbounded retry
+  loop in Zig's `deleteTree` on a file still held open (fits the second case, after an error), the ten-minute
+  deadline tripping on 14 000 `fsync`s and sending it into that cleanup, or an assertion compiled out in
+  `ReleaseFast` in the streamed reader. Next time: build two local 2.0.6 copies, point the first at a folder served
+  on localhost holding the second (`DESKTOP_UPDATE_BASE`), update, and take two or three stack samples of the
+  spinning `electrobun-update-<txid>.exe` with Process Explorer; frames in `ntdll!NtCreateFile` or
+  `NtSetInformationFile` mean the delete loop, user-mode frames mean the reader or the recipe code. Then report it
+  with those samples.
 - [ ] **Send the glTF-Transform fast path upstream.** `patches/@gltf-transform__core@4.4.0.patch` copies a lone vertex
   accessor whole instead of component by component (`VertexLayout.SEPARATE`): seven times faster on megabyte tiles,
-  same bytes. It is ten lines in `interleaveAccessors`; as a pull request to donmccurdy/glTF-Transform it would let
-  the patch go. The patch is pinned to 4.4.0: pnpm refuses to install if the version moves without it.
-- [ ] **`@playcanvas/splat-transform` 3.x** (we are on 2.6; 3.0 was a rewrite announced as several times faster, and it
-  reads LCC2). Loading 2.6 costs each thread nearly two seconds, which is what caps the SOG converter's gain from
-  workers on small scenes. To try on the SOG and GeoSplats paths, with the tiles compared before and after.
-- [ ] **RAD through Spark's own Rust reader, as WebAssembly.** Spark's `rust/spark-lib` crate has a `rad` feature and
-  build scripts for WASM. A module with only that feature is about a day's work (build, a thin binding, tiles
-  compared with today's), plus a Rust toolchain in CI or a committed `.wasm` of a few hundred kilobytes. It would
-  follow the format as Spark changes it; today's JS reader is ours to keep up.
+  same bytes ([what it does and why](/docs/guide/supported-formats#the-gltf-transform-patch-explained)). The pull
+  request is drafted against `packages/core/src/io/writer.ts` of donmccurdy/glTF-Transform (`main` is unchanged
+  there since 4.4.0; 4.5.1 is current) and waits for a go-ahead to open; merged, it would let the patch go. The
+  patch is pinned to 4.4.0: pnpm refuses to install if the version moves without it.
+- [x] **`@playcanvas/splat-transform` 3.x** (done 2026-11-08: 2.6.0 to 3.10.3). The SOG tiles are the same bytes;
+  decode time and the two-second load per thread are unchanged (3.0's "7× faster" is a streaming PLY filter
+  benchmark, not WebP decode). What changed for us: `readFile` now returns lazy chunk sources, so SOG goes through
+  `readSog` (a whole table, as before) and the extract endpoint's `readSpz` through a chunk pool and
+  `materializeToDataTable`; `writeSog` wants `iterations`; `readLcc`/`readLcc2` left the root exports (they are
+  behind `readFile({inputFormat})`). Node 22 or later is now required, which Docker and the desktop bundle already
+  had. The library and its peers are compared on the [splat tools](/docs/guide/splat-tools) page.
+- [ ] **RAD through Spark's own Rust reader, as WebAssembly.** Spark's `rust/spark-lib` crate has a `rad` feature
+  (`rad.rs`, 1 800 lines, decoder and encoder) and `wasm-pack` build scripts. The published npm package embeds the
+  module as base64 with the renderer's exports only, so it is a build of our own: `wasm-pack build --target nodejs
+  --no-default-features --features rad,gsplat`, a thin binding from Spark's packed splats to columns, tiles compared
+  with today's. About a day. Ship the `.wasm` committed, a few hundred kilobytes, not a Rust toolchain in CI; rebuild
+  it by hand when Spark changes the format.
+- [ ] **LEPCC through loaders.gl once 5.0 is stable.** `@loaders.gl/tiles-3d` 5.0 (alpha and beta today) has a
+  dependency-free TypeScript LEPCC decoder, `i3s-lepcc.ts` (MIT): the same four blob types as our port. Compare the
+  two on the New York and point-cloud SLPKs, then keep one.
 
 - [ ] Further out: a browser/server tiled-splat transcoding UI in the spirit of SuperSplat's splat-transform
   tooling; a **georeferencing/geolocator** step for splats that don't ship one, along the lines of

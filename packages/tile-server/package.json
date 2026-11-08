@@ -12,7 +12,7 @@
     "3dtiles-tools": "workspace:*",
     "@loaders.gl/i3s": "^4.4.3",
     "@loaders.gl/zip": "^4.4.3",
-    "@playcanvas/splat-transform": "^2.6.0",
+    "@playcanvas/splat-transform": "^3.10.3",
     "copc": "^0.0.8",
     "i3s-to-3dtiles": "workspace:*",
     "implicit-to-explicit": "workspace:*",

@@ -3,7 +3,7 @@
  * no network and no cached context, so that it runs the same on the server's thread (the *-live.js modules) and on a
  * tile worker (tile-tasks-splats.js, behind TILED_WORKERS).
  */
-import { readFile as readSplatFile, readSog, MemoryReadFileSystem } from '@playcanvas/splat-transform';
+import { readSog, MemoryReadFileSystem } from '@playcanvas/splat-transform';
 import { decodeSplats } from '../lcc-to-3dtiles/src/lccDecode.js';
 import { encodeChunkGlb } from '../rad-to-3dtiles/src/index.js';
 import { buildSplatTileGlb, computeBounds } from '../core/index.js';
@@ -28,7 +28,7 @@ export async function radChunkGlb(cbuf, local, base, centroids = false) {
 export async function sogChunkColumns(files) {
   const fileSystem = new MemoryReadFileSystem();
   for (const [name, bytes] of Object.entries(files)) { fileSystem.set(name, bytes); fileSystem.set('./' + name, bytes); }
-  const table = (await readSplatFile({ filename: 'meta.json', inputFormat: 'sog', options: {}, params: [], fileSystem }))[0];
+  const table = await readSog(fileSystem, 'meta.json', { logging: 'silent' });
   const out = { numRows: table.numRows };
   for (const name of SOG_COLUMNS) { const d = table.getColumnByName(name)?.data; if (d) out[name] = d; }
   return out;
@@ -68,5 +68,5 @@ export async function geosplatsBundleGlb(buf, files) {
   const fs = new MemoryReadFileSystem();
   let off = 0;
   for (const [name, size] of files) { fs.set(name, buf.subarray(off, off + size)); off += size; }
-  return dataTableToSplatGlb(await readSog(fs, 'meta.json'));
+  return dataTableToSplatGlb(await readSog(fs, 'meta.json', { logging: 'silent' }));
 }

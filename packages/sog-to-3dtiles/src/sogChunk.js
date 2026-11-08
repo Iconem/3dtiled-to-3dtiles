@@ -16,7 +16,7 @@
 
 import fs   from 'fs/promises';
 import path from 'path';
-import { readFile as readSplatFile, MemoryReadFileSystem } from '@playcanvas/splat-transform';
+import { readSog, MemoryReadFileSystem } from '@playcanvas/splat-transform';
 
 const SH_C0 = 0.28209479177387814;
 
@@ -47,14 +47,8 @@ export async function decodeChunk(metaJsonPath) {
     put(n, new Uint8Array(await fs.readFile(path.join(dir, n))));
   }
 
-  const tables = await readSplatFile({
-    filename: 'meta.json',
-    inputFormat: 'sog',
-    options: {},
-    params: [],
-    fileSystem,
-  });
-  return tables[0];
+  // readSog returns a whole DataTable (splat-transform 3.x's readFile returns lazy chunk sources instead).
+  return readSog(fileSystem, 'meta.json', { logging: 'silent' });
 }
 
 const sigmoid = x => 1 / (1 + Math.exp(-x));

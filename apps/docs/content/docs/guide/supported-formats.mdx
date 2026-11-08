@@ -113,6 +113,31 @@ Formats that carry (or wrap) a general node/mesh hierarchy rather than a point- 
 | **[RAD](https://sparkjs.dev/docs/lod-getting-started/)** (SparkJS) · [ext-splats](https://sparkjs.dev/docs/ext-splats/) | LoD merge tree, variable fanout (Tiny-LoD base β≈1.75; Bhatt-LoD unspecified, our converter observes ~1.5 in practice) | RADC chunk: per-splat columns — `f16`/`oct88r8` **interleaved**, `ln_0r8`/`r8_delta` **planar**, `f32_lebytes` byte-transposed | REPLACE | downsampled **merged** splats | no geo metadata, root `RAD0` JSON + per-chunk `RADC` JSON | ✅ chunked `.radc` |
 | **[GeoSplats](https://www.maptiler.com/geosplats/)** (MapTiler) | **octree voxel grids** (`grid_1/8/64/512`) × 8 progressive LODs | per-octant **SOGS** (`means_l/u`, `quats`, `scales`, `sh0` WebP) or `octant_<n>.ply` | REPLACE (LOD subset) | coarser-LOD octants | georef'ed,`model.json` (georef) + per-sub-model `metadata.json` (`voxel_grids` + `entries` TOC) | ✅ per-file / range |
 
+### LCC and LCC2
+
+XGRIDS replaced LCC with LCC2 in 2026 ([LCC whitepaper](https://github.com/xgrids/LCCWhitepaper),
+[LCC2 whitepaper](https://github.com/xgrids/LCC2Whitepaper), spec 0.0.3 of June 2026; both carry XGRIDS' own
+licence, which asks for attribution and keeps derivatives of the format as open). We read LCC; LCC2 is not read
+yet. What changed, from the two whitepapers and `splat-transform`'s readers (`read-lcc.ts`, `read-lcc2.ts`):
+
+| | LCC | LCC2 |
+|---|---|---|
+| Files | `meta.lcc` (JSON), `Index.bin`, `Data.bin`, optional `Shcoef.bin`, `Environment.bin`, `Collision.lci` | one `.lcc2` JSON, `data/3dgs/*` as `.sog`, `.spz` or `.ply`, optional `data/mesh/*.ply` and `.btree` BVH files |
+| Spatial structure | a flat XY grid of units (`cellLengthX/Y` metres from the bounding box's corner), each unit a stack of LOD levels | an n-ary tree of nodes (`id` like `0-1-1-7`), each with its own box and children; `splat-transform` treats it as an octree |
+| Index | `Index.bin`, one fixed record per unit: cell x and y, then per LOD a count, an offset and a size into `Data.bin` | the tree is inside the JSON: a node names a file by index and a row range in it (`start`, `count`); neighbouring nodes of one level share a file |
+| LOD | `totalLevel` levels, bound to the storage layout: a unit's LOD is a byte range | `totalLevels`, independent of storage; node LOD = `totalLevels − depth`; an optional `virtualLoD` describes further downsizing |
+| Splat encoding | its own fixed 32-byte record: `f32` xyz, `rgba8`, `u16` scales against scene-wide min and max, a 10-10-10-2 rotation, `u16` normals | delegated to the payload codec, one per dataset (`splatType`): SOG's WebP planes or SPZ; `splat-transform` reads those two, not the PLY variant |
+| Spherical harmonics | `Portable` = degree 0; `Quality` = degree 3 in `Shcoef.bin`, 64 bytes a splat | inside the SOG or SPZ chunks, must be the same degree in every chunk |
+| Environment and collision | `Environment.bin` (its own min and max) and `Collision.lci` (meshes and a serialized BVH) | an `env` entry naming a splat file; per-node `mesh` and `bvh` entries, `.btree` files of 32-byte nodes |
+| Georeferencing | `epsg`, `offset`, `shift`, `scale` | same names; `offset`, `shift` and `scale` marked reserved |
+| New in LCC2 | | `splatExtraAttributes` (instance, semantic, thermal), `renderingHints` |
+
+For the converter and the server this means: an LCC tile is a byte range of `Data.bin` decoded by a loop, so it
+streams over range requests with no decoder dependency. An LCC2 tile would be a row range of a SOG or SPZ file:
+decoding goes through `splat-transform` (it reads both, and keeps the tree's node-to-range map), and a node's rows
+cannot be fetched alone from a SOG, whose WebP planes decode whole. The live path for LCC2 would then look like the
+streamed-SOG one, a decoded chunk cached and tiles cut from it, rather than like LCC's.
+
 ## What decodes and encodes each format
 
 Every tile is the same three steps: read the source bytes, decode them, write a GLB. This is what runs for each
@@ -124,8 +149,7 @@ format, and whether the server and the offline converter can spread it over work
 | COPC | [`copc`](https://github.com/connormanning/copc.js) reader, LAZ chunks through `laz-perf` (WASM) | glTF-Transform, POINTS | yes | yes |
 | Potree 2.0 | our own reader; brotli nodes through Node's `zlib` | glTF-Transform, POINTS | yes | yes |
 | Potree 1.x | our own `.bin` reader; LAZ nodes through `copc`'s LAS reader and `laz-perf` | glTF-Transform, POINTS | yes | yes |
-| Plain LAS/LAZ | `copc`'s LAS reader and `laz-perf`, the whole file at once; cut into sibling tiles of 2 million points at most, with no levels of detail | glTF-Transform, POINTS | no live path | no |
-| Streamed SOG | [`@playcanvas/splat-transform`](https://github.com/playcanvas/splat-transform) (`readFile`, WebP planes) | our SPZ v2 writer, gzip through Node's `zlib`, wrapped by glTF-Transform | yes | yes, per chunk |
+| Streamed SOG | [`@playcanvas/splat-transform`](https://github.com/playcanvas/splat-transform) 3.x (`readSog`, WebP planes; see [splat tools](/docs/guide/splat-tools)) | our SPZ v2 writer, gzip through Node's `zlib`, wrapped by glTF-Transform | yes | yes, per chunk |
 | GeoSplats (MapTiler) | `@playcanvas/splat-transform` (`readSog`) | same SPZ writer | yes | no offline converter |
 | LCC (XGRIDS) | our own decoder (`lccDecode.js`) | same SPZ writer | yes | yes |
 | RAD (Spark) | our own reader (`radHeader.js`), chunks inflated by Node's `zlib` | same SPZ writer | yes | yes |
@@ -139,15 +163,42 @@ format, and whether the server and the offline converter can spread it over work
 | Format | What exists | Why it is not what runs here |
 |---|---|---|
 | Potree 1.x and 2.0 | Potree's own loaders, written for three.js in a browser | They load into a renderer's scene, node by node on its camera. A converter needs one node's bytes turned into arrays, with no scene; the readers are a few hundred lines. |
-| LCC (XGRIDS) | XGRIDS' LCC Web SDK; `@playcanvas/splat-transform` reads `.lcc` and LCC2 (since 0.14) | The SDK is a renderer: it unpacks splats in a shader and exposes no decode call (our byte layout is taken from that shader). `splat-transform` reads a whole LCC, or whole LOD levels of it, into one table; a tile here is one unit at one LOD, a byte range named by `index.bin`, which is what lets it be streamed over range requests. The data is uncompressed, 32 bytes a splat, so the decoder is a loop. LCC2 is not read yet: `splat-transform` is the way in when it is needed. |
-| RAD (Spark) | Spark's own reader, in Rust, compiled to WebAssembly inside the renderer's package | It is not published as a decoder: the WASM module is embedded in the Spark bundle and its exports are the renderer's. Compiling Spark's Rust crate to our own WASM module is feasible, and would track the format as it changes; it means a Rust toolchain in the build and a binary to ship. The format is a JSON header and deflated columns, which Node's `zlib` inflates natively, so a JS reader was the smaller thing to own. To revisit if the format moves faster than we follow. |
+| LCC (XGRIDS) | XGRIDS' LCC Web SDK; `@playcanvas/splat-transform` reads `.lcc` and LCC2 | The SDK is a renderer: it unpacks splats in a shader and exposes no decode call (our byte layout is taken from that shader). `splat-transform` 3.x reads LCC as a lazy source that can be asked for one chunk, but its chunks are its own (a LOD level cut every 65 536 splats), not the units of `Index.bin`; a tile here is one unit at one LOD, a byte range named by `Index.bin`, which is what lets it be streamed over range requests. The data is uncompressed, 32 bytes a splat, so the decoder is a loop. LCC2 is not read yet ([what differs](#lcc-and-lcc2)): there `splat-transform` is the way in, because the payload is SOG or SPZ. |
+| RAD (Spark) | Spark's own reader, in Rust (`rust/spark-lib`, feature `rad`, 1 800 lines with both encoder and decoder), compiled to WebAssembly inside the renderer's package | The published `@sparkjsdev/spark` carries that WASM only as base64 inside its bundle (1.8 MB), and the bundle's exports are the renderer's (`transcodeSpz`, `SplatLoader`); the decode functions (`decode_rad_header`, `decode_to_gsplatarray`) are not exported, and they yield Spark's packed splat encodings, not columns. The module itself needs no browser (its imports are only the wasm-bindgen glue). To use it we would build `spark-rs` ourselves with `wasm-pack --target nodejs`, `rad` feature only, and commit the `.wasm` (a few hundred KB) rather than put a Rust toolchain in CI. The format is a JSON header and deflated columns, which Node's `zlib` inflates natively, so a JS reader was the smaller thing to own. Spark's module would be worth it as a cross-check, or if the format moves faster than we follow. |
 | SPZ (output) | Niantic's `spz` library (C++, with WASM builds by others) | Only the writer is needed, for one version of the format (v2, which the glTF extension names): pack the columns, gzip. No native module to build or ship. |
-| I3S | `@loaders.gl/i3s`, Cesium's I3S provider; for LEPCC, Esri's C++ reference, a Rust port and Python bindings, none in JavaScript | `loaders.gl` is used to open `.slpk` archives. Its tile loader returns renderer-ready, already reprojected content for whole layers; a converter needs each node's raw buffers, and we found no LEPCC point-cloud decoder in it, hence the port of Esri's reference decoder. |
+| I3S | `@loaders.gl/i3s`, Cesium's I3S provider. For LEPCC: Esri's C++ reference (Apache-2.0, last touched 2022); `@loaders.gl/tiles-3d` 5.0 (alpha and beta only, since `5.0.0-alpha.6`) has a dependency-free TypeScript decoder, `i3s-lepcc.ts`; a pure-Rust port, the `lepcc` crate (MIT, one author, six commits); `lepcc-ffi` (bindings over the C++); `pylepcc`; and a closed-licence WASM, `@bitruvius/turbo-lepcc`. CesiumJS has none: its I3S provider skips point-cloud layers. | `loaders.gl` is used to open `.slpk` archives. Its stable tile loader returns renderer-ready, already reprojected content for whole layers; a converter needs each node's raw buffers. When we wrote the port there was no LEPCC decoder in JavaScript; ours is a port of Esri's reference, as loaders.gl's new one is. The Rust port would not be reused for this: it is the same port in another language, it would need its own WASM build, and it is maintained less than ours. The loaders.gl decoder is the one to adopt, or to compare against, once 5.0 is stable. |
 | 3MX | none in JavaScript that we found; Bentley's SDK is native and closed | The `.3mxb` container is a JSON header and a list of buffers; its meshes are OpenCTM, decoded by the vendored `js-openctm`. |
+
+### The glTF-Transform patch, explained
+
+I3S and Bing globe tiles are written with [glTF-Transform](https://gltf-transform.dev) since 2026-11-05, and a
+patch of it ships in `patches/` (applied by pnpm at install, in Docker and in the desktop bundle). What it is for:
+
+A GLB holds its vertex data in one binary blob. For a mesh tile that blob is a few arrays laid end to end:
+all the positions, then all the normals, then all the texture coordinates, each a plain run of 32-bit floats. We
+already have each of those arrays in memory as a typed array (`Float32Array`), and a typed array *is* already the
+exact bytes the file needs, in the right order. Producing the blob should be a copy, the way `memcpy` is a copy.
+
+glTF-Transform's writer was built for the other layout too, *interleaved*: position, normal and UV of vertex 0,
+then those of vertex 1, and so on. Its one routine handles both layouts the same way: for every vertex, for
+every attribute, for every component (x, then y, then z), it reads one number from the typed array and writes it
+into the output through a `DataView`, which is JavaScript's byte-by-byte writer. For a tile of 300 000 vertices
+with three attributes that is a few million small calls, and it took 88 ms of a tile's time. The arrays were
+already in the right shape; the routine just did not notice.
+
+The patch adds one check at the top of that routine: if this buffer view is made of a single attribute, and its
+elements are not padded (a `VEC3` of floats is 12 bytes, which needs no padding; a `VEC3` of bytes would), then
+the typed array's bytes are the output, and they are copied in one call. Otherwise the old loop runs. For the
+same tile the write drops to 13 ms, and the file is identical to the byte: the output hash of the I3S run did not
+change. Ten lines, in `interleaveAccessors` of `packages/core/src/io/writer.ts`. The pull request to send it
+upstream is drafted (see the [future work](/docs/guide/todo-future-work) page); merged, our patch goes away. Until
+then it is pinned to glTF-Transform 4.4.0: pnpm refuses to install if the dependency moves without it.
 
 ### What tile workers gain, measured
 
-The same tiles, byte for byte, with and without workers. Offline converters, 20 cores, local disk, in seconds:
+The same tiles, byte for byte, with and without workers. Offline converters, local disk, in seconds. The machine is
+a laptop (Intel i7-12800H: 6 performance cores, 8 efficiency cores, 20 threads) that was rendering in Blender
+during most of these runs, so take the ratios, not the figures:
 
 | Converter | Dataset | One thread | 4 workers | 8 workers |
 |---|---|---|---|---|
@@ -163,6 +214,38 @@ the whole file and builds its tree on one thread. Every worker of a SOG run firs
 seconds each, which a small scene never earns back. On the live server the splat formats gain least: the gzip of an
 SPZ payload already ran off the main thread (Node hands it to its own thread pool), and the remote samples measured
 were slower to fetch than to decode.
+
+COPC and Potree were moved onto the shared tile loop after this table was taken; measured again against their
+former loops, interleaved, three runs each: same bytes, and the same times within the noise of the machine (Autzen
+17.3 against 17.5 s on one thread, 4.6 against 4.7 s with 8 workers; Texas, 1 002 tiles, 42.7 against 40.5 s and
+9.8 against 11.0 s; Potree `lion_p2`, 1 741 tiles, 4.0 against 3.9 s and 2.3 against 2.4 s).
+
+**Why the big SOG scene gains less than 2×.** Taken apart on the Roman parish scene (same laptop, Blender running,
+so the absolute figures are worse than the table's):
+
+| Run | One thread | 8 workers |
+|---|---|---|
+| Whole conversion | 130 s | 59 s |
+| The same with the tile files not written | 78 s | 36 s |
+| Sum of the time the threads spent decoding chunks | 30 s | 59 s |
+| Sum of the time the threads spent cutting, packing and gzipping tiles | 39 s | 124 s |
+| Before the first chunk starts (start-up) | 1.9 s | 6.7 s |
+
+- **Writing 37 725 small files costs 50 s on one thread and 22 s with workers**, about 40% of the run either way:
+  creating a file on Windows (NTFS plus Defender's scan of each new file) is a millisecond or more, serialised in
+  the kernel, not in our code. Fewer, larger tiles would be the only cure, and the SOG tree decides the tiles.
+- **The same work takes 2.6 times longer per thread when eight threads do it** (70 s of thread time becomes
+  183 s). That is the hardware: eight workers plus the main thread and Node's pool land on six fast cores and
+  eight slow ones that share one power budget, with Blender on them too. Four workers take the same wall time as
+  eight (37 against 36 s without writes), sixteen are slower (42 s). On a desktop with more full cores the ratio
+  would be better; the code is not the limit here.
+- **Start-up is 6.7 s with workers against 1.9 s without**: eight workers each load `splat-transform` (1.8 s alone,
+  near 5 s when eight load at once). Node's compile cache (`NODE_COMPILE_CACHE`) does not help: the cost is running
+  the module's top level (it brings the PlayCanvas engine in), not parsing it.
+- Not the cause: the libuv pool (raising `UV_THREADPOOL_SIZE` to 16 gained 5 s), chunk order (the largest chunk is
+  1.2 s of work; chunks now go out largest first anyway), or `splat-transform` 2.6 against 3.10 (same times).
+- Kept from this: chunks are handed out largest first, and a tile worker gzips in place rather than through the
+  pool the whole process shares. Both leave the bytes as they were.
 
 **A streamed-SOG chunk is decoded once, not once per tile.** A chunk is a set of WebP images holding half a million
 splats or so, and dozens to hundreds of tiles are ranges of it. Offline, tiles are grouped by chunk and each chunk
