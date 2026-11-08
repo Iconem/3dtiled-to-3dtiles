@@ -5,6 +5,15 @@ Format loosely follows [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+### Added — 2026-11-08 (the largest public streamed splats, in the library)
+- **Streamed SOG from SuperSplat**: Andrii Shramko's **Jastrzębia Góra**, a 4 × 2 km scan of 105.9 M splats in 8 LOD
+  levels (CC BY 4.0, [221ee167](https://superspl.at/scene/221ee167); its root tileset is 90 MB and 284 165 tiles) and
+  Daniel Dworschak's **Dittrichova hrobka** (53.7 M, 7 levels, [6c09cd54](https://superspl.at/scene/6c09cd54)). Both
+  stream through `/stream?format=sog`; every SuperSplat scene exposes its `lod-meta.json` at
+  `d28zzqy0iyovbz.cloudfront.net/<id>/v1/`.
+- **RAD from World Labs' Spark 2.0 demos**: **Poland village** (Teleportour, 106 M leaf splats, 2.75 GB) and **Cave**
+  (73 M, 1.46 GB), beside Coit Tower from the same set. Not timed yet: the CDN gave 39 KB/s where this was added.
+
 ### Added — 2026-11-08 (an 83-million-splat streamed SOG in the library)
 - **Vyšehrad Basilica and parks, Prague** (Daniel Dworschak, [superspl.at/scene/1b7afbf6](https://superspl.at/scene/1b7afbf6)): a
   splat-transform streamed SOG of 82.9 M splats in 7 LOD levels, streamed from SuperSplat's CDN through `/stream?format=sog`.

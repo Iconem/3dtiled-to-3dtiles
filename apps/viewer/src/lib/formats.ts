@@ -123,6 +123,8 @@ export const FORMATS: FormatMeta[] = [
     { id: 'grace-cathedral-ext', label: 'Grace Cathedral SF ext (Vincent Woo) ⬀', src: 'https://d28zzqy0iyovbz.cloudfront.net/b8b1fd14/v1/lod-meta.json' },
     { id: 'cathedral-interior', label: 'Cathedral Interior ⬀', src: 'https://d28zzqy0iyovbz.cloudfront.net/02d5f4eb/v3/lod-meta.json' },
     { id: 'vysehrad-prague', label: 'Vyšehrad Basilica & parks, Prague (D. Dworschak, 83M) ⬀', src: 'https://d28zzqy0iyovbz.cloudfront.net/1b7afbf6/v1/lod-meta.json' },
+    { id: 'jastrzebia-gora-sog', label: 'Jastrzębia Góra 4×2 km (A. Shramko, CC BY, 106M) ⬀', src: 'https://d28zzqy0iyovbz.cloudfront.net/221ee167/v1/lod-meta.json' },
+    { id: 'dittrichova-hrobka', label: 'Dittrichova hrobka, Krásná Lípa (D. Dworschak, 54M) ⬀', src: 'https://d28zzqy0iyovbz.cloudfront.net/6c09cd54/v1/lod-meta.json' },
   ] },
   { fmt: 'lcc', icon: '◆', label: 'LCC', type: 'splat', octree: false, stream: true, assets: [
     // Real public .lcc downloads (found via XGRIDS' own sample-data page,
@@ -144,6 +146,8 @@ export const FORMATS: FormatMeta[] = [
     // Real sources: the exact files this repo's own README setup instructions curl down as
     // coit.rad/tastier500k.rad (wlt-ai-cdn.art — William Liu's own CDN, the RAD/BhattLod format author).
     { id: 'coit', label: 'Coit', src: 'https://wlt-ai-cdn.art/spark-2.0/rad/coit-40m-sh1-lod.rad', out: 'output/rad/coit-3dtiles-from-rad' },
+    { id: 'poland-rad', label: 'Poland village (Teleportour, 106M, 2.75 GB) ⬀', src: 'https://wlt-ai-cdn.art/spark-2.0/rad/poland-lod.rad' },
+    { id: 'cave-rad', label: 'Cave (World Labs, 73M, 1.46 GB) ⬀', src: 'https://wlt-ai-cdn.art/spark-2.0/rad/cave-lod.rad' },
     { id: 'tastier', label: 'Tastier', src: 'https://wlt-ai-cdn.art/tastier_rad_500/0524c1a1-abf2-4969-ae40-9981ee836536_500k-lod.rad', out: 'output/rad/tastier500k-3dtiles-from-rad' },
     // No public source found for either — private/internal PLY-derived test assets (WIP label already
     // flags these as such). Stay on local sample-data.
