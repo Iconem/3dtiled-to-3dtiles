@@ -94,6 +94,8 @@ export async function handleConvert(req, res, u) {
     const name = src.split('?')[0].split('/').pop() || 'input';
     const fmt = await resolveFormat(src, u.searchParams.get('format'), name);
     if (!fmt) { res.writeHead(400, CORS); res.end(`could not detect format for "${name}" — pass &format=`); return true; }
+    // a virtual point cloud is an index of files, not a dataset to convert: it is served as a mosaic of their streams
+    if (fmt === 'vpc') { res.writeHead(400, CORS); res.end('a .vpc is not converted as a whole: use /stream/tileset.json?format=vpc&url=… (a mosaic of its COPC items)'); return true; }
     const centroids = ['1', 'true', 'yes'].includes((u.searchParams.get('centroids') || '').toLowerCase());
     const tiling = u.searchParams.get('tiling') || undefined;   // 'implicit' | 'explicit'
     const key = keyFor(src, fmt, centroids, tiling);

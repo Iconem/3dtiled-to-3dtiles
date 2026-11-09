@@ -85,6 +85,8 @@ export async function convert(input, outDir, opts = {}) {
   const format = opts.format
     || (isRemote(input) ? detectFormatByName(input) : await detectFormat(input));
   if (!format) throw new Error(`Could not detect input format for "${input}". Pass { format } explicitly.`);
+  // A virtual point cloud indexes files that are converted one by one; as a whole it is served, not converted.
+  if (format === 'vpc') throw new Error('A .vpc is not converted as a whole: serve it (`3dtiled serve <url>.vpc`, or /stream/tileset.json?format=vpc&url=…), or convert each COPC file it lists.');
 
   // Remote input → download (with the sibling files the format needs) to a temp dir, then convert locally.
   if (isRemote(input)) {

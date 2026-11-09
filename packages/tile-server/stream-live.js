@@ -94,7 +94,8 @@ const ADAPTERS = {
   threemx:   { tileset: threemxTileset,   tile: threemxTile,   tileRe: threemxTileRe },
   geosplats: { tileset: geosplatsTileset, tile: geosplatsTile, tileRe: geosplatsTileRe },
 };
-export const streamableFormats = Object.keys(ADAPTERS);
+// `vpc` streams too, without an adapter: a mosaic of COPC streams, built by /aggregate (see handleStream).
+export const streamableFormats = [...Object.keys(ADAPTERS), 'vpc'];
 
 // cache=refine: open lazily with nothing prefetched, then drain the whole hierarchy in the background
 // as soon as a client asks for a tile below the root, i.e. once it refines into the dataset. What a
@@ -172,6 +173,22 @@ export async function handleStream(req, res, u) {
     const u2 = new URL(u.href);
     u2.pathname = `/3dtiles-self-contained/${key}`;
     return handleSelfContained(req, res, u2);
+  }
+
+  // A virtual point cloud (.vpc) has no tiles of its own: it indexes COPC files, each of which already
+  // streams here. So its tileset is a mosaic of those streams, and /aggregate builds mosaics: the
+  // request is handed over as /aggregate/tileset.json?vpc=<url> (vpc-live.js parses the file), nested
+  // on the geodetic quadtree unless &nest= says otherwise. &cache=, &prefetch=, &curved=, &bv=, &ttl=,
+  // &sniff= carry through; &format= does not (there it is a filter on the children).
+  if (fmt === 'vpc') {
+    if (u.pathname !== '/stream/tileset.json') { res.writeHead(404, CORS); res.end('a VPC has no tiles of its own: its leaves are /stream/tileset.json?format=copc&url=<item> tilesets'); return true; }
+    const u2 = new URL(u.href);
+    u2.pathname = '/aggregate/tileset.json';
+    for (const k of ['url', 'format', 'set', 'urls', 'vpc']) u2.searchParams.delete(k);
+    u2.searchParams.set('vpc', url);
+    if (!u2.searchParams.has('nest')) u2.searchParams.set('nest', 'geodetic');
+    const { handleAggregate } = await import('./aggregate-live.js');
+    return handleAggregate(req, res, u2);
   }
 
   const adapter = ADAPTERS[fmt];

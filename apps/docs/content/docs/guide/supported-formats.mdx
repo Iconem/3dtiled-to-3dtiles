@@ -57,6 +57,13 @@ canonical source exists); formats with no public spec (reverse-engineered/undocu
 | **[COPC](https://copc.io)** (Cloud Optimized Pointcloud) · [spec repo](https://github.com/copcio/copcio.github.io) | **octree** (EPT-style) | LAZ-compressed LAS points | ADD | octree nodes (accumulate) | COPC VLR + hierarchy pages | ✅ designed for range reads |
 | **[Potree](https://github.com/potree/PotreeConverter)** (v1 and v2) · [2.0 format](https://github.com/potree/potree/blob/develop/docs/) | **octree** (named `r`/`r0`..`r7`) | points: position int32×3·scale+offset + rgb (2.0 `octree.bin` / 1.x per-node `.bin`) | ADD | octree nodes (accumulate) | 2.0 `metadata.json`+`hierarchy.bin` (22 B/node) · 1.x `cloud.js`+`.hrc` | ✅ (2.0 single octree.bin; 1.x per-node files) |
 
+**A virtual point cloud (`.vpc`) is an index, not a tiling.** PDAL and QGIS write one to treat a folder of
+LAS/LAZ/COPC tiles as a single dataset: a STAC ItemCollection with each file's extent, CRS and point count. It
+streams as `/stream/tileset.json?format=vpc&url=<….vpc>`: one mosaic whose leaves are the COPC streams of its
+items, placed from each item's own `proj:bbox` so that the root is built without opening any of them (1 000
+tiles: a 643 KB root in 161 ms). Only its COPC items are streamed; plain LAS/LAZ items are skipped and
+counted. See the [VPC page](/docs/references/pointclouds/vpc).
+
 **Potree 1.x point counts are not reliable.** PotreeConverter's 1.7 code writes `numAccepted` to the `.hrc`, and only an
 inner node adds to it: a leaf keeps its points in `store`. So a leaf can be recorded with **0 points while its `.bin`
 holds thousands**. On one 1.3 billion point Iconem cloud that was 169,134 of 209,474 nodes, about 3/4 of the points. It is

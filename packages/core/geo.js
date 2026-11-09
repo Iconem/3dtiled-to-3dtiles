@@ -41,9 +41,13 @@ export const enuMatrix = (lon, lat, cx, cy, cz) => {
 // proj4 cannot parse a COMPD_CS[...] (compound horizontal+vertical CRS — common in ContextCapture/3MX
 // WKT, e.g. "RGF93 / Lambert-93 + NGF-IGN69 height"). Unwrap it to the inner horizontal PROJCS/GEOGCS
 // (the vertical component is just height, already carried by origin[2]).
+// The same for WKT2's COMPOUNDCRS[…, PROJCRS|GEOGCRS|GEODCRS[…], VERTCRS[…]] (what PDAL writes into a
+// VPC's proj:wkt2 for AHN: "Amersfoort / RD New + NAP height") and for a PROJJSON CompoundCRS object.
 function unwrapCompoundWkt(crs) {
-  if (typeof crs !== 'string' || !/^\s*COMPD_CS/i.test(crs)) return crs;
-  const start = crs.search(/PROJCS\[/i) >= 0 ? crs.search(/PROJCS\[/i) : crs.search(/GEOGCS\[/i);
+  if (crs && typeof crs === 'object' && Array.isArray(crs.components) && crs.components.length) return crs.components[0];
+  if (typeof crs !== 'string' || !/^\s*(COMPD_CS|COMPOUNDCRS)/i.test(crs)) return crs;
+  const first = (...res) => { for (const re of res) { const i = crs.search(re); if (i >= 0) return i; } return -1; };
+  const start = first(/PROJCS\[/i, /PROJCRS\[/i, /GEOGCS\[/i, /GEOGCRS\[/i, /GEODCRS\[/i, /GEOGRAPHICCRS\[/i);
   if (start < 0) return crs;
   let depth = 0;                                            // extract the first balanced [...] block
   for (let i = crs.indexOf('[', start); i < crs.length; i++) {
@@ -165,6 +169,41 @@ export function georefFromCrs(origin, crs, tag = 'geo') {
     if (![...colX, ...colY].every(Number.isFinite)) return enu;
     return [colX[0], colX[1], colX[2], 0, colY[0], colY[1], colY[2], 0, enu[8], enu[9], enu[10], 0, e[0], e[1], e[2], 1];
   } catch (e) { console.warn(`[${tag}] georef failed:`, e.message); return null; }
+}
+
+/**
+ * A CRS (`EPSG:<n>`, WKT1/WKT2, a proj string, a PROJJSON object) → `(x, y, z) → ECEF [X, Y, Z]`, with
+ * the same definitions and the same proj4 as georefFromCrs, so a box placed from metadata (a VPC item's
+ * `proj:bbox`) lands where the file's own root transform puts its points. Heights are taken as
+ * ellipsoidal, as everywhere here. Null when proj4 cannot read the CRS.
+ */
+export function crsToEcef(crs) {
+  if (!crs) return null;
+  try {
+    const P = proj4(unwrapCompoundWkt(crsDefinition(crs)), 'WGS84');
+    return (x, y, z = 0) => { const [lon, lat] = P.forward([x, y]); return llhToEcef(lon, lat, z); };
+  } catch { return null; }
+}
+
+/** `EPSG:<n>` of a WKT1/WKT2 text or a PROJJSON object, read from the identifier of its horizontal part, or null. */
+export function epsgOfCrs(crs) {
+  const h = unwrapCompoundWkt(crs);
+  if (h && typeof h === 'object') return String(h.id?.authority).toUpperCase() === 'EPSG' && Number.isInteger(+h.id.code) ? `EPSG:${+h.id.code}` : null;
+  const m = typeof h === 'string' && /(?:AUTHORITY|ID)\[\s*"EPSG"\s*,\s*"?(\d+)"?\s*\]\s*\]\s*$/i.exec(h);
+  return m ? `EPSG:${m[1]}` : null;
+}
+
+/**
+ * Make `EPSG:<n>` usable as a `&crs=`: true when proj4 or the table above already reads it, else the
+ * definition that came with it (WKT or PROJJSON, from a VPC item) is registered under that code for
+ * the life of the process. A short code can then stand for the CRS in every child URL of a mosaic.
+ */
+export function ensureCrs(code, def = null) {
+  const reads = () => { try { proj4(crsDefinition(code), 'WGS84'); return true; } catch { return false; } };
+  if (reads()) return true;
+  if (!def || !/^EPSG:\d+$/.test(code)) return false;
+  try { proj4.defs(code, unwrapCompoundWkt(def)); } catch { return false; }
+  return reads();
 }
 
 /** Column-major 4×4 inverse (general; null when singular). */

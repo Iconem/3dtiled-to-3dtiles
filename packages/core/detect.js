@@ -1,7 +1,7 @@
 /**
  * 3dtiles-convert-core — input format detection. Sniffs a path (file or directory) → format id.
  * Cheap checks: index filenames for directory formats, magic bytes / extension for file formats.
- * Returns one of: 'rad' | 'sog' | 'lcc' | 'lcc2' | 'copc' | 'potree' | 'i3s' | null.
+ * Returns one of: 'rad' | 'sog' | 'lcc' | 'lcc2' | 'copc' | 'potree' | 'i3s' | 'vpc' | null.
  */
 import fs from 'fs/promises';
 import path from 'path';
@@ -17,6 +17,7 @@ const isDir  = async p => { const s = await fs.stat(p).catch(() => null); return
 export function detectFormatByName(name) {
   const l = name.toLowerCase().split('?')[0].split('#')[0];
   if (l.endsWith('.rad')) return 'rad';
+  if (l.endsWith('.vpc')) return 'vpc';                    // PDAL/QGIS virtual point cloud: an index of LAS/LAZ/COPC files
   if (l.endsWith('.copc.laz') || l.endsWith('.copc') || l.endsWith('.laz') || l.endsWith('.las')) return 'copc';
   if (l.endsWith('.slpk')) return 'i3s';
   if (l.endsWith('metadata.json') || l.endsWith('cloud.js')) return 'potree';
@@ -34,6 +35,7 @@ export async function detectFormat(input) {
 
   // ── file-based ──
   if (lower.endsWith('.rad')) return 'rad';
+  if (lower.endsWith('.vpc')) return 'vpc';
   if (lower.endsWith('.3tz') || lower.endsWith('.3dtiles')) return 'package';
   if (lower.endsWith('.copc.laz') || lower.endsWith('.copc')) return 'copc';
   if (lower.endsWith('.slpk')) return 'i3s';

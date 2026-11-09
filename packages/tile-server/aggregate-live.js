@@ -15,6 +15,9 @@
  *   …&nest=auto|mercator|geodetic|flat   &bv=sphere|region   &ttl=<seconds>
  *   …&format=  &only=  &exclude=  &hide=<id>  &latest=1  &from=YYYY[-MM]  &to=YYYY[-MM]
  *
+ *   GET /aggregate/tileset.json?vpc=<url of a .vpc>  a PDAL/QGIS virtual point cloud as the set: its COPC
+ *                                                    items, placed from their own extents (vpc-live.js)
+ *
  * Child fetch failures don't kill the aggregate: failed children are skipped and listed in
  * `asset.extras.failed` (with the error), so a mosaic of 40 datasets survives one dead host.
  */
@@ -24,7 +27,8 @@ import { fileURLToPath } from 'node:url';
 import { createHash, randomUUID } from 'node:crypto';
 import { datasetGroundSamples, offsetFromSamples } from '../core/dataset-ground.js';
 import { sampleTerrain, TERRAINS } from '../core/terrain.js';
-import { llhToEcef, ecefToLlh, curvedParam } from '../core/index.js';
+import { llhToEcef, ecefToLlh, curvedParam, httpStatusOf } from '../core/index.js';
+import { vpcSet, sniffParam } from './vpc-live.js';
 
 const CORS = { 'Access-Control-Allow-Origin': '*', 'Access-Control-Allow-Headers': '*' };
 
@@ -1128,6 +1132,36 @@ export async function handleAggregate(req, res, u) {
   const isSnapStream = u.pathname === '/aggregate/snap.ndjson';
   if (!isTileset && !isIndex && !isSnapStream) return false;
 
+  // ?vpc=<url of a .vpc>: a PDAL/QGIS virtual point cloud is a set read from that one file (vpc-live.js),
+  // its COPC items placed from their own extents. It takes the place of ?set=, and composes with ?url=.
+  let vpc = null;
+  const vpcUrl = u.searchParams.get('vpc');
+  if (vpcUrl) {
+    if (setParam) { res.writeHead(400, CORS); res.end('?vpc= and ?set= are two ways of naming the children: give one'); return true; }
+    const ttlQ = u.searchParams.get('ttl');
+    try {
+      vpc = { ...(await vpcSet(vpcUrl, { ttlMs: ttlQ == null ? DEFAULT_TTL_MS : Math.max(0, Number(ttlQ) || 0) * 1000, sniff: sniffParam(u.searchParams.get('sniff')) })) };
+    } catch (e) {
+      const status = e.status ?? httpStatusOf(e);
+      res.writeHead(status, { 'Content-Type': 'application/json', ...CORS });
+      res.end(JSON.stringify({ error: status === 404 ? `no .vpc at ${vpcUrl.split('?')[0]}` : String(e.message || e), ...(e.detail ?? {}) }));
+      return true;
+    }
+    sets.vpc = vpc.set;
+    u = new URL(u.href);
+    u.searchParams.set('set', 'vpc');
+    const proto = (req.headers['x-forwarded-proto'] || 'http').split(',')[0].trim();
+    const origin = `${proto}://${req.headers['x-forwarded-host'] || req.headers.host}`;
+    const r = vpc.report;
+    // The overview of the whole set, when the VPC names one: reported as a ready stream, not placed in the tree (see the VPC docs page for why).
+    vpc.extras = { ...r, ...(r.overviews ? { overviews: r.overviews.map((o) => ({ url: o, stream: childUrlFor({ format: 'copc', url: o, crs: vpc.set.entries[0]?.crs }, origin) })) } : {}) };
+    vpc.headers = {
+      'X-VPC-Items': String(r.items), 'X-VPC-Streamed': String(r.streamed), 'X-VPC-Skipped': String(r.skipped),
+      ...(r.skipped ? { 'X-VPC-Skipped-Reasons': Object.entries(r.skippedReasons).map(([k, n]) => `${n} ${k}`).join('; ').replace(/[^\x20-\x7e]/g, '?') } : {}),
+      'Access-Control-Expose-Headers': 'X-VPC-Items, X-VPC-Streamed, X-VPC-Skipped, X-VPC-Skipped-Reasons',
+    };
+  }
+
   const sel = selectChildren(req, u, sets);
   if (sel.error) { res.writeHead(400, CORS); res.end(sel.error); return true; }
   if (isSnapStream && !sel.snap) { res.writeHead(400, CORS); res.end('snap.ndjson needs &snap=<terrain>'); return true; }
@@ -1192,15 +1226,17 @@ export async function handleAggregate(req, res, u) {
       }
       for (const c of t.children || []) walk(c, depth + 1);
     })(ts.root);
-    res.writeHead(200, { 'Content-Type': 'application/json', ...CORS });
+    res.writeHead(200, { 'Content-Type': 'application/json', ...CORS, ...(vpc?.headers ?? {}) });
     res.end(JSON.stringify({
-      count: datasets.length, build: ts.asset.extras.build, datasets,
+      count: datasets.length, build: ts.asset.extras.build, ...(vpc ? { vpc: vpc.extras } : {}), datasets,
       unplaced: ts.asset.extras.unplaced ?? [], failed: ts.asset.extras.failed ?? [],
     }));
     return true;
   }
 
-  res.writeHead(200, { 'Content-Type': 'application/json', ...CORS });
+  // the mosaic is cached and shared: a VPC's report (items streamed, skipped and why) goes on a copy
+  if (vpc) ts = { ...ts, asset: { ...ts.asset, extras: { ...ts.asset.extras, vpc: vpc.extras } } };
+  res.writeHead(200, { 'Content-Type': 'application/json', ...CORS, ...(vpc?.headers ?? {}) });
   res.end(JSON.stringify(ts));
   return true;
 }
