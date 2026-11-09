@@ -685,6 +685,13 @@ const FORMATS = [
       { id: 'arcgis-pts-slpk', label: 'ArcGIS Moro Bay LiDAR .slpk (LEPCC — unsupported)', src: 'https://www.arcgis.com/sharing/rest/content/items/496552d059644b4892c51ad06bdba8e2/data' },
       { id: 'arcgis-pts-svc',  label: 'ArcGIS Moro Bay LiDAR SceneServer (LEPCC — unsupported)', src: 'https://tiles.arcgis.com/tiles/z2tnIkrLQ2BRzr6P/arcgis/rest/services/Moro_Bay_LiDAR/SceneServer' },
   ]},
+  // OSGB (OpenSceneGraph binary tiled meshes: ContextCapture, DJI Terra, …), streamed only. Same list as src/lib/formats.ts.
+  { fmt: 'osgb', icon: '🧊', label: 'OSGB', type: 'mesh', octree: false, stream: true, assets: [
+      { id: 'weinan',   label: 'Weinan (ContextCapture, 30 tiles, 183 MB)', src: 'https://raw.githubusercontent.com/xyxfa/UnityOSGB-main/main/Assets/StreamingAssets/weinan/metadata.xml' },
+      { id: 'dayanta',  label: 'Dayanta pagoda, Xi’an (ContextCapture, 63 tiles, cut at L17)', src: 'https://raw.githubusercontent.com/Sogrey/Cesium-start-Example/master/SampleData/models/dayanta_osgb/osgb/metadata.xml' },
+      { id: 'hongkong', label: 'Hong Kong Central, tile 21-25 (LandsD mesh, OSG 3.2, 217 MB)', src: 'https://raw.githubusercontent.com/fafa1899/GISBasic/main/Data/Model/hongkong/tile_21_25/Data/Model/Model.osgb' },
+      { id: 'generic',  label: 'One tile to L22 (ContextCapture, 32 MB)', src: 'https://raw.githubusercontent.com/xarray/generic-osgb/master/examples/data/Tile_1/Tile_1.osgb' },
+  ]},
 ];
 
 // Already-3D-Tiles datasets (the "3D Tiles" format): loaded directly, independent of mode.
@@ -743,8 +750,9 @@ function buildMiddlewareUrl(rawSrc, f) {
   f = f || fmtMeta(selectedFormat);
   const fmt = f ? f.fmt : selectedFormat;
   const enc = encodeURIComponent(rawSrc);
-  if (cacheScope === 'all') return `${MW}/convert/tileset.json?format=${fmt}&url=${enc}${streamParams(f)}`;
-  let q = `&cache=${cacheScope}`;   // 'none' | 'hierarchy' — /stream reads this directly now
+  // osgb has a /stream adapter and no offline converter: cache=all stays on /stream
+  if (cacheScope === 'all' && fmt !== 'osgb') return `${MW}/convert/tileset.json?format=${fmt}&url=${enc}${streamParams(f)}`;
+  let q = `&cache=${cacheScope === 'all' ? 'hierarchy' : cacheScope}`;  // 'none' | 'hierarchy' — /stream reads this directly now
   if (cacheScope === 'none') q += `&prefetch=${prefetchN}`;
   if (transformOp) q += `&transform=${transformOp}`;       // per-tile encode (meshopt/draco) or decode (decompress)
   return `${MW}/stream/tileset.json?format=${fmt}&url=${enc}${q}${streamParams(f)}`;

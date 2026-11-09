@@ -7,7 +7,8 @@ description: "A crawl of the GIS / CAD-AEC / VFX / cultural-heritage communities
 
 A crawl of the GIS / CAD-AEC / VFX / cultural-heritage communities for **tiled / streamable** formats we
 don't yet ingest. Ranked by value × feasibility for a *live → 3D Tiles* adapter. (Already supported:
-COPC, Potree 1.x/2.0, EPT, I3S/SLPK, streamed-SOG, LCC, RAD, 3D Tiles packages, Bentley 3MX, Bing Maps 3D.)
+COPC, Potree 1.x/2.0, EPT, I3S/SLPK, streamed-SOG, LCC, RAD, 3D Tiles packages, Bentley 3MX, Bing Maps 3D, and
+since 2026-11-09 OSGB.)
 
 **Candidates — open enough + cleanly tiled + remotely consumable:**
 | Format | Origin / community | Content | Hierarchy | Remote/range | Reader | Note |
@@ -15,7 +16,7 @@ COPC, Potree 1.x/2.0, EPT, I3S/SLPK, streamed-SOG, LCC, RAD, 3D Tiles packages, 
 | **SPZ v5** (upcoming) | Niantic Spatial | Gaussian splats, spatial chunking + LOD (planned) | not yet specified | unspecified | none yet | to be implemented once the spec ships — see below |
 | **Splatter** (splatter.app) | Jakub Červený · hosted Gaussian-splat viewer/host | opaque `splatId`-addressed splats (PLY + server-side LOD augmentation) | private backend; not a published tiled format | ➖ opaque backend, no public wire format | none (private `splatter-three` client) | reprioritized higher per explicit product request — see full status writeup below |
 | **2.5D Terrain** (DEM → TIN, and Terrarium/Terrain-RGB-encoded XYZ tiles) | Cesium quantized-mesh / Terrarium / Mapbox Terrain-RGB | raster-DEM → TIN mesh | quadtree-in-TMS (`layer.json`) or raster XYZ | ✅ per-tile | martini/delatin (JS bridges) | separate track, future — see below |
-| **OSGB** `.osgb` | OpenSceneGraph + Acute3D/Smart3D · GIS oblique (huge in China) | textured mesh | `metadata.xml` + PagedLOD child files | ➖ file paging (no byte-range) | `flywave/go-osg`, OSG C++, WASM; offline [fanvanzh/3dtiles](https://github.com/fanvanzh/3dtiles) (reads **OSGB, SHP, FBX, and OBJ** — OBJ via single-file `gltf` mode; full simplify/Draco tileset pipeline is still only `osgb`/`shape`) | main work = georef (CGCS2000) + synth GE/bbox. **Open sample data**: few openly downloadable full tilesets (vendor demo projects + [natowi/photogrammetry_datasets](https://github.com/natowi/photogrammetry_datasets) index; small fixtures in converters) — ContextCapture/ion **3D Tiles** samples are easier to get than raw OSGB. |
+| **OSGB** `.osgb` — **implemented 2026-11-09**, see [the OSGB reference](/docs/references/mesh-generic/osgb) (the rest of this row is the assessment that preceded it) | OpenSceneGraph + Acute3D/Smart3D · GIS oblique (huge in China) | textured mesh | `metadata.xml` + PagedLOD child files | ➖ file paging (no byte-range) | `flywave/go-osg`, OSG C++, WASM; offline [fanvanzh/3dtiles](https://github.com/fanvanzh/3dtiles) (reads **OSGB, SHP, FBX, and OBJ** — OBJ via single-file `gltf` mode; full simplify/Draco tileset pipeline is still only `osgb`/`shape`) | main work = georef (CGCS2000) + synth GE/bbox. **Open sample data**: few openly downloadable full tilesets (vendor demo projects + [natowi/photogrammetry_datasets](https://github.com/natowi/photogrammetry_datasets) index; small fixtures in converters) — ContextCapture/ion **3D Tiles** samples are easier to get than raw OSGB. |
 | **Nexus** `.nxs/.nxz` | CNR-ISTI (3DHOP) · heritage/academic | mesh (+pts) | error-tagged **DAG of patches** | ✅ **HTTP Range by design** | `nexus3d`/`nexus.js` + Corto (MIT) | best heritage fit; DAG→tileset maps cleanly — see the full assessment below |
 | **SuperMap S3M** `.s3mb+.scp` | SuperMap · China GIS (open spec T/CAGIS) | mesh (+WebP/KTX2) | LOD pyramid under `.scp` | ✅ HTTP per LOD/tile | [s3m-spec](https://github.com/SuperMap/s3m-spec) + **official S3M↔3D Tiles tool** | low risk; converter already exists, but **adoption outside China is low** (SuperMap-internal; OGC 3D Tiles dominates internationally) — deprioritize. Samples referenced in [SuperMap/s3m-spec](https://github.com/SuperMap/s3m-spec) but no direct URLs. |
 
@@ -84,6 +85,10 @@ Deliberately out of scope so far, but worth showing: **DEM raster tiles → TIN 
 > Verify-before-relying caveats from the crawl: itowns' current 3MX support is unconfirmed against master;
 > Google 3D Tiles byte-range behavior is observed, not published; OSGB GE/bounding-volume metadata must be
 > *synthesized* (the format only implies it via PagedLOD ranges).
+>
+> OSGB, as built: the bounding volume needs no synthesis (each PagedLOD carries a sphere), the geometric error is
+> `2 · radius · 16 / range` from its pixel range, and open sample data turned out not to be scarce: eight datasets
+> on GitHub, 15 MB to 217 MB. See [the OSGB reference](/docs/references/mesh-generic/osgb).
 
 ### Nexus, the fuller assessment (MODERATE, postponed)
 
@@ -107,7 +112,8 @@ Node struct: `uint32 offset(×256)` + `uint16 nvert` + `uint16 nface` + `float e
 [nexus.js](https://github.com/cnr-isti-vclab/nexus/blob/master/html/js/nexus.js) ·
 [corto](https://github.com/cnr-isti-vclab/corto))
 
-**Implemented adapters:** Bentley 3MX and Bing Maps 3D are both fully implemented and live — see the
+**Implemented adapters:** OSGB is live (`/stream?format=osgb`, [reference](/docs/references/mesh-generic/osgb)).
+Bentley 3MX and Bing Maps 3D are both fully implemented and live — see the
 dedicated [Bentley 3MX and Bing Maps 3D](/docs/guide/planning/streaming-architecture-design-log) sections in the
 design log for the full implementation detail (format investigation, byte layouts, and the plans that
 preceded the build). Still not implemented: **Nexus** — see the assessment above.

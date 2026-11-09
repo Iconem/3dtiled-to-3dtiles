@@ -1,5 +1,5 @@
 {
   "title": "Mesh/Generic",
   "defaultOpen": true,
-  "pages": ["i3s-spec", "nexus-format"]
+  "pages": ["i3s", "osgb", "nexus"]
 }

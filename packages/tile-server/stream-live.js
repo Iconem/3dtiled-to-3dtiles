@@ -10,6 +10,7 @@
  *   GET /stream/tile/<key>.glb?url=<SRC>&format=<fmt>       → one range-built tile from that adapter
  *   GET /stream/subtrees/<key>.subtree?url=<SRC>&format=<fmt>  → implicit-tiling subtree (octree fmts)
  *   GET /stream/threemx/node/<path>.json?url=<SRC>          → 3MX lazy-fragment continuation (one .3mxb)
+ *   GET /stream/osgb/node/<path>.json?url=<SRC>             → OSGB lazy-fragment continuation (one .osgb)
  *   GET /stream/rad/subtree/<chunkIndex>.json?url=<SRC>     → RAD cache=none depth-cut continuation
  *
  * I3S has no persisted spatial index to make a lazy/partial hierarchy read meaningful (see its
@@ -42,6 +43,7 @@ import { lcc2Tileset, lcc2Tile, lcc2TileRe } from './lcc2-live.js';
 import { radTileset, radTile, radTileRe, radSubtree } from './rad-live.js';
 import { i3sTileset, i3sTile, i3sTileRe } from './i3s-live.js';
 import { threemxTileset, threemxTile, threemxTileRe, threemxNode } from './threemx-live.js';
+import { osgbTileset, osgbTile, osgbTileRe, osgbNode } from './osgb-live.js';
 import { geosplatsTileset, geosplatsTile, geosplatsTileRe } from './geosplats-live.js';
 import { handleSelfContained } from './3dtiles-self-contained.js';
 import { detectFormatByName, compressGlb, decompressGlb, applyPlacement, curvedParam, attributesSpec } from '../core/index.js';
@@ -92,6 +94,7 @@ const ADAPTERS = {
   rad:       { tileset: radTileset,       tile: radTile,       tileRe: radTileRe },
   i3s:       { tileset: i3sTileset,       tile: i3sTile,       tileRe: i3sTileRe },
   threemx:   { tileset: threemxTileset,   tile: threemxTile,   tileRe: threemxTileRe },
+  osgb:      { tileset: osgbTileset,      tile: osgbTile,      tileRe: osgbTileRe },
   geosplats: { tileset: geosplatsTileset, tile: geosplatsTile, tileRe: geosplatsTileRe },
 };
 // `vpc` streams too, without an adapter: a mosaic of COPC streams, built by /aggregate (see handleStream).
@@ -139,6 +142,23 @@ async function handleThreemxNode(u, res) {
   return true;
 }
 
+// OSGB spreads its hierarchy over its files as 3MX does (each .osgb names the file that refines it), so it has the
+// same lazy continuation: one finer .osgb → one fragment. &ge and &bs carry the error and the bounding sphere of the
+// tile that points here, which the fragment's root repeats (osgb-live.js).
+async function handleOsgbNode(u, res) {
+  const n = u.pathname.match(/^\/stream\/osgb\/node\/(.+)\.json$/);
+  if (!n) return false;
+  const url = u.searchParams.get('url');
+  if (!url) { res.writeHead(400, CORS); res.end('missing ?url=<source url>'); return true; }
+  const ge = u.searchParams.has('ge') ? Number(u.searchParams.get('ge')) : undefined;
+  const bs = u.searchParams.has('bs') ? u.searchParams.get('bs').split(',').map(Number) : undefined;
+  const frag = await osgbNode(url, decodeURIComponent(n[1]), { ge, bs, from: u.searchParams.get('from') || undefined });
+  if (!frag) { res.writeHead(404, CORS); res.end('no such node'); return true; }
+  res.writeHead(200, { 'Content-Type': 'application/json', ...CORS });
+  res.end(JSON.stringify(frag));
+  return true;
+}
+
 // RAD's cache=none continuation (see rad-live.js's file header + scanBoundedTopology comment) — a
 // depth-cut external-tileset reference, same idea as threemx's node continuation above but for a
 // format that DOES have real per-chunk bounds/topology once you bother reading them, just too many
@@ -159,6 +179,7 @@ async function handleRadSubtree(u, res) {
 export async function handleStream(req, res, u) {
   if (!u.pathname.startsWith('/stream/')) return false;
   if (await handleThreemxNode(u, res)) return true;
+  if (await handleOsgbNode(u, res)) return true;
   if (await handleRadSubtree(u, res)) return true;
   const url = u.searchParams.get('url');
   if (!url) { res.writeHead(400, CORS); res.end('missing ?url=<source url>'); return true; }

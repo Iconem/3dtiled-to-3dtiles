@@ -148,6 +148,7 @@ links and local-mirror notes per format.
 | **3D Tiles packages** `.3tz`/`.3dtiles` | 🟢 | passthrough — whatever the wrapped `tileset.json` declares | the wrapped tileset's own tile content, unchanged | (wrapped tileset's own) | N/A — O(1) offset/key lookup |
 | **I3S** (Esri) | 🟡 draft | node tree (always explicit), OBB/MBS LoD (SLPK or REST) | nodes/geometry/textures; PerAttributeArray or Draco | REPLACE | ✅ REST/range |
 | **3MX** (Bentley/Acute3D) | 🟢 | master `Scene.3mx` JSON → `3MXBO` binary node tree | OpenCTM mesh + JPEG baseColor → transcoded to glTF | REPLACE | ➖ per-file GET |
+| **OSGB** (OpenSceneGraph binary: ContextCapture, DJI Terra) | 🟢 live only | `osg::PagedLOD` nodes over one `.osgb` per level of each tile, `metadata.xml` for the SRS | `osg::Geometry` mesh + embedded JPEG → glTF | REPLACE | ➖ per-file GET |
 | **Bing Maps 3D** | 🟢 | quadtree of quadkeys (availability by HTTP probe) | `tf=3dv4` GLB — Draco + KTX2, ECEF in node matrix | REPLACE | ➖ per-file GET |
 | **Nexus** (CNR-ISTI) | 🟠 doc | multiresolution patch DAG / batched mesh | per-patch mesh (not splats) | — | ✅ |
 

@@ -127,7 +127,7 @@ const EPSG_DEFS = {
 
 /**
  * `EPSG:<n>` → a proj4 definition. Also derives the UTM families by rule: WGS84 (326xx north,
- * 327xx south) and ETRS89 (258xx). Anything else (WKT, a proj string) passes through unchanged.
+ * 327xx south) and ETRS89 (258xx), and CGCS2000 Gauss-Krüger (4491-4554). Anything else (WKT, a proj string) passes through unchanged.
  */
 export function crsDefinition(crs) {
   const m = /^\s*EPSG:(\d+)\s*$/i.exec(String(crs));
@@ -136,6 +136,14 @@ export function crsDefinition(crs) {
   if (EPSG_DEFS[code]) return EPSG_DEFS[code];
   if (code >= 32601 && code <= 32660) return `+proj=utm +zone=${code - 32600} +datum=WGS84 +units=m +no_defs`;
   if (code >= 32701 && code <= 32760) return `+proj=utm +zone=${code - 32700} +south +datum=WGS84 +units=m +no_defs`;
+  // CGCS2000 Gauss-Krüger, what Chinese photogrammetry exports (an OSGB metadata.xml) are in: the 6° zones 13-23
+  // (4491-4501) and the 3° zones 25-45 (4513-4533) carry the zone number in the easting, 4502-4512 and 4534-4554
+  // are named by central meridian.
+  const gk = (lon0, x0) => `+proj=tmerc +lat_0=0 +lon_0=${lon0} +k=1 +x_0=${x0} +y_0=0 +ellps=GRS80 +towgs84=0,0,0,0,0,0,0 +units=m +no_defs`;
+  if (code >= 4491 && code <= 4501) return gk((code - 4478) * 6 - 3, (code - 4478) * 1e6 + 5e5);
+  if (code >= 4502 && code <= 4512) return gk(75 + 6 * (code - 4502), 5e5);
+  if (code >= 4513 && code <= 4533) return gk(3 * (code - 4488), (code - 4488) * 1e6 + 5e5);
+  if (code >= 4534 && code <= 4554) return gk(75 + 3 * (code - 4534), 5e5);
   if (code >= 25828 && code <= 25838) return `+proj=utm +zone=${code - 25800} +ellps=GRS80 +towgs84=0,0,0,0,0,0,0 +units=m +no_defs`;
   return crs;                                   // EPSG:4326 / 3857 — proj4 knows them already
 }

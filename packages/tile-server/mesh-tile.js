@@ -1,6 +1,6 @@
 /**
- * mesh-tile.js — the CPU half of a live mesh tile (I3S, 3MX): fetched bytes → GLB, with no network and no cached
- * context, so that it runs the same on the server's thread (i3s-live.js, threemx-live.js) and on a tile worker
+ * mesh-tile.js — the CPU half of a live mesh tile (I3S, 3MX, OSGB): fetched bytes → GLB, with no network and no cached
+ * context, so that it runs the same on the server's thread (i3s-live.js, threemx-live.js, osgb-live.js) and on a tile worker
  * (tile-tasks-mesh.js, behind TILED_WORKERS).
  */
 import { Document, NodeIO } from '@gltf-transform/core';
@@ -8,6 +8,8 @@ import { decodeDefaultGeometry, geodeticToEcef } from '../i3s-to-3dtiles/src/i3s
 import { decodeLepccRgb } from '../i3s-to-3dtiles/src/lepccDecode.js';
 import { buildGlb } from '../i3s-to-3dtiles/src/glbBuild.js';
 import { decodeCTM } from '../threemx-to-3dtiles/src/ctm-decode.js';
+import { parseOsgb, osgbUnits } from '../osgb-to-3dtiles/src/osgb-reader.js';
+import { osgbTexture } from '../osgb-to-3dtiles/src/osgb-image.js';
 
 /**
  * One I3S node's geometry buffer → GLB bytes, or null when it holds no vertices.
@@ -156,3 +158,66 @@ export async function threemxNodeGlb(bytes, nodeIdx) {
   return new NodeIO().writeBinary(doc);
 }
 
+
+/**
+ * One unit of an .osgb file (a PagedLOD's own mesh, or the meshes outside any: see osgbUnits) → GLB, or null when it
+ * holds no triangles. One glTF primitive per osg::Geometry, its texture embedded: the JPEG/PNG file the exporter put in
+ * the .osgb passes through untouched, DDS/S3TC and raw pixels are re-encoded (osgb-image.js).
+ */
+export async function osgbUnitGlb(bytes, unitIdx) {
+  const unit = osgbUnits(parseOsgb(bytes))[unitIdx];
+  if (!unit || !unit.meshes.length) return null;
+
+  const doc = new Document();
+  doc.getRoot().getAsset().generator = 'osgb-to-3dtiles';
+  const buffer = doc.createBuffer();
+  const mesh = doc.createMesh();
+  const materials = new Map();                              // osg::Image → glTF material (a texture shared by meshes is written once)
+  const plain = () => doc.createMaterial().setMetallicFactor(0).setRoughnessFactor(1);
+  const toLinear = (c) => (c <= 0.04045 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4);   // an OSG colour is a display value, a glTF factor is linear
+
+  for (const g of unit.meshes) {
+    const n = g.positions.length / 3;
+    // OSG is Z-up, glTF Y-up: (x, y, z) → (x, z, −y), which a 3D Tiles client's own Y-up → Z-up rotation undoes, so the
+    // mesh lands back in the frame the tile's bounding volume and the root transform are written in.
+    const pos = new Float32Array(n * 3);
+    for (let i = 0; i < pos.length; i += 3) { pos[i] = g.positions[i]; pos[i + 1] = g.positions[i + 2]; pos[i + 2] = -g.positions[i + 1]; }
+    const prim = doc.createPrimitive()
+      .setAttribute('POSITION', doc.createAccessor().setType('VEC3').setArray(pos).setBuffer(buffer))
+      .setIndices(doc.createAccessor().setType('SCALAR').setArray(g.indices).setBuffer(buffer));
+    if (g.normals) {
+      const nor = new Float32Array(n * 3);
+      for (let i = 0; i < nor.length; i += 3) {
+        const x = g.normals[i], y = g.normals[i + 2], z = -g.normals[i + 1], l = Math.hypot(x, y, z) || 1;
+        nor[i] = x / l; nor[i + 1] = y / l; nor[i + 2] = z / l;
+      }
+      if (nor.some((v) => v !== 0)) prim.setAttribute('NORMAL', doc.createAccessor().setType('VEC3').setArray(nor).setBuffer(buffer));
+    }
+    if (g.colors) prim.setAttribute('COLOR_0', doc.createAccessor().setType('VEC4').setArray(g.colors).setNormalized(true).setBuffer(buffer));
+
+    let material = g.image && g.uvs ? materials.get(g.image) : null;
+    if (g.image && g.uvs && material === undefined) {
+      const tex = osgbTexture(g.image);
+      material = tex ? plain().setBaseColorTexture(doc.createTexture().setImage(new Uint8Array(tex.bytes.buffer, tex.bytes.byteOffset, tex.bytes.byteLength)).setMimeType(tex.mimeType)) : null;
+      if (tex?.transcoded && tex.mimeType === 'image/png') material.setAlphaMode('MASK');   // re-encoded as PNG only when a pixel is transparent
+      materials.set(g.image, material);
+    }
+    if (material) {
+      // OpenGL's v = 0 is the bottom row of the picture, glTF's the top one
+      const uv = new Float32Array(n * 2);
+      for (let k = 0; k < uv.length; k += 2) { uv[k] = g.uvs[k]; uv[k + 1] = 1 - g.uvs[k + 1]; }
+      prim.setAttribute('TEXCOORD_0', doc.createAccessor().setType('VEC2').setArray(uv).setBuffer(buffer));
+    }
+    // An explicit matte material in every case: glTF's default one is fully metallic and renders black (see glbBuild.js).
+    // An untextured mesh takes the diffuse colour of its OSG material (ContextCapture's grey for faces no photo saw).
+    if (!material) {
+      const d = g.diffuse && g.diffuse.some((v) => v !== 1) ? g.diffuse : null, key = d ? d.join() : 'plain';
+      material = materials.get(key);
+      if (!material) materials.set(key, material = d ? plain().setBaseColorFactor([toLinear(d[0]), toLinear(d[1]), toLinear(d[2]), d[3]]) : plain());
+    }
+    prim.setMaterial(material);
+    mesh.addPrimitive(prim);
+  }
+  doc.createScene().addChild(doc.createNode().setMesh(mesh));
+  return new NodeIO().writeBinary(doc);
+}

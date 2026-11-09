@@ -5,7 +5,7 @@ import { Input } from '@/components/ui/input';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { useUrlState } from '@/state/urlState';
 import { useViewerStore } from '@/state/store';
-import { PSEUDO_FORMATS, FORMAT_PILL_ORDER, pillMeta, fmtMeta, canCentroids, MW } from '@/lib/formats';
+import { PSEUDO_FORMATS, FORMAT_PILL_ORDER, STREAM_ONLY_FORMATS, pillMeta, fmtMeta, canCentroids, MW } from '@/lib/formats';
 import { buildMiddlewareUrl, currentPresets, type MiddlewareParams, type Preset } from '@/lib/middleware';
 import type { ViewerHandle } from '@/lib/viewer-handle';
 import { formatPose, parsePose, type CameraPose } from '@/lib/cameraPose';
@@ -404,8 +404,8 @@ export default function TopBar({ activeHandleRef }: { activeHandleRef: React.Ref
 
         {url.mode === 'stream' && (
           <PillGroup tint="amber">
-            {/* mosaics: no cache=all (no per-dataset meaning), and hierarchy means "on refine" */}
-            {CACHE_PILLS.filter(([v]) => url.format !== 'aggregate' || v !== 'all').map(([v, l]) => (
+            {/* mosaics: no cache=all (no per-dataset meaning), and hierarchy means "on refine"; nor for a format with no offline converter */}
+            {CACHE_PILLS.filter(([v]) => (url.format !== 'aggregate' && !STREAM_ONLY_FORMATS.has(url.format)) || v !== 'all').map(([v, l]) => (
               <Pill key={v} tint="amber" active={url.cache === v} onClick={() => setUrl({ cache: v as any })}
                 title={(url.format === 'aggregate' ? CACHE_TIPS_MOSAIC : CACHE_TIPS)[v]}>{l}</Pill>
             ))}
