@@ -1,6 +1,6 @@
 // Ported as pure functions from viewer.html's buildMiddlewareUrl/streamParams/assetUrl/srcUrl
 // (lines ~694-797) — same algorithms, but read an explicit params object instead of globals.
-import { MW, SDATA, FORMATS, DIRECT, TOOLS_DATASETS, PSEUDO_FORMATS, fmtMeta, canCentroids, type Asset, type AssetType, type FormatMeta } from './formats';
+import { MW, SDATA, FORMATS, DIRECT, TOOLS_DATASETS, PSEUDO_FORMATS, STREAM_ONLY_FORMATS, fmtMeta, canCentroids, type Asset, type AssetType, type FormatMeta } from './formats';
 import { GOOGLE_MAPS_API_KEY } from './google';
 
 export type TilesetOp = 'implicit-to-explicit' | 'upgrade' | '';
@@ -33,8 +33,8 @@ export function buildMiddlewareUrl(rawSrc: string, p: MiddlewareParams, fOverrid
   const f = fOverride ?? fmtMeta(p.selectedFormat);
   const fmt = f ? f.fmt : p.selectedFormat;
   const enc = encodeURIComponent(rawSrc);
-  if (p.cacheScope === 'all') return `${MW}/convert/tileset.json?format=${fmt}&url=${enc}${streamParams(f, p)}`;
-  let q = `&cache=${p.cacheScope}`;
+  if (p.cacheScope === 'all' && !STREAM_ONLY_FORMATS.has(fmt)) return `${MW}/convert/tileset.json?format=${fmt}&url=${enc}${streamParams(f, p)}`;
+  let q = `&cache=${p.cacheScope === 'all' ? 'hierarchy' : p.cacheScope}`;
   if (p.cacheScope === 'none') q += `&prefetch=${p.prefetchN}`;
   if (p.transformOp) q += `&transform=${p.transformOp}`;
   return `${MW}/stream/tileset.json?format=${fmt}&url=${enc}${q}${streamParams(f, p)}`;

@@ -147,7 +147,7 @@ face-handle resize yet — translate only).
 > upstream sources are shared between the two, but this section's job is the pill → source mapping.
 
 The viewer's top-bar preset pills (COPC, Potree, SOG, LCC, GeoSplats, RAD, 3D Tiles, Packages, I3S,
-3MX, Bing) each carry one or more named, clickable datasets, defined in `apps/viewer/src/lib/formats.ts`.
+3MX, OSGB, Bing) each carry one or more named, clickable datasets, defined in `apps/viewer/src/lib/formats.ts`.
 The sections below document exactly what each one is and where it comes from, pulled directly from that file.
 
 ### COPC ☁
@@ -221,6 +221,19 @@ Esri Indexed 3D Scene Layer (mesh and point-cloud layers), streamed live via `/s
 
 See [`i3s-spec.md`](/docs/references/mesh-generic/i3s-spec) and the I3S section of [CLI usage](/docs/guide/cli-usage)
 for the LEPCC decode / texture-embedding details behind these.
+
+### OSGB 🧊
+
+OpenSceneGraph binary tiled meshes, streamed through `/stream?format=osgb` (no offline converter: the cache pill
+has no "all"). Four folders of public GitHub repositories under an MIT licence, read through
+`raw.githubusercontent.com`. See the [OSGB reference](/docs/references/mesh-generic/osgb).
+
+| Pill | Source |
+|------|--------|
+| **Weinan** | `xyxfa/UnityOSGB-main` · `Assets/StreamingAssets/weinan/metadata.xml`: ContextCapture layout, 30 top tiles, 2 641 files, 183 MB, `EPSG:4545` |
+| **Dayanta pagoda, Xi'an** | `Sogrey/Cesium-start-Example` · `SampleData/models/dayanta_osgb/osgb/metadata.xml`: 63 top tiles, 15 MB, a copy cut at level 17, `ENU:34.2196,108.9594` |
+| **Hong Kong Central, tile 21-25** | `fafa1899/GISBasic` · `Data/Model/hongkong/tile_21_25/Data/Model/Model.osgb`: a Lands Department mesh converted with OSG tools, 343 files, 217 MB, `EPSG:2326` |
+| **One tile to L22** | `xarray/generic-osgb` · `examples/data/Tile_1/Tile_1.osgb`: one ContextCapture tile, 9 levels, 32 MB |
 
 ### 3D Tiles ◈ (DIRECT presets)
 

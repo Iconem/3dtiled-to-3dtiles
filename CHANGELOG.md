@@ -5,6 +5,42 @@ Format loosely follows [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+### Added — 2026-11-09 (OSGB: OpenSceneGraph tiled meshes, streamed)
+- **A new input format, OSGB**, what ContextCapture / iTwin Capture, DJI Terra and Smart3D write as an
+  "OpenSceneGraph" tiled model: `GET /stream/tileset.json?format=osgb&url=<…/metadata.xml | folder | root .osgb>`,
+  from an http(s) URL or a local folder. Each `.osgb` is one level of one tile and names the file that refines it,
+  so the tree is served as 3MX's is, one lazy external-tileset fragment per file (`/stream/osgb/node/…`). Detected
+  from a URL ending in `metadata.xml` or `.osgb`. Reference:
+  [OSGB](apps/docs/content/docs/references/mesh-generic/osgb.mdx).
+- **A reader of OpenSceneGraph's binary scene files in JavaScript** (`packages/osgb-to-3dtiles`, no OSG library, no
+  native code), written from the layout of the format, which has no specification: file versions 80 (OSG 3.0) to
+  161 (3.6), with or without block sizes, zlib bodies, arrays inline or as objects. Checked on **3 918 real files of
+  8 datasets** (14.7 million vertices, versions 80, 91, 97 and 131) and 4 generic OSG models: every file reads in
+  full.
+- **Geometric error from the PagedLOD's pixel range**: `2 · radius · 16 / range`, which makes a 3D Tiles client at
+  its default 16 px switch levels at the distance OpenSceneGraph does. Bounding volumes are OSG's own spheres. The
+  error never grows from a tile to its children on any dataset (7 600 tiles checked), and every mesh is inside its
+  tile's sphere.
+- **Georeference from `metadata.xml`**: `ENU:lat,lon`, a projected `EPSG:n` with its origin, or `EPSG:4326` with a
+  longitude/latitude origin (the form of the DJI Terra layout). core/geo.js now derives the CGCS2000 Gauss-Krüger
+  zones (EPSG:4491 to 4554) most Chinese exports are in; a code it does not know is asked from epsg.io once.
+  Dayanta lands on the Giant Wild Goose Pagoda in Xi'an (34.2196° N, 108.9590° E), the Hong Kong tile on Central.
+- **Textures**: the JPEG embedded in every photogrammetry export passes through untouched (6 867 of them in the
+  eight datasets). DDS files and raw S3TC blocks (DXT1, 3, 5) and raw RGB(A) are decoded and re-encoded in
+  JavaScript; an untextured mesh keeps the grey of its OSG material.
+- **Top tiles without a directory listing**: a local folder is listed, a GitHub raw URL through one tree API call,
+  an HTML index is read, and otherwise the exporters' names are probed (`Data/Tile_+xxx_+yyy/…` outwards from the
+  tiles found, `Block/Block.osgb`, `Data/Model/Model.osgb`). A finer file a copy lacks is answered with its
+  parent's mesh, not a hole: Dayanta's public copy stops at level 17.
+- **Measured**: a tile is built in 1.3 to 4.2 ms and a fragment in 0.7 to 1.9 ms from disk. Weinan (2 641 files,
+  183 MB on GitHub) opens in 2.0 to 3.1 s, the read of its 30 root files, and its whole tree is 3 701 tiles, 199 MB
+  of GLB and 4.4 million triangles. `3dtiled export` of a streamed OSGB tileset writes it as static 3D Tiles.
+- **Viewer**: an OSGB pill with four public datasets (Weinan, Dayanta, a Hong Kong tile, a one-tile sample);
+  23 tests, on files written by a small OSGB encoder so that none needs the network.
+- **Not there**: no offline converter (`/convert`); `&transform=` does not reach the tiles; classes outside the
+  mesh ones (`ProxyNode`, `Billboard`, `osgSim`…) stop the read of a file that has no block sizes; a zlib body, a
+  DDS file and OSG 3.6 files were not found in any real dataset and are covered by synthetic files only.
+
 ### Added — 2026-11-08 (the largest public streamed splats, in the library)
 - **Streamed SOG from SuperSplat**: Andrii Shramko's **Jastrzębia Góra**, a 4 × 2 km scan of 105.9 M splats in 8 LOD
   levels (CC BY 4.0, [221ee167](https://superspl.at/scene/221ee167); its root tileset is 90 MB and 284 165 tiles) and

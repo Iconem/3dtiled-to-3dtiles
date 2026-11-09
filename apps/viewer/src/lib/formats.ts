@@ -187,6 +187,16 @@ export const FORMATS: FormatMeta[] = [
     { id: 'arcgis-pts-svc', label: 'ArcGIS Moro Bay LiDAR SceneServer', type: 'pointcloud', src: 'https://tiles.arcgis.com/tiles/z2tnIkrLQ2BRzr6P/arcgis/rest/services/Moro_Bay_LiDAR/SceneServer' },
     { id: 'arcgis-usgsnyc-svc', label: 'ArcGIS USGSNYC 2014 LiDAR SceneServer', type: 'pointcloud', src: 'https://tiles.arcgis.com/tiles/z2tnIkrLQ2BRzr6P/arcgis/rest/services/USGSNYC_2014_LiDAR/SceneServer' },
   ] },
+  // OSGB (OpenSceneGraph binary tiled meshes: ContextCapture, DJI Terra, …), streamed only (no offline converter, so no
+  // `out`). `src` is the dataset's metadata.xml, or its root .osgb where the folder has a single one. All four are
+  // folders of public GitHub repositories under an MIT licence, read through raw.githubusercontent.com: the server
+  // finds the top tiles with one GitHub tree API call, or by their names when that call is refused.
+  { fmt: 'osgb', icon: '🧊', label: 'OSGB', type: 'mesh', octree: false, stream: true, assets: [
+    { id: 'weinan', label: 'Weinan (ContextCapture, 30 tiles, 183 MB)', src: 'https://raw.githubusercontent.com/xyxfa/UnityOSGB-main/main/Assets/StreamingAssets/weinan/metadata.xml' },
+    { id: 'dayanta', label: 'Dayanta pagoda, Xi’an (ContextCapture, 63 tiles, cut at L17)', src: 'https://raw.githubusercontent.com/Sogrey/Cesium-start-Example/master/SampleData/models/dayanta_osgb/osgb/metadata.xml' },
+    { id: 'hongkong', label: 'Hong Kong Central, tile 21-25 (LandsD mesh, OSG 3.2, 217 MB)', src: 'https://raw.githubusercontent.com/fafa1899/GISBasic/main/Data/Model/hongkong/tile_21_25/Data/Model/Model.osgb' },
+    { id: 'generic', label: 'One tile to L22 (ContextCapture, 32 MB)', src: 'https://raw.githubusercontent.com/xarray/generic-osgb/master/examples/data/Tile_1/Tile_1.osgb' },
+  ] },
 ];
 
 export interface DirectAsset { id: string; icon: string; label: string; type: AssetType; url: string }
@@ -236,6 +246,7 @@ export const FORMAT_PILL_ORDER: { id: string; group: number }[] = [
   { id: 'packages', group: 2 },
   { id: 'i3s', group: 2 },
   { id: 'threemx', group: 2 },
+  { id: 'osgb', group: 2 },
   { id: 'bing', group: 2 },
   { id: 'google', group: 2 },
   { id: 'aggregate', group: 3 },
@@ -250,6 +261,8 @@ export function pillMeta(id: string): { icon: string; label: string } | null {
 }
 
 export const fmtMeta = (fmt: string) => FORMATS.find((f) => f.fmt === fmt);
+/** Formats with a live /stream adapter and no offline converter: cache=all (/convert) has nothing to offer them. */
+export const STREAM_ONLY_FORMATS = new Set(['osgb']);
 export const canCentroids = (fmt: string) => SPLAT_FORMATS.has(fmt);
 
 export const SNIPPETS: Record<string, { title: string; code: string; note: string }> = {

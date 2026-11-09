@@ -1,7 +1,8 @@
 /**
  * 3dtiles-convert-core — input format detection. Sniffs a path (file or directory) → format id.
  * Cheap checks: index filenames for directory formats, magic bytes / extension for file formats.
- * Returns one of: 'rad' | 'sog' | 'lcc' | 'copc' | 'potree' | 'i3s' | null.
+ * Returns one of: 'rad' | 'sog' | 'lcc' | 'copc' | 'potree' | 'i3s' | 'osgb' | null ('osgb' and 'threemx' have a
+ * live /stream adapter only, no offline converter).
  */
 import fs from 'fs/promises';
 import path from 'path';
@@ -25,6 +26,8 @@ export function detectFormatByName(name) {
   if (l.endsWith('3dscenelayer.json') || l.endsWith('3dscenelayer.json.gz')) return 'i3s';
   if (l.endsWith('.3tz') || l.endsWith('.3dtiles')) return 'package';
   if (l.endsWith('.3mx') || l.endsWith('.3mxb')) return 'threemx';
+  // OSGB: one .osgb, or the metadata.xml at the top of a ContextCapture / DJI Terra export (ModelMetadata: SRS + SRSOrigin)
+  if (l.endsWith('.osgb') || l === 'metadata.xml' || l.endsWith('/metadata.xml')) return 'osgb';
   return null;
 }
 

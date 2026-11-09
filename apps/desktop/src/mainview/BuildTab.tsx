@@ -28,7 +28,7 @@ export const WORKERS_TITLE = 'Decode and encode tiles on worker threads: about 3
 const FORMATS = [
   { value: '', label: 'auto-detect' }, { value: 'copc', label: 'COPC' }, { value: 'potree', label: 'Potree' },
   { value: 'sog', label: 'SOG (streamed)' }, { value: 'lcc', label: 'LCC' }, { value: 'rad', label: 'RAD' },
-  { value: 'i3s', label: 'I3S' }, { value: 'threemx', label: '3MX' }, { value: 'geosplats', label: 'GeoSplats' },
+  { value: 'i3s', label: 'I3S' }, { value: 'threemx', label: '3MX' }, { value: 'osgb', label: 'OSGB' }, { value: 'geosplats', label: 'GeoSplats' },
 ];
 const CACHES = [
   { value: 'none', label: 'cache=none — stream, nothing stored' },

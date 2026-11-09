@@ -1,0 +1,259 @@
+---
+title: "OSGB — OpenSceneGraph binary tiled meshes"
+description: "What photogrammetry software writes as an OpenSceneGraph tiled model (ContextCapture, DJI Terra, Smart3D): the file layout, the datasets it was read on, and how it maps to 3D Tiles"
+---
+
+<InlineTOC items={toc} />
+
+> Status: live `/stream` adapter (`packages/tile-server/osgb-live.js`), reader in
+> `packages/osgb-to-3dtiles/` (pure JavaScript, no OpenSceneGraph). No offline converter; `3dtiled export` of the
+> streamed tileset writes a static 3D Tiles folder.
+> Read in full on 8 real datasets and 4 generic OSG models, 3 918 files, file versions 80 to 131. Not met on real
+> data, and covered by synthetic files only: a zlib body, a DDS file inside the `.osgb`, files of OSG 3.6 (version
+> 149 and later).
+
+OSGB is the tiled mesh format of the Chinese oblique-photogrammetry world and one of the standard exports of
+Bentley ContextCapture / iTwin Capture, DJI Terra, Smart3D, Skyline PhotoMesh and Metashape. It is not a format of
+its own: it is [OpenSceneGraph](https://github.com/openscenegraph/OpenSceneGraph)'s native binary scene file, used
+with one convention, a tree of `osg::PagedLOD` nodes spread over thousands of small files.
+
+```
+GET /stream/tileset.json?format=osgb&url=<…/metadata.xml | dataset folder | one root .osgb>
+GET /stream/osgb/node/<file>.json?url=<same>          lazy fragment for a finer .osgb
+GET /stream/tile/<file>__<unit>.glb?url=<same>&format=osgb
+```
+
+`url` is an http(s) URL or a local path. `format=osgb` is detected from a URL ending in `metadata.xml` or `.osgb`.
+
+## A dataset
+
+```
+metadata.xml                                  SRS and SRSOrigin
+Data/Tile_+000_+000/Tile_+000_+000.osgb       a top tile, coarsest level
+Data/Tile_+000_+000/Tile_+000_+000_L16_0.osgb its next level
+Data/Tile_+000_+000/Tile_+000_+000_L17_00.osgb
+Data/Tile_+001_+000/…
+```
+
+Each file is one level of detail of one part of one tile. It holds a few `osg::PagedLOD` nodes, and each of them
+holds its own coarse textured mesh (an `osg::Geode` with `osg::Geometry` drawables) and the **file name** of what
+refines it, relative to the file itself, with the range at which that file takes over and a bounding sphere. The
+last level holds meshes only. Nothing indexes the whole: the hierarchy is discovered file by file, as in 3MX.
+
+| Layout | Seen in | Root files |
+|---|---|---|
+| `Data/Tile_+xxx_+yyy/Tile_+xxx_+yyy.osgb` | ContextCapture, Smart3D | one per grid tile; the grid need not start at 0 |
+| `Block/Block.osgb` + `Block/Block_L15_1.osgb`, and a `Block.osgb` index above | DJI Terra (`terra_osgbs`) | the block; the index only repeats it |
+| `Data/Model/Model.osgb` + `tile_1_0_16_tex_children.osgb` | a mesh converted with OpenSceneGraph tools (Hong Kong LandsD) | one |
+| `Tile_1/Tile_1.osgb` with no `Data` folder | a ContextCapture copy | one per folder |
+
+## The file format
+
+There is no specification. What follows was learned from the OpenSceneGraph sources and checked against the
+files; `packages/osgb-to-3dtiles/src/osgb-reader.js` is written from this description, not from that code.
+
+- **Header.** `0x6C910EA1`, `0x1AFB4545` (little-endian), type (1 = scene), **version**, attributes, then a string
+  naming the compressor: `0`, or `zlib` when everything after it is one gzip/zlib stream. The version is the "SO
+  version" of the OpenSceneGraph that wrote the file, not its release number: 80 is OSG 3.0, 91 is 3.2, 131 a 3.5
+  development build, 161 is 3.6.
+- **Scalars** are little-endian, a boolean is one byte, a string is an `int32` length and its bytes.
+- **Brackets.** Attribute bit 4 says the file has "binary brackets": every `{` of OSG's text format is a block
+  size here (`int32`, `int64` from version 149), so a reader can step over any object it does not understand.
+  Files written by ContextCapture (attributes 0) have none: every class must be known, or the read fails.
+- **Objects.** A class name, `{`, a `uint32` id, then, unless that id was read before (a shared object), the
+  fields of each class the object derives from, base first, in the order the class declares them. For a
+  `PagedLOD`: `osg::Object`, `osg::Node`, `osg::LOD`, `osg::PagedLOD` (not `osg::Group`: a PagedLOD writes its own
+  children, the ones that are not in another file).
+- **Fields.** A plain value is its bytes. An object field is a boolean "present" and the object. A "user" field is
+  a boolean and a layout of its own, lists being a count, `{`, the items, `}`.
+- **Versions.** Classes gained and lost fields: `osg::Object`'s user data became a container at 77, textures
+  gained a swizzle at 98, `osg::Drawable` became a node at 154. Each field carries the versions that write it.
+- **Arrays and primitive sets** are a special case before version 112 (`id`, type code, count, `{`, data, `}`, and
+  for a primitive set: type code, GL mode, indices) and ordinary objects from 112 (`osg::Vec3Array`,
+  `osg::DrawElementsUInt`).
+- **Images** have no bracket: id, file name, write hint, then either the **bytes of an image file** (what every
+  photogrammetry export holds: a JPEG) or raw pixels with their OpenGL formats (S3TC blocks in models "optimised
+  for the GPU").
+
+Classes read: `Group`, `PagedLOD`, `LOD`, `Geode`, `Geometry`, `MatrixTransform`, `StateSet`, `Material`,
+`Texture2D`, `Image`, `TexEnv`, `CullFace`, `BlendFunc`, `ShadeModel`, `DefaultUserDataContainer`, the 32 array
+types and `DrawArrays`, `DrawArrayLengths`, `DrawElementsUByte/UShort/UInt`. Triangles, strips, fans, quads and
+quad strips become indexed triangles; points and lines are dropped.
+
+### Open references
+
+| Reference | Used for |
+|---|---|
+| [OpenSceneGraph](https://github.com/openscenegraph/OpenSceneGraph) `src/osgDB/InputStream.cpp`, `src/osgPlugins/osg/BinaryStreamOperator.h`, `src/osgWrappers/serializers/osg/*.cpp`, `include/osgDB/Serializer` (OSGPL, an LGPL with exceptions) | the layout: read, not copied |
+| [`osgb`](https://www.npmjs.com/package/osgb) / `osg-serializer-js` on npm (JavaScript, unmaintained, versions up to about 100) | its four sample models, as test files |
+| [fanvanzh/3dtiles](https://github.com/fanvanzh/3dtiles) (`osgb23dtile`, links the OpenSceneGraph library) | the conventions of an offline converter: sphere to box, `metadata.xml` |
+| [flywave/go-osg](https://github.com/flywave/go-osg) (a Go port of the serializers) | not used |
+
+## Datasets it was read on
+
+All found on GitHub, read from `raw.githubusercontent.com`. None of the files names the software that wrote it:
+the producer is told from the layout, the version and the texture names.
+
+| Dataset | Source | Producer (as far as the files tell) | Files, size | Version | Georeference |
+|---|---|---|---|---|---|
+| Dayanta pagoda, Xi'an | `Sogrey/Cesium-start-Example` `SampleData/models/dayanta_osgb/osgb` (MIT repo) | ContextCapture layout | 189, 15.2 MB, 63 top tiles, cut at L17 | 91 | `ENU:34.2196,108.9594` |
+| Weinan | `xyxfa/UnityOSGB-main` `Assets/StreamingAssets/weinan` (MIT repo) | ContextCapture layout | 2 641, 183.4 MB, 30 top tiles | 91 | `EPSG:4545` |
+| One tile, L14 to L22 | `xarray/generic-osgb` `examples/data` (MIT repo) | ContextCapture layout, no `Data` folder | 158, 32.0 MB | 91 | `ENU:48.21221,124.61605` |
+| One tile | `channyHuang/OsgObjects` `data/tiles` (MIT repo) | ContextCapture layout | 40, 9.2 MB | 91 | `ENU:22.64785,113.06277` |
+| One tile, Wuhan | `fafa1899/GISBasic` `Data/Model/Tile_+005_+004` (MIT repo) | Smart3D-era layout (`_t0.jpg` textures) | 243, 48.0 MB | 80 | none (a `.prj` only) |
+| Hong Kong, tile 21-25 | `fafa1899/GISBasic` `Data/Model/hongkong/tile_21_25` (MIT repo, Lands Department mesh) | converted from OBJ with OSG tools; one root under a `MatrixTransform` | 343, 216.6 MB | 97 | `EPSG:2326` |
+| A "Block" export | `wutonggaoqiezhi/learning-cases` `osgb/data/osgbs` (no licence stated) | DJI Terra layout (`Block.osgb`, `Block_L15_1.osgb`); block sizes | 298, 216.0 MB | 131 | `EPSG:4326`, origin in longitude, latitude, height |
+| Two files of a "BlockX" export | `XEMPZ/GeoRefine` `sample_data` (MIT repo) | same family as above | 2, 44 KB | 131 | `EPSG:4547` |
+| `cessna`, `grass1`, `streetlight`, `tree4` | npm `osgb@1.0.1` `Samples/` | OpenSceneGraph's own sample models | 4, 1.2 MB | 95, 100 | none |
+
+Every file of every dataset parses with nothing skipped: 3 918 files, 14.7 million vertices. All bodies are
+uncompressed and every texture of the eight photogrammetry datasets is an embedded JPEG file, 6 867 of them. The
+generic models bring the other image forms: raw DXT5 with nine mipmap levels, raw RGB and raw RGBA.
+
+### What differs between exporters
+
+| | ContextCapture (versions 80, 91) | "Block" exports, DJI Terra layout (version 131) |
+|---|---|---|
+| Block sizes | none | yes: unknown classes can be skipped |
+| Arrays | inline, by type code | objects (`osg::Vec3Array`) |
+| Root of a file | a `PagedLOD`, or a `Group` of them | always a `Group` |
+| Range of the last entry | `1e30` | `3.4e38` (`FLT_MAX`) |
+| Levels | one file per level and quadrant: the error halves at each level | adaptive: one file holds PagedLODs of several levels |
+| Untextured faces | a second, grey `Geometry` (diffuse 0.5) with no UVs | none seen |
+| User data | none | a base64 token in each Geode's descriptions |
+| `metadata.xml` | `ENU:lat,lon`, or `EPSG:n` with a projected origin | `EPSG:4326` with the origin as longitude, latitude, height (a local ENU frame there), or a projected `EPSG:n` |
+| Range mode | pixel size on screen | pixel size on screen |
+
+## Mapping to 3D Tiles
+
+One tile per PagedLOD of a file (a "unit"), plus one for the meshes a file holds outside any PagedLOD:
+
+- **Bounding volume**: the sphere OSG has for the PagedLOD (its user-defined centre and radius), which is what
+  OSG culls and switches on; a computed sphere for bare meshes.
+- **Content**: the unit's own mesh, as a GLB.
+- **Children**: the finer file, as an **external tileset** served by `/stream/osgb/node/…`. That tile repeats the
+  sphere and the error of its parent, and the fragment's root repeats them too, so that a finer file is refined
+  into exactly when its parent is.
+- `refine: REPLACE`.
+
+The root tileset reads every top tile's root file (30 files and 3.1 s for Weinan over the network, 80 ms for the
+63 of Dayanta from disk) and groups them spatially, 16 to a group. Nothing below is read until a client asks.
+
+### Geometric error
+
+Every export seen uses `PIXEL_SIZE_ON_SCREEN`: the finer file takes over when the bounding sphere is `range`
+pixels across. A 3D Tiles client refines when `geometricError · K / distance` exceeds its threshold, with
+`K = viewportHeight / (2 · tan(fov / 2))`, and the sphere is `2 · radius · K / distance` pixels across. Both
+switch at the same distance when
+
+```
+geometricError = 2 · radius · 16 / range        (16 px, the default maximumScreenSpaceError)
+```
+
+In `DISTANCE_FROM_EYE_POINT` mode (none seen), the finer file takes over under `range` metres:
+`geometricError = 16 · range / K` with K for a 1080 px viewport and a 60° field of view. A unit with no finer file
+has error 0. A range of 0 px ("always refine", DJI Terra's index file) counts as 1 px.
+
+On ContextCapture data the range doubles at each level and the error halves: 32, 16, 8 m from the top of Dayanta
+and Weinan, 64 m from the top of the one-tile samples, down to 0.25 m above the last level. On every dataset the
+error never increases from a tile to its children (7 600 tiles checked).
+
+### Frames and georeference
+
+OSG is Z-up and so is a tileset: spheres are written as read. Tile content is glTF, Y-up: a vertex is written
+`(x, z, −y)`, which the client's own Y-up to Z-up rotation undoes. UVs are flipped (`v → 1 − v`): OpenGL's `v = 0`
+is the bottom of the picture, glTF's the top.
+
+`metadata.xml` gives the root transform:
+
+| `<SRS>` | Root transform |
+|---|---|
+| `ENU:lat,lon` | east-north-up frame at that point (note the order), offset by `SRSOrigin` in metres |
+| `EPSG:n`, projected | `georefFromCrs` of core/geo.js at `SRSOrigin`: the CRS's own x/y axes measured there, not a plain ENU frame |
+| `EPSG:4326` (or another geographic CRS) | ENU frame at `SRSOrigin` = longitude, latitude, height |
+| `EPSG:4978` | translation by `SRSOrigin`: the model is in ECEF |
+| a WKT or proj string | as a projected CRS |
+| none, or no `metadata.xml` | no transform; `&lon=&lat=[&alt=][&heading=]` places the dataset |
+
+EPSG codes are resolved in three steps: the table of core/geo.js, which now derives the CGCS2000 Gauss-Krüger
+zones (EPSG:4491 to 4554) that most Chinese exports use; proj4's own; then `epsg.io/<code>.proj4`, asked once per
+process (Hong Kong's EPSG:2326 comes that way). A code with no definition serves the dataset without a transform.
+
+| Dataset | Root centre | Site |
+|---|---|---|
+| Dayanta | 34.21962° N, 108.95902° E, 431 m | Giant Wild Goose Pagoda, Xi'an: 34.2197° N, 108.9594° E |
+| Hong Kong 21-25 | 22.27784° N, 114.16104° E | Central, Hong Kong Island |
+| Weinan | 34.41829° N, 109.18301° E | the Wei plain between Xi'an and Weinan |
+| "Block" | 30.49360° N, 120.07171° E | the `SRSOrigin` of its `metadata.xml`, Zhejiang |
+| GeoRefine sample | 25.89147° N, 114.95097° E | Ganzhou, Jiangxi (the sample's other files name the Changsha-Ganzhou line) |
+
+### Textures
+
+| In the file | In the GLB |
+|---|---|
+| a JPEG or PNG file (every photogrammetry export seen) | the same bytes |
+| a DDS file (DXT1, DXT3, DXT5, or uncompressed 24/32-bit) | decoded, re-encoded as JPEG, or PNG when a pixel is transparent |
+| raw pixels: S3TC blocks, or 8-bit RGB, RGBA, BGR, BGRA, luminance | same |
+| an external file, any other format | none: the mesh is written untextured |
+
+An untextured mesh takes the diffuse colour of its OSG material. The decoder and the encoders are pure JavaScript
+(`jpeg-js`, `pngjs`, and 60 lines for S3TC).
+
+## Finding the top tiles over HTTP
+
+A folder cannot be listed over plain HTTP, and an OSGB dataset has no index. In order:
+
+1. a **local folder** is listed;
+2. a **`raw.githubusercontent.com`** URL is listed with one call to the GitHub tree API (60 an hour without a
+   token; `GITHUB_TOKEN` is used when set);
+3. an **HTML index** of `Data/` (nginx or Apache autoindex) is read for the tile folders;
+4. otherwise the names are **probed**: `Data/Tile_+xxx_+yyy/Tile_+xxx_+yyy.osgb` over a 6 × 6 window, then outwards
+   from every tile found, two tiles around each (also `data/`, and no folder), then `Block/Block.osgb`,
+   `Data/Block.osgb`, `Data/Model/Model.osgb`, `main.osgb`.
+
+A dataset laid out otherwise is opened by the URL of its root `.osgb`; `metadata.xml` is then looked for beside it
+and up to two folders above. Probing costs requests: 27 s for the 63 tiles of Dayanta through jsDelivr, which also
+answered 403 for 12 of them (51 found); the same dataset listed through GitHub opens in 6.1 s, the time of its 63
+root files.
+
+A finer file that a dataset names and does not have (copies on the web are often cut at some level, Dayanta at
+L17) is answered with its parent's mesh again, as a leaf: the coarser level stays on screen instead of a hole.
+
+## Measured
+
+Through the server (`node packages/tile-server/server.js`), every tile of the tree fetched and read back, on one
+thread:
+
+| Dataset | Root tileset | Tiles with content | GLB bytes | Vertices, triangles | A tile, a fragment |
+|---|---|---|---|---|---|
+| Dayanta (local) | 80 ms, 133 tiles | 189 | 14.6 MB | 212 354, 108 512 | 1.7 ms, 0.7 ms |
+| One tile L14-L22 (local) | 45 ms | 233 | 43.1 MB | 496 979, 702 730 | 2.3 ms, 1.2 ms |
+| OsgObjects (local) | 42 ms | 52 | 11.1 MB | 86 170, 116 450 | 1.9 ms, 1.0 ms |
+| Wuhan tile (local) | 43 ms | 384 | 51.2 MB | 1 000 458, 1 129 958 | 2.0 ms, 1.1 ms |
+| Hong Kong 21-25 (local) | 314 ms (epsg.io) | 1 365 | 202.9 MB | 6 943 818, 2 314 606 | 2.6 ms, 1.5 ms |
+| "Block" (local) | 48 ms, 9 tiles | 570 | 193.4 MB | 2 922 894, 3 772 555 | 4.2 ms, 1.9 ms |
+| Weinan (GitHub, all 2 641 files) | 2.0 to 3.1 s, 63 tiles | 3 701 | 199.2 MB | 3 012 287, 4 401 887 | 1.3 ms, 335 ms (the download) |
+
+Vertex and triangle counts equal what the reader finds in the files that the tree reaches (the Wuhan folder has
+6 files nothing names, and what they name). Every mesh is inside its own tile's sphere, on all datasets. With
+`TILED_WORKERS=2` the same tiles come from worker threads.
+
+`3dtiled export "<server>/stream/tileset.json?format=osgb&url=…" <folder>` writes the whole tree as static 3D Tiles:
+40 tilesets and 52 tiles, 11.1 MB, in 0.3 s for OsgObjects.
+
+## Limits
+
+- **Bounding volumes do not nest.** OSG's spheres bound each PagedLOD, not its descendants: 12 to 68 % of the
+  tiles of a ContextCapture or Hong Kong dataset have a sphere that sticks out of their parent's, by up to 27 % of
+  its radius (none on the "Block" export). The content of a tile leaves its **parent's** sphere on 9 tiles of
+  6 500: 1 of Dayanta (by 1.1 %) and 8 of Hong Kong (by up to 10.8 %). A client that culls on the parent can drop such a tile at the edge of the view.
+- **No offline converter**: `/convert` and the CLI's `convert` do not take OSGB (`export` does, see above).
+- `&transform=` (Draco, meshopt, KTX2 per tile) does not reach the tiles, as for 3MX: their URIs are absolute.
+- Not read: `osg::ProxyNode`, `osg::Billboard`, shapes, animations, shaders, and the plugins outside the `osg`
+  namespace (`osgSim`, `osgTerrain`…). In a file with block sizes they are stepped over, in one without (version 80
+  and 91 files) the read fails. Deprecated per-attribute index arrays are ignored. Only the texture of unit 0 is
+  used. A PagedLOD's `DatabasePath` is ignored: file names are taken relative to the file.
+- Normals are dropped under a `MatrixTransform`. Photogrammetry exports have none.
+- Files with an inline schema (attribute bit 2) or custom domains are refused or untested.
+- The glTF validator was not run on the tiles (it is not a dependency here); each GLB was read back with
+  glTF-Transform.
