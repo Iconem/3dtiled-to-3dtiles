@@ -631,6 +631,11 @@ const FORMATS = [
       { id: 'eiffel', label: 'Eiffel',  src: 'input/COPC/eiffel.copc.laz', out: 'output/copc/eiffel-3dtiles-from-copc' },
       { id: 'texas',  label: 'Texas',   src: 'input/COPC/texas.copc.laz',  out: 'output/copc/texas-3dtiles-from-copc'  },
   ]},
+  { fmt: 'vpc', icon: '🗂', label: 'VPC', type: 'pointcloud', octree: false, stream: true, assets: [
+      { id: 'ahn5-amsterdam', label: 'AHN5 Amsterdam, 9 tiles (HPC-DAT, 227M) ⬀', src: 'https://raw.githubusercontent.com/HPC-DAT/copc-dataset/main/ahn5.vpc' },
+      { id: 'qgis-sunshine-coast', label: 'QGIS test · Sunshine Coast, 4 tiles ⬀', src: 'https://raw.githubusercontent.com/qgis/QGIS/master/tests/testdata/point_clouds/virtual/sunshine-coast/combined-with-overview.vpc' },
+      { id: 'dublin-2015', label: 'Dublin City 2015, 35 tiles (NYU via flai, 1.4G, self-made VPC) ⬀', src: 'https://raw.githubusercontent.com/jo-chemla/3dtiled-to-3dtiles/main/packages/tile-server/samples/dublin-city-2015.vpc' },
+  ]},
   { fmt: 'potree', icon: '🌲', label: 'Potree', type: 'pointcloud', octree: true, stream: true, assets: [
       { id: 'lion2',    label: 'Lion 2.0',          src: 'input/POTREE/lion_p2/metadata.json',       out: 'output/potree/lion_p2'          },
       { id: 'takanawa', label: 'Lion Takanawa 1.x',  src: 'input/POTREE/lion_takanawa/cloud.js',      out: 'output/potree/lion_takanawa'    },

@@ -5,6 +5,35 @@ Format loosely follows [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+### Added — 2026-11-09 (VPC: a PDAL / QGIS virtual point cloud as one tileset)
+- **`/stream/tileset.json?format=vpc&url=<….vpc>`** serves a virtual point cloud, the STAC ItemCollection PDAL
+  and QGIS write to treat a folder of LAS/LAZ/COPC tiles as one dataset, as a single mosaic whose leaves are the
+  COPC streams of its items. `.vpc` is detected from the extension. The same mosaic is
+  `/aggregate/tileset.json?vpc=<url>`: a VPC is parsed into the set manifest `/aggregate` already serves, so
+  nesting, selection, `index.json` and `&cache=` all apply.
+- **The root is built from the `.vpc` alone.** Each leaf is placed from its item's `proj:bbox`, reprojected to
+  ECEF from `proj:wkt2` / `proj:projjson` / `proj:epsg` (each item may have its own CRS), then the WGS 84
+  `bbox`, then the `geometry`. Measured: 1 000 tiles of Luxembourg's 2019 LiDAR (7.0 G points, a 1.06 MB
+  `.vpc`) give a 643 KB root in 161 ms, 138 groups 8 deep, and no COPC file opened; the 9 AHN5 tiles of
+  HPC-DAT/copc-dataset (227 M points) a 6.5 KB root. Against the COPC streams' own roots: centres 0.00 m apart
+  on AHN5, geometric errors equal to the metre (1732.19 against 1732.0).
+- **Only COPC items are streamed.** A plain LAS/LAZ item is skipped, like EPT and local paths, and counted with
+  its reason in `asset.extras.vpc`, in `X-VPC-Streamed` / `X-VPC-Skipped` / `X-VPC-Skipped-Reasons` and in
+  the log; a VPC with no COPC item is a 422 that says so. An item named `.laz` may be a COPC: one 589-byte
+  read tells (the first 16, then all of them only if one was; `&sniff=all|0`).
+- **The `overview` asset is reported, not drawn**: `asset.extras.vpc.overviews` gives its COPC stream. A tile
+  whose content is an external tileset may not have children, so it cannot be the root's content over the
+  leaves; the docs page says what the workaround would cost.
+- A COPC that declares no CRS takes the item's EPSG code (`&crs=`, read from `proj:epsg` or from inside the
+  WKT). WKT2 `COMPOUNDCRS` and PROJJSON compound CRSs are read through their horizontal part, as `COMPD_CS` was.
+- `scripts/copc-to-vpc.mjs` writes a VPC over online COPC files without PDAL (one 64 KB read per file: 35
+  files in 4.3 s, 1 000 in 107 s); `scripts/vpc-to-manifest.mjs` turns a VPC into a set manifest with baked
+  bounds. `packages/tile-server/samples/dublin-city-2015.vpc` is self-made with the first: 35 tiles of NYU's
+  2015 Dublin scan from flai's mirror, 1.42 G points, with its overview.
+- Viewer: a **VPC** format with AHN5 Amsterdam, QGIS's Sunshine Coast test set and the Dublin sample. Docs: a
+  VPC page under references, and sections in the formats and meta-tilesets guides. Not done: offline
+  conversion of a whole VPC (refused with a message), plain LAS/LAZ and EPT items, local paths.
+
 ### Added — 2026-11-08 (the largest public streamed splats, in the library)
 - **Streamed SOG from SuperSplat**: Andrii Shramko's **Jastrzębia Góra**, a 4 × 2 km scan of 105.9 M splats in 8 LOD
   levels (CC BY 4.0, [221ee167](https://superspl.at/scene/221ee167); its root tileset is 90 MB and 284 165 tiles) and

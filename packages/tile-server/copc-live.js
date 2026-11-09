@@ -34,6 +34,22 @@ async function readWkt(getter, copc) {
   return raw || null;
 }
 
+/**
+ * The header of a COPC file, from one 64 KB range read: { min, max, pointCount, cube, created, wkt }. No hierarchy page and no
+ * cache: for scripts that index many files (scripts/copc-to-vpc.mjs).
+ */
+export async function copcHeaderInfo(url) {
+  const head = Buffer.from(await rangeGetter(url)(0, 65536));
+  if (head.toString('latin1', 0, 4) !== 'LASF') throw new Error('not a LAS/COPC file');
+  const getter = async (begin, end) => (end <= head.length ? head.subarray(begin, end) : rangeGetter(url)(begin, end));
+  const copc = await Copc.create(getter);
+  const { min, max, pointCount } = copc.header;
+  // LAS header: file creation day of year (u16 at 90) and year (u16 at 92)
+  const doy = head.readUInt16LE(90), year = head.readUInt16LE(92);
+  const created = year > 1990 && doy >= 1 && doy <= 366 ? new Date(Date.UTC(year, 0, doy)) : null;
+  return { min, max, pointCount, cube: copc.info.cube, created, wkt: await readWkt(getter, copc) };
+}
+
 // Per-URL context (COPC header + full node hierarchy + georef), cached.
 // memoizeAsync caches FAILURES too — a broken source (bad LAS header, unreachable URL, ...) fails
 // fast on retry instead of redoing the range-read pass every time (see cache.js's own comment) — but

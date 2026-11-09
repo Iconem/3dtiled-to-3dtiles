@@ -68,10 +68,11 @@
                 "rad",
                 "i3s",
                 "threemx",
-                "geosplats"
+                "geosplats",
+                "vpc"
               ]
             },
-            "description": "Source format. Auto-detected from the URL/extension when omitted for most formats."
+            "description": "Source format. Auto-detected from the URL/extension when omitted for most formats. `vpc` (a PDAL/QGIS virtual point cloud, `.vpc`) answers with a mosaic of its COPC items, built by /aggregate: tileset.json only."
           },
           {
             "name": "cache",
@@ -830,6 +831,14 @@
         "summary": "Meta-tileset over N child tilesets (MosaicJSON/STAC-style)",
         "description": "Serves ONE 3D Tiles tileset whose children external-reference each given tileset URL, with per-child bounding spheres derived from each child root (fetched once, cached). Children can be any 3D-Tiles URL, including this server's own /stream, /convert, /bing or /3dtiles-self-contained endpoints - so one endpoint can mosaic COPC + Potree + LCC + RAD + remote 3D Tiles together. A local child can be globe-placed first via /stream's lon/lat placement params. Unreachable children are skipped and listed in asset.extras.failed.",
         "parameters": [
+          {
+            "name": "vpc",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            },
+            "description": "Absolute URL of a PDAL/QGIS virtual point cloud (`.vpc`, a STAC ItemCollection of LAS/LAZ/COPC files). Its COPC items become the children, placed from each item's own `proj:bbox`, so no child file is read; other items are skipped and counted in `asset.extras.vpc` and the `X-VPC-*` headers. Takes the place of ?set=. `&sniff=auto|all|0` says how `.laz` items are checked for being COPC."
+          },
           {
             "name": "set",
             "in": "query",

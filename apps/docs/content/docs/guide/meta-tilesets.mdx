@@ -14,6 +14,7 @@ error from it, and emits a parent whose children external-reference the child UR
 GET /aggregate/tileset.json?url=<u1>&url=<u2>&…        # repeated form
 GET /aggregate/tileset.json?urls=<u1>,<u2>,…           # comma form (each URL-encoded)
 GET /aggregate/tileset.json?set=opendata|iconem-open|world|flai|aerometrex|vexcel|…  # a named set (below)
+GET /aggregate/tileset.json?vpc=<url of a .vpc>         # a PDAL/QGIS virtual point cloud as the set (below)
     [&nest=auto|mercator|geodetic|flat]  [&bv=cell|sphere|region|box]  [&snap=0|1|<terrain>]  [&ttl=<seconds>]
     [&format=…] [&only=…] [&exclude=…] [&hide=<id>] [&latest=1] [&from=…] [&to=…]
 GET /aggregate/snap.ndjson?<same query, with &snap=>  # the snap offsets, one line per dataset as each resolves
@@ -581,6 +582,26 @@ curl -X POST --data-binary @.local/aggregate-sets/iconem.json https://<server>/a
 - **Never listed.** Uploads do not appear in `/aggregate/demo.json` or in "unknown set" errors, and
   without the file the hash cannot be guessed. Anyone given the mosaic URL can still read the share
   links inside it, as with any mosaic.
+
+### A virtual point cloud is a manifest: `?vpc=`
+
+A PDAL / QGIS [virtual point cloud](/docs/references/pointclouds/vpc) (`.vpc`) is the same idea as a set
+manifest, written by other tools: a STAC ItemCollection listing point cloud files, each with its extent. So
+`/aggregate` takes one directly, in place of `?set=`:
+
+```
+GET /aggregate/tileset.json?vpc=https://<host>/<set>.vpc&nest=geodetic
+GET /stream/tileset.json?format=vpc&url=https://<host>/<set>.vpc      # the same mosaic, nested geodetic by default
+```
+
+Each COPC item becomes a `format: copc` entry whose `bounds` are computed from the item's own `proj:bbox`,
+reprojected to ECEF: the mosaic is built from the one `.vpc` file, with no child root fetched
+(`childRootsBaked` = the item count). Measured on 1 000 tiles of Luxembourg's 2019 LiDAR (a 1.06 MB `.vpc`,
+7.0 G points): a 643 KB root in 161 ms, 138 groups, depth 8, 3 children at the root, and no COPC file opened.
+Items that are not COPC (plain LAS/LAZ, EPT, local paths) are skipped and counted in `asset.extras.vpc`
+and the `X-VPC-*` response headers; with none left the answer is a 422 that says why. Every selection and
+nesting parameter of this page applies. `scripts/vpc-to-manifest.mjs` writes the manifest to a file
+instead, to edit or to keep as a named set.
 
 ### Generating the manifest: `scripts/iconem-share-links.mjs`
 

@@ -102,6 +102,16 @@ export const FORMATS: FormatMeta[] = [
     { id: 'eiffel', label: 'Eiffel', src: 'https://data.geopf.fr/telechargement/download/LiDARHD-NUALID/NUALHD_1-0__LAZ_LAMB93_KE_2025-06-06/LHD_FXX_0648_6863_PTS_LAMB93_IGN69.copc.laz', out: 'output/copc/eiffel-3dtiles-from-copc' },
     { id: 'texas', label: 'Texas', src: 'https://data.opengeos.org/USGS_LPC_TX_CoastalRegion_2018_A18_stratmap18-50cm-2995201a1.copc.laz', out: 'output/copc/texas-3dtiles-from-copc' },
   ] },
+  // A PDAL/QGIS virtual point cloud: one .vpc indexing many COPC files, served as a mosaic of their streams
+  // (/stream?format=vpc hands it to /aggregate). Not an octree itself, and nothing to convert offline.
+  { fmt: 'vpc', icon: '🗂', label: 'VPC', type: 'pointcloud', octree: false, stream: true, assets: [
+    // Real: nine 1 km AHN5 tiles over Amsterdam, 227 M points, from HPC-DAT/copc-dataset (COPC on the AHN bucket).
+    { id: 'ahn5-amsterdam', label: 'AHN5 Amsterdam, 9 tiles (HPC-DAT, 227M) ⬀', src: 'https://raw.githubusercontent.com/HPC-DAT/copc-dataset/main/ahn5.vpc' },
+    // Real: QGIS's own test fixture, four tiny COPC files (253 points) with an overview asset.
+    { id: 'qgis-sunshine-coast', label: 'QGIS test · Sunshine Coast, 4 tiles ⬀', src: 'https://raw.githubusercontent.com/qgis/QGIS/master/tests/testdata/point_clouds/virtual/sunshine-coast/combined-with-overview.vpc' },
+    // Self-made (scripts/copc-to-vpc.mjs) over flai's public COPC mirror of NYU's Dublin 2015 scan, CC BY 4.0.
+    { id: 'dublin-2015', label: 'Dublin City 2015, 35 tiles (NYU via flai, 1.4G, self-made VPC) ⬀', src: 'https://raw.githubusercontent.com/jo-chemla/3dtiled-to-3dtiles/main/packages/tile-server/samples/dublin-city-2015.vpc' },
+  ] },
   { fmt: 'potree', icon: '🌲', label: 'Potree', type: 'pointcloud', octree: true, stream: true, assets: [
     // Real source: potree.org's own hosted Potree-2.0 build of the lion scan.
     { id: 'lion2', label: 'Lion 2.0', src: 'https://potree.org/pointclouds/lion/metadata.json', out: 'output/potree/lion_p2' },
@@ -228,6 +238,7 @@ export const PSEUDO_FORMATS: [string, string][] = [
 export const FORMAT_PILL_ORDER: { id: string; group: number }[] = [
   { id: 'copc', group: 0 },
   { id: 'potree', group: 0 },
+  { id: 'vpc', group: 0 },
   { id: 'sog', group: 1 },
   { id: 'lcc', group: 1 },
   { id: 'geosplats', group: 1 },

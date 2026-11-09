@@ -1,0 +1,154 @@
+---
+title: "VPC — Virtual Point Cloud (PDAL / QGIS)"
+description: "A .vpc file indexes many LAS/LAZ/COPC files as one dataset. What the format holds, and how it is served here as one 3D Tiles mosaic of COPC streams."
+---
+
+Source: [`vpc-spec.md` in PDAL/wrench](https://github.com/PDAL/wrench/blob/main/vpc-spec.md) (a draft, by
+Lutra Consulting and Hobu for QGIS 3.32+) and the QGIS documentation on virtual point clouds. Distilled here per
+this repo's convention; the second half is what this toolbox does with one.
+
+## What it is
+
+A `.vpc` is the point-cloud counterpart of a GDAL VRT: one small JSON file that makes a folder of tiles behave
+as a single dataset. QGIS loads it as one layer, `pdal_wrench` takes it as input (`build_vpc` writes one), and
+PDAL reads it with `readers.stac`.
+
+The file is a **STAC API ItemCollection**: a GeoJSON `FeatureCollection` whose features are STAC items using
+the `pointcloud` and `projection` extensions. Not a STAC *Collection*: everything is in the one file.
+
+| Where | What |
+|---|---|
+| `assets.data.href` | the point cloud file: relative to the `.vpc`, an absolute URL, or a local path. LAS, LAZ, COPC or EPT |
+| `properties["proj:bbox"]` | its extent in its **own CRS**, 3D recommended: `[xmin, ymin, zmin, xmax, ymax, zmax]` |
+| `proj:wkt2` / `proj:epsg` / `proj:projjson` | that CRS. Each item may have its own; one CRS per VPC is recommended |
+| `bbox`, `geometry` | the same extent in WGS 84, which GeoJSON requires. `proj:bbox` wins when present |
+| `pc:count`, `pc:type`, `pc:encoding` | point count, kind of capture, encoding |
+| `pc:statistics`, `pc:schemas` | optional per-attribute statistics and dimensions |
+| `assets.overview` (role `overview`) | optional: a thinned COPC of the **whole** set, shared by every item, or one of several overview tiles |
+
+## How it is served: a mosaic of COPC streams
+
+```
+GET /stream/tileset.json?format=vpc&url=<https://….vpc>      # format is detected from the .vpc extension
+GET /aggregate/tileset.json?vpc=<https://….vpc>               # the same mosaic, with /aggregate's own defaults
+GET /aggregate/index.json?vpc=<https://….vpc>                 # one row per streamed item
+    [&nest=geodetic|mercator|flat] [&bv=…] [&cache=none|hierarchy] [&prefetch=N] [&sniff=auto|all|0] [&ttl=<s>]
+```
+
+A VPC has no tiles of its own, so there is no range adapter for it. Each COPC file it lists already streams as
+its own tileset (`/stream/tileset.json?format=copc&url=<item>`), and [`/aggregate`](/docs/guide/meta-tilesets)
+already builds one tileset out of many. So the `.vpc` is parsed into the manifest `/aggregate` reads
+(`packages/tile-server/vpc-live.js`), and the answer is a mosaic whose leaves reference those COPC streams.
+
+**The root is built from the `.vpc` alone.** Each leaf's bounding sphere comes from its item's `proj:bbox`,
+reprojected to ECEF with the same proj4 definitions the COPC stream uses for the file, so `/aggregate` gets
+its bounds baked (`childRootsBaked` = the item count, `childRootsFetched` = 0 in `asset.extras.build`). A
+client opens a COPC file only when it refines into that leaf.
+
+Measured on this machine, server on localhost:
+
+| VPC | Items | Root | Time | Tree |
+|---|---:|---:|---:|---|
+| QGIS test fixture, Sunshine Coast (4 COPC + overview) | 4 | 3.9 KB | 1.7 s, 1.1 s of it fetching the `.vpc` from GitHub | 1 group |
+| AHN5 Amsterdam, [HPC-DAT/copc-dataset](https://github.com/HPC-DAT/copc-dataset) (227 M points) | 9 | 6.5 KB | 0.55 s, 0.43 s fetching | 3 groups, depth 2 |
+| Dublin City 2015, self-made (1.42 G points) | 35 | 22.9 KB | 70 ms | 7 groups, depth 4 |
+| Luxembourg 2019, first 1 000 tiles, self-made (7.0 G points, a 1.06 MB `.vpc`) | 1 000 | 643 KB | 161 ms cold, 60 ms from cache | 138 groups, depth 8, 3 at the root |
+
+In all four, no COPC file was opened to build the root.
+
+### Which items are streamed
+
+Only **COPC** items. A plain LAS or LAZ file has no levels of detail to map onto tiles, the reason the
+converter refuses one as well. The rest are skipped, never silently:
+
+| The href | What happens |
+|---|---|
+| ends in `.copc.laz` | streamed. No request |
+| ends in `.laz` | may be a COPC (it is a valid LAZ 1.4, and nothing forces the double extension). One 589-byte range read tells: the `copc` info VLR sits right after the LAS header |
+| ends in `.las` | skipped: *plain LAS* |
+| `ept.json` | skipped: EPT is not supported |
+| a drive letter, a UNC path, `file://`, `s3://` | skipped: *local path* or *unsupported scheme*. The server reads sources over HTTP |
+
+`&sniff=auto` (default) reads the first 16 `.laz` items; if none is a COPC, the others are taken for plain LAZ
+unread, so a VPC of 10 000 plain tiles does not cost 10 000 requests to say so. `&sniff=all` reads every one,
+`&sniff=0` none.
+
+The count and the reasons are in `asset.extras.vpc` (`items`, `streamed`, `skipped`, `skippedReasons`, the
+first 20 `skippedItems`, `sniffed`, `boundsFrom`, `points`), in the response headers `X-VPC-Items`,
+`X-VPC-Streamed`, `X-VPC-Skipped`, `X-VPC-Skipped-Reasons`, and in the server log. A VPC with no COPC item at
+all answers **422** with the same report and what to do about it. Example, 9 AHN5 COPC items mixed with five
+plain `.laz` and one `.las`: `X-VPC-Streamed: 9`, `X-VPC-Skipped: 6`,
+`1 plain LAS (no levels of detail); 5 plain LAZ (no levels of detail)`, 5 files read to tell.
+
+### Where each item is placed
+
+1. `proj:bbox` in the item's own CRS, tried as `proj:wkt2`, then `proj:projjson`, then `proj:epsg` /
+   `proj:code`. The WKT first: PDAL copies it from the file, and the COPC stream places the file from that
+   same text. A compound CRS (WKT1 `COMPD_CS`, WKT2 `COMPOUNDCRS`, PROJJSON `CompoundCRS`) is read through its
+   horizontal part; heights are taken as they are. A 2D `proj:bbox` takes its heights from a 3D `bbox`.
+2. the WGS 84 `bbox`, when there is no native box or proj4 cannot read the CRS;
+3. the extent of `geometry`;
+4. nothing usable: the item has no baked bounds, and `/aggregate` reads that one file's root, as it does for
+   any child without them (`boundsFrom.probe` counts these).
+
+Items of one VPC may each have their own CRS. Past 20 km a box is sampled 5 × 5 on its top and bottom faces
+and the dip of the ellipsoid between samples is added: a box over a country is not flat.
+
+The leaf's sphere encloses the **points** (the header's tight box); the COPC stream's own root encloses the
+octree **cube**, which is larger, and not always centred on the points. Compared on real files:
+
+| File | Centre distance | Leaf radius / child-root radius | Geometric error, leaf / child |
+|---|---:|---:|---:|
+| AHN5 `124000_484000` (PDAL cube, centred) | 0.00 m | 707.4 / 866.0 = 0.82 | 1732.19 / 1732.0 |
+| Dublin `T_316500_233500` | 0.85 m | 432.5 / 433.0 = 1.00 | 865.83 / 866.0 |
+| Dublin `T_317000_234000` (a partial tile) | 143 m | 369.3 / 433.0 = 0.85 | 865.83 / 866.0 |
+| Luxembourg `100500_88500` (a height outlier: the cube is 2.2 km) | 1 233 m | 1176.5 / 1943.6 = 0.61 | 3887.16 / 3887.2 |
+
+The geometric error of a leaf is the diagonal of the cube a COPC of that extent has (longest side × √3), which
+is what the child declares for its own root: the two refine in order.
+
+**A file without a CRS of its own.** A COPC stream takes its CRS from the file. Some files carry none (flai's
+mirror), and the COPC files QGIS itself writes keep it in a private `qgis` record. The item's EPSG code, from
+`proj:epsg` or from the identifier inside its WKT, therefore rides on each leaf as `&crs=EPSG:<n>`, which a
+file's own CRS always overrides. A code this server does not know is registered from the item's own WKT when
+the VPC is read, for the life of the process.
+
+### The overview asset
+
+Not used as root content, and reported instead: `asset.extras.vpc.overviews` lists each overview with a ready
+`/stream/tileset.json?format=copc&url=…` URL.
+
+The natural design, the overview as the root's content with `refine: REPLACE` over the per-file leaves, is
+not valid 3D Tiles: a tile whose content is an external tileset may not have children. The workaround is to
+put one GLB of the overview (its root node) on the root. That needs the overview's header read before the
+root can answer, a root transform that every leaf then has to undo, and it shows one level of a file that has
+a whole pyramid. Without it the mosaic's groups are empty, so from far away every leaf in view opens its
+COPC root: for the 1 000 Luxembourg tiles seen whole, 1 000 small requests. That is the cost of leaving the
+overview out, and the next thing to build here.
+
+## Writing one without PDAL
+
+`scripts/copc-to-vpc.mjs` writes a VPC over COPC files that are already online: one 64 KB range read per file
+for the header and the CRS, no statistics. `packages/tile-server/samples/dublin-city-2015.vpc` was made with
+it (35 tiles of NYU's 2015 Dublin scan, CC BY 4.0, from flai's public mirror; 4.3 s):
+
+```bash
+node scripts/copc-to-vpc.mjs --s3 https://open-lidar-data.s3.eu-central-1.amazonaws.com \
+  --prefix data/IE/NYU_EDU/Dublin_City_2015/copc/ --crs EPSG:29902 \
+  --overview https://open-lidar-data.s3.eu-central-1.amazonaws.com/data/IE/NYU_EDU/Dublin_City_2015/overview/overview.copc.laz \
+  -o dublin-city-2015.vpc
+```
+
+`scripts/vpc-to-manifest.mjs <file.vpc | url> -o set.json` goes the other way: a VPC to an `/aggregate` set
+manifest with baked bounds, to edit, to keep as a named set, or to `POST /aggregate/set`.
+
+## Not supported
+
+- **Plain LAS/LAZ and EPT items**: skipped, as above.
+- **Local paths.** The `.vpc` and its files are read over HTTP. A `.vpc` written with absolute local paths
+  has to be rewritten; one with relative paths works once the folder is published.
+- **Offline conversion.** `3dtiled <x.vpc> <outDir>` is refused with a message: convert the COPC files one by
+  one, or serve the VPC (`3dtiled serve <url>.vpc`).
+- **`&attributes=`, `&colors=`, `&transform=`, `&tiling=`** are not passed on to the COPC leaves.
+- **Tiled overviews, `pc:statistics`, `proj:geometry`**: read by nothing here.
+- **Vertical datums**: heights are placed as ellipsoidal, as everywhere in this toolbox.
