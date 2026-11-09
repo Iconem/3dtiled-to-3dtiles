@@ -143,6 +143,14 @@ export async function mirrorRemote(src, fmt, dir, opts = {}) {
     await fetchOptional(base + 'shcoef.bin', path.join(dir, 'shcoef.bin'));
     return dir;
   }
+  if (fmt === 'lcc2') {                                     // the manifest + every chunk file it lists (the whole scene: Tunis is 1.4 GB)
+    await get(name);
+    const { root } = JSON.parse(await fs.readFile(path.join(dir, name), 'utf8'));
+    const chunks = root?.splatFiles ?? root?.files ?? [];
+    // all but the environment chunk, which the converter does not read
+    for (const [i, rel] of chunks.entries()) if (i !== root.data?.env?.name) await get(String(rel).replace(/\\/g, '/'));
+    return path.join(dir, name);
+  }
   if (fmt === 'sog') {                                      // lod-meta.json + per-chunk meta.json + the files each chunk references
     const lod = JSON.parse((await fetchSource(base + name)).toString('utf8'));
     await fs.mkdir(dir, { recursive: true });

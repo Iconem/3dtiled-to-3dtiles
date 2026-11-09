@@ -115,7 +115,8 @@ const YUP_ZUP_P90= [1,0,0,0, 0,0,-1,0, 0,1,0,0, 0,0,0,1];   // (x,y,z)→(x,z,�
 //           transform (no real ENU ever) is exactly `YUP_ZUP_P90` already — verified against 6 real
 //           skatepark tiles (~110m off with 'auto' vs ~1-5m with 'baked'). Both bugs were found the same
 //           way: sample real tiles, compare the placed splat centroid to that tile's own declared box.
-const SPLAT_FLIP_BAKED = new Set(['lcc', 'sog']);
+//           LCC2 is here by construction, not by such a sampling: its root transform is LCC's (lcc2Manifest.js).
+const SPLAT_FLIP_BAKED = new Set(['lcc', 'lcc2', 'sog']);
 // `srcFormat` comes from the nested /stream URL's own `format=` param — absent for a prebuilt-offline
 // tileset.json (no /stream involved), so fall back to sniffing the well-known per-format sample-data
 // path segment (input/LCC/…, output/lcc/…, etc. — case-insensitive covers both).

@@ -31,7 +31,7 @@ to link the `3dtiles-convert-core` workspace symlink and each converter's deps.
 ```sh
 npm install                                  # wire up the workspaces
 # CLI (auto-detects format):
-npm run convert -- <input> <outDir> [--format rad|sog|lcc|copc|potree|i3s] \
+npm run convert -- <input> <outDir> [--format rad|sog|lcc|lcc2|copc|potree|i3s] \
                                     [--scale N] [--ge-scale N] [--ge-layer N] [-- <extra converter args>]
 # or directly:
 node packages/convert/cli.js sample-data/input/RAD/coit.rad sample-data/output/rad/coit-3dtiles-from-rad
@@ -62,8 +62,8 @@ with `TILED_ALLOW_EXPORT=1`.
 
 Tiles are decoded and encoded on the process's one thread by default. Set `TILED_WORKERS=auto` (one worker
 thread per core but one, at most 8) or `TILED_WORKERS=<n>` to spread that work over worker threads: on the server for
-`/stream` tiles and crawl exports of every streamed format (COPC, Potree, SOG, LCC, RAD, GeoSplats, I3S, 3MX), and in
-the offline converters (COPC, Potree, SOG, LCC, RAD, I3S), which also take `--workers <n>`. The output is identical.
+`/stream` tiles and crawl exports of every streamed format (COPC, Potree, SOG, LCC, LCC2, RAD, GeoSplats, I3S, 3MX), and in
+the offline converters (COPC, Potree, SOG, LCC, LCC2, RAD, I3S), which also take `--workers <n>`. The output is identical.
 Expect about 3 times the throughput on 8 cores for point clouds and I3S meshes, 1.6 to 2 times for splats
 ([measured](/docs/guide/supported-formats#what-tile-workers-gain-measured)), a server that stays responsive while it
 builds tiles, and roughly 50 MB more memory per worker. One export can ask for it alone: `workers` on `POST /export`,
@@ -397,6 +397,13 @@ meta `attributes.scale.min/max`); rotation decode = the SDK's `QUAT_TAB`.
 0 bad quaternions, scale p50 ≈ 3 cm (sane for a 325 m-diagonal temple). **SH (`Shcoef.bin`, Quality
 files) not yet emitted** (DC only, like the other converters). LCC is XGRIDS' format — attribution
 required per its White Paper (see the doc).
+
+**LCC2.** The same package converts an **[LCC2](/docs/references/3dgs-splats/lcc2)** scene, told apart by its
+`*.lcc2` manifest (`node src/index.js path/to/scene.lcc2 ./out`, or the folder holding it; `--format lcc2` through
+`3dtiled`). The tree and the boxes come from the manifest, the tiles are row ranges of its bundled `.sog` chunks,
+written as `tiles/<file>_<start>_<count>.glb`, the same bytes the live `format=lcc2` adapter serves. Checked on the
+two coarsest levels of the Tunis sample: 30 tiles, 984 571 splats, the sum of those two levels in the manifest. A
+remote `.lcc2` is mirrored whole first (Tunis: 1.4 GB); streaming it needs no download.
 
 > **License note:** the LCC White Paper requires displaying "Data Organization Format originated
 > from XGRIDS" and publishing derivatives under terms no less open. This converter reads the format;

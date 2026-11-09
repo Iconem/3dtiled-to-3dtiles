@@ -1,0 +1,106 @@
+---
+title: "LCC2 — Lixel CyberColor 2 (XGrids)"
+description: "LCC2 is XGRIDS's successor to LCC: a JSON manifest holding a tree of nodes, over chunk files in SOG or SPZ"
+---
+
+> Sources: https://github.com/xgrids/LCC2Whitepaper (version 0.0.3) · the PlayCanvas engine's `streamed-lcc2` example
+> and its Tunis scene · `@playcanvas/splat-transform`'s `read-lcc2`
+> License: XGRIDS White Paper License, as for [LCC](/docs/references/3dgs-splats/lcc) (attribution required: "Data
+> Organization Format originated from XGRIDS"). Quote and cite, do not relicense.
+
+LCC2 keeps LCC's purpose (large scans with levels of detail, streamed) and its coordinate frame, and replaces its
+layout. LCC packs a flat grid of units into `Index.bin` and `Data.bin`, in a splat encoding of its own. LCC2 is a JSON
+manifest that holds a tree of nodes, and leaves the splats to an existing codec: each node names a run of rows in a
+chunk file, a bundled SOG or an SPZ. What follows is the whitepaper checked against the one public scene we found,
+**Tunis** (`https://code.playcanvas.com/examples_data/tunis_01/03-19-195651.lcc2`, an XGRIDS PortalCam capture).
+
+## File set
+
+| File | Req | Purpose |
+|------|-----|---------|
+| `<name>.lcc2` | ✔ | the manifest, JSON: scene metadata and the whole node tree (Tunis: 1.1 MB for 571 nodes) |
+| `data/3dgs/*` | ✔ | chunk files, all of one type (`splatType`: `.sog`, `.spz`; the whitepaper also lists `.ply`) |
+| `data/mesh/*.ply`, `*.btree` | optional | collision meshes and their BVH, per node |
+
+## The manifest
+
+Top level: `version` (`0.0.3`), `epsg`, `offset`, `shift`, `scale` (the last three "reserved" in the whitepaper),
+`source`, `dataType` (`PortalCam`), `fileType` (`quality`), `totalSplats`, `totalLevels`, `lodSplats` (splats per LOD,
+finest first), `splatType`, `virtualLoD` (settings of an extra LOD a renderer derives by itself), `env` (count and box
+of the environment splats), `splatExtraAttributes`, `renderingHints`, and `root`.
+
+A node:
+
+```json
+{
+  "id": "0_0_0_0_0_1",
+  "boundingBox": { "min": [148.90, 21.55, -5.38], "max": [230.04, 112.86, 39.58] },
+  "childNum": 1,
+  "child": { "0": { "id": "0_0_0_0_0_1_0", "…": "…" } },
+  "data": { "3dgs": { "name": 11, "start": 723, "count": 959 } }
+}
+```
+
+- `data.3dgs` is `count` splats from row `start` of chunk file `root.splatFiles[name]`. Neighbouring nodes of one
+  level share a chunk: Tunis has 570 runs in 140 chunks, of 90 597 to 824 736 splats each.
+- A node at depth d is its region at LOD `totalLevels − d` (0 = finest). Each depth is the whole scene at one LOD,
+  and the splats of a depth add up to that LOD's entry in `lodSplats`.
+- The root carries the file lists (`splatFiles`, `meshFiles`, `bvhFiles`) and, as its only data, `data.env.name`: the
+  chunk holding the environment, a shell of far splats (Tunis: 12 659 splats in a box 4.3 km wide).
+- Some nodes also have `data.mesh` (`name`, `vertex`, `face`) and `data.bvh` (`name`), indices into `meshFiles` and
+  `bvhFiles`.
+
+Tunis, measured from its manifest: 84 247 558 splats in 8 levels, halving at each level from 42 350 088 down to
+328 190; depth 1 has 15 nodes and depth 8 has 225; the scene's box is 325 × 183 × 45 m.
+
+## The chunks
+
+A `.sog` chunk is a bundled [SOG](/docs/references/3dgs-splats/sog): a ZIP, entries stored uncompressed, of
+`means_l.webp`, `means_u.webp`, `quats.webp`, `scales.webp`, `sh0.webp`, `shN_centroids.webp`, `shN_labels.webp` and
+`meta.json` (SOG version 2, written by `flash-kmeans-sog`). Tunis carries spherical harmonics of degree 3. Its 140
+chunks are 2.6 to 13.4 MB; with the environment chunk (360 KB) the scene is 1.40 GB.
+
+## Coordinate frame
+
+"Right-handed, keep the same with LCC": Z up, metres. The positions inside the SOG chunks are in that frame as they
+are (checked on Tunis, one tile per level: the rows of a run fall inside their node's `boundingBox`, to within a
+centimetre).
+
+## Where the sample and the whitepaper differ
+
+- The whitepaper lists `data` among the fields of leaf nodes. In Tunis every node below the root has `data.3dgs`,
+  which is what makes each depth a complete LOD.
+- Node ids are written `0-1-1-7` in the whitepaper and `0_1_1_7` in the sample, and chunk files are named after them.
+- `child` is an object keyed by serial number. `splat-transform` also accepts an array, and the field names of an
+  earlier protocol (`files`, `child_num`, `lod_level`, `lod_3dgs_info`, `total_splats`); so do we.
+- Nothing says what `offset`, `shift` and `scale` will mean once they stop being reserved. Tunis has `epsg: 0` and
+  zeros.
+- Nothing says whether a node's children must cover it, which replacing a tile by its children relies on. In Tunis
+  every child box is inside its parent's; two nodes have children whose boxes fill only half of theirs, and all of
+  their own splats still fall inside one of those boxes. A node often has a single child with its own box: each of
+  the 15 nodes of depth 1 does.
+
+## Mapping to 3D Tiles
+
+The tree is a 3D Tiles tree as it stands (`packages/lcc-to-3dtiles/src/lcc2Manifest.js`, used by the live adapter and
+by the offline converter):
+
+| LCC2 | 3D Tiles |
+|---|---|
+| node | tile, `refine: REPLACE` |
+| `boundingBox` | `boundingVolume.box`, turned from Z-up to the glTF tile frame as for LCC |
+| `data.3dgs` run | the tile's content, `tile/<file>_<start>_<count>.glb`: SPZ v2 in `KHR_gaussian_splatting_compression_spz_2`, or glTF POINTS with `&centroids=1` |
+| depth | geometric error: 5 % of the scene diagonal at depth 1, halved at each depth below, doubled for the root (LCC's and streamed SOG's rule) |
+| `epsg` + `offset` | root transform, through LCC's own georeferencing; with no usable EPSG, the transform that stands the scene upright |
+
+A tile needs its chunk decoded, and a SOG's WebP planes decode whole: the server reads a chunk once, keeps it decoded
+(the cache streamed SOG uses, 24 chunks a scene) and cuts every tile of that chunk from it. It does not download the
+`shN_*` planes, which the tiles do not carry: it reads the ZIP's directory from the end of the file, then the one span
+holding the other planes. That is two requests for 44 to 77 % of a chunk, 73 % of Tunis as a whole.
+
+Measured on Tunis from a laptop that got about 1 MB/s from the CDN: the root tileset, 571 tiles and 202 KB, in 1.9 s
+(the 1.1 MB manifest's download); the first tile of a chunk in 5 to 11 s, nearly all of it the chunk's download; a
+tile of a chunk already decoded in 4 to 140 ms for 723 to 162 865 splats.
+
+Not carried over: spherical harmonics above degree 0 (as for every splat format here), the environment chunk, the
+collision meshes, `virtualLoD`, and chunks of type `.spz` or `.ply`, which are refused with a message.

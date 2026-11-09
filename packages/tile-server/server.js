@@ -128,7 +128,7 @@ http.createServer(async (req, res) => {
     }
     if (await handleHomepage(req, res, u)) return;    // / , /openapi.json, /playground (+ /docs alias)
     if (await handleTiles(req, res, u)) return;      // unified /tiles?cache= continuum entry (in-process, no redirect)
-    if (await handleStream(req, res, u)) return;     // unified true-streaming dispatcher (copc/potree/sog/lcc/rad/i3s)
+    if (await handleStream(req, res, u)) return;     // unified true-streaming dispatcher (copc/potree/sog/lcc/lcc2/rad/i3s)
     if (await handleConvert(req, res, u)) return;    // any <fmt> → 3D Tiles live (preprocess + cache)
     if (await handleSelfContained(req, res, u)) return;   // .3tz / .3dtiles self-contained packages
     if (await handle3dtilesTools(req, res, u)) return;    // /3dtiles-tools?tool=implicit-to-explicit|upgrade
@@ -158,7 +158,7 @@ http.createServer(async (req, res) => {
   Promise.all(Object.values(MODULES).map((load) => load())).then(() => console.log(`  modules loaded in ${((Date.now() - t0) / 1000).toFixed(1)} s`), (e) => console.error('[tile-server] a module failed to load:', e));
   console.log(`  playground  interactive API reference (Scalar, driven by /openapi.json) → /playground (alias: /docs)`);
   console.log(`  tiles    (unified, no redirect) /tiles/tileset.json?url=<SRC>&format=<fmt>&cache=<none|hierarchy|full>[&prefetch=N][&tiling=implicit|explicit]`);
-  console.log(`  stream   (cache=none/hierarchy; copc/potree/sog/lcc/rad/i3s/threemx/geosplats) /stream/tileset.json?url=<SRC>&format=<fmt>[&cache=none|hierarchy][&prefetch=N]`);
+  console.log(`  stream   (cache=none/hierarchy; copc/potree/sog/lcc/lcc2/rad/i3s/threemx/geosplats) /stream/tileset.json?url=<SRC>&format=<fmt>[&cache=none|hierarchy][&prefetch=N]`);
   console.log(`  convert  (preprocess+cache, any fmt) /convert/tileset.json?url=<SRC>[&format=<fmt>][&centroids=1]`);
   console.log(`  3dtiles-self-contained  /3dtiles-self-contained/tileset.json?url=<path-or-URL.3tz|.3dtiles>`);
   console.log(`  3dtiles-tools  /3dtiles-tools/tileset.json?tool=implicit-to-explicit|upgrade&dir=<path>[&base=<url>]`);

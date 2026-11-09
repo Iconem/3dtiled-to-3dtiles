@@ -110,6 +110,7 @@ Formats that carry (or wrap) a general node/mesh hierarchy rather than a point- 
 |--------|-------------------------|---------------------|:------:|--------------------|-------------------|:----------:|
 | **[SOG (streamed)](https://developer.playcanvas.com/user-manual/gaussian-splatting/formats/streamed-sog/)** (PlayCanvas) · [SOG](https://developer.playcanvas.com/user-manual/gaussian-splatting/formats/sog/) | **binary** spatial tree (AABB split) | unbundled SOG chunk: WebP textures → `DataTable` (pos/quat-w-first/log-scale/SH-DC/logit-opacity) | REPLACE | empty grouping nodes | no geo metadata, `lod-meta.json` + per-chunk `meta.json` | ✅ per-file |
 | **[LCC](https://developer.xgrids.com/#/document?titleId=en-1720509291851)** (XGRIDS) · [whitepaper](https://github.com/xgrids/LCCWhitepaper) | **grid of Units** (cellX×Y) × per-cell LODs | `Data.bin` fixed **32 B/splat**: pos `f32×3`, color `rgba8`, scale `u16×3`, rot `10-10-10-2` (+SH `Shcoef.bin` 64 B) | REPLACE | per-cell coarse LODs | georef'ed, `meta.lcc` JSON + `Index.bin` | ✅ `Index.bin` offsets into `Data.bin` |
+| **[LCC2](https://github.com/xgrids/LCC2Whitepaper)** (XGRIDS) · [our notes](/docs/references/3dgs-splats/lcc2) | **tree of nodes** in the manifest, one LOD per depth | a row range of a bundled `.sog` chunk shared by neighbouring nodes (WebP planes, SH inside) | REPLACE | every node holds its region at its LOD | `epsg` + reserved `offset`, one `.lcc2` JSON | ✅ per chunk file; the SH planes are skipped by range |
 | **[RAD](https://sparkjs.dev/docs/lod-getting-started/)** (SparkJS) · [ext-splats](https://sparkjs.dev/docs/ext-splats/) | LoD merge tree, variable fanout (Tiny-LoD base β≈1.75; Bhatt-LoD unspecified, our converter observes ~1.5 in practice) | RADC chunk: per-splat columns — `f16`/`oct88r8` **interleaved**, `ln_0r8`/`r8_delta` **planar**, `f32_lebytes` byte-transposed | REPLACE | downsampled **merged** splats | no geo metadata, root `RAD0` JSON + per-chunk `RADC` JSON | ✅ chunked `.radc` |
 | **[GeoSplats](https://www.maptiler.com/geosplats/)** (MapTiler) | **octree voxel grids** (`grid_1/8/64/512`) × 8 progressive LODs | per-octant **SOGS** (`means_l/u`, `quats`, `scales`, `sh0` WebP) or `octant_<n>.ply` | REPLACE (LOD subset) | coarser-LOD octants | georef'ed,`model.json` (georef) + per-sub-model `metadata.json` (`voxel_grids` + `entries` TOC) | ✅ per-file / range |
 
@@ -117,8 +118,9 @@ Formats that carry (or wrap) a general node/mesh hierarchy rather than a point- 
 
 XGRIDS replaced LCC with LCC2 in 2026 ([LCC whitepaper](https://github.com/xgrids/LCCWhitepaper),
 [LCC2 whitepaper](https://github.com/xgrids/LCC2Whitepaper), spec 0.0.3 of June 2026; both carry XGRIDS' own
-licence, which asks for attribution and keeps derivatives of the format as open). We read LCC; LCC2 is not read
-yet. What changed, from the two whitepapers and `splat-transform`'s readers (`read-lcc.ts`, `read-lcc2.ts`):
+licence, which asks for attribution and keeps derivatives of the format as open). We read both, LCC2 since
+2026-11-09 and only with `.sog` chunks ([notes on the format and its one public sample](/docs/references/3dgs-splats/lcc2)).
+What changed, from the two whitepapers and `splat-transform`'s readers (`read-lcc.ts`, `read-lcc2.ts`):
 
 | | LCC | LCC2 |
 |---|---|---|
@@ -133,10 +135,13 @@ yet. What changed, from the two whitepapers and `splat-transform`'s readers (`re
 | New in LCC2 | | `splatExtraAttributes` (instance, semantic, thermal), `renderingHints` |
 
 For the converter and the server this means: an LCC tile is a byte range of `Data.bin` decoded by a loop, so it
-streams over range requests with no decoder dependency. An LCC2 tile would be a row range of a SOG or SPZ file:
-decoding goes through `splat-transform` (it reads both, and keeps the tree's node-to-range map), and a node's rows
-cannot be fetched alone from a SOG, whose WebP planes decode whole. The live path for LCC2 would then look like the
-streamed-SOG one, a decoded chunk cached and tiles cut from it, rather than like LCC's.
+streams over range requests with no decoder dependency. An LCC2 tile is a row range of a SOG chunk: a node's rows
+cannot be fetched alone from a SOG, whose WebP planes decode whole. So `format=lcc2` is an adapter of its own that
+shares LCC's frame and georeferencing and runs on streamed SOG's machinery: the chunk is decoded by `readSog`, kept
+in the same cache, and tiles are cut from it by the same code. The tree comes from the manifest alone, node for
+tile. The offline converter (`3dtiled scene.lcc2 out`, inside `lcc-to-3dtiles`) writes the same tiles through
+streamed SOG's chunk task. What a chunk's ZIP makes possible is leaving its `shN_*` planes on the server, 27 % of
+the Tunis sample's bytes.
 
 ## What decodes and encodes each format
 
@@ -152,6 +157,7 @@ format, and whether the server and the offline converter can spread it over work
 | Streamed SOG | [`@playcanvas/splat-transform`](https://github.com/playcanvas/splat-transform) 3.x (`readSog`, WebP planes; see [splat tools](/docs/guide/splat-tools)) | our SPZ v2 writer, gzip through Node's `zlib`, wrapped by glTF-Transform | yes | yes, per chunk |
 | GeoSplats (MapTiler) | `@playcanvas/splat-transform` (`readSog`) | same SPZ writer | yes | no offline converter |
 | LCC (XGRIDS) | our own decoder (`lccDecode.js`) | same SPZ writer | yes | yes |
+| LCC2 (XGRIDS) | our own manifest and ZIP-directory readers; chunks through `@playcanvas/splat-transform` (`readSog`) | same SPZ writer | yes | yes, per chunk |
 | RAD (Spark) | our own reader (`radHeader.js`), chunks inflated by Node's `zlib` | same SPZ writer | yes | yes |
 | I3S / SLPK | our own geometry parser, a port of Esri's LEPCC codec for point clouds, `@loaders.gl/i3s` to read `.slpk` archives | glTF-Transform, textures passed through as they are | yes | yes |
 | 3MX (Bentley) | our own `.3mxb` parser, OpenCTM through a vendored `js-openctm` (LZMA) | glTF-Transform, TRIANGLES | yes | no offline converter |
@@ -163,7 +169,7 @@ format, and whether the server and the offline converter can spread it over work
 | Format | What exists | Why it is not what runs here |
 |---|---|---|
 | Potree 1.x and 2.0 | Potree's own loaders, written for three.js in a browser | They load into a renderer's scene, node by node on its camera. A converter needs one node's bytes turned into arrays, with no scene; the readers are a few hundred lines. |
-| LCC (XGRIDS) | XGRIDS' LCC Web SDK; `@playcanvas/splat-transform` reads `.lcc` and LCC2 | The SDK is a renderer: it unpacks splats in a shader and exposes no decode call (our byte layout is taken from that shader). `splat-transform` 3.x reads LCC as a lazy source that can be asked for one chunk, but its chunks are its own (a LOD level cut every 65 536 splats), not the units of `Index.bin`; a tile here is one unit at one LOD, a byte range named by `Index.bin`, which is what lets it be streamed over range requests. The data is uncompressed, 32 bytes a splat, so the decoder is a loop. LCC2 is not read yet ([what differs](#lcc-and-lcc2)): there `splat-transform` is the way in, because the payload is SOG or SPZ. |
+| LCC (XGRIDS) | XGRIDS' LCC Web SDK; `@playcanvas/splat-transform` reads `.lcc` and LCC2 | The SDK is a renderer: it unpacks splats in a shader and exposes no decode call (our byte layout is taken from that shader). `splat-transform` 3.x reads LCC as a lazy source that can be asked for one chunk, but its chunks are its own (a LOD level cut every 65 536 splats), not the units of `Index.bin`; a tile here is one unit at one LOD, a byte range named by `Index.bin`, which is what lets it be streamed over range requests. The data is uncompressed, 32 bytes a splat, so the decoder is a loop. LCC2 ([what differs](#lcc-and-lcc2)) is the other way round: its payload is SOG, so `splat-transform` decodes the chunks, and what is ours is the manifest's tree, which its `readLcc2` merges into one multi-LOD source where a tile needs each node's own run. |
 | RAD (Spark) | Spark's own reader, in Rust (`rust/spark-lib`, feature `rad`, 1 800 lines with both encoder and decoder), compiled to WebAssembly inside the renderer's package | The published `@sparkjsdev/spark` carries that WASM only as base64 inside its bundle (1.8 MB), and the bundle's exports are the renderer's (`transcodeSpz`, `SplatLoader`); the decode functions (`decode_rad_header`, `decode_to_gsplatarray`) are not exported, and they yield Spark's packed splat encodings, not columns. The module itself needs no browser (its imports are only the wasm-bindgen glue). To use it we would build `spark-rs` ourselves with `wasm-pack --target nodejs`, `rad` feature only, and commit the `.wasm` (a few hundred KB) rather than put a Rust toolchain in CI. The format is a JSON header and deflated columns, which Node's `zlib` inflates natively, so a JS reader was the smaller thing to own. Spark's module would be worth it as a cross-check, or if the format moves faster than we follow. |
 | SPZ (output) | Niantic's `spz` library (C++, with WASM builds by others) | Only the writer is needed, for one version of the format (v2, which the glTF extension names): pack the columns, gzip. No native module to build or ship. |
 | I3S | `@loaders.gl/i3s`, Cesium's I3S provider. For LEPCC: Esri's C++ reference (Apache-2.0, last touched 2022); `@loaders.gl/tiles-3d` 5.0 (alpha and beta only, since `5.0.0-alpha.6`) has a dependency-free TypeScript decoder, `i3s-lepcc.ts`; a pure-Rust port, the `lepcc` crate (MIT, one author, six commits); `lepcc-ffi` (bindings over the C++); `pylepcc`; and a closed-licence WASM, `@bitruvius/turbo-lepcc`. CesiumJS has none: its I3S provider skips point-cloud layers. | `loaders.gl` is used to open `.slpk` archives. Its stable tile loader returns renderer-ready, already reprojected content for whole layers; a converter needs each node's raw buffers. When we wrote the port there was no LEPCC decoder in JavaScript; ours is a port of Esri's reference, as loaders.gl's new one is. The Rust port would not be reused for this: it is the same port in another language, it would need its own WASM build, and it is maintained less than ours. The loaders.gl decoder is the one to adopt, or to compare against, once 5.0 is stable. |

@@ -111,7 +111,7 @@ Each per-format converter is independent (install just the one you need); the me
 (`packages/convert`) auto-detects input format and dispatches to the right one:
 
 ```sh
-npm run convert -- <input> <outDir> [--format rad|sog|lcc|copc|potree|i3s]
+npm run convert -- <input> <outDir> [--format rad|sog|lcc|lcc2|copc|potree|i3s]
 # or directly:
 node packages/convert/cli.js sample-data/input/RAD/coit.rad sample-data/output/rad/coit-3dtiles-from-rad
 ```

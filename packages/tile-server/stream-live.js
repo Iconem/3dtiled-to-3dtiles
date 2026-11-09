@@ -38,6 +38,7 @@ import { copcTileset, copcTile, copcSubtree, copcTileRe, copcDrain } from './cop
 import { potreeTileset, potreeTile, potreeSubtree, potreeTileRe, potreeDrain } from './potree-live.js';
 import { sogTileset, sogTile, sogTileRe } from './sog-live.js';
 import { lccTileset, lccTile, lccTileRe } from './lcc-live.js';
+import { lcc2Tileset, lcc2Tile, lcc2TileRe } from './lcc2-live.js';
 import { radTileset, radTile, radTileRe, radSubtree } from './rad-live.js';
 import { i3sTileset, i3sTile, i3sTileRe } from './i3s-live.js';
 import { threemxTileset, threemxTile, threemxTileRe, threemxNode } from './threemx-live.js';
@@ -77,7 +78,8 @@ const COORD_RE = /^\d+-\d+-\d+-\d+$/;
 
 // format → range adapter. Add an entry here as each format gains a streaming adapter.
 // Streamable iff the source lets us build the tileset WITHOUT a full geometry convert: COPC/Potree
-// (octree boxes), SOG (lod-meta tree), LCC (grid cell boxes from index.bin). RAD has no persisted
+// (octree boxes), SOG (lod-meta tree), LCC (grid cell boxes from index.bin), LCC2 (the manifest's tree
+// of node boxes; its chunks are bundled SOGs, decoded by SOG's code). RAD has no persisted
 // per-tile bounds, but a cheap centers-only pass yields them without the full SPZ encode — so it
 // streams too (decode each chunk's center column for the tree, full-encode tiles on demand).
 // COPC/Potree are octrees → support &tiling=implicit|explicit (default implicit) + on-the-fly subtrees.
@@ -86,6 +88,7 @@ const ADAPTERS = {
   potree:    { tileset: potreeTileset,    tile: potreeTile,    subtree: potreeSubtree, tileRe: potreeTileRe, octree: true, drain: potreeDrain },
   sog:       { tileset: sogTileset,       tile: sogTile,       tileRe: sogTileRe },
   lcc:       { tileset: lccTileset,       tile: lccTile,       tileRe: lccTileRe },
+  lcc2:      { tileset: lcc2Tileset,      tile: lcc2Tile,      tileRe: lcc2TileRe },
   rad:       { tileset: radTileset,       tile: radTile,       tileRe: radTileRe },
   i3s:       { tileset: i3sTileset,       tile: i3sTile,       tileRe: i3sTileRe },
   threemx:   { tileset: threemxTileset,   tile: threemxTile,   tileRe: threemxTileRe },

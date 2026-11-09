@@ -586,7 +586,7 @@ let prefetchN  = 1;                                        // background-warm N 
 let transformOp = '';                                      // per-tile glTF-Transform on /stream: ''|meshopt|draco|decompress
 let centroidsOnly = false;                                 // tiled-splat preview: POINTS centroids instead of gaussians
 let rawUrlMode = false;                                    // url field holds a RAW dataset url (wrap it) vs a ready url
-const SPLAT_FORMATS = new Set(['sog', 'lcc', 'rad']);      // formats that support centroids-only
+const SPLAT_FORMATS = new Set(['sog', 'lcc', 'lcc2', 'rad']); // formats that support centroids-only
 let selectedFormat = 'copc';                               // which FORMAT's assets are shown
 let toolName = 'implicit-to-explicit';                     // 'implicit-to-explicit' | 'upgrade'
 
@@ -655,6 +655,9 @@ const FORMATS = [
       { id: 'guan',      label: 'Guan Temple',      src: 'input/LCC/Guan_Temple/meta.lcc',                 out: 'output/lcc/Guan_Temple-3dtiles-from-lcc'             },
       { id: 'guanlan',   label: 'Guanlan Town',      src: 'input/LCC/Guanlan Ancient Town/meta.lcc',        out: 'output/lcc/Guanlan_Ancient_Town-3dtiles-from-lcc'    },
       { id: 'religious', label: 'Religious Center',  src: 'input/LCC/religious_center_L2_P/meta.lcc',       out: 'output/lcc/religious_center_L2_P-3dtiles-from-lcc'   },
+  ]},
+  { fmt: 'lcc2', icon: '◈', label: 'LCC2', type: 'splat', octree: false, stream: true, assets: [
+      { id: 'tunis-lcc2', label: 'Tunis (XGRIDS PortalCam, 84M, 1.4 GB) ⬀', src: 'https://code.playcanvas.com/examples_data/tunis_01/03-19-195651.lcc2' },
   ]},
   { fmt: 'rad', icon: '✦', label: 'RAD', type: 'splat', octree: false, stream: true, assets: [
       { id: 'coit',      label: 'Coit',       src: 'input/RAD/coit.rad',             out: 'output/rad/coit-3dtiles-from-rad'        },

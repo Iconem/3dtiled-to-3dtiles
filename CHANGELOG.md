@@ -5,6 +5,27 @@ Format loosely follows [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+### Added — 2026-11-09 (LCC2, XGRIDS' successor to LCC, streamed and converted)
+- **`format=lcc2`** on `/stream`, detected from a `.lcc2` URL. An LCC2 scene is a JSON manifest holding a tree of
+  nodes, each a box and a run of rows in a chunk file; the tree becomes the tileset node for tile, with no splat
+  decoded. It is an adapter of its own, as LCC2 shares LCC's frame and none of its layout: georeferencing and the
+  upright transform are LCC's, the chunk decode, chunk cache and tile encoding are streamed SOG's, a chunk being a
+  bundled `.sog`.
+- **Tunis** (XGRIDS PortalCam, hosted by PlayCanvas for its `streamed-lcc2` example) is in the library under a new
+  LCC2 pill: 84 247 558 splats in 8 levels, 140 chunks, 1.40 GB. Its root tileset is 571 tiles and 202 KB, built in
+  1.9 s, the time to download the 1.1 MB manifest. The splats of each depth add up to the manifest's `lodSplats`,
+  level by level, and to its total.
+- **A chunk's spherical-harmonics planes are not downloaded**, as the tiles do not carry them: the ZIP directory is
+  read from the end of the chunk, then one span. Two requests for 44 to 77 % of a chunk, 73 % of Tunis. The first
+  tile of a chunk took 5 to 11 s at the 1 MB/s the CDN gave; a tile of a chunk already decoded, 4 to 140 ms.
+  `&centroids=1` and `TILED_WORKERS` work as for streamed SOG, with the same tile bytes with and without workers.
+- **Offline too**: `3dtiled scene.lcc2 out` (or `--format lcc2`), inside `lcc-to-3dtiles` and on the shared tile
+  loop through streamed SOG's chunk task. Run on the two coarsest levels of Tunis (30 tiles, 984 571 splats); its
+  tiles are byte for byte the live ones. The whole 1.4 GB scene was not converted.
+- Not read: `.spz` chunks (refused with a message, no sample to check against), the environment chunk, the
+  collision meshes. No georeferenced LCC2 sample was found, so placement from `epsg` is LCC's code, unchecked here.
+- Docs: a reference page on LCC2 as the sample has it, and where it differs from the whitepaper.
+
 ### Added — 2026-11-08 (the largest public streamed splats, in the library)
 - **Streamed SOG from SuperSplat**: Andrii Shramko's **Jastrzębia Góra**, a 4 × 2 km scan of 105.9 M splats in 8 LOD
   levels (CC BY 4.0, [221ee167](https://superspl.at/scene/221ee167); its root tileset is 90 MB and 284 165 tiles) and

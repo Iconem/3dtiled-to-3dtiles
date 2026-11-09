@@ -124,7 +124,7 @@ test('a failed build is not remembered for ever', async () => {
 
 test('every format reads its source through the shared layer', async () => {
   const dir = path.dirname(fileURLToPath(import.meta.url));
-  for (const f of ['copc-live', 'potree-live', 'sog-live', 'lcc-live', 'rad-live', 'i3s-live', 'threemx-live', 'geosplats-live', 'remote-zip', 'range-getter', '3dtiles-self-contained', 'export-live']) {
+  for (const f of ['copc-live', 'potree-live', 'sog-live', 'lcc-live', 'lcc2-live', 'rad-live', 'i3s-live', 'threemx-live', 'geosplats-live', 'remote-zip', 'range-getter', '3dtiles-self-contained', 'export-live']) {
     const code = (await readFile(path.join(dir, `${f}.js`), 'utf8')).replace(/\/\*[\s\S]*?\*\/|\/\/.*$/gm, '');
     assert.ok(!/(^|[^.\w])fetch\(/m.test(code), `${f}.js calls fetch itself`);
   }
@@ -154,6 +154,7 @@ const i3sLayer = { layerType: 'IntegratedMesh', nodePages: { nodesPerPage: 2 }, 
 const FORMATS = {
   sog: { files: { '/lod-meta.json': { filenames: ['a/meta.json'], tree: { bound: box, lods: { 0: { file: 0, offset: 0, count: 1 } } } } }, root: '/lod-meta.json', tile: '0_0_1', tileFile: '/a/meta.json' },
   lcc: { files: lcc(2), root: '/meta.lcc', tile: '32_64_2', tileFile: '/data.bin' },
+  lcc2: { files: { '/a.lcc2': { totalLevels: 1, root: { boundingBox: box, splatFiles: ['data/3dgs/a.sog'], child: { 0: { boundingBox: box, data: { '3dgs': { name: 0, start: 0, count: 1 } } } } } } }, root: '/a.lcc2', tile: '0_0_1', tileFile: '/data/3dgs/a.sog' },
   threemx: { files: { '/root.3mxb': threemxb([{ bbMin: [0, 0, 0], bbMax: [1, 1, 1], maxScreenDiameter: 1, children: [], resources: ['g'] }]) }, root: '/root.3mxb', tile: `${encodeURIComponent('root.3mxb')}__0`, tileFile: '/root.3mxb', sharedFile: true },
   i3s: { files: { '/3dSceneLayer.json': i3sLayer, '/nodepages/0.json': { nodes: [i3sNode(0)] } }, root: '/3dSceneLayer.json', tile: '0', tileFile: '/nodes/0/geometries/0.bin', probeFiles: ['/nodes/0/geometries/0.bin.gz'] },
   copc: { root: '/a.copc.laz', files: { '/a.copc.laz': Buffer.alloc(16) } },

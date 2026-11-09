@@ -74,7 +74,7 @@ export interface FormatMeta {
   assets: Asset[];
 }
 
-export const SPLAT_FORMATS = new Set(['sog', 'lcc', 'rad']);
+export const SPLAT_FORMATS = new Set(['sog', 'lcc', 'lcc2', 'rad']);
 
 export const TOOLS_DATASETS: Record<string, Asset[]> = {
   'implicit-to-explicit': [
@@ -141,6 +141,12 @@ export const FORMATS: FormatMeta[] = [
     // sibling HTTP files (see remote-zip.js). data.bin is DEFLATE-compressed inside the zip (not
     // byte-seekable), so it's decompressed once per cold source (~5-13s) and cached, not per-tile.
     { id: 'guan-temple', label: 'Guan Temple (zip)', src: 'https://da9i2vj1xvtoc.cloudfront.net/lcc-pub/fine_v2/Guan_Temple.zip', out: 'output/lcc/Guan_Temple-3dtiles-from-lcc' },
+  ] },
+  { fmt: 'lcc2', icon: '◈', label: 'LCC2', type: 'splat', octree: false, stream: true, assets: [
+    // XGRIDS LCC2: a *.lcc2 JSON manifest (a tree of nodes with boxes) over bundled .sog chunks, the only public
+    // sample found so far being the one PlayCanvas hosts for its `streamed-lcc2` engine example. 84 M splats,
+    // 8 LODs, 140 chunks, 1.4 GB: streamed, one chunk read per group of tiles (lcc2-live.js). Local frame, no EPSG.
+    { id: 'tunis-lcc2', label: 'Tunis (XGRIDS PortalCam, 84M, 1.4 GB) ⬀', src: 'https://code.playcanvas.com/examples_data/tunis_01/03-19-195651.lcc2' },
   ] },
   { fmt: 'rad', icon: '✦', label: 'RAD', type: 'splat', octree: false, stream: true, assets: [
     // Real sources: the exact files this repo's own README setup instructions curl down as
@@ -222,7 +228,7 @@ export const PSEUDO_FORMATS: [string, string][] = [
 // other tileset-native/mesh formats), which is why this can't just be "FORMATS then PSEUDO_FORMATS"
 // in array order. `group` drives the visual separators TopBar renders between clusters:
 //   0: point-cloud octrees (COPC, Potree)
-//   1: splat formats (SOG, LCC, GeoSplats, RAD)
+//   1: splat formats (SOG, LCC, LCC2, GeoSplats, RAD)
 //   2: tileset-native / mesh formats (3D Tiles, Packages, I3S, 3MX, Bing, Google)
 //   3: meta-tilesets — /aggregate mosaics that mix all of the above
 export const FORMAT_PILL_ORDER: { id: string; group: number }[] = [
@@ -230,6 +236,7 @@ export const FORMAT_PILL_ORDER: { id: string; group: number }[] = [
   { id: 'potree', group: 0 },
   { id: 'sog', group: 1 },
   { id: 'lcc', group: 1 },
+  { id: 'lcc2', group: 1 },
   { id: 'geosplats', group: 1 },
   { id: 'rad', group: 1 },
   { id: '3dtiles', group: 2 },

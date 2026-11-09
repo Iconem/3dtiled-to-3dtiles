@@ -2,7 +2,7 @@
 /**
  * 3dtiled — meta-converter CLI. Detects the input format and converts to 3D Tiles.
  *
- *   3dtiled <input> <outDir> [--format rad|sog|lcc|copc|potree|i3s]
+ *   3dtiled <input> <outDir> [--format rad|sog|lcc|lcc2|copc|potree|i3s]
  *           [--scale N] [--ge-scale N] [--ge-layer N] [--centroids-only] [--verify off|counts|sample|full] [--hierarchy-errors error|warn] [-- <extra converter args>]
  *
  *   3dtiled serve [<input>] [--port 3001] [--format <fmt>] [--lon <deg> --lat <deg>] [--alt m]
@@ -19,11 +19,11 @@
  *     relative, implicit tilings expanded. For a raw dataset (a .copc.laz, a Potree folder…), either
  *     use the default convert command below or `3dtiled serve` it and export the printed URL.
  *
- * --centroids-only: for splat formats (rad/sog/lcc), emit a glTF POINTS tileset of splat centroids
+ * --centroids-only: for splat formats (rad/sog/lcc/lcc2), emit a glTF POINTS tileset of splat centroids
  *   instead of KHR_gaussian_splatting tiles — renderable by point-cloud-only 3D Tiles viewers.
  *
  * Detection covers: .rad · .copc.laz/.laz · streamed-SOG (lod-meta.json) · single SOG (meta.json+webp)
- * · LCC (meta.lcc/index.bin/data.bin) · Potree 2.0 (metadata.json+octree.bin) / 1.x (cloud.js)
+ * · LCC (meta.lcc/index.bin/data.bin) · LCC2 (*.lcc2 + data/3dgs/*.sog) · Potree 2.0 (metadata.json+octree.bin) / 1.x (cloud.js)
  * · I3S (.slpk / 3dSceneLayer.json).
  */
 import { convert, detectFormat, supportedFormats } from './index.js';

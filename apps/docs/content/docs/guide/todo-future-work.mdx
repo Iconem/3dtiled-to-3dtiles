@@ -439,6 +439,16 @@ flowchart LR
 
 ## Format coverage
 
+- [x] **LCC2 (XGRIDS), live and offline** (done 2026-11-09, `format=lcc2`, `.lcc2` detected by name). The manifest's
+  tree is the tile tree; chunks are bundled SOGs decoded through streamed SOG's code, their SH planes left on the
+  server. Checked against the Tunis sample, the only public one found
+  ([notes](/docs/references/3dgs-splats/lcc2)).
+- [ ] **What LCC2 still lacks here.** Chunks of type `.spz` (refused with a message: no sample to check a reader
+  against); the environment chunk, which the offline streamed-SOG converter attaches as an always-drawn child and
+  which here would make the root box 4 km wide for 12 659 far splats; a georeferenced sample, to check that `epsg`
+  and `offset` place a scene as LCC's do while the whitepaper calls `offset` reserved; the collision meshes
+  (`data/mesh/*.ply`), which could be a second, mesh tileset of the same tree.
+
 - [ ] **Spherical harmonics (view-dependent color) for Gaussian splats.** Every splat converter
   (RAD/LCC/SOG/GeoSplats) currently emits **DC-only** color — the source formats' higher-order SH bands
   are decoded-and-discarded (or never touched) on the way to a 3D Tiles GLB, so specular/view-dependent

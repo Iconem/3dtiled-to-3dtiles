@@ -1,7 +1,7 @@
 /**
  * 3dtiles-convert-core — input format detection. Sniffs a path (file or directory) → format id.
  * Cheap checks: index filenames for directory formats, magic bytes / extension for file formats.
- * Returns one of: 'rad' | 'sog' | 'lcc' | 'copc' | 'potree' | 'i3s' | null.
+ * Returns one of: 'rad' | 'sog' | 'lcc' | 'lcc2' | 'copc' | 'potree' | 'i3s' | null.
  */
 import fs from 'fs/promises';
 import path from 'path';
@@ -22,6 +22,7 @@ export function detectFormatByName(name) {
   if (l.endsWith('metadata.json') || l.endsWith('cloud.js')) return 'potree';
   if (l.endsWith('lod-meta.json')) return 'sog';
   if (l.endsWith('.lcc')) return 'lcc';
+  if (l.endsWith('.lcc2')) return 'lcc2';
   if (l.endsWith('3dscenelayer.json') || l.endsWith('3dscenelayer.json.gz')) return 'i3s';
   if (l.endsWith('.3tz') || l.endsWith('.3dtiles')) return 'package';
   if (l.endsWith('.3mx') || l.endsWith('.3mxb')) return 'threemx';
@@ -36,6 +37,7 @@ export async function detectFormat(input) {
   if (lower.endsWith('.3tz') || lower.endsWith('.3dtiles')) return 'package';
   if (lower.endsWith('.copc.laz') || lower.endsWith('.copc')) return 'copc';
   if (lower.endsWith('.slpk')) return 'i3s';
+  if (lower.endsWith('.lcc2')) return 'lcc2';
   if (lower.endsWith('.laz') || lower.endsWith('.las')) {
     // COPC iff a "copc" VLR is present — sniff the header region cheaply.
     try { const fh = await fs.open(input, 'r'); const b = Buffer.alloc(8192); await fh.read(b, 0, 8192, 0); await fh.close();
@@ -52,6 +54,8 @@ export async function detectFormat(input) {
   // I3S (extracted SLPK / REST mirror): Esri commonly gzips the layer doc → `.json.gz`.
   if (await exists(path.join(dir, '3dSceneLayer.json')) || await exists(path.join(dir, '3dSceneLayer.json.gz'))
       || await exists(path.join(dir, 'nodepages'))) return 'i3s';
+  // LCC2: a *.lcc2 manifest beside its data/3dgs chunks (checked before LCC, whose *.lcc test is on the name's end too)
+  if (await isDir(input)) { const files = await fs.readdir(input).catch(() => []); if (files.some(f => f.toLowerCase().endsWith('.lcc2'))) return 'lcc2'; }
   if (await exists(path.join(dir, 'index.bin')) && await exists(path.join(dir, 'data.bin'))) return 'lcc';
   // LCC meta file name is arbitrary (*.lcc)
   if (await isDir(input)) { const files = await fs.readdir(input).catch(() => []); if (files.some(f => f.toLowerCase().endsWith('.lcc'))) return 'lcc'; }

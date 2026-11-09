@@ -80,5 +80,6 @@ What we changed to move: SOG chunks go through `readSog(fileSystem, 'meta.json')
 (`readFile` now returns sources); the extract endpoint reads SPZ through `readSpz(source, pool)` and
 `materializeToDataTable`; `writeSog` takes an `iterations` count; `MemoryFileSystem.results` holds the output.
 `readLcc` and `readLcc2` are no longer root exports (they sit behind `readFile({ inputFormat })`), which does not
-matter to us as LCC is decoded by our own reader. The read path uses no GPU; `webgpu` (Dawn) is a dependency the
+matter to us: LCC is decoded by our own reader, and of LCC2 (read since 2026-11-09) we parse the manifest ourselves
+and hand each chunk, a bundled SOG, to `readSog`. The read path uses no GPU; `webgpu` (Dawn) is a dependency the
 package installs but only the CLI imports. Node 22 or later is required.

@@ -4,12 +4,12 @@
  * The COPC path (server.js) is per-tile: each request HTTP-range-reads one octree node. This path is
  * per-dataset: on the FIRST request it runs the in-process `convert()` once (cached on disk) and then
  * serves the static 3D Tiles output. Not range-streamed, but genuinely on-demand for ANY format —
- * potree, sog (streamed-SOG), rad, lcc, copc, i3s.
+ * potree, sog (streamed-SOG), rad, lcc, lcc2, copc, i3s.
  *
  *   GET /convert/tileset.json?url=<SRC>[&format=<fmt>][&centroids=1]  → tileset (URIs rewritten absolute)
  *   GET /convert/<key>/<path>                                        → static tile / subtree / sub-tileset
  *
- * &centroids=1 makes splat formats (rad/sog/lcc) emit a POINTS tileset of splat centroids, so
+ * &centroids=1 makes splat formats (rad/sog/lcc/lcc2) emit a POINTS tileset of splat centroids, so
  * renderers without KHR_gaussian_splatting can still display the scene.
  *
  * SRC may be a remote URL (we download the source + the sibling files each converter reads) OR a local

@@ -21,6 +21,7 @@ const REGISTRY = {
   rad:    { module: 'rad-to-3dtiles',    script: 'packages/rad-to-3dtiles/src/index.js' },
   sog:    { module: 'sog-to-3dtiles',    script: 'packages/sog-to-3dtiles/src/index.js' },
   lcc:    { module: 'lcc-to-3dtiles',    script: 'packages/lcc-to-3dtiles/src/index.js' },
+  lcc2:   { module: 'lcc-to-3dtiles',    script: 'packages/lcc-to-3dtiles/src/index.js' },   // same package, told apart by the *.lcc2 manifest
   copc:   { module: 'copc-to-3dtiles',   script: 'packages/copc-to-3dtiles/src/index.js' },
   potree: { module: 'potree-to-3dtiles', script: 'packages/potree-to-3dtiles/src/index.js' },
   i3s:    { module: 'i3s-to-3dtiles',    script: 'packages/i3s-to-3dtiles/src/index.js' },

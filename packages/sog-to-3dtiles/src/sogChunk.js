@@ -17,15 +17,23 @@
 import fs   from 'fs/promises';
 import path from 'path';
 import { readSog, MemoryReadFileSystem } from '@playcanvas/splat-transform';
+import { bundledSogFiles } from './sogBundle.js';
 
 const SH_C0 = 0.28209479177387814;
 
 /**
- * Load + decode one unbundled SOG chunk directory into a DataTable.
- * @param {string} metaJsonPath  absolute path to the chunk's meta.json
+ * Load + decode one SOG chunk into a DataTable: an unbundled chunk directory, or a bundled `.sog` file (as an LCC2
+ * scene stores its chunks), of which the higher-order SH planes are left unread (see sogBundle.js).
+ * @param {string} metaJsonPath  absolute path to the chunk's meta.json, or to a bundled `.sog`
  * @returns {Promise<import('@playcanvas/splat-transform').DataTable>}
  */
 export async function decodeChunk(metaJsonPath) {
+  if (/\.sog$/i.test(metaJsonPath)) {
+    const bundle = await fs.readFile(metaJsonPath);
+    const bundled = new MemoryReadFileSystem();
+    for (const [name, bytes] of Object.entries(await bundledSogFiles(bundle, bundle.length))) { bundled.set(name, bytes); bundled.set('./' + name, bytes); }
+    return readSog(bundled, 'meta.json', { logging: 'silent' });
+  }
   const dir  = path.dirname(metaJsonPath);
   const meta = JSON.parse(await fs.readFile(metaJsonPath, 'utf8'));
 

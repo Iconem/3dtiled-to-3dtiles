@@ -38,7 +38,10 @@ function boundToZUpBox(b) {
 
 /** Uniform in-process entry: convert an LCC dataset (dir or meta.lcc) → 3D Tiles. */
 export async function convert(input, outDir, opts = {}) {
-  if (!input || !outDir) throw new Error('Usage: lcc-to-3dtiles <lcc-dir | meta.lcc> <outDir>');
+  if (!input || !outDir) throw new Error('Usage: lcc-to-3dtiles <lcc-dir | meta.lcc | scene.lcc2> <outDir>');
+  // LCC2 (a *.lcc2 manifest over bundled SOG chunks) shares LCC's frame but none of its layout: its own path, lcc2.js.
+  const { lcc2ManifestPath, convertLcc2 } = await import('./lcc2.js');
+  if (opts.format === 'lcc2' || await lcc2ManifestPath(input)) return convertLcc2(input, outDir, opts);
   let inPath = input;
   const stat = await fs.stat(inPath).catch(() => null);
   if (stat?.isDirectory()) {
