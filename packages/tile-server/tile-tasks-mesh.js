@@ -3,8 +3,12 @@
  * clouds, core's task-worker.js for the worker). Each task takes what the server's thread fetched and returns the GLB.
  */
 import { i3sNodeGlb, threemxNodeGlb, osgbUnitGlb } from './mesh-tile.js';
+import { nexusNodeGlb } from '../nexus-to-3dtiles/src/nexus-glb.js';
 
 const asBuffer = (u8) => (u8 ? Buffer.from(u8.buffer, u8.byteOffset, u8.byteLength) : u8);
+
+/** @param {{index:object, i:number, nodeBytes:Uint8Array, textures:[number,Uint8Array][]}} a one Nexus node's bytes and its textures' */
+export const nexusTileTask = ({ index, i, nodeBytes, textures }) => nexusNodeGlb(index, i, asBuffer(nodeBytes), new Map(textures.map(([t, b]) => [t, asBuffer(b)])));
 
 /** @param {{buf:Uint8Array, spec:object, texture?:{bytes:Uint8Array,mimeType:string}, rgbBuf?:Uint8Array|null}} a */
 export const i3sTileTask = ({ buf, spec, texture, rgbBuf }) =>

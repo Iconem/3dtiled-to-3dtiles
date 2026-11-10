@@ -1,0 +1,16 @@
+{
+  "name": "nexus-to-3dtiles",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "main": "src/index.js",
+  "exports": {
+    ".": "./src/index.js",
+    "./reader": "./src/nexus-reader.js",
+    "./glb": "./src/nexus-glb.js",
+    "./tileset": "./src/nexus-tileset.js"
+  },
+  "dependencies": {
+    "@gltf-transform/core": "^4.4.0"
+  }
+}

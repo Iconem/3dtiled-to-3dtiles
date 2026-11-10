@@ -12,6 +12,7 @@
  *   GET /stream/threemx/node/<path>.json?url=<SRC>          → 3MX lazy-fragment continuation (one .3mxb)
  *   GET /stream/osgb/node/<path>.json?url=<SRC>             → OSGB lazy-fragment continuation (one .osgb)
  *   GET /stream/rad/subtree/<chunkIndex>.json?url=<SRC>     → RAD cache=none depth-cut continuation
+ *   GET /stream/tileset.json?format=nexus&url=<….nxs|nxz>   → Nexus: the whole tree from the file's tables (nexus-live.js)
  *
  * I3S has no persisted spatial index to make a lazy/partial hierarchy read meaningful (see its
  * file-header comments), so it always fully materializes its explicit tree regardless of `cache=` —
@@ -45,6 +46,7 @@ import { i3sTileset, i3sTile, i3sTileRe } from './i3s-live.js';
 import { threemxTileset, threemxTile, threemxTileRe, threemxNode } from './threemx-live.js';
 import { osgbTileset, osgbTile, osgbTileRe, osgbNode } from './osgb-live.js';
 import { geosplatsTileset, geosplatsTile, geosplatsTileRe } from './geosplats-live.js';
+import { nexusTileset, nexusTile, nexusTileRe } from './nexus-live.js';
 import { handleSelfContained } from './3dtiles-self-contained.js';
 import { detectFormatByName, compressGlb, decompressGlb, applyPlacement, curvedParam, attributesSpec } from '../core/index.js';
 
@@ -96,6 +98,8 @@ const ADAPTERS = {
   threemx:   { tileset: threemxTileset,   tile: threemxTile,   tileRe: threemxTileRe },
   osgb:      { tileset: osgbTileset,      tile: osgbTile,      tileRe: osgbTileRe },
   geosplats: { tileset: geosplatsTileset, tile: geosplatsTile, tileRe: geosplatsTileRe },
+  // Nexus (.nxs/.nxz): one file made for range requests; the tileset is built from its tables (nexus-live.js)
+  nexus:     { tileset: nexusTileset,     tile: nexusTile,     tileRe: nexusTileRe },
 };
 // `vpc` streams too, without an adapter: a mosaic of COPC streams, built by /aggregate (see handleStream).
 export const streamableFormats = [...Object.keys(ADAPTERS), 'vpc'];
@@ -246,6 +250,9 @@ export async function handleStream(req, res, u) {
       yaw: u.searchParams.has('yaw') ? Number(u.searchParams.get('yaw')) : undefined,
       alt: u.searchParams.has('alt') ? Number(u.searchParams.get('alt')) : undefined,
     } : null;
+    // nexus-only knobs (ignored by every other adapter): dag=levels|paths (the DAG → tree mapping, nexus-tileset.js)
+    // and ge=<factor> (geometricError = factor × node error, default 8).
+    const nexusOpts = fmt === 'nexus' ? { dag: u.searchParams.get('dag') || undefined, geScale: u.searchParams.has('ge') ? Number(u.searchParams.get('ge')) : undefined } : null;
     // crs: EPSG:<n> for point clouds whose file declares no CRS (copc/potree; ignored elsewhere).
     const crs = u.searchParams.get('crs') || undefined;
     // curved: on|off overrides copc-live's extent rule for placing points on the ellipsoid (default auto).
@@ -253,7 +260,7 @@ export async function handleStream(req, res, u) {
     // depth=0: the root tile only (no children, no hierarchy drain) — what /aggregate needs to place a
     // child; honoured by copc-live's curved explicit tree, ignored where the root is already cheap.
     const depth = u.searchParams.has('depth') ? Math.max(0, Math.trunc(Number(u.searchParams.get('depth')))) : undefined;
-    const ts = await adapter.tileset(url, { tiling: u.searchParams.get('tiling'), lazy, hierarchy, prefetch, centroids, crs, curved, depth, ...geosplatsOpts });
+    const ts = await adapter.tileset(url, { tiling: u.searchParams.get('tiling'), lazy, hierarchy, prefetch, centroids, crs, curved, depth, ...geosplatsOpts, ...nexusOpts });
     // User-directed globe placement (&lon=&lat=[&alt=][&heading=][&scale=]): attach a LOCAL dataset to
     // a real location so ANY 3D Tiles client (Cesium for Unreal/Unity, QGIS, native CesiumJS) streams
     // it in place — no viewer-side reorientation needed. Composes ON TOP of the adapter's own

@@ -167,7 +167,7 @@ export async function mirrorRemote(src, fmt, dir, opts = {}) {
     }
     return path.join(dir, 'lod-meta.json');
   }
-  await get(name);                                          // single-file: copc / rad / i3s-slpk
+  await get(name);                                          // single-file: copc / rad / i3s-slpk / nexus (.nxs, .nxz)
   return path.join(dir, name);
 }
 

@@ -12,6 +12,7 @@
     "fflate": "^0.8.3",
     "i3s-to-3dtiles": "workspace:*",
     "lcc-to-3dtiles": "workspace:*",
+    "nexus-to-3dtiles": "workspace:*",
     "potree-to-3dtiles": "workspace:*",
     "rad-to-3dtiles": "workspace:*",
     "sog-to-3dtiles": "workspace:*",

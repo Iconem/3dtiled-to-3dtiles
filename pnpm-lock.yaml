@@ -235,6 +235,9 @@ importers:
       lcc-to-3dtiles:
         specifier: workspace:*
         version: link:../lcc-to-3dtiles
+      nexus-to-3dtiles:
+        specifier: workspace:*
+        version: link:../nexus-to-3dtiles
       potree-to-3dtiles:
         specifier: workspace:*
         version: link:../potree-to-3dtiles
@@ -318,6 +321,12 @@ importers:
         version: link:../core
 
   packages/lcc-to-3dtiles: {}
+
+  packages/nexus-to-3dtiles:
+    dependencies:
+      '@gltf-transform/core':
+        specifier: ^4.4.0
+        version: 4.4.0(patch_hash=fb4359db3867ba80e738de3960b907cc04264f8f0a9a70931d3d2ef6d643a2f7)
 
   packages/osgb-to-3dtiles:
     dependencies:

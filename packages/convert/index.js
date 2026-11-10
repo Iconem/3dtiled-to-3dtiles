@@ -25,6 +25,7 @@ const REGISTRY = {
   copc:   { module: 'copc-to-3dtiles',   script: 'packages/copc-to-3dtiles/src/index.js' },
   potree: { module: 'potree-to-3dtiles', script: 'packages/potree-to-3dtiles/src/index.js' },
   i3s:    { module: 'i3s-to-3dtiles',    script: 'packages/i3s-to-3dtiles/src/index.js' },
+  nexus:  { module: 'nexus-to-3dtiles',  script: 'packages/nexus-to-3dtiles/src/index.js' },   // .nxs / .nxz (one file)
 };
 
 /**

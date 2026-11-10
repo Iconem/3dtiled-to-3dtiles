@@ -706,6 +706,13 @@ const FORMATS = [
       { id: 'hongkong', label: 'Hong Kong Central, tile 21-25 (LandsD mesh, OSG 3.2, 217 MB)', src: 'https://raw.githubusercontent.com/fafa1899/GISBasic/main/Data/Model/hongkong/tile_21_25/Data/Model/Model.osgb' },
       { id: 'generic',  label: 'One tile to L22 (ContextCapture, 32 MB)', src: 'https://raw.githubusercontent.com/xarray/generic-osgb/master/examples/data/Tile_1/Tile_1.osgb' },
   ]},
+  // Nexus (CNR-ISTI multiresolution meshes, 3DHOP's .nxs/.nxz): one file read by range requests. Same list as src/lib/formats.ts.
+  { fmt: 'nexus', icon: '🗿', label: 'Nexus', type: 'mesh', octree: false, stream: true, assets: [
+      { id: 'gargoyle', label: 'Gargoyle (3DHOP sample, 187 nodes, 4.0 M triangles, 7.3 MB)', src: 'https://raw.githubusercontent.com/cnr-isti-vclab/3dhop/master/examples/models/gargo.nxz' },
+      { id: 'shell',    label: 'Unio hainesianus shell, textured (Smithsonian CC0, 28 nodes, 40 MB)', src: 'https://huggingface.co/datasets/JulyTheMonth/NexusDataset/resolve/main/shell.nxz' },
+      { id: 'dragon',   label: 'Stanford dragon (85 nodes, 1.7 M triangles, 3.5 MB)', src: 'https://huggingface.co/datasets/JulyTheMonth/NexusDataset/resolve/main/dragon.nxz' },
+      { id: 'bust',     label: 'George Washington bust (Smithsonian CC0, 242 MB)', src: 'https://huggingface.co/datasets/JulyTheMonth/NexusDataset/resolve/main/bust.nxz' },
+  ]},
 ];
 
 // Already-3D-Tiles datasets (the "3D Tiles" format): loaded directly, independent of mode.

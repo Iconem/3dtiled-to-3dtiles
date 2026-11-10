@@ -70,6 +70,7 @@
                 "i3s",
                 "threemx",
                 "osgb",
+                "nexus",
                 "geosplats",
                 "vpc"
               ]
@@ -183,7 +184,7 @@
         "tags": [
           "tiles"
         ],
-        "summary": "GET /stream/tileset.json — true online range-streaming (copc/potree/sog/lcc/lcc2/rad/i3s/threemx/osgb/geosplats)",
+        "summary": "GET /stream/tileset.json — true online range-streaming (copc/potree/sog/lcc/lcc2/rad/i3s/threemx/osgb/nexus/geosplats)",
         "description": "Range-reads the source's own persisted hierarchy (no full decode/convert) to build a tileset.json; individual tiles are converted on demand as the client requests them via `/stream/tile/...` or `/stream/subtrees/...` URIs embedded in the response.",
         "parameters": [
           {
@@ -211,6 +212,7 @@
                 "i3s",
                 "threemx",
                 "osgb",
+                "nexus",
                 "geosplats"
               ]
             }

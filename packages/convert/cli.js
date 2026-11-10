@@ -2,8 +2,8 @@
 /**
  * 3dtiled — meta-converter CLI. Detects the input format and converts to 3D Tiles.
  *
- *   3dtiled <input> <outDir> [--format rad|sog|lcc|lcc2|copc|potree|i3s]
- *           [--scale N] [--ge-scale N] [--ge-layer N] [--centroids-only] [--verify off|counts|sample|full] [--hierarchy-errors error|warn] [-- <extra converter args>]
+ *   3dtiled <input> <outDir> [--format rad|sog|lcc|lcc2|copc|potree|i3s|nexus]
+ *           [--scale N] [--ge-scale N] [--ge-layer N] [--centroids-only] [--dag levels|paths] [--verify off|counts|sample|full] [--hierarchy-errors error|warn] [-- <extra converter args>]
  *
  *   3dtiled serve [<input>] [--port 3001] [--format <fmt>] [--lon <deg> --lat <deg>] [--alt m]
  *           [--heading deg] [--place-scale N]
@@ -24,7 +24,7 @@
  *
  * Detection covers: .rad · .copc.laz/.laz · streamed-SOG (lod-meta.json) · single SOG (meta.json+webp)
  * · LCC (meta.lcc/index.bin/data.bin) · LCC2 (*.lcc2 + data/3dgs/*.sog) · Potree 2.0 (metadata.json+octree.bin) / 1.x (cloud.js)
- * · I3S (.slpk / 3dSceneLayer.json).
+ * · I3S (.slpk / 3dSceneLayer.json) · Nexus (.nxs / .nxz).
  */
 import { convert, detectFormat, supportedFormats } from './index.js';
 import { detectFormatByName } from '3dtiles-convert-core';
@@ -35,7 +35,7 @@ const sepIdx = rawArgv.indexOf('--');
 const argv = sepIdx >= 0 ? rawArgv.slice(0, sepIdx) : rawArgv;
 const extraArgs = sepIdx >= 0 ? rawArgv.slice(sepIdx + 1) : [];
 
-const VALUE_FLAGS = new Set(['workers', 'verify', 'hierarchy-errors', 'max-depth', 'pack', 'format', 'scale', 'ge-scale', 'ge-layer', 'tiling', 'port', 'lon', 'lat', 'alt', 'heading', 'place-scale']);
+const VALUE_FLAGS = new Set(['workers', 'verify', 'hierarchy-errors', 'max-depth', 'pack', 'format', 'scale', 'ge-scale', 'ge-layer', 'tiling', 'port', 'lon', 'lat', 'alt', 'heading', 'place-scale', 'dag']);
 function flag(name) { const i = argv.indexOf(`--${name}`); return i >= 0 ? argv[i + 1] : undefined; }
 // --workers auto|<n>: build tiles on worker threads, in every converter that has a tile loop (same as TILED_WORKERS)
 if (flag('workers') != null) { const { setTileWorkers } = await import('3dtiles-convert-core'); setTileWorkers(flag('workers')); }
@@ -130,6 +130,7 @@ if (!input || !outDir) {
     geLayer: flag('ge-layer')!= null ? Number(flag('ge-layer')): undefined,
     centroidsOnly: argv.includes('--centroids-only'),   // splat fmts → POINTS centroid tileset
     tiling: flag('tiling'),                             // 'implicit' | 'explicit' (copc, potree)
+    dag: flag('dag'),                                   // 'levels' | 'paths' (nexus: how the DAG becomes a tree)
     extraArgs,
   };
   // The desktop app reads these lines for its bar: [step/steps] label: done/total

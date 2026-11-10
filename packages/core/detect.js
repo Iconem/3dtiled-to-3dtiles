@@ -1,8 +1,8 @@
 /**
  * 3dtiles-convert-core — input format detection. Sniffs a path (file or directory) → format id.
  * Cheap checks: index filenames for directory formats, magic bytes / extension for file formats.
- * Returns one of: 'rad' | 'sog' | 'lcc' | 'lcc2' | 'copc' | 'potree' | 'i3s' | 'vpc' | 'osgb' | null ('osgb' and 'threemx' have a
- * live /stream adapter only, no offline converter).
+ * Returns one of: 'rad' | 'sog' | 'lcc' | 'lcc2' | 'copc' | 'potree' | 'i3s' | 'vpc' | 'osgb' | 'nexus' | null ('osgb' and 'threemx'
+ * have a live /stream adapter only, no offline converter).
  */
 import fs from 'fs/promises';
 import path from 'path';
@@ -28,6 +28,7 @@ export function detectFormatByName(name) {
   if (l.endsWith('3dscenelayer.json') || l.endsWith('3dscenelayer.json.gz')) return 'i3s';
   if (l.endsWith('.3tz') || l.endsWith('.3dtiles')) return 'package';
   if (l.endsWith('.3mx') || l.endsWith('.3mxb')) return 'threemx';
+  if (l.endsWith('.nxs') || l.endsWith('.nxz')) return 'nexus';                  // Nexus multiresolution mesh (3DHOP), plain or compressed
   // OSGB: one .osgb, or the metadata.xml at the top of a ContextCapture / DJI Terra export (ModelMetadata: SRS + SRSOrigin)
   if (l.endsWith('.osgb') || l === 'metadata.xml' || l.endsWith('/metadata.xml')) return 'osgb';
   return null;
@@ -43,6 +44,7 @@ export async function detectFormat(input) {
   if (lower.endsWith('.copc.laz') || lower.endsWith('.copc')) return 'copc';
   if (lower.endsWith('.slpk')) return 'i3s';
   if (lower.endsWith('.lcc2')) return 'lcc2';
+  if (lower.endsWith('.nxs') || lower.endsWith('.nxz')) return 'nexus';
   if (lower.endsWith('.laz') || lower.endsWith('.las')) {
     // COPC iff a "copc" VLR is present — sniff the header region cheaply.
     try { const fh = await fs.open(input, 'r'); const b = Buffer.alloc(8192); await fh.read(b, 0, 8192, 0); await fh.close();

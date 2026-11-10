@@ -237,6 +237,17 @@ export const FORMATS: FormatMeta[] = [
     { id: 'hongkong', label: 'Hong Kong Central, tile 21-25 (LandsD mesh, OSG 3.2, 217 MB)', src: 'https://raw.githubusercontent.com/fafa1899/GISBasic/main/Data/Model/hongkong/tile_21_25/Data/Model/Model.osgb' },
     { id: 'generic', label: 'One tile to L22 (ContextCapture, 32 MB)', src: 'https://raw.githubusercontent.com/xarray/generic-osgb/master/examples/data/Tile_1/Tile_1.osgb' },
   ] },
+  // Nexus (CNR-ISTI multiresolution meshes, the format of 3DHOP; `.nxs` plain, `.nxz` Corto-compressed): one file, read
+  // by range requests (the header and tables, then one node at a time), live or converted offline. The gargoyle is the
+  // Visual Computing Lab's own sample (MIT, in the 3DHOP repository); the shell and the bust are Smithsonian scans
+  // (CC0) packed as Nexus in a Hugging Face dataset, the shell textured (28 JPEGs); the Stanford dragon is for
+  // non-commercial use. Every host answers Range.
+  { fmt: 'nexus', icon: '🗿', label: 'Nexus', type: 'mesh', octree: false, stream: true, assets: [
+    { id: 'gargoyle', label: 'Gargoyle (3DHOP sample, 187 nodes, 4.0 M triangles, 7.3 MB)', src: 'https://raw.githubusercontent.com/cnr-isti-vclab/3dhop/master/examples/models/gargo.nxz' },
+    { id: 'shell', label: 'Unio hainesianus shell, textured (Smithsonian CC0, 28 nodes, 40 MB)', src: 'https://huggingface.co/datasets/JulyTheMonth/NexusDataset/resolve/main/shell.nxz' },
+    { id: 'dragon', label: 'Stanford dragon (85 nodes, 1.7 M triangles, 3.5 MB)', src: 'https://huggingface.co/datasets/JulyTheMonth/NexusDataset/resolve/main/dragon.nxz' },
+    { id: 'bust', label: 'George Washington bust (Smithsonian CC0, 242 MB)', src: 'https://huggingface.co/datasets/JulyTheMonth/NexusDataset/resolve/main/bust.nxz' },
+  ] },
 ];
 
 export interface DirectAsset { id: string; icon: string; label: string; type: AssetType; url: string }
@@ -289,6 +300,7 @@ export const FORMAT_PILL_ORDER: { id: string; group: number }[] = [
   { id: 'i3s', group: 2 },
   { id: 'threemx', group: 2 },
   { id: 'osgb', group: 2 },
+  { id: 'nexus', group: 2 },
   { id: 'bing', group: 2 },
   { id: 'google', group: 2 },
   { id: 'aggregate', group: 3 },
