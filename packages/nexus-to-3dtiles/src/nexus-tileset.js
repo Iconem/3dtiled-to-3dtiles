@@ -41,6 +41,8 @@ import { nodeChildren, nexusStats } from './nexus-reader.js';
 
 export const DAG_MODES = ['levels', 'paths'];
 export const DEFAULT_GE_SCALE = 8;
+/** By paths, the most tiles a tree may hold (the bust's DAG has 76 million root-to-node paths): past it the call throws, naming dag=levels. */
+export const MAX_PATH_TILES = 200_000;
 
 const num = (v) => Number(v.toPrecision(9));
 /** A sphere of the model frame → the tile frame: (x, y, z) → (x, −z, y). */
@@ -68,12 +70,13 @@ export function enclosingSphere(index, tight = true) {
 /**
  * @param index   parseNexus()'s result
  * @param contentUri (nodeIndex) => the URI of that node's GLB
- * @param opts    { dag: 'levels' | 'paths', geScale, tag }
+ * @param opts    { dag: 'levels' | 'paths', geScale, tag, maxPaths (by paths: the most tiles, default MAX_PATH_TILES) }
  * @returns { tileset, stats, tiles (count), mode }
  */
-export function nexusTileset(index, contentUri, { dag = 'levels', geScale = DEFAULT_GE_SCALE, tag = 'nexus' } = {}) {
+export function nexusTileset(index, contentUri, { dag = 'levels', geScale = DEFAULT_GE_SCALE, tag = 'nexus', maxPaths = MAX_PATH_TILES } = {}) {
   if (!DAG_MODES.includes(dag)) throw new Error(`${tag}: dag must be one of ${DAG_MODES.join(', ')}`);
   const stats = nexusStats(index);
+  if (dag === 'paths' && stats.paths > maxPaths) throw new Error(`${tag}: by paths this DAG is ${stats.paths} tiles (${stats.nodes} nodes, up to ${stats.maxParents} parents each), more than ${maxPaths}: use dag=levels`);
   if (!stats.patchesOk) console.warn(`[${tag}] the patches of some nodes do not partition their triangles: the file is damaged or of a layout this reader does not know`);
   if (dag === 'levels' && !stats.layeredOk) { console.warn(`[${tag}] the DAG is not layered (${stats.crossLevel} patches skip a level): level cuts would leave holes, writing the tree by paths instead`); dag = 'paths'; }
   // levels: the tiles that switch together share one sphere, and a node's content is culled by its tight one; paths: a

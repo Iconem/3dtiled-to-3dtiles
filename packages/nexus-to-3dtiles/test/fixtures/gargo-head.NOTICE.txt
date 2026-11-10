@@ -1,0 +1,4 @@
+gargo-head.nxz — the first 37 120 bytes of examples/models/gargo.nxz of 3DHOP (https://github.com/cnr-isti-vclab/3dhop,
+CNR-ISTI Visual Computing Lab, repository under the GNU GPL v3): the 88-byte header, the node, patch and texture tables
+and node 0 (3 882 vertices, 7 760 triangles, Corto-compressed). Kept as a test fixture only, so that the reader and the
+decoder are checked on a real file without the network; the model itself is the lab's sample for 3DHOP.

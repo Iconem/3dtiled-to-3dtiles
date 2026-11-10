@@ -238,15 +238,15 @@ export const FORMATS: FormatMeta[] = [
     { id: 'generic', label: 'One tile to L22 (ContextCapture, 32 MB)', src: 'https://raw.githubusercontent.com/xarray/generic-osgb/master/examples/data/Tile_1/Tile_1.osgb' },
   ] },
   // Nexus (CNR-ISTI multiresolution meshes, the format of 3DHOP; `.nxs` plain, `.nxz` Corto-compressed): one file, read
-  // by range requests (the header and tables, then one node at a time), live or converted offline. The gargoyle is the
-  // Visual Computing Lab's own sample (MIT, in the 3DHOP repository); the shell and the bust are Smithsonian scans
+  // by range requests (the header and tables, then one node at a time), live or converted offline. The gargoyle is
+  // 3DHOP's own example (from its GPL-3 repository, the model the lab's sample); the shell and the bust are Smithsonian scans
   // (CC0) packed as Nexus in a Hugging Face dataset, the shell textured (28 JPEGs); the Stanford dragon is for
   // non-commercial use. Every host answers Range.
   { fmt: 'nexus', icon: '🗿', label: 'Nexus', type: 'mesh', octree: false, stream: true, assets: [
     { id: 'gargoyle', label: 'Gargoyle (3DHOP sample, 187 nodes, 4.0 M triangles, 7.3 MB)', src: 'https://raw.githubusercontent.com/cnr-isti-vclab/3dhop/master/examples/models/gargo.nxz' },
-    { id: 'shell', label: 'Unio hainesianus shell, textured (Smithsonian CC0, 28 nodes, 40 MB)', src: 'https://huggingface.co/datasets/JulyTheMonth/NexusDataset/resolve/main/shell.nxz' },
+    { id: 'shell', label: 'Unio hainesianus shell, textured (Smithsonian CC0, 28 nodes, 0.54 M triangles, 28 JPEGs, 40 MB)', src: 'https://huggingface.co/datasets/JulyTheMonth/NexusDataset/resolve/main/shell.nxz' },
     { id: 'dragon', label: 'Stanford dragon (85 nodes, 1.7 M triangles, 3.5 MB)', src: 'https://huggingface.co/datasets/JulyTheMonth/NexusDataset/resolve/main/dragon.nxz' },
-    { id: 'bust', label: 'George Washington bust (Smithsonian CC0, 242 MB)', src: 'https://huggingface.co/datasets/JulyTheMonth/NexusDataset/resolve/main/bust.nxz' },
+    { id: 'bust', label: 'George Washington bust, textured (Smithsonian CC0, 2 541 nodes, 52.1 M triangles, 242 MB)', src: 'https://huggingface.co/datasets/JulyTheMonth/NexusDataset/resolve/main/bust.nxz' },
   ] },
 ];
 

@@ -168,6 +168,13 @@ test('tileset: by paths, a shared node is a tile under each parent with the same
   assert.throws(() => buildTileset(parseNexus(FILE), () => '', { dag: 'tree' }), /dag must be one of/);
 });
 
+test('tileset: by paths, a DAG with more root-to-node paths than the cap is refused, naming dag=levels', () => {
+  const idx = parseNexus(FILE);
+  assert.equal(nexusStats(idx).paths, 5, 'the synthetic DAG has 5 paths (node 3 under both of nodes 1 and 2)');
+  assert.throws(() => buildTileset(idx, (i) => `${i}.glb`, { dag: 'paths', maxPaths: 4 }), /5 tiles .* more than 4: use dag=levels/);
+  assert.equal(buildTileset(idx, (i) => `${i}.glb`, { dag: 'paths', maxPaths: 5 }).tiles, 5, 'at the cap it is written');
+});
+
 test('tileset: a DAG that is not layered is written by paths', (t) => {
   quiet(t);
   const dag = DAG();

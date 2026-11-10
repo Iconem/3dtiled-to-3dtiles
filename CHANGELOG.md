@@ -5,6 +5,42 @@ Format loosely follows [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+### Added — 2026-11-11 (Nexus: 3DHOP's multiresolution meshes, live and offline)
+- **Nexus (`.nxs` / `.nxz`, CNR-ISTI Visual Computing Lab, the format of 3DHOP) is read, live and offline.**
+  `GET /stream/tileset.json?format=nexus&url=<….nxz>` (`packages/tile-server/nexus-live.js`) builds the tileset
+  from two range reads (the 88-byte header, then the node / patch / texture tables) and serves one node per tile,
+  its bytes and the JPEGs its patches name read by range and written as a GLB (positions, int16 normals made unit,
+  RGBA colours, uvs with v flipped, one primitive per texture); `3dtiled <file.nxs|nxz> <outDir>` converts the same
+  way offline (`packages/nexus-to-3dtiles/`, `--dag`, `--ge-scale`, `--workers`). The reader is written from the
+  layout alone; the compressed nodes of an `.nxz` are decoded by the MIT JavaScript decoders of Corto and of Nexus's
+  own loader (meco), vendored unchanged with their licences, so nothing GPL is linked. Detected from the extension
+  (`core/detect.js`), in `openapi.json`, on the server banner, tile workers through `tile-tasks-mesh.js`.
+- **A DAG becomes a tree two ways** (`nexus-tileset.js`). A Nexus file is a DAG: a finer node is named by the
+  patches of several coarser nodes (171 of the gargoyle's 187, up to 10 parents), and the viewer draws it once. By
+  default (`dag=levels`) the DAG is cut by level, each level being a complete mesh at one resolution: a chain of
+  contentless level tiles, under each the level's nodes as content tiles sharing one sphere and one geometric
+  error so that a client switches them together, each node culled by its own sphere as `content.boundingVolume`
+  and vanishing through an empty child. `dag=paths` writes a shared node under each parent, one tile per
+  root-to-node path with the same GLB (130 for the shell, 25 202 for the gargoyle, 76 million for the bust), with
+  Nexus's per-node choice of level and its duplicated draws. `geometricError = 8 × node error` (`ge=`,
+  `--ge-scale`): Nexus refines at 2 px of error, a 3D Tiles client at 16 px, the same metric.
+- **Four public `.nxz` files found and read in full**, every host answering `Range`: 3DHOP's gargoyle (7.3 MB,
+  187 nodes in 9 levels, 3 966 820 triangles, normals and colours), and from the `JulyTheMonth/NexusDataset`
+  Hugging Face dataset the Smithsonian's Unio hainesianus shell (40 MB, 28 nodes, 541 840 triangles, 28 JPEGs,
+  CC0), the Stanford dragon (3.5 MB, 85 nodes, 1 735 694 triangles) and the Smithsonian's George Washington bust
+  (242 MB, 2 541 nodes in 13 levels, 52 116 066 triangles, 2 541 JPEGs, CC0). All four in the viewer's new Nexus
+  pill. Measured: the gargoyle's tileset in 5.8 s and its tiles (150 to 580 KB) in 0.5 to 1.1 s from GitHub's raw
+  host; a textured shell tile in 22 to 36 s, the Hugging Face CDN's speed that day (1 MB in 25 s by curl); the
+  dragon converted offline in 0.7 s into 85 GLBs, 32 MB. The docs page `references/mesh-generic/nexus` replaces the
+  "doc-referenced only" stub, with the layout, the mappings, the datasets and the limits (one level for the whole
+  model by default, textures passed through, `DEEPZOOM` files refused, meco and plain `.nxs` seen on synthetic files
+  only).
+- 12 tests without the network (`packages/tile-server/nexus.test.js`): the reader over a synthetic `.nxs` written
+  by `nexus-fixture.js` (a four-node DAG with a shared node and two textures) and over the head of the real
+  gargoyle (`gargo-head.nxz`, 37 KB, node 0 decoded from Corto), the DAG statistics, truncated and foreign files,
+  both mappings and the fallback for a DAG that is not layered, a textured and an untextured node's GLB, the live
+  route on a host that answers `Range`, on a local file, a missing file and a `DEEPZOOM` file, and the offline
+  converter. Tile-server suite 187/187, viewer typecheck clean.
 ### Added — 2026-11-10 (OSGB datasets measured: scripts/osgb-stats.mjs)
 - **`scripts/osgb-stats.mjs <metadata.xml | root.osgb URL | folder>`** crawls an OSGB dataset as a client does, from
   the top tiles the tile-server finds (`--server=`, default `http://localhost:3016`; a local folder or one root

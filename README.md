@@ -150,7 +150,7 @@ links and local-mirror notes per format.
 | **3MX** (Bentley/Acute3D) | 🟢 | master `Scene.3mx` JSON → `3MXBO` binary node tree | OpenCTM mesh + JPEG baseColor → transcoded to glTF | REPLACE | ➖ per-file GET |
 | **OSGB** (OpenSceneGraph binary: ContextCapture, DJI Terra) | 🟢 live only | `osg::PagedLOD` nodes over one `.osgb` per level of each tile, `metadata.xml` for the SRS | `osg::Geometry` mesh + embedded JPEG → glTF | REPLACE | ➖ per-file GET |
 | **Bing Maps 3D** | 🟢 | quadtree of quadkeys (availability by HTTP probe) | `tf=3dv4` GLB — Draco + KTX2, ECEF in node matrix | REPLACE | ➖ per-file GET |
-| **Nexus** (CNR-ISTI) | 🟠 doc | multiresolution patch DAG / batched mesh | per-patch mesh (not splats) | — | ✅ |
+| **Nexus** (CNR-ISTI, 3DHOP: `.nxs` / `.nxz`) | 🟢 | one file, a DAG of mesh nodes coarse to fine (patches name the finer nodes); a tree by level or by path | node mesh (positions, normals, colours, uvs) + JPEG, Corto-decoded → glTF | REPLACE | ✅ header, tables, one node at a time |
 
 ### Tiled Gaussian-splat sources → 3D Tiles
 
