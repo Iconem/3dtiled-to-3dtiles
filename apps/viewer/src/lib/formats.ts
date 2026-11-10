@@ -117,6 +117,15 @@ export const FORMATS: FormatMeta[] = [
     // Self-made over flai's COPC mirror of IGN's LiDAR HD (Licence Ouverte 2.0): the 100 km Lambert-93 block X 600–700 / Y 6800–6900 km,
     // Paris and most of Île-de-France, 5 712 of the 337 206 tiles mirrored. 127 G points.
     { id: 'france-lidarhd-paris', label: 'IGN LiDAR HD, Paris 100 km block, 5 712 tiles (via flai, 127G, self-made VPC) ⬀', src: 'https://raw.githubusercontent.com/jo-chemla/3dtiled-to-3dtiles/main/packages/tile-server/samples/france-lidarhd-paris-100km.vpc.gz' },
+    // Self-made over ALL of flai's IGN LiDAR HD mirror: 337 206 tiles, footprints from the names and counts from the sizes (scripts/copc-to-vpc.mjs --estimate),
+    // split by scripts/vpc-split.mjs into a 30 KB root over 385 child VPCs (24 MB gzipped in all). 10.0 T points estimated.
+    { id: 'france-lidarhd', label: 'IGN LiDAR HD, all of France, 337 206 tiles (via flai, ~10T, split VPC of VPCs) ⬀', src: 'https://raw.githubusercontent.com/jo-chemla/3dtiled-to-3dtiles/main/packages/tile-server/samples/france-lidarhd.vpc.gz' },
+    // Self-made from swisstopo's STAC API: every swissSURFACE3D 1 km tile served as COPC (15 643 of 58 987 items on 2026-11-10), headers read, split into 27 children.
+    { id: 'switzerland-swisssurface3d', label: 'swissSURFACE3D, 15 643 COPC tiles (swisstopo, 515G, split VPC) ⬀', src: 'https://raw.githubusercontent.com/jo-chemla/3dtiled-to-3dtiles/main/packages/tile-server/samples/switzerland-swisssurface3d.vpc.gz' },
+    // Self-made over NRCan's CanElevation bucket (OGL-Canada): the whole of New Brunswick and Prince Edward Island, 90 764 of its 751 929 COPC tiles, headers read.
+    { id: 'canada-canelevation-nb-pei', label: 'CanElevation, New Brunswick + PEI, 90 764 tiles (NRCan, split VPC) ⬀', src: 'https://raw.githubusercontent.com/jo-chemla/3dtiled-to-3dtiles/main/packages/tile-server/samples/canada-canelevation-nb-pei.vpc.gz' },
+    // Self-made over NOAA Digital Coast's unsigned COPC copy of a USGS 3DEP project (Fairbanks, AK, 2017, QL1 + QL2): 7 471 tiles, 63 G points, headers read.
+    { id: 'usgs-3dep-fairbanks-2017', label: 'USGS 3DEP Fairbanks 2017 via NOAA, 7 471 tiles (63G, split VPC) ⬀', src: 'https://raw.githubusercontent.com/jo-chemla/3dtiled-to-3dtiles/main/packages/tile-server/samples/usgs-3dep-fairbanks-2017.vpc.gz' },
   ] },
   { fmt: 'potree', icon: '🌲', label: 'Potree', type: 'pointcloud', octree: true, stream: true, assets: [
     // Real source: potree.org's own hosted Potree-2.0 build of the lion scan.

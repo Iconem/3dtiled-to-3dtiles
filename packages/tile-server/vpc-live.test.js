@@ -340,3 +340,85 @@ test('/stream?format=vpc: a .laz item is read once to tell, a VPC of plain files
   assert.equal((await q('/c/index.vpc')).status, 422);
   assert.equal((await q('/none/index.vpc')).status, 404);
 });
+
+// ── nested VPCs: a root whose items are child .vpc files (scripts/vpc-split.mjs) ──────────────────
+
+const childItem = (href, x0, x1, extra = {}) => ({
+  type: 'Feature', id: extra.id ?? href, geometry: null,
+  bbox: [9.5, 51.6, 200, 9.7, 51.7, 320],
+  properties: { datetime: '2024-01-01T00:00:00Z', 'pc:count': 5000, 'pc:type': 'vpc', 'vpc:items': 5, 'proj:wkt2': UTM32, 'proj:bbox': [x0, 5724000, 220, x1, 5725000, 320], ...extra.props },
+  links: [], assets: { data: { href, roles: ['data'], type: 'application/geo+json' } },
+});
+
+test('a nested VPC is parsed into vpc entries placed from their own proj:bbox, child links add what the items do not name', () => {
+  const doc = {
+    type: 'FeatureCollection',
+    features: [
+      childItem('./set/00.vpc.gz', 540000, 545000),
+      childItem('./set/01.vpc', 545000, 550000),
+      childItem('./set/02', 550000, 555000, { props: { 'pc:type': 'vpc' } }),   // no extension: the item says what it is
+      utmItem('./tiles/t.copc.laz', 560000),
+    ],
+    links: [
+      { rel: 'child', href: './set/00.vpc.gz', type: 'application/geo+json' },  // already an item
+      { rel: 'child', href: './set/03.vpc.gz', type: 'application/geo+json' },  // not an item: placed by reading its mosaic root
+      { rel: 'child', href: './set/readme.txt' },
+      { rel: 'self', href: './index.vpc' },
+    ],
+  };
+  const p = parseVpc(doc, BASE);
+  assert.equal(p.nested, 4);
+  assert.deepEqual(p.entries.map((e) => [e.format, e.url.replace(BASE.replace('index.vpc', ''), ''), e.boundsFrom]), [
+    ['vpc', 'set/00.vpc.gz', 'proj:bbox'], ['vpc', 'set/01.vpc', 'proj:bbox'], ['vpc', 'set/02', 'proj:bbox'], ['copc', 'tiles/t.copc.laz', 'proj:bbox'], ['vpc', 'set/03.vpc.gz', 'probe'],
+  ]);
+  assert.equal(p.entries[0].points, 5000);
+  assert.equal(p.entries[0].crs, undefined);                      // a child mosaic places its own files
+  assert.ok(Math.abs(p.entries[0].bounds.geometricError - 5000 * Math.sqrt(3)) < 10);   // the cube's diagonal (UTM's scale factor adds 3.5 m)
+  assert.deepEqual(p.skipped, [{ href: './set/readme.txt', reason: 'child link that is not a VPC' }]);
+  const { report } = vpcToSet(p);
+  assert.deepEqual([report.items, report.streamed, report.nested, report.points], [4, 5, 4, 16000]);
+});
+
+test('/stream?format=vpc serves a root of child VPCs from the root file alone; a leaf is the child\'s own mosaic', async (t) => {
+  quiet(t);
+  const tiles = (n, x) => Array.from({ length: n }, (_, i) => utmItem(`../tiles/${x + i * 1000}.copc.laz`, x + i * 1000));
+  const h = await host(t, {
+    '/set/index.vpc.gz': gzipSync(JSON.stringify({
+      type: 'FeatureCollection',
+      features: [childItem('./index/0.vpc.gz', 540000, 545000, { id: 'index-0' }), childItem('./index/1.vpc.gz', 545000, 550000, { id: 'index-1' })],
+      links: [{ rel: 'child', href: './index/0.vpc.gz' }, { rel: 'child', href: './index/1.vpc.gz' }],
+    })),
+    '/set/index/0.vpc.gz': gzipSync(JSON.stringify({ type: 'FeatureCollection', features: tiles(5, 540000) })),
+    '/set/index/1.vpc.gz': gzipSync(JSON.stringify({ type: 'FeatureCollection', features: tiles(5, 545000) })),
+  });
+  const s = await streamServer(t);
+  const r = await fetch(`${s}/stream/tileset.json?url=${encodeURIComponent(`${h.base}/set/index.vpc.gz`)}&cache=none`);
+  assert.equal(r.status, 200);
+  assert.deepEqual([r.headers.get('x-vpc-items'), r.headers.get('x-vpc-streamed'), r.headers.get('x-vpc-skipped')], ['2', '2', '0']);
+  const ts = await r.json();
+  const leaves = leavesOf(ts);
+  assert.equal(leaves.length, 2);
+  for (const lf of leaves) {
+    const u = new URL(lf.content.uri);
+    assert.equal(u.origin + u.pathname, `${s}/stream/tileset.json`);
+    assert.equal(u.searchParams.get('format'), 'vpc');
+    assert.match(u.searchParams.get('url'), new RegExp(`^${h.base}/set/index/[01]\\.vpc\\.gz$`));
+    assert.ok(Math.abs(lf.boundingVolume.sphere[3] - Math.hypot(2500, 500, 50)) < 3);
+  }
+  assert.deepEqual([ts.asset.extras.vpc.nested, ts.asset.extras.build.childRootsFetched], [2, 0]);
+  assert.deepEqual(h.hits, { '/set/index.vpc.gz': 1 });            // no child opened to build the root
+  // the leaf: the child's mosaic, five COPC streams, the child file read once
+  const sub = await (await fetch(leaves[0].content.uri)).json();
+  const items = leavesOf(sub).map((l) => new URL(l.content.uri));
+  assert.equal(items.length, 5);
+  assert.ok(items.every((u) => u.searchParams.get('format') === 'copc' && /\/set\/tiles\/\d+\.copc\.laz$/.test(u.searchParams.get('url'))));
+  assert.equal(Object.values(h.hits).reduce((a, b) => a + b), 2);
+  // the child's mosaic holds what the parent's leaf promised, and its leaves lie inside that leaf's sphere
+  assert.equal(sub.asset.extras.datasets, 5);
+  const [cx, cy, cz, cr] = leaves[0].boundingVolume.sphere;
+  // (a tile's own sphere pokes past the box corners the parent's sphere was fitted to: the points do not)
+  for (const l of leavesOf(sub)) assert.ok(dist(l.boundingVolume.sphere, [cx, cy, cz]) + l.boundingVolume.sphere[3] < cr * 1.1);
+  // index.json lists the two children as vpc rows
+  const idx = await (await fetch(`${s}/aggregate/index.json?vpc=${encodeURIComponent(`${h.base}/set/index.vpc.gz`)}`)).json();
+  assert.deepEqual(idx.datasets.map((d) => d.format).sort(), ['vpc', 'vpc']);
+});
