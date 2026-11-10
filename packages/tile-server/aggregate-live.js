@@ -13,6 +13,7 @@
  *   GET /aggregate/tileset.json?urls=<u1>,<u2>,…     (each URL-encoded; commas separate)
  *   GET /aggregate/tileset.json?url=<u1>&url=<u2>…   (repeated form, equivalent)
  *   …&nest=auto|mercator|geodetic|flat   &bv=sphere|region   &ttl=<seconds>
+ *   …&cut=auto|<depth>|0  &cell=<key>       external tilesets every <depth> group levels (see the depth cut below)
  *   …&format=  &only=  &exclude=  &hide=<id>  &latest=1  &from=YYYY[-MM]  &to=YYYY[-MM]
  *
  *   GET /aggregate/tileset.json?vpc=<url of a .vpc>  a PDAL/QGIS virtual point cloud as the set: its COPC
@@ -545,6 +546,88 @@ function nestLeaves(leaves, schemeName, bv = 'sphere') {
   return tree && { tree, sphere: sph(tree) };
 }
 
+// ── the depth cut: external tilesets per group ───────────────────────────────────────────────────
+//
+// The nested tree is a quadtree, but the ROOT carries all of it inline: 616 bytes per dataset, so a
+// country of 1 km LiDAR tiles is a 6 MB root at 10 000 tiles, 62 MB at 100 000, 208 MB at 337 000
+// (IGN's LiDAR HD, measured). A 3D Tiles client cannot show the first tile before it has parsed the
+// whole thing. So past `cut` group levels a group is emitted as a tile whose CONTENT is another
+// tileset.json, this same endpoint with `&cell=<its key>`, and no children: the one form the spec
+// allows for an external tileset. That request answers with the group as a root, cut again the same
+// way, so every tileset.json on the way down holds a few hundred tiles at most whatever the size of
+// the set, and a client fetches only the branches it looks at.
+//
+// The cut is a VIEW of the one cached tree: the subtree is the same node, so geometric errors and
+// bounding volumes are the ones the inline tree had, and index.json still walks every leaf. The
+// default (`cut=auto`) leaves a set under 1 024 datasets as it was, byte for byte.
+const CUT_AUTO_MIN = 1024;          // datasets: below this the whole tree stays inline
+const CUT_AUTO_DEPTH = 4;           // then every 4 group levels are their own tileset.json
+const CUT_MIN_DATASETS = 8;         // a group with fewer datasets below is inlined whole: not worth a round-trip
+
+/** `cut=` of a request → the depth to cut at, 0 for none. */
+export function parseCut(v, datasets) {
+  const s = String(v ?? 'auto').toLowerCase();
+  if (['0', 'off', 'false', 'none', 'no', 'flat'].includes(s)) return 0;
+  const n = Math.trunc(Number(s));
+  if (Number.isInteger(n) && n >= 1) return n;
+  return datasets >= CUT_AUTO_MIN ? CUT_AUTO_DEPTH : 0;                   // 'auto', '', unknown
+}
+
+/** Datasets (content tiles) at or below a tile. */
+export const datasetsBelow = (t) => (t.children ? t.children.reduce((n, c) => n + datasetsBelow(c), 0) : t.content?.uri ? 1 : 0);
+
+/**
+ * The tree cut at `depth` group levels (the root is depth 0): a group at that depth or deeper, with
+ * at least CUT_MIN_DATASETS datasets below it, becomes a childless tile whose content is `uriFor(its
+ * cell key)`. Nodes above the cut are shallow copies; the tree given is not touched. Returns
+ * `{ root, externals }`; with `depth` 0 the tree as it is.
+ */
+export function cutTree(root, depth, uriFor) {
+  if (!(depth > 0) || !root.children) return { root, externals: 0 };
+  let externals = 0;
+  const walk = (t, d) => {
+    if (!t.children) return t;
+    const key = t.extras?.cell?.key;
+    if (d >= depth && key && key !== '(root)') {
+      const n = datasetsBelow(t);
+      if (n >= CUT_MIN_DATASETS) {
+        externals++;
+        const { children, ...rest } = t;
+        return { ...rest, extras: { ...t.extras, datasets: n }, content: { uri: uriFor(key) } };
+      }
+    }
+    return { ...t, children: t.children.map((c) => walk(c, d + 1)) };
+  };
+  return { root: walk(root, 0), externals };
+}
+
+/** The group whose cell key is `key`, anywhere under `root`, or null. */
+export function subtreeOf(root, key) {
+  let found = null;
+  (function walk(t) {
+    if (found || !t.children) return;
+    if (t.extras?.cell?.key === key) { found = t; return; }
+    for (const c of t.children) walk(c);
+  })(root);
+  return found;
+}
+
+/**
+ * A group of a built mosaic as a tileset of its own, cut again at `depth`: what `&cell=<key>` answers.
+ * The root tile is the group itself (volume and geometric error unchanged, so the parent's external
+ * tile and this root agree), and `asset.extras` says which cell this is and how many datasets it holds.
+ */
+export function subtreeTileset(ts, node, depth, uriFor, key) {
+  const { root, externals } = cutTree(node, depth, uriFor);
+  return {
+    asset: { ...ts.asset, extras: { ...ts.asset.extras, datasets: datasetsBelow(node), cell: key, cut: { depth, externals } } },
+    schema: ts.schema,
+    ...(ts.extensionsUsed ? { extensionsUsed: ts.extensionsUsed } : {}),
+    geometricError: node.geometricError * 2,
+    root,
+  };
+}
+
 /**
  * Bounded-concurrency `Promise.allSettled`.
  *
@@ -558,6 +641,9 @@ function nestLeaves(leaves, schemeName, bv = 'sphere') {
  * in flight already saturates the link, and going wider only buys socket exhaustion — against our own
  * loopback here, and against whatever remote host is serving a real mosaic's children.
  */
+/** max over an array, as a loop: `Math.max(...arr)` overflows the call stack past ~125 000 children (337 206 IGN tiles did). */
+const maxOf = (arr, f) => { let m = -Infinity; for (const x of arr) { const v = f(x); if (v > m) m = v; } return m; };
+
 const FETCH_CONCURRENCY = 16;
 
 async function pooledSettled(items, worker, limit = FETCH_CONCURRENCY) {
@@ -673,7 +759,7 @@ export async function buildAggregate(urls, { nest = 'auto', ttlMs = DEFAULT_TTL_
       // ×2, not max(): 3D Tiles requires geometric error to DECREASE on refine, and plain max() ties
       // the root to its largest child — so the root and that child become selectable at the same SSE.
       // The nested path has always doubled; this keeps the flat path consistent with it.
-      geometricError: Math.max(...children.map(c => c.geometricError)) * 2,
+      geometricError: maxOf(children, (c) => c.geometricError) * 2,
       refine: 'ADD',
       children,
     };
@@ -684,7 +770,7 @@ export async function buildAggregate(urls, { nest = 'auto', ttlMs = DEFAULT_TTL_
   // larger than the planet). Both enclose every child; keep whichever is smaller.
   // A lone child is its own root and keeps its own volume. With bv=region the root is a region too.
   if (root.children) {
-    const earthR = Math.max(...children.map((c) => { const [x, y, z, r] = c.boundingVolume.sphere; return Math.hypot(x, y, z) + r; }));
+    const earthR = maxOf(children, (c) => { const [x, y, z, r] = c.boundingVolume.sphere; return Math.hypot(x, y, z) + r; });
     // union of the children's regions — the nested root already is one; a region around the union
     // SPHERE would be useless (that sphere can be larger than the planet)
     const regionOf = (c) => c.boundingVolume.region ?? sphereToRegion(c.boundingVolume.sphere ?? sphereOfVolume(c.boundingVolume));
@@ -1162,26 +1248,43 @@ export async function handleAggregate(req, res, u) {
     };
   }
 
-  const sel = selectChildren(req, u, sets);
-  if (sel.error) { res.writeHead(400, CORS); res.end(sel.error); return true; }
-  if (isSnapStream && !sel.snap) { res.writeHead(400, CORS); res.end('snap.ndjson needs &snap=<terrain>'); return true; }
-  const { nest, ttlMs, bv } = sel;
-  let { items } = sel;
-  // &latest=1 needs every dataset's footprint, so it runs after selection, on the cached child roots.
-  if (sel.latest) items = await keepLatest(items, ttlMs);
-  // &curved=on|off: every /stream child of this server carries it (copc-live's ellipsoid placement
-  // rule); the child URLs change, so the mosaic cache key does too.
-  const curved = curvedParam(u.searchParams.get('curved'));
-  if (curved) items = items.map((it) => /\/stream\/tileset\.json\?/.test(it.url) ? { ...it, url: `${it.url}&curved=${curved}` } : it);
-  const urls = items.map((it) => it.url);
-  const labels = Object.fromEntries(items.map((it) => [it.url, {
-    id: it.id, name: it.name, project: it.project, scene: it.scene, date: it.date, format: it.fmt, licence: it.licence,
-    provider: it.provider, attribution: it.attribution, country: it.country ?? null,
-  }]));
+  const proto = (req.headers['x-forwarded-proto'] || 'http').split(',')[0].trim();
+  const origin = `${proto}://${req.headers['x-forwarded-host'] || req.headers.host}`;
+  // A &cell= request (a subtree of a cut mosaic) never comes first: the root request has just derived
+  // the mosaic's cache key from this same selection. The key is remembered by request (minus &cell=)
+  // and reused, instead of being derived again from every item: 0.8 s per subtree at 100 000 items.
+  const cell = isTileset ? u.searchParams.get('cell') : null;
+  const viewKey = viewKeyOf(u, origin);
+  const memo = cell ? viewMemo.get(viewKey) : null;
+  let key, ttlMs, sel = null, items = null;
+  if (memo && Date.now() - memo.at < VIEW_MEMO_MS) ({ key, ttlMs } = memo);
+  else {
+    sel = selectChildren(req, u, sets);
+    if (sel.error) { res.writeHead(400, CORS); res.end(sel.error); return true; }
+    if (isSnapStream && !sel.snap) { res.writeHead(400, CORS); res.end('snap.ndjson needs &snap=<terrain>'); return true; }
+    const { nest, bv } = sel;
+    ({ ttlMs, items } = sel);
+    // &latest=1 needs every dataset's footprint, so it runs after selection, on the cached child roots.
+    if (sel.latest) items = await keepLatest(items, ttlMs);
+    // &curved=on|off: every /stream child of this server carries it (copc-live's ellipsoid placement
+    // rule); the child URLs change, so the mosaic cache key does too.
+    const curved = curvedParam(u.searchParams.get('curved'));
+    if (curved) items = items.map((it) => /\/stream\/tileset\.json\?/.test(it.url) ? { ...it, url: `${it.url}&curved=${curved}` } : it);
+    const urls = items.map((it) => it.url);
+    const labels = Object.fromEntries(items.map((it) => [it.url, {
+      id: it.id, name: it.name, project: it.project, scene: it.scene, date: it.date, format: it.fmt, licence: it.licence,
+      provider: it.provider, attribution: it.attribution, country: it.country ?? null,
+    }]));
 
-  // Baked bounds are trusted unless the request forces a re-read (&ttl=0) or changes placement (&curved=).
-  const known = ttlMs > 0 && !curved ? Object.fromEntries(items.filter((it) => it.bounds).map((it) => [it.url, it.bounds])) : {};
-  const key = JSON.stringify({ urls, nest, ttlMs, bv, labels, snap: isSnapStream ? null : sel.snap, native: sel.native, known });
+    // Baked bounds are trusted unless the request forces a re-read (&ttl=0) or changes placement (&curved=).
+    const known = ttlMs > 0 && !curved ? Object.fromEntries(items.filter((it) => it.bounds).map((it) => [it.url, it.bounds])) : {};
+    key = JSON.stringify({ urls, nest, ttlMs, bv, labels, snap: isSnapStream ? null : sel.snap, native: sel.native, known });
+    if (isTileset && ttlMs > 0) {
+      viewMemo.delete(viewKey);
+      viewMemo.set(viewKey, { at: Date.now(), key, ttlMs });
+      while (viewMemo.size > VIEW_MEMO_MAX) viewMemo.delete(viewMemo.keys().next().value);
+    }
+  }
   let ts;
   try {
     ts = await aggregateCached(key, ttlMs);
@@ -1234,12 +1337,34 @@ export async function handleAggregate(req, res, u) {
     return true;
   }
 
+  // The depth cut (see cutTree): groups past `cut` levels become external tilesets, each this same URL
+  // with &cell=<key>; a &cell= request answers with that group as a root, cut the same way. Both are
+  // views of the one cached tree, so a set below the threshold is served exactly as before.
+  const cutDepth = parseCut(u.searchParams.get('cut'), ts.asset.extras.datasets);
+  const self = new URL(u.pathname + u.search, origin);
+  if (vpcUrl) self.searchParams.delete('set');               // ?vpc= named the children; ?set=vpc was our own alias
+  const uriFor = (k) => { const x = new URL(self.href); x.searchParams.set('cell', k); return x.href; };
+  let out = ts;
+  if (cell) {
+    const node = subtreeOf(ts.root, cell);
+    if (!node) { res.writeHead(404, { 'Content-Type': 'application/json', ...CORS }); res.end(JSON.stringify({ error: `no group with cell key "${cell}" in this mosaic (keys are in each group's extras.cell)` })); return true; }
+    out = subtreeTileset(ts, node, cutDepth, uriFor, cell);
+  } else if (cutDepth) {
+    const { root, externals } = cutTree(ts.root, cutDepth, uriFor);
+    if (externals) out = { ...ts, asset: { ...ts.asset, extras: { ...ts.asset.extras, cut: { depth: cutDepth, externals } } }, root };
+  }
   // the mosaic is cached and shared: a VPC's report (items streamed, skipped and why) goes on a copy
-  if (vpc) ts = { ...ts, asset: { ...ts.asset, extras: { ...ts.asset.extras, vpc: vpc.extras } } };
+  if (vpc) out = { ...out, asset: { ...out.asset, extras: { ...out.asset.extras, vpc: vpc.extras } } };
   res.writeHead(200, { 'Content-Type': 'application/json', ...CORS, ...(vpc?.headers ?? {}) });
-  res.end(JSON.stringify(ts));
+  res.end(JSON.stringify(out));
   return true;
 }
+
+// The mosaic cache key a request derived, by request: what a &cell= subtree request reuses (see handleAggregate).
+const VIEW_MEMO_MS = 10 * 60 * 1000;
+const VIEW_MEMO_MAX = 16;
+const viewMemo = new Map();                        // origin + path + query without &cell= → { at, key, ttlMs }
+const viewKeyOf = (u, origin) => `${origin}${u.pathname}?${[...u.searchParams].filter(([k]) => k !== 'cell').sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0)).map(([k, v]) => `${k}=${v}`).join('&')}`;
 
 /** Stable short id of a child — hashed from its SOURCE url, so it survives a change of server origin. */
 const idOf = (x) => createHash('sha1').update(x).digest('hex').slice(0, 10);
