@@ -12,7 +12,7 @@ import { encodeOsgb, quad } from '../osgb-to-3dtiles/test/osgb-fixture.js';
 import { parseOsgb } from '../osgb-to-3dtiles/src/osgb-reader.js';
 import { osgbStats, fileStats, embeddedImages, cacheSlug } from '../../scripts/osgb-stats.mjs';
 import { handleStream } from './stream-live.js';
-import { httpStatusOf } from '../core/index.js';
+import { httpStatusOf, writeZip } from '../core/index.js';
 
 const quiet = (t) => { t.mock.method(console, 'log', () => {}); t.mock.method(console, 'warn', () => {}); };
 const JPEG = jpeg.encode({ data: Buffer.alloc(8 * 8 * 4, 200), width: 8, height: 8 }, 90).data;
@@ -109,4 +109,25 @@ test('osgb-stats: a dataset on a host, roots from the tile-server, files cached 
   check(again);
   assert.deepEqual([again.bytesFetched, again.bytesCached, again.requests], [0, first.bytes, 0]);
   for (const p of Object.keys(hits)) if (p.endsWith('.osgb')) assert.equal(hits[p], before[p], `${p} fetched again`);
+});
+
+test('osgb-stats: a dataset in a zip, whole and under --max-files / --max-depth, the cut files counted and no leaf claimed among them', async (t) => {
+  quiet(t);
+  const zip = writeZip(Object.fromEntries(Object.entries(DATASET).map(([k, v]) => [`tile/${k}`, v])));
+  const dir = await mkdtemp(path.join(tmpdir(), 'osgb-zip-'));
+  t.after(() => rm(dir, { recursive: true, force: true }));
+  await writeFile(path.join(dir, 'tile.zip'), zip);
+  const cache = path.join(dir, 'cache');
+  const whole = await osgbStats(path.join(dir, 'tile.zip'), { cache });
+  check(whole);
+  assert.deepEqual([whole.cut, whole.limits, whole.bytesFetched], [null, null, whole.bytes]);
+  assert.deepEqual((await readdir(path.join(cache, cacheSlug(`file:///${dir.replace(/\\/g, '/')}/tile.zip`), 'tile'))).sort(), ['Data', 'metadata.xml'], 'cached extracted, the metadata.xml with it');
+
+  // depth 1 only: the two roots read, their two finer files named and not read; nothing is a leaf among what was cut
+  const shallow = await osgbStats(path.join(dir, 'tile.zip'), { cache, maxDepth: 1 });
+  assert.deepEqual([shallow.files, shallow.depth, shallow.vertices, shallow.cut, shallow.limits], [2, 1, 8, [0, 2], { maxFiles: null, maxDepth: 1 }]);
+  assert.deepEqual([shallow.leafTiles, shallow.missing], [0, 0], 'the roots name finer files that were not read: not leaves, not missing');
+  // three files: the roots and one of depth 2; the other of depth 2, and the one of depth 3 the file read names, left
+  const three = await osgbStats(path.join(dir, 'tile.zip'), { cache, maxFiles: 3 });
+  assert.deepEqual([three.files, three.cut, three.limits.maxFiles, three.leafTiles], [3, [0, 1, 1], 3, 0]);
 });

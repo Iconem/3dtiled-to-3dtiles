@@ -19,4 +19,5 @@ export { compressGlb } from './gltf-compress.js';
 export { progressStart, progressTick, progressDone, progressGet } from './progress.js';
 export { LasWriter, writeLasBuffer, lasHeaderBuffer, lasRecordBuffer, LAS_RECORD_LEN } from './las-writer.js';
 export { memoizeAsync } from './cache.js';
-export { requestSource, fetchSource, fetchSourceJson, fetchSourceRange, isAbsent, httpStatusOf, hostLimit } from './source-fetch.js';
+export { requestSource, fetchSource, fetchSourceJson, fetchSourceRange, isAbsent, httpStatusOf, hostLimit, isLenientHost } from './source-fetch.js';
+export { openZip, writeZip } from './zip.js';
