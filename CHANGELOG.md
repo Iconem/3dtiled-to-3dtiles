@@ -35,10 +35,10 @@ Format loosely follows [Keep a Changelog](https://keepachangelog.com/).
   "doc-referenced only" stub, with the layout, the mappings, the datasets and the limits (one level for the whole
   model by default, textures passed through, `DEEPZOOM` files refused, meco and plain `.nxs` seen on synthetic files
   only).
-- 12 tests without the network (`packages/tile-server/nexus.test.js`): the reader over a synthetic `.nxs` written
+- 13 tests without the network (`packages/tile-server/nexus.test.js`): the reader over a synthetic `.nxs` written
   by `nexus-fixture.js` (a four-node DAG with a shared node and two textures) and over the head of the real
   gargoyle (`gargo-head.nxz`, 37 KB, node 0 decoded from Corto), the DAG statistics, truncated and foreign files,
-  both mappings and the fallback for a DAG that is not layered, a textured and an untextured node's GLB, the live
+  both mappings, the cap on paths and the fallback for a DAG that is not layered, a textured and an untextured node's GLB, the live
   route on a host that answers `Range`, on a local file, a missing file and a `DEEPZOOM` file, and the offline
   converter. Tile-server suite 187/187, viewer typecheck clean.
 ### Added — 2026-11-10 (OSGB datasets measured: scripts/osgb-stats.mjs)
