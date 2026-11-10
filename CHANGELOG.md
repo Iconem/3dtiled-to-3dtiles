@@ -22,6 +22,30 @@ Format loosely follows [Keep a Changelog](https://keepachangelog.com/).
   339 s each, 1 196 s in all at about 650 KB/s; from the cache 0.1 to 0.5 s.
 - 3 tests on the synthetic OSGB fixture: a file's counts and a shared image counted once, a local folder, and a
   dataset on a host with the roots from the tile-server, cached once and re-read from the cache.
+### Added — 2026-11-10 (every public LCC2 dataset, and the `.spz` / `.ply` chunks two of them use)
+- **Seven more LCC2 scenes and four LCC v1 scenes found and tested**, all on one public Google Cloud Storage bucket,
+  the sample data of Spark's radix viewer (World Labs), which answers Range. Two are XGRIDS' own, from the
+  `Content.zip` of [3dgs-unreal-example](https://github.com/xgrids/3dgs-unreal-example) (byte for byte the same
+  files): a street of 2.83 M splats in 6 LODs and 18 chunks (46 MB) and four statues of 1.51 M in 7 LODs (19 MB).
+  The other five are radix's conversions of its LCC v1 samples (XGRIDS' showroom and Unreal scene, Mip-NeRF 360's
+  bicycle, Sutro Tower) to `.spz`, `.ply` and `.sog` chunks, 119 to 250 MB, 3.4 to 11.9 M splats. The LCC v1 set
+  holds the one georeferenced XGRIDS scene found (EPSG:4547 + offset → 112.916 E, 27.864 N); no LCC2 with a
+  usable `epsg` exists in public (the street has `epsg: 1`, read as none). All 11 are in the library's LCC and
+  LCC2 pills, remote stream-only; the LCC2 docs page tables them with sizes, terms, timings and what could not be
+  had (XGRIDS' developer-site samples need a login, `lcc-viewer.xgrids.com` shares a token).
+- **`.spz` and `.ply` chunks are read**, live and offline: the whitepaper's other two chunk types, which the radix
+  conversions use. A chunk of either kind cannot be read in part the way a bundled SOG's planes can, so it is
+  downloaded whole and decoded by `splat-transform`'s `readSpz` / `readPly` into the table the SOG path cuts tiles
+  from. Checked on 50 nodes of the Unreal scene's PLY and 7 of Sutro's SPZ: the rows of a run land in their node's
+  box wherever the node is interior. Measured: the showroom's root of 593 tiles in 1.5 s, a tile of a 20 MB SPZ
+  chunk in 10–31 s on a 700 KB/s link, 2 KB tiles of 9 and 66 splats among them; a test builds the same scene as
+  SOG, SPZ and PLY and expects the same tiles.
+- **The content pack from disk**: the docs say how to serve `Content.zip`'s three scenes through a static host and
+  convert one with the CLI. The street's coarse tile from disk is byte for byte the streamed one; the statues'
+  finest tile is the same from disk, from the bucket and from the offline converter (11 tiles, 2.2 s).
+- Found and noted, not usable: XGRIDS' sample page (Stanford, 60.7 M splats, login and testing-only terms),
+  `lcc-pub` on CloudFront (LCC v1 only, already in the library), SuperSplat's "LCC Studio" scenes (streamed SOG).
+  Radix's converted scenes keep splats outside their node boxes (up to 400 m in Sutro), which XGRIDS' own do not.
 
 ### Added — 2026-11-09 (LCC2, XGRIDS' successor to LCC, streamed and converted)
 - **`format=lcc2`** on `/stream`, detected from a `.lcc2` URL. An LCC2 scene is a JSON manifest holding a tree of

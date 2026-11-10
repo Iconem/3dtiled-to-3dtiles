@@ -151,12 +151,30 @@ export const FORMATS: FormatMeta[] = [
     // sibling HTTP files (see remote-zip.js). data.bin is DEFLATE-compressed inside the zip (not
     // byte-seekable), so it's decompressed once per cold source (~5-13s) and cached, not per-tile.
     { id: 'guan-temple', label: 'Guan Temple (zip)', src: 'https://da9i2vj1xvtoc.cloudfront.net/lcc-pub/fine_v2/Guan_Temple.zip', out: 'output/lcc/Guan_Temple-3dtiles-from-lcc' },
+    // The LCC v1 samples of Spark's radix viewer (World Labs), on a public GCS bucket that answers Range: the LCC
+    // scene of XGRIDS' 3dgs-unreal-example content pack (the one public LCC that is georeferenced, EPSG:4547 → Hunan),
+    // XGRIDS' PortalCam showroom (one 30 m cell: its finest level is one 6 M-splat tile, a 192 MB read), and two
+    // scenes converted from PLY by radix's tools (Mip-NeRF 360's bicycle with SH 3, Sutro Tower).
+    { id: 'radix-unreal-lcc', label: 'Unreal example scene (XGRIDS, 3.4M, EPSG:4547, 115 MB) ⬀', src: 'https://storage.googleapis.com/forge-dev-public/asundqui/radix/261012/lcc/unreal/meta.lcc' },
+    { id: 'radix-showroom2-lcc', label: 'Showroom (XGRIDS PortalCam, 11.6M, 1 cell, 372 MB) ⬀', src: 'https://storage.googleapis.com/forge-dev-public/asundqui/radix/261012/lcc/showroom2/showroom2.lcc' },
+    { id: 'radix-sutro-lcc', label: 'Sutro Tower (radix, from PLY, 3.8M, 360 MB) ⬀', src: 'https://storage.googleapis.com/forge-dev-public/asundqui/radix/261012/lcc/sutro/meta.lcc' },
+    { id: 'radix-bicycle-lcc', label: 'Bicycle, Mip-NeRF 360 (radix, from PLY, 11.9M, 1.1 GB) ⬀', src: 'https://storage.googleapis.com/forge-dev-public/asundqui/radix/261012/lcc/bicycle/meta.lcc' },
   ] },
   { fmt: 'lcc2', icon: '◈', label: 'LCC2', type: 'splat', octree: false, stream: true, assets: [
-    // XGRIDS LCC2: a *.lcc2 JSON manifest (a tree of nodes with boxes) over bundled .sog chunks, the only public
-    // sample found so far being the one PlayCanvas hosts for its `streamed-lcc2` engine example. 84 M splats,
-    // 8 LODs, 140 chunks, 1.4 GB: streamed, one chunk read per group of tiles (lcc2-live.js). Local frame, no EPSG.
+    // XGRIDS LCC2: a *.lcc2 JSON manifest (a tree of nodes with boxes) over chunk files, bundled .sog, .spz or .ply.
+    // Tunis is the scene PlayCanvas hosts for its `streamed-lcc2` engine example: 84 M splats, 8 LODs, 140 chunks,
+    // 1.4 GB, streamed one chunk read per group of tiles (lcc2-live.js). Local frame, no EPSG.
     { id: 'tunis-lcc2', label: 'Tunis (XGRIDS PortalCam, 84M, 1.4 GB) ⬀', src: 'https://code.playcanvas.com/examples_data/tunis_01/03-19-195651.lcc2' },
+    // The LCC2 samples of Spark's radix viewer, on its GCS bucket: XGRIDS' own two LCC2 scenes from the
+    // 3dgs-unreal-example content pack (byte for byte the Content.zip ones, .sog chunks), and the LCC v1 samples
+    // above converted by radix's to-lcc2 tool to one chunk type each, .spz, .ply or .sog (the docs page says how
+    // their node boxes compare with their splats). None is georeferenced (the street has `epsg: 1`, read as none).
+    { id: 'radix-street-lcc2', label: 'Unreal street (XGRIDS, 2.8M, 6 LODs, .sog, 46 MB) ⬀', src: 'https://storage.googleapis.com/forge-dev-public/asundqui/radix/261012/lcc2/street/LCC2.lcc2' },
+    { id: 'radix-statues-lcc2', label: 'Unreal statues (XGRIDS, 1.5M, 7 LODs, .sog, 19 MB) ⬀', src: 'https://storage.googleapis.com/forge-dev-public/asundqui/radix/261012/lcc2/lcc2-1/LCC2.lcc2' },
+    { id: 'radix-showroom2-spz', label: 'Showroom (XGRIDS PortalCam, radix, 11.6M, .spz, 182 MB) ⬀', src: 'https://storage.googleapis.com/forge-dev-public/asundqui/radix/261012/lcc2/showroom2-spz/showroom2-spz.lcc2' },
+    { id: 'radix-unreal-ply', label: 'Unreal example scene (XGRIDS, radix, 3.4M, .ply, 199 MB) ⬀', src: 'https://storage.googleapis.com/forge-dev-public/asundqui/radix/261012/lcc2/unreal-ply/unreal-ply.lcc2' },
+    { id: 'radix-sutro-spz', label: 'Sutro Tower (radix, 3.8M, .spz, 119 MB) ⬀', src: 'https://storage.googleapis.com/forge-dev-public/asundqui/radix/261012/lcc2/sutro-spz/sutro-spz.lcc2' },
+    { id: 'radix-bicycle-sog', label: 'Bicycle, Mip-NeRF 360 (radix, 11.9M, .sog, 250 MB) ⬀', src: 'https://storage.googleapis.com/forge-dev-public/asundqui/radix/261012/lcc2/bicycle-sog/bicycle-sog.lcc2' },
   ] },
   { fmt: 'rad', icon: '✦', label: 'RAD', type: 'splat', octree: false, stream: true, assets: [
     // Real sources: the exact files this repo's own README setup instructions curl down as

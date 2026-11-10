@@ -660,9 +660,21 @@ const FORMATS = [
       { id: 'guan',      label: 'Guan Temple',      src: 'input/LCC/Guan_Temple/meta.lcc',                 out: 'output/lcc/Guan_Temple-3dtiles-from-lcc'             },
       { id: 'guanlan',   label: 'Guanlan Town',      src: 'input/LCC/Guanlan Ancient Town/meta.lcc',        out: 'output/lcc/Guanlan_Ancient_Town-3dtiles-from-lcc'    },
       { id: 'religious', label: 'Religious Center',  src: 'input/LCC/religious_center_L2_P/meta.lcc',       out: 'output/lcc/religious_center_L2_P-3dtiles-from-lcc'   },
+      // Spark's radix LCC v1 samples on GCS (remote, stream-only): see apps/viewer/src/lib/formats.ts
+      { id: 'radix-unreal-lcc', label: 'Unreal example scene (XGRIDS, 3.4M, EPSG:4547, 115 MB) ⬀', src: 'https://storage.googleapis.com/forge-dev-public/asundqui/radix/261012/lcc/unreal/meta.lcc' },
+      { id: 'radix-showroom2-lcc', label: 'Showroom (XGRIDS PortalCam, 11.6M, 1 cell, 372 MB) ⬀', src: 'https://storage.googleapis.com/forge-dev-public/asundqui/radix/261012/lcc/showroom2/showroom2.lcc' },
+      { id: 'radix-sutro-lcc', label: 'Sutro Tower (radix, from PLY, 3.8M, 360 MB) ⬀', src: 'https://storage.googleapis.com/forge-dev-public/asundqui/radix/261012/lcc/sutro/meta.lcc' },
+      { id: 'radix-bicycle-lcc', label: 'Bicycle, Mip-NeRF 360 (radix, from PLY, 11.9M, 1.1 GB) ⬀', src: 'https://storage.googleapis.com/forge-dev-public/asundqui/radix/261012/lcc/bicycle/meta.lcc' },
   ]},
   { fmt: 'lcc2', icon: '◈', label: 'LCC2', type: 'splat', octree: false, stream: true, assets: [
       { id: 'tunis-lcc2', label: 'Tunis (XGRIDS PortalCam, 84M, 1.4 GB) ⬀', src: 'https://code.playcanvas.com/examples_data/tunis_01/03-19-195651.lcc2' },
+      // Spark's radix LCC2 samples on GCS: XGRIDS' Unreal example scenes (.sog) and the LCC v1 samples converted to .spz / .ply / .sog
+      { id: 'radix-street-lcc2', label: 'Unreal street (XGRIDS, 2.8M, 6 LODs, .sog, 46 MB) ⬀', src: 'https://storage.googleapis.com/forge-dev-public/asundqui/radix/261012/lcc2/street/LCC2.lcc2' },
+      { id: 'radix-statues-lcc2', label: 'Unreal statues (XGRIDS, 1.5M, 7 LODs, .sog, 19 MB) ⬀', src: 'https://storage.googleapis.com/forge-dev-public/asundqui/radix/261012/lcc2/lcc2-1/LCC2.lcc2' },
+      { id: 'radix-showroom2-spz', label: 'Showroom (XGRIDS PortalCam, radix, 11.6M, .spz, 182 MB) ⬀', src: 'https://storage.googleapis.com/forge-dev-public/asundqui/radix/261012/lcc2/showroom2-spz/showroom2-spz.lcc2' },
+      { id: 'radix-unreal-ply', label: 'Unreal example scene (XGRIDS, radix, 3.4M, .ply, 199 MB) ⬀', src: 'https://storage.googleapis.com/forge-dev-public/asundqui/radix/261012/lcc2/unreal-ply/unreal-ply.lcc2' },
+      { id: 'radix-sutro-spz', label: 'Sutro Tower (radix, 3.8M, .spz, 119 MB) ⬀', src: 'https://storage.googleapis.com/forge-dev-public/asundqui/radix/261012/lcc2/sutro-spz/sutro-spz.lcc2' },
+      { id: 'radix-bicycle-sog', label: 'Bicycle, Mip-NeRF 360 (radix, 11.9M, .sog, 250 MB) ⬀', src: 'https://storage.googleapis.com/forge-dev-public/asundqui/radix/261012/lcc2/bicycle-sog/bicycle-sog.lcc2' },
   ]},
   { fmt: 'rad', icon: '✦', label: 'RAD', type: 'splat', octree: false, stream: true, assets: [
       { id: 'coit',      label: 'Coit',       src: 'input/RAD/coit.rad',             out: 'output/rad/coit-3dtiles-from-rad'        },

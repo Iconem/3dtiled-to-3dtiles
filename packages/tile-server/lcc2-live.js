@@ -15,11 +15,14 @@
  * cache and range → GLB (sog-live.js), a chunk being a SOG either way.
  *
  * A chunk is a bundled `.sog` (a ZIP). Its `shN_*` planes are not in the tiles, so they are not downloaded: the ZIP's
- * directory is read from the file's last bytes, then the span of the planes that are needed (sogBundle.js).
+ * directory is read from the file's last bytes, then the span of the planes that are needed (sogBundle.js). A `.spz` or
+ * `.ply` chunk (the whitepaper's other two types; LCC Studio writes SPZ too) is downloaded whole and decoded by
+ * splat-transform's reader into the same table (sogChunk.js), so the tiles are cut the same way.
  */
 import { memoizeAsync, fetchSource as fetchBuf, fetchSourceRange, requestSource } from '../core/index.js';
 import { parseLcc2, lcc2Tileset as buildTileset } from '../lcc-to-3dtiles/src/lcc2Manifest.js';
 import { bundledSogFiles } from '../sog-to-3dtiles/src/sogBundle.js';
+import { decodeSplatFile } from '../sog-to-3dtiles/src/sogChunk.js';
 import { cachedChunk, decodeSogFiles, sogRangeGlb } from './sog-live.js';
 
 // What is asked of a chunk first: its end, where the ZIP directory is and, in the bundles seen, meta.json too.
@@ -28,7 +31,7 @@ const TAIL_BYTES = 64 * 1024;
 // Per-URL context: the parsed manifest and a small LRU of decoded chunks. memoizeAsync caches FAILURES too (cache.js).
 const getCtx = memoizeAsync(async (url) => {
   const manifest = parseLcc2((await fetchBuf(url)).toString('utf8'));
-  console.log(`[lcc2-live] ${url} → ${manifest.files.length} chunk files, ${manifest.totalLevels} LODs, ${manifest.totalSplats} splats${manifest.meta.epsg ? ` (EPSG:${manifest.meta.epsg})` : ' (local upright, no EPSG)'}`);
+  console.log(`[lcc2-live] ${url} → ${manifest.files.length} ${manifest.splatType} chunk files, ${manifest.totalLevels} LODs, ${manifest.totalSplats} splats${manifest.meta.epsg ? ` (EPSG:${manifest.meta.epsg})` : ' (local upright, no EPSG)'}`);
   return { url, manifest, chunks: new Map() };           // chunks: file index → promise of the decoded table (LRU)
 });
 
@@ -43,8 +46,13 @@ async function fetchBundle(url) {
 }
 
 // A chunk backs many tiles (Tunis: 570 tiles in 140 chunks), so its decode is cached as an in-flight promise, like sog-live's.
-const getChunkTable = (ctx, file) => cachedChunk(ctx.chunks, file, async () =>
-  decodeSogFiles(new Map(Object.entries(await fetchBundle(chunkUrl(ctx, file))))));
+// A bundled SOG is read in part and decoded as streamed SOG's chunks are (on a tile worker when there are any); an SPZ or
+// PLY chunk is read whole and decoded on this thread.
+const getChunkTable = (ctx, file) => cachedChunk(ctx.chunks, file, async () => {
+  const url = chunkUrl(ctx, file), name = ctx.manifest.files[file].split('/').pop();
+  if (/\.(spz|ply)$/i.test(name)) return decodeSplatFile(await fetchBuf(url), name);
+  return decodeSogFiles(new Map(Object.entries(await fetchBundle(url))));
+});
 // Chunk paths are relative to the manifest; its query string (a signed URL's token) is carried over to them.
 function chunkUrl(ctx, file) {
   const u = new URL(ctx.manifest.files[file], ctx.url);
