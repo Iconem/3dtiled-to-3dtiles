@@ -92,23 +92,47 @@ quad strips become indexed triangles; points and lines are dropped.
 ## Datasets it was read on
 
 All found on GitHub, read from `raw.githubusercontent.com`. None of the files names the software that wrote it:
-the producer is told from the layout, the version and the texture names.
+the producer is told from the layout, the version and the texture names. The geometry columns were measured on
+2026-11-10 with `scripts/osgb-stats.mjs` (below): the crawl starts at the top tiles the server finds and follows
+every finer file a PagedLOD names, so "files" there are the files the tree reaches, and the depth counts a root
+file as 1. A tile is one PagedLOD of a file (or the bare meshes of a file), a leaf a tile with no finer file in the
+copy; the finest level is the leaves. Textures are embedded `osg::Image` objects, each counted once per file
+however many meshes share it.
 
-| Dataset | Source | Producer (as far as the files tell) | Files, size | Version | Georeference |
-|---|---|---|---|---|---|
-| Dayanta pagoda, Xi'an | `Sogrey/Cesium-start-Example` `SampleData/models/dayanta_osgb/osgb` (MIT repo) | ContextCapture layout | 189, 15.2 MB, 63 top tiles, cut at L17 | 91 | `ENU:34.2196,108.9594` |
-| Weinan | `xyxfa/UnityOSGB-main` `Assets/StreamingAssets/weinan` (MIT repo) | ContextCapture layout | 2 641, 183.4 MB, 30 top tiles | 91 | `EPSG:4545` |
-| One tile, L14 to L22 | `xarray/generic-osgb` `examples/data` (MIT repo) | ContextCapture layout, no `Data` folder | 158, 32.0 MB | 91 | `ENU:48.21221,124.61605` |
-| One tile | `channyHuang/OsgObjects` `data/tiles` (MIT repo) | ContextCapture layout | 40, 9.2 MB | 91 | `ENU:22.64785,113.06277` |
-| One tile, Wuhan | `fafa1899/GISBasic` `Data/Model/Tile_+005_+004` (MIT repo) | Smart3D-era layout (`_t0.jpg` textures) | 243, 48.0 MB | 80 | none (a `.prj` only) |
-| Hong Kong, tile 21-25 | `fafa1899/GISBasic` `Data/Model/hongkong/tile_21_25` (MIT repo, Lands Department mesh) | converted from OBJ with OSG tools; one root under a `MatrixTransform` | 343, 216.6 MB | 97 | `EPSG:2326` |
-| A "Block" export | `wutonggaoqiezhi/learning-cases` `osgb/data/osgbs` (no licence stated) | DJI Terra layout (`Block.osgb`, `Block_L15_1.osgb`); block sizes | 298, 216.0 MB | 131 | `EPSG:4326`, origin in longitude, latitude, height |
-| Two files of a "BlockX" export | `XEMPZ/GeoRefine` `sample_data` (MIT repo) | same family as above | 2, 44 KB | 131 | `EPSG:4547` |
-| `cessna`, `grass1`, `streetlight`, `tree4` | npm `osgb@1.0.1` `Samples/` | OpenSceneGraph's own sample models | 4, 1.2 MB | 95, 100 | none |
+| Dataset | Source | Producer (as far as the files tell) | Files, size | Version | Georeference | Depth | Tiles, leaves | Vertices, triangles | Finest level: vertices, triangles | Textures |
+|---|---|---|---|---|---|---|---|---|---|---|
+| Dayanta pagoda, Xi'an | `Sogrey/Cesium-start-Example` `SampleData/models/dayanta_osgb/osgb` (MIT repo) | ContextCapture layout | 189, 15.2 MB, 63 top tiles, cut at L17 | 91 | `ENU:34.2196,108.9594` | 3 | 189, 63 | 212 354, 108 512 | 127 211, 66 122 | 189 JPEG, 9.4 MB |
+| Weinan | `xyxfa/UnityOSGB-main` `Assets/StreamingAssets/weinan` (MIT repo) | ContextCapture layout | 2 641, 183.4 MB, 30 top tiles | 91 | `EPSG:4545` | 8 | 3 701, 1 090 | 3 012 287, 4 401 887 | 1 579 790, 2 473 809 | 2 641 JPEG, 67.9 MB |
+| One tile, L14 to L22 | `xarray/generic-osgb` `examples/data` (MIT repo) | ContextCapture layout, no `Data` folder | 158, 32.0 MB | 91 | `ENU:48.21221,124.61605` | 10 | 233, 76 | 496 979, 702 730 | 203 234, 305 181 | 158 JPEG, 13.5 MB |
+| One tile | `channyHuang/OsgObjects` `data/tiles` (MIT repo) | ContextCapture layout | 40, 9.2 MB | 91 | `ENU:22.64785,113.06277` | 9 | 52, 13 | 86 170, 116 450 | 35 295, 51 243 | 40 JPEG, 6.0 MB |
+| One tile, Wuhan | `fafa1899/GISBasic` `Data/Model/Tile_+005_+004` (MIT repo) | Smart3D-era layout (`_t0.jpg` textures) | 243, 48.0 MB (236 reached) | 80 | none (a `.prj` only) | 10 | 384, 149 | 1 000 458, 1 129 958 | 500 910, 672 558 | 236 JPEG, 13.6 MB |
+| Hong Kong, tile 21-25 | `fafa1899/GISBasic` `Data/Model/hongkong/tile_21_25` (MIT repo, Lands Department mesh) | converted from OBJ with OSG tools; one root under a `MatrixTransform` | 343, 216.6 MB (342 reached) | 97 | `EPSG:2326` | 6 | 1 365, 1 024 | 6 943 818, 2 314 606 | 5 169 387, 1 723 129 | 1 365 JPEG, 48.6 MB |
+| A "Block" export | `wutonggaoqiezhi/learning-cases` `osgb/data/osgbs` (no licence stated) | DJI Terra layout (`Block.osgb`, `Block_L15_1.osgb`); block sizes | 298, 216.0 MB (297 reached) | 131 | `EPSG:4326`, origin in longitude, latitude, height | 9 | 570, 274 | 2 922 894, 3 772 555 | 1 239 985, 1 905 226 | 1 168 JPEG, 111.3 MB |
+| Two files of a "BlockX" export | `XEMPZ/GeoRefine` `sample_data` (MIT repo) | same family as above | 2, 44 KB | 131 | `EPSG:4547` | 2 | 2, 1 | 667, 910 | 404, 555 | 2 JPEG, 17 KB |
+| `cessna`, `grass1`, `streetlight`, `tree4` | npm `osgb@1.0.1` `Samples/` | OpenSceneGraph's own sample models | 4, 1.2 MB | 95, 100 | none | 1 | 4, 4 | 11 239, 9 944 | 11 239, 9 944 | 3 raw (DXT5, RGB, RGBA), 808 KB |
 
-Every file of every dataset parses with nothing skipped: 3 918 files, 14.7 million vertices. All bodies are
-uncompressed and every texture of the eight photogrammetry datasets is an embedded JPEG file, 6 867 of them. The
-generic models bring the other image forms: raw DXT5 with nine mipmap levels, raw RGB and raw RGBA.
+Every file of every dataset parses with nothing skipped and nothing misread: 3 909 files reached, 720.7 MB,
+14 686 866 vertices and 12 557 552 triangles in 6 500 tiles, 2 694 of them leaves (8 867 455 vertices, 7 207 767
+triangles at the finest level). The 9 files of the 3 918 that the tree does not reach are named by nothing: the
+Wuhan folder's 7 stray L23/L24 files, Hong Kong's `Model_with_transform.osgb` (a second root), and the 232-byte
+`Block.osgb` index above the "Block" export. All bodies are uncompressed and every texture of the eight
+photogrammetry datasets is an embedded JPEG file, 5 799 of them (271 MB, 38 % of the bytes; 52 % on the "Block"
+export, which holds up to four per file). The generic models bring the other image forms: raw DXT5 with nine mipmap
+levels, raw RGB and raw RGBA (`cessna` has no texture).
+
+```
+node scripts/osgb-stats.mjs <…/metadata.xml | …/root.osgb | folder> [--server=http://localhost:3016] [--cache=sample-data/osgb] [--out=stats.json]
+```
+
+The script reads the files with the reader, not through the server's GLBs (the reader is what the tiles are
+built from, says what it skipped, and costs no re-encoding); the server is asked for one thing, the root tileset,
+to find the top tiles of a dataset on a host. It prints one line and a JSON (per-depth counts, versions, texture
+kinds, missing and failed files) and keeps every file it downloads under `sample-data/osgb/<host_path>/` as the
+dataset has it, so a dataset is fetched once: the first crawls took 2.5 s (GeoRefine) to 339 s (the "Block"
+export, 216 MB at about 650 KB/s), 1 196 s for the 721 MB of the nine; from the cache, 0.1 to 0.5 s each. A
+cached folder is a dataset the server opens (`url=sample-data/osgb/<folder>/metadata.xml`, or its root `.osgb`
+where the dataset is given by one). Only Dayanta (63 L18 files, cut at L17) and GeoRefine (its L21 file) name
+files their copies lack.
 
 ### What differs between exporters
 

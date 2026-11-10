@@ -5,6 +5,24 @@ Format loosely follows [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+### Added — 2026-11-10 (OSGB datasets measured: scripts/osgb-stats.mjs)
+- **`scripts/osgb-stats.mjs <metadata.xml | root.osgb URL | folder>`** crawls an OSGB dataset as a client does, from
+  the top tiles the tile-server finds (`--server=`, default `http://localhost:3016`; a local folder or one root
+  `.osgb` needs none) down every finer file a PagedLOD names, reads each file once with the reader, and prints one
+  line and a JSON: files, bytes, LOD depth, tiles and leaf tiles, vertices and triangles in all and at the finest
+  level, embedded textures by kind and bytes (an image shared by several meshes is counted once), versions,
+  skipped and misread classes, missing and failed files. Downloads are kept under `sample-data/osgb/<host_path>/`
+  as the dataset has them, so a dataset is fetched once and the cached folder is one the server can open.
+- **The nine datasets of the OSGB reference page, measured**: 3 909 files reached of 3 918 (the 9 others are named
+  by nothing), 720.7 MB, 14 686 866 vertices, 12 557 552 triangles, 6 500 tiles of which 2 694 leaves
+  (8 867 455 vertices at the finest level), 5 799 embedded JPEGs (271 MB) and the 3 raw images of the npm samples.
+  Nothing skipped or misread in any file. Depths 1 to 10; Hong Kong's 1 024 leaves are an exact quadtree in 6
+  levels, the "Block" export holds up to four textures per file (111 MB of its 216). The docs table carries the
+  new columns (depth, tiles and leaves, vertices and triangles, finest level, textures). First crawls took 2.5 to
+  339 s each, 1 196 s in all at about 650 KB/s; from the cache 0.1 to 0.5 s.
+- 3 tests on the synthetic OSGB fixture: a file's counts and a shared image counted once, a local folder, and a
+  dataset on a host with the roots from the tile-server, cached once and re-read from the cache.
+
 ### Added — 2026-11-09 (LCC2, XGRIDS' successor to LCC, streamed and converted)
 - **`format=lcc2`** on `/stream`, detected from a `.lcc2` URL. An LCC2 scene is a JSON manifest holding a tree of
   nodes, each a box and a run of rows in a chunk file; the tree becomes the tileset node for tile, with no splat
