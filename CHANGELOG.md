@@ -26,9 +26,9 @@ Format loosely follows [Keep a Changelog](https://keepachangelog.com/).
 - Measured through the server: a zip's root tileset in 3.0 s, an L22 leaf in 14 s, root to L17 in 49 s; the
   collection of 2 150 in 35 s (694 KB, 9 levels of groups). `scripts/osgb-stats.mjs` crawls a zip (`--max-files`,
   `--max-depth` for a big one, the unread files counted per depth): `Tile_+005_+006` 873 354 vertices, 1 187 533
-  triangles, 309 tiles, 96 leaves, 12 levels; `tile_16_11` 3 234 618 vertices, 1 365 tiles, 1 024 leaves; TBD1827_CL.
+  triangles, 309 tiles, 96 leaves, 12 levels; `tile_16_11` 3 234 618 vertices, 1 365 tiles, 1 024 leaves; `tile_18_27` (Central) 6 414 429 vertices, 2 138 143 triangles, the densest of the three (442.6 MB of files in a 332 MB zip).
   The host gives about 650 KB/s a connection and drops requests under many: 156 s, 802 s (4 DNS failures, re-run
-  from the cache in 25 s) and TBD1827_SEC s for the three.
+  from the cache in 25 s) and 922 s for the three.
 - 6 tests: the lenient client on a server that folds its headers; zip members by range and from a file, deflated and
   stored; a zipped dataset served member by member; the placement hints and their yielding to a `metadata.xml`; a
   tile index as a collection (the Planning Department's UTF-16 columns), its hints passed to each tile; osgb-stats

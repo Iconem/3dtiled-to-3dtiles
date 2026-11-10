@@ -9,7 +9,7 @@ description: "What photogrammetry software writes as an OpenSceneGraph tiled mod
 > `packages/osgb-to-3dtiles/` (pure JavaScript, no OpenSceneGraph). No offline converter; `3dtiled export` of the
 > streamed tileset writes a static 3D Tiles folder.
 > Read in full on 8 real datasets and 4 generic OSG models, 3 918 files, file versions 80 to 131, and on three
-> zipped tiles of Hong Kong's territory-wide model (TBD1827_SUMFILES files, TBD1827_SUMMB MB, versions 91 and 97), whose 2 150 zips are
+> zipped tiles of Hong Kong's territory-wide model (898 files, 733 MB, versions 91 and 97), whose 2 150 zips are
 > served in place. Not met on real data, and covered by synthetic files only: a zlib body, a DDS file inside the
 > `.osgb`, files of OSG 3.6 (version 149 and later).
 
@@ -117,7 +117,7 @@ however many meshes share it.
 | `cessna`, `grass1`, `streetlight`, `tree4` | npm `osgb@1.0.1` `Samples/` | OpenSceneGraph's own sample models | 4, 1.2 MB | 95, 100 | none | 1 | 4, 4 | 11 239, 9 944 | 11 239, 9 944 | 3 raw (DXT5, RGB, RGBA), 808 KB |
 | Hong Kong, `Tile_+005_+006` (Mong Kok) | PlanD photo-realistic model, one zip of 2 150 (data.gov.hk terms) | ContextCapture layout, 12 levels | 214, 92.1 MB (a 78.3 MB zip) | 91 | `EPSG:2326` | 12 | 309, 96 | 873 354, 1 187 533 | 494 424, 730 390 | 213 JPEG, 60.2 MB |
 | Hong Kong, `tile_16_11` (Aberdeen) | same, one zip | converted with OSG tools, an exact quadtree | 342, 197.9 MB (a 141.3 MB zip) | 97 | `EPSG:2326` | 6 | 1 365, 1 024 | 3 234 618, 1 078 206 | 2 291 631, 763 877 | 1 365 JPEG, 119.2 MB |
-| Hong Kong, `tile_18_27` (Central) | same, one zip | same | TBD1827_FILES (a 332.0 MB zip) | 97 | `EPSG:2326` | TBD1827_DEPTH | TBD1827_TILES | TBD1827_VT | TBD1827_FINEST | TBD1827_TEX |
+| Hong Kong, `tile_18_27` (Central) | same, one zip | same | 342, 442.6 MB (a 332.0 MB zip) | 97 | `EPSG:2326` | 6 | 1 365, 1 024 | 6 414 429, 2 138 143 | 4 381 800, 1 460 600 | 1 365 JPEG, 287.6 MB |
 
 Every file of every dataset parses with nothing skipped and nothing misread: 3 909 files reached, 720.7 MB,
 14 686 866 vertices and 12 557 552 triangles in 6 500 tiles, 2 694 of them leaves (8 867 455 vertices, 7 207 767
@@ -160,10 +160,10 @@ as origin):
 | Family | Tiles | Bytes | Written by | Levels | A tile measured |
 |---|---|---|---|---|---|
 | `Tile_+xxx_+yyy` (Kowloon) | 822 | 101.2 GB | ContextCapture (version 91, `Tile_+005_+006/Tile_+005_+006_L12_0.osgb`…) | 12, one file per level and quadrant, L12 to L22 | `Tile_+005_+006`: 873 354 vertices in 309 tiles |
-| `tile_xx_yy` (Hong Kong Island, Sham Shui Po) | 1 328 | 366.0 GB | OpenSceneGraph tools from a mesh (version 97, `Data/Model/Model.osgb`, `tile_1_0_0_tex_children.osgb`…), the family of the tile 21-25 above | 6, an exact quadtree: 1, 4, 16, 64, 256, 1 024 leaves | `tile_16_11`: 3 234 618 vertices in 1 365 tiles; `tile_18_27`: TBD1827_V vertices |
+| `tile_xx_yy` (Hong Kong Island, Sham Shui Po) | 1 328 | 366.0 GB | OpenSceneGraph tools from a mesh (version 97, `Data/Model/Model.osgb`, `tile_1_0_0_tex_children.osgb`…), the family of the tile 21-25 above | 6, an exact quadtree: 1, 4, 16, 64, 256, 1 024 leaves | `tile_16_11`: 3 234 618 vertices in 1 365 tiles; `tile_18_27`: 6 414 429 vertices |
 
 From the three tiles measured, the set holds of the order of **10 G vertices** (1.1 G over Kowloon at 11 000
-vertices per zip-MB, 8.4 G over the island at 23 000) in some 700 000 files. Nothing of it is unpacked: the server
+vertices per zip-MB, 7.7 to 8.4 G over the island at 19 000 to 23 000) in some 700 000 files. Nothing of it is unpacked: the server
 reads each zip in place (core/zip.js: the central directory from the archive's tail, then one range read per member,
 inflated here), and the index is served as a **collection**, one tileset whose 2 150 children are the zips, each an
 external tileset opened when the camera comes within twice the tile's width (geometric error = half its width;
@@ -172,7 +172,7 @@ the middle of the index; inside, every zip has its own `metadata.xml` and places
 `Content-Security-Policy` header that `fetch` refuses, so it is read with Node's lenient parser from the first
 refusal on; and it is slow, about 650 KB/s a connection and worse with many: the first crawl of `tile_16_11` took
 802 s and lost 4 files to DNS errors (re-run from the cache: 25 s), `tile_18_27`'s first attempt lost a 3 MB member
-to the range read's timeout while 24 connections were open (TBD1827_SEC s on its own).
+to the range read's timeout while 24 connections were open (922 s on its own).
 
 The other sources looked at hold no OSGB in the open: Hong Kong's Lands Department ships its territory-wide mesh
 (the origin of tile 21-25) as OBJ through CSDI, Helsinki (Kalasatama, 30 M polygons), Melbourne (2018 PhotoMesh)
