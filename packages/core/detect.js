@@ -30,6 +30,8 @@ export function detectFormatByName(name) {
   if (l.endsWith('.3mx') || l.endsWith('.3mxb')) return 'threemx';
   // OSGB: one .osgb, or the metadata.xml at the top of a ContextCapture / DJI Terra export (ModelMetadata: SRS + SRSOrigin)
   if (l.endsWith('.osgb') || l === 'metadata.xml' || l.endsWith('/metadata.xml')) return 'osgb';
+  // a dataset zipped per tile, and the index of such tiles (Hong Kong's Planning Department: Tile_+005_+006_OSGB.zip, GridIdx_OSGB.csv)
+  if (l.endsWith('_osgb.zip') || l.endsWith('grididx_osgb.csv')) return 'osgb';
   return null;
 }
 

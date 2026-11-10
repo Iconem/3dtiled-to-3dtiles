@@ -178,6 +178,8 @@ test('metadata.xml: ENU, projected EPSG and geographic origins land where they s
   assert.ok(near(await place(metadata('EPSG:4326', '120.0717,30.4936,22.9')), [120.0717, 30.4936, 22.9], 1e-6)); // DJI Terra: lon, lat, height
   assert.equal(await osgbGeoref(parseOsgbMetadata('<ModelMetadata></ModelMetadata>')), null);
   assert.equal(detectFormatByName('metadata.xml'), 'osgb');
+  assert.equal(detectFormatByName('https://pdmap.pland.gov.hk/PLANDWEB/public/3d_photo_realistic_models/OSGB/Tile_+005_+006_OSGB.zip'), 'osgb');
+  assert.equal(detectFormatByName('https://pdmap.pland.gov.hk/PLANDWEB/public/3d_photo_realistic_models/Metadata/GridIdx_OSGB.csv'), 'osgb');
   assert.equal(detectFormatByName('Tile_+000_+000.osgb'), 'osgb');
 });
 

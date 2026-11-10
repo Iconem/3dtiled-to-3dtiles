@@ -8,7 +8,7 @@
  * refines it. The hierarchy is therefore spread over every file, exactly as in 3MX, and is served the same way: one
  * `.osgb` → one tileset.json fragment, fetched as the camera refines in (packages/osgb-to-3dtiles reads the files).
  *
- *   GET /stream/tileset.json?url=<…/metadata.xml | dataset folder | one .osgb>&format=osgb
+ *   GET /stream/tileset.json?url=<…/metadata.xml | dataset folder | one .osgb | …/tile.zip | …/GridIdx_OSGB.csv>&format=osgb
  *   GET /stream/osgb/node/<encRelPath>.json?url=<same>[&ge=&bs=]      (lazy fragment for a finer .osgb)
  *   GET /stream/tile/<encRelPath>__<unit>.glb?url=<same>&format=osgb
  *

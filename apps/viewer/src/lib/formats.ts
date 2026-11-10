@@ -228,10 +228,16 @@ export const FORMATS: FormatMeta[] = [
     { id: 'arcgis-usgsnyc-svc', label: 'ArcGIS USGSNYC 2014 LiDAR SceneServer', type: 'pointcloud', src: 'https://tiles.arcgis.com/tiles/z2tnIkrLQ2BRzr6P/arcgis/rest/services/USGSNYC_2014_LiDAR/SceneServer' },
   ] },
   // OSGB (OpenSceneGraph binary tiled meshes: ContextCapture, DJI Terra, …), streamed only (no offline converter, so no
-  // `out`). `src` is the dataset's metadata.xml, or its root .osgb where the folder has a single one. All four are
-  // folders of public GitHub repositories under an MIT licence, read through raw.githubusercontent.com: the server
-  // finds the top tiles with one GitHub tree API call, or by their names when that call is refused.
+  // `out`). `src` is the dataset's metadata.xml, or its root .osgb where the folder has a single one, or a zip of one
+  // tile, or the CSV index of such zips (a collection: one external tileset per zip, opened as the camera nears it).
+  // The first two are Hong Kong's Planning Department 3D photo-realistic model (data.gov.hk terms, free reuse): the
+  // whole set, 2 150 zips of 250 m each over Kowloon and Hong Kong Island, about 1.9 G vertices, read in place by
+  // range requests; and one of its tiles. The other four are folders of public GitHub repositories under an MIT
+  // licence, read through raw.githubusercontent.com: the server finds the top tiles with one GitHub tree API call,
+  // or by their names when that call is refused.
   { fmt: 'osgb', icon: '🧊', label: 'OSGB', type: 'mesh', octree: false, stream: true, assets: [
+    { id: 'hk-pland', label: 'Hong Kong, PlanD photo-realistic model (2 150 zipped tiles, ~160 GB, ~1.9 G vertices)', src: 'https://pdmap.pland.gov.hk/PLANDWEB/public/3d_photo_realistic_models/Metadata/GridIdx_OSGB.csv' },
+    { id: 'hk-pland-tile', label: 'Hong Kong, PlanD tile +005_+006, Mong Kok (one zip, 78 MB, 873 k vertices, 12 levels)', src: 'https://pdmap.pland.gov.hk/PLANDWEB/public/3d_photo_realistic_models/OSGB/Tile_+005_+006_OSGB.zip' },
     { id: 'weinan', label: 'Weinan (ContextCapture, 30 tiles, 183 MB)', src: 'https://raw.githubusercontent.com/xyxfa/UnityOSGB-main/main/Assets/StreamingAssets/weinan/metadata.xml' },
     { id: 'dayanta', label: 'Dayanta pagoda, Xi’an (ContextCapture, 63 tiles, cut at L17)', src: 'https://raw.githubusercontent.com/Sogrey/Cesium-start-Example/master/SampleData/models/dayanta_osgb/osgb/metadata.xml' },
     { id: 'hongkong', label: 'Hong Kong Central, tile 21-25 (LandsD mesh, OSG 3.2, 217 MB)', src: 'https://raw.githubusercontent.com/fafa1899/GISBasic/main/Data/Model/hongkong/tile_21_25/Data/Model/Model.osgb' },
