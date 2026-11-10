@@ -8,9 +8,10 @@ description: "What photogrammetry software writes as an OpenSceneGraph tiled mod
 > Status: live `/stream` adapter (`packages/tile-server/osgb-live.js`), reader in
 > `packages/osgb-to-3dtiles/` (pure JavaScript, no OpenSceneGraph). No offline converter; `3dtiled export` of the
 > streamed tileset writes a static 3D Tiles folder.
-> Read in full on 8 real datasets and 4 generic OSG models, 3 918 files, file versions 80 to 131. Not met on real
-> data, and covered by synthetic files only: a zlib body, a DDS file inside the `.osgb`, files of OSG 3.6 (version
-> 149 and later).
+> Read in full on 8 real datasets and 4 generic OSG models, 3 918 files, file versions 80 to 131, and on three
+> zipped tiles of Hong Kong's territory-wide model (TBD1827_SUMFILES files, TBD1827_SUMMB MB, versions 91 and 97), whose 2 150 zips are
+> served in place. Not met on real data, and covered by synthetic files only: a zlib body, a DDS file inside the
+> `.osgb`, files of OSG 3.6 (version 149 and later).
 
 OSGB is the tiled mesh format of the Chinese oblique-photogrammetry world and one of the standard exports of
 Bentley ContextCapture / iTwin Capture, DJI Terra, Smart3D, Skyline PhotoMesh and Metashape. It is not a format of
@@ -18,12 +19,15 @@ its own: it is [OpenSceneGraph](https://github.com/openscenegraph/OpenSceneGraph
 with one convention, a tree of `osg::PagedLOD` nodes spread over thousands of small files.
 
 ```
-GET /stream/tileset.json?format=osgb&url=<…/metadata.xml | dataset folder | one root .osgb>
+GET /stream/tileset.json?format=osgb&url=<…/metadata.xml | dataset folder | one root .osgb | …/tile.zip | …/GridIdx_OSGB.csv>
 GET /stream/osgb/node/<file>.json?url=<same>          lazy fragment for a finer .osgb
 GET /stream/tile/<file>__<unit>.glb?url=<same>&format=osgb
 ```
 
-`url` is an http(s) URL or a local path. `format=osgb` is detected from a URL ending in `metadata.xml` or `.osgb`.
+`url` is an http(s) URL or a local path: a `metadata.xml`, a folder, one root `.osgb`, a **zip** of a dataset (read
+in place, member by member, see [below](#a-city-in-zips-hong-kong)), or a **CSV index** of such zips, served as one
+tileset whose tiles are the zips. `format=osgb` is detected from a URL ending in `metadata.xml`, `.osgb`,
+`_OSGB.zip` or `GridIdx_OSGB.csv`. `&srs=EPSG:2326&origin=x,y,z` on the URL stand in for a missing `metadata.xml`.
 
 ## A dataset
 
@@ -46,6 +50,7 @@ last level holds meshes only. Nothing indexes the whole: the hierarchy is discov
 | `Block/Block.osgb` + `Block/Block_L15_1.osgb`, and a `Block.osgb` index above | DJI Terra (`terra_osgbs`) | the block; the index only repeats it |
 | `Data/Model/Model.osgb` + `tile_1_0_16_tex_children.osgb` | a mesh converted with OpenSceneGraph tools (Hong Kong LandsD) | one |
 | `Tile_1/Tile_1.osgb` with no `Data` folder | a ContextCapture copy | one per folder |
+| one `.zip` per 250 m tile, holding `Tile_+005_+006/Tile_+005_+006.osgb` (Kowloon) or `tile_18_27/Data/Model/Model.osgb` (Hong Kong Island), a `metadata.xml` beside it | Hong Kong Planning Department, 2 150 tiles | the zip's one |
 
 ## The file format
 
@@ -110,6 +115,9 @@ however many meshes share it.
 | A "Block" export | `wutonggaoqiezhi/learning-cases` `osgb/data/osgbs` (no licence stated) | DJI Terra layout (`Block.osgb`, `Block_L15_1.osgb`); block sizes | 298, 216.0 MB (297 reached) | 131 | `EPSG:4326`, origin in longitude, latitude, height | 9 | 570, 274 | 2 922 894, 3 772 555 | 1 239 985, 1 905 226 | 1 168 JPEG, 111.3 MB |
 | Two files of a "BlockX" export | `XEMPZ/GeoRefine` `sample_data` (MIT repo) | same family as above | 2, 44 KB | 131 | `EPSG:4547` | 2 | 2, 1 | 667, 910 | 404, 555 | 2 JPEG, 17 KB |
 | `cessna`, `grass1`, `streetlight`, `tree4` | npm `osgb@1.0.1` `Samples/` | OpenSceneGraph's own sample models | 4, 1.2 MB | 95, 100 | none | 1 | 4, 4 | 11 239, 9 944 | 11 239, 9 944 | 3 raw (DXT5, RGB, RGBA), 808 KB |
+| Hong Kong, `Tile_+005_+006` (Mong Kok) | PlanD photo-realistic model, one zip of 2 150 (data.gov.hk terms) | ContextCapture layout, 12 levels | 214, 92.1 MB (a 78.3 MB zip) | 91 | `EPSG:2326` | 12 | 309, 96 | 873 354, 1 187 533 | 494 424, 730 390 | 213 JPEG, 60.2 MB |
+| Hong Kong, `tile_16_11` (Aberdeen) | same, one zip | converted with OSG tools, an exact quadtree | 342, 197.9 MB (a 141.3 MB zip) | 97 | `EPSG:2326` | 6 | 1 365, 1 024 | 3 234 618, 1 078 206 | 2 291 631, 763 877 | 1 365 JPEG, 119.2 MB |
+| Hong Kong, `tile_18_27` (Central) | same, one zip | same | TBD1827_FILES (a 332.0 MB zip) | 97 | `EPSG:2326` | TBD1827_DEPTH | TBD1827_TILES | TBD1827_VT | TBD1827_FINEST | TBD1827_TEX |
 
 Every file of every dataset parses with nothing skipped and nothing misread: 3 909 files reached, 720.7 MB,
 14 686 866 vertices and 12 557 552 triangles in 6 500 tiles, 2 694 of them leaves (8 867 455 vertices, 7 207 767
@@ -121,7 +129,7 @@ export, which holds up to four per file). The generic models bring the other ima
 levels, raw RGB and raw RGBA (`cessna` has no texture).
 
 ```
-node scripts/osgb-stats.mjs <…/metadata.xml | …/root.osgb | folder> [--server=http://localhost:3016] [--cache=sample-data/osgb] [--out=stats.json]
+node scripts/osgb-stats.mjs <…/metadata.xml | …/root.osgb | folder | …/tile.zip> [--server=http://localhost:3016] [--cache=sample-data/osgb] [--max-files=N] [--max-depth=D] [--out=stats.json]
 ```
 
 The script reads the files with the reader, not through the server's GLBs (the reader is what the tiles are
@@ -132,7 +140,45 @@ dataset has it, so a dataset is fetched once: the first crawls took 2.5 s (GeoRe
 export, 216 MB at about 650 KB/s), 1 196 s for the 721 MB of the nine; from the cache, 0.1 to 0.5 s each. A
 cached folder is a dataset the server opens (`url=sample-data/osgb/<folder>/metadata.xml`, or its root `.osgb`
 where the dataset is given by one). Only Dayanta (63 L18 files, cut at L17) and GeoRefine (its L21 file) name
-files their copies lack.
+files their copies lack. A zip is crawled member by member over range requests and cached extracted; `--max-files`
+and `--max-depth` stop a crawl of a big one, the JSON then says how many named files were left unread at each depth
+(`cut`), for a total to be extrapolated from the levels read.
+
+### A city in zips: Hong Kong
+
+The one city-scale OSGB dataset found in the open is Hong Kong's **3D Photo-realistic Model** by the Planning
+Department ([data.gov.hk](https://data.gov.hk/en-data/dataset/hk-pland-pland1-3d-photo-realistic-model), free
+commercial and non-commercial reuse under the DATA.GOV.HK Terms and Conditions of Use; aerial photos of March 2017
+and 2018, files of 2019): Kowloon and Hong Kong Island, 114.116° to 114.257° E, 22.220° to 22.353° N, in **2 150
+tiles of 250 m**, each one zip, listed by
+[`GridIdx_OSGB.csv`](https://pdmap.pland.gov.hk/PLANDWEB/public/3d_photo_realistic_models/Metadata/GridIdx_OSGB.csv)
+(UTF-16, tab-separated: name, district, extent in HK1980 grid and in WGS84, the zip's URL, a date; the same index
+exists for OBJ and Cesium 3D Tiles). A `HEAD` of every zip on 2026-11-11 gives **467.2 GB** in all, 0 to 1 394 MB
+a zip, 217 MB on average. Two families, each with its own `metadata.xml` (`EPSG:2326`, the tile's south-west corner
+as origin):
+
+| Family | Tiles | Bytes | Written by | Levels | A tile measured |
+|---|---|---|---|---|---|
+| `Tile_+xxx_+yyy` (Kowloon) | 822 | 101.2 GB | ContextCapture (version 91, `Tile_+005_+006/Tile_+005_+006_L12_0.osgb`…) | 12, one file per level and quadrant, L12 to L22 | `Tile_+005_+006`: 873 354 vertices in 309 tiles |
+| `tile_xx_yy` (Hong Kong Island, Sham Shui Po) | 1 328 | 366.0 GB | OpenSceneGraph tools from a mesh (version 97, `Data/Model/Model.osgb`, `tile_1_0_0_tex_children.osgb`…), the family of the tile 21-25 above | 6, an exact quadtree: 1, 4, 16, 64, 256, 1 024 leaves | `tile_16_11`: 3 234 618 vertices in 1 365 tiles; `tile_18_27`: TBD1827_V vertices |
+
+From the three tiles measured, the set holds of the order of **10 G vertices** (1.1 G over Kowloon at 11 000
+vertices per zip-MB, 8.4 G over the island at 23 000) in some 700 000 files. Nothing of it is unpacked: the server
+reads each zip in place (core/zip.js: the central directory from the archive's tail, then one range read per member,
+inflated here), and the index is served as a **collection**, one tileset whose 2 150 children are the zips, each an
+external tileset opened when the camera comes within twice the tile's width (geometric error = half its width;
+the tile's volume spans −50 to 600 m, since no index says how tall its city is). The root frame is east-north-up at
+the middle of the index; inside, every zip has its own `metadata.xml` and places itself. The host sends a folded
+`Content-Security-Policy` header that `fetch` refuses, so it is read with Node's lenient parser from the first
+refusal on; and it is slow, about 650 KB/s a connection and worse with many: the first crawl of `tile_16_11` took
+802 s and lost 4 files to DNS errors (re-run from the cache: 25 s), `tile_18_27`'s first attempt lost a 3 MB member
+to the range read's timeout while 24 connections were open (TBD1827_SEC s on its own).
+
+The other sources looked at hold no OSGB in the open: Hong Kong's Lands Department ships its territory-wide mesh
+(the origin of tile 21-25) as OBJ through CSDI, Helsinki (Kalasatama, 30 M polygons), Melbourne (2018 PhotoMesh)
+and Estonia as OBJ or 3D Tiles, Taiwan's NLSC as I3S; the Chinese city models on CSDN and the "441 GB Hong Kong",
+"139 GB Taipei", Macau and Paris OSGB shares of one blogger are Google Earth meshes re-exported, on Baidu pan;
+Bentley, DJI and Skyline publish no sample city; nothing on Zenodo, Figshare, Kaggle, Hugging Face or OpenDataLab.
 
 ### What differs between exporters
 
@@ -197,7 +243,7 @@ is the bottom of the picture, glTF's the top.
 | `EPSG:4326` (or another geographic CRS) | ENU frame at `SRSOrigin` = longitude, latitude, height |
 | `EPSG:4978` | translation by `SRSOrigin`: the model is in ECEF |
 | a WKT or proj string | as a projected CRS |
-| none, or no `metadata.xml` | no transform; `&lon=&lat=[&alt=][&heading=]` places the dataset |
+| none, or no `metadata.xml` | `&srs=EPSG:2326&origin=x,y,z` on the dataset URL, the same two fields; else no transform, and `&lon=&lat=[&alt=][&heading=]` places the dataset |
 
 EPSG codes are resolved in three steps: the table of core/geo.js, which now derives the CGCS2000 Gauss-Krüger
 zones (EPSG:4491 to 4554) that most Chinese exports use; proj4's own; then `epsg.io/<code>.proj4`, asked once per
@@ -236,7 +282,9 @@ A folder cannot be listed over plain HTTP, and an OSGB dataset has no index. In 
    `Data/Block.osgb`, `Data/Model/Model.osgb`, `main.osgb`.
 
 A dataset laid out otherwise is opened by the URL of its root `.osgb`; `metadata.xml` is then looked for beside it
-and up to two folders above. Probing costs requests: 27 s for the 63 tiles of Dayanta through jsDelivr, which also
+and up to two folders above. A **zip** needs no probing: its central directory is the listing, and the shallowest
+`metadata.xml` in it is the dataset's. A **CSV index** of zips (columns `OSGB_URL` or `FILE_URL`, `MIN_LNG, MIN_LAT,
+MAX_LNG, MAX_LAT` or `MIN_X, MIN_Y, MAX_X, MAX_Y` with `&srs=` on the URL) is a collection of them. Probing costs requests: 27 s for the 63 tiles of Dayanta through jsDelivr, which also
 answered 403 for 12 of them (51 found); the same dataset listed through GitHub opens in 6.1 s, the time of its 63
 root files.
 
@@ -257,6 +305,8 @@ thread:
 | Hong Kong 21-25 (local) | 314 ms (epsg.io) | 1 365 | 202.9 MB | 6 943 818, 2 314 606 | 2.6 ms, 1.5 ms |
 | "Block" (local) | 48 ms, 9 tiles | 570 | 193.4 MB | 2 922 894, 3 772 555 | 4.2 ms, 1.9 ms |
 | Weinan (GitHub, all 2 641 files) | 2.0 to 3.1 s, 63 tiles | 3 701 | 199.2 MB | 3 012 287, 4 401 887 | 1.3 ms, 335 ms (the download) |
+| Hong Kong `Tile_+005_+006` (a zip on pdmap.pland.gov.hk) | 3.0 s (the archive's tail, then its root member) | — | — | — | an L22 leaf 14 s (one 400 KB range read); root to L17 in 49 s |
+| Hong Kong, the 2 150 zips (`GridIdx_OSGB.csv`) | 35 s, 2 150 external tilesets in 9 levels of groups, 694 KB | — | — | — | each child is the root above |
 
 Vertex and triangle counts equal what the reader finds in the files that the tree reaches (the Wuhan folder has
 6 files nothing names, and what they name). Every mesh is inside its own tile's sphere, on all datasets. With
