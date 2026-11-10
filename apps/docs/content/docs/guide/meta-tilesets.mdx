@@ -511,6 +511,15 @@ End to end on Luxembourg, from the root to a leaf's first points: root 157 ms, s
 On the Paris block, 96 and 49 ms, then 984 ms and 3.7 s for a 777 KB root tile. The cut adds one request of
 some 10 ms per four levels; what a client waits for is the point cloud.
 
+**The cut does not shrink the manifest.** The 337 206-item root above still parses a 225 MB `.vpc` before it
+answers (12.7 s cold), and a client of any other kind (QGIS, PDAL) parses it whole too. Past a few thousand
+items a VPC is therefore split into a **VPC of VPCs** (`scripts/vpc-split.mjs`: a quadtree of child files
+under 2 048 items and 2 MB each, a root whose items carry each child's union extent and count), and a nested
+item is one leaf of the root mosaic whose content is the child's own mosaic, cut again as above. All of France
+is then a 30 KB root file answered in 173 ms, a 19 KB child mosaic (1 054 items, 30 externals) in 135 ms and a
+34 KB subtree in 25 ms before the first COPC root; the numbers for France, Switzerland, New Brunswick and
+Fairbanks are on [the VPC page](/docs/references/pointclouds/vpc#a-vpc-of-vpcs-the-hierarchy-past-a-few-thousand-items).
+
 ## What a mosaic costs: caches, upfront work, per-dataset fetches
 
 A mosaic is cheap to describe and expensive only where it touches the sources. This section lists

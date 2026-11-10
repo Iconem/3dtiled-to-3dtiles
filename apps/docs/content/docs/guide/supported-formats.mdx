@@ -62,7 +62,9 @@ LAS/LAZ/COPC tiles as a single dataset: a STAC ItemCollection with each file's e
 streams as `/stream/tileset.json?format=vpc&url=<….vpc>`: one mosaic whose leaves are the COPC streams of its
 items, placed from each item's own `proj:bbox` so that the root is built without opening any of them (1 000
 tiles: a 643 KB root in 161 ms). Only its COPC items are streamed; plain LAS/LAZ items are skipped and
-counted. See the [VPC page](/docs/references/pointclouds/vpc).
+counted. See the [VPC page](/docs/references/pointclouds/vpc). A VPC may nest: an item whose asset
+is another `.vpc` is one leaf whose content is that child's own mosaic, which is how all of France (337 206
+tiles) opens from a 30 KB root file.
 
 **Potree 1.x point counts are not reliable.** PotreeConverter's 1.7 code writes `numAccepted` to the `.hrc`, and only an
 inner node adds to it: a leaf keeps its points in `store`. So a leaf can be recorded with **0 points while its `.bin`

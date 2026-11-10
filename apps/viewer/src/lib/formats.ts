@@ -122,8 +122,9 @@ export const FORMATS: FormatMeta[] = [
     { id: 'france-lidarhd', label: 'IGN LiDAR HD, all of France, 337 206 tiles (via flai, ~10T, split VPC of VPCs) ⬀', src: 'https://raw.githubusercontent.com/jo-chemla/3dtiled-to-3dtiles/main/packages/tile-server/samples/france-lidarhd.vpc.gz' },
     // Self-made from swisstopo's STAC API: every swissSURFACE3D 1 km tile served as COPC (15 643 of 58 987 items on 2026-11-10), headers read, split into 27 children.
     { id: 'switzerland-swisssurface3d', label: 'swissSURFACE3D, 15 643 COPC tiles (swisstopo, 515G, split VPC) ⬀', src: 'https://raw.githubusercontent.com/jo-chemla/3dtiled-to-3dtiles/main/packages/tile-server/samples/switzerland-swisssurface3d.vpc.gz' },
-    // Self-made over NRCan's CanElevation bucket (OGL-Canada): the whole of New Brunswick and Prince Edward Island, 90 764 of its 751 929 COPC tiles, headers read.
-    { id: 'canada-canelevation-nb-pei', label: 'CanElevation, New Brunswick + PEI, 90 764 tiles (NRCan, split VPC) ⬀', src: 'https://raw.githubusercontent.com/jo-chemla/3dtiled-to-3dtiles/main/packages/tile-server/samples/canada-canelevation-nb-pei.vpc.gz' },
+    // Self-made over NRCan's CanElevation bucket (OGL-Canada): the whole of New Brunswick and Prince Edward Island, 90 764 of its 751 929 COPC tiles,
+    // every header read (1.73 T points, 39 projects 2015–2024), split into 147 child VPCs (9.9 MB gzipped in all) under a 16 KB root.
+    { id: 'canada-canelevation-nb-pei', label: 'CanElevation, New Brunswick + PEI, 90 764 tiles (NRCan, 1.7T, split VPC) ⬀', src: 'https://raw.githubusercontent.com/jo-chemla/3dtiled-to-3dtiles/main/packages/tile-server/samples/canada-canelevation-nb-pei.vpc.gz' },
     // Self-made over NOAA Digital Coast's unsigned COPC copy of a USGS 3DEP project (Fairbanks, AK, 2017, QL1 + QL2): 7 471 tiles, 63 G points, headers read.
     { id: 'usgs-3dep-fairbanks-2017', label: 'USGS 3DEP Fairbanks 2017 via NOAA, 7 471 tiles (63G, split VPC) ⬀', src: 'https://raw.githubusercontent.com/jo-chemla/3dtiled-to-3dtiles/main/packages/tile-server/samples/usgs-3dep-fairbanks-2017.vpc.gz' },
   ] },
