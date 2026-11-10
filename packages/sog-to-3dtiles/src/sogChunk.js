@@ -16,18 +16,40 @@
 
 import fs   from 'fs/promises';
 import path from 'path';
-import { readSog, MemoryReadFileSystem } from '@playcanvas/splat-transform';
+import { readSog, readSpz, readPly, materializeToDataTable, createChunkDataPool, MemoryReadFileSystem } from '@playcanvas/splat-transform';
 import { bundledSogFiles } from './sogBundle.js';
 
 const SH_C0 = 0.28209479177387814;
 
+/** A chunk file name this can decode: a bundled SOG, an SPZ or a 3DGS PLY (the three chunk types the LCC2 whitepaper lists). */
+export const SPLAT_CHUNK_RE = /\.(sog|spz|ply)$/i;
+
 /**
- * Load + decode one SOG chunk into a DataTable: an unbundled chunk directory, or a bundled `.sog` file (as an LCC2
- * scene stores its chunks), of which the higher-order SH planes are left unread (see sogBundle.js).
- * @param {string} metaJsonPath  absolute path to the chunk's meta.json, or to a bundled `.sog`
+ * One whole `.spz` or `.ply` chunk file → the DataTable `readSog` gives for a SOG chunk (the same columns: x, y, z,
+ * scale_*, rot_*, f_dc_*, opacity, in the PLY conventions listed above), through splat-transform's own readers. Neither
+ * format can be read in part the way a bundled SOG's planes can, so the whole file is decoded; its f_rest_* columns,
+ * if any, are left unused by extractRange.
+ * @param {Uint8Array|Buffer} bytes  the file
+ * @param {string} name  its name, for the extension
+ */
+export async function decodeSplatFile(bytes, name) {
+  const fileSystem = new MemoryReadFileSystem();
+  fileSystem.set(name, bytes instanceof Uint8Array ? bytes : new Uint8Array(bytes));
+  const source = await fileSystem.createSource(name);
+  const pool = createChunkDataPool();
+  const src = /\.spz$/i.test(name) ? await readSpz(source, pool) : await readPly(source, pool);
+  try { return await materializeToDataTable(src, pool); } finally { src.destroy?.(); pool.destroy(); }
+}
+
+/**
+ * Load + decode one chunk into a DataTable: an unbundled SOG chunk directory, a bundled `.sog` file (as an LCC2
+ * scene stores its chunks), of which the higher-order SH planes are left unread (see sogBundle.js), or an LCC2
+ * scene's `.spz` or `.ply` chunk.
+ * @param {string} metaJsonPath  absolute path to the chunk's meta.json, or to a bundled `.sog`, `.spz` or `.ply`
  * @returns {Promise<import('@playcanvas/splat-transform').DataTable>}
  */
 export async function decodeChunk(metaJsonPath) {
+  if (/\.(spz|ply)$/i.test(metaJsonPath)) return decodeSplatFile(await fs.readFile(metaJsonPath), path.basename(metaJsonPath));
   if (/\.sog$/i.test(metaJsonPath)) {
     const bundle = await fs.readFile(metaJsonPath);
     const bundled = new MemoryReadFileSystem();

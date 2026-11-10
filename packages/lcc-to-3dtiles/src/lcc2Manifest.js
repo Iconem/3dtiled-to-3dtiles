@@ -39,7 +39,7 @@ const stripTrailingCommas = (text) => text.replace(/"(?:[^"\\]|\\.)*"|,(\s*[}\]]
 export const lcc2Children = (node) => (Array.isArray(node?.child) ? node.child : Object.values(node?.child ?? {})).filter((c) => c && typeof c === 'object');
 
 /**
- * Parse a `*.lcc2` manifest → { meta, root, files, totalLevels, lodSplats, totalSplats, envFile }.
+ * Parse a `*.lcc2` manifest → { meta, root, splatType, files, totalLevels, lodSplats, totalSplats, envFile }.
  * Accepts the field names of the earlier protocol too (`files`, `lod_level`, `lod_3dgs_info`, `total_splats`).
  */
 export function parseLcc2(text) {
@@ -50,12 +50,13 @@ export function parseLcc2(text) {
   const files = root?.splatFiles ?? root?.files;
   if (!root || typeof root !== 'object' || !Array.isArray(files)) throw new Error('not an LCC2 manifest: no root.splatFiles');
   if (!isBox(root.boundingBox)) throw new Error('LCC2 manifest: the root node has no boundingBox');
+  // The whitepaper's three chunk types. A chunk is decoded by its own file's extension; `splatType` says what they all are.
   const splatType = String(meta.splatType ?? '.sog').toLowerCase();
-  if (splatType !== '.sog') throw new Error(`LCC2 chunks of type "${splatType}" are not supported yet (only .sog)`);
+  if (!['.sog', '.spz', '.ply'].includes(splatType)) throw new Error(`LCC2 chunks of type "${splatType}" are not supported (only .sog, .spz and .ply)`);
   const lodSplats = meta.lodSplats ?? (Array.isArray(meta.lod_3dgs_info) ? [...meta.lod_3dgs_info].reverse() : []);
   const env = root.data?.env?.name;
   return {
-    meta, root, files: files.map((f) => String(f).replace(/\\/g, '/')),
+    meta, root, splatType, files: files.map((f) => String(f).replace(/\\/g, '/')),
     totalLevels: Number(meta.totalLevels ?? meta.lod_level) || 0, lodSplats, totalSplats: Number(meta.totalSplats ?? meta.total_splats) || 0,
     envFile: Number.isInteger(env) ? env : undefined,
   };

@@ -8,7 +8,7 @@ import { once } from 'node:events';
 import { mkdtemp, mkdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
-import { writeSog, DataTable, Column, MemoryFileSystem } from '@playcanvas/splat-transform';
+import { writeSog, writeSpz, writePly, DataTable, Column, MemoryFileSystem } from '@playcanvas/splat-transform';
 import { detectFormat, detectFormatByName, LCC_LOCAL_UPRIGHT } from '../core/index.js';
 import { parseLcc2, lcc2Tileset as buildTileset } from '../lcc-to-3dtiles/src/lcc2Manifest.js';
 import { convert as convertLcc } from '../lcc-to-3dtiles/src/index.js';
@@ -18,19 +18,31 @@ import { lcc2Tileset, lcc2Tile } from './lcc2-live.js';
 
 const quiet = (t) => { t.mock.method(console, 'log', () => {}); t.mock.method(console, 'warn', () => {}); };
 
-/** A bundled SOG of `n` splats on the x axis (x = first + i), with one band of spherical harmonics so that it has shN planes. */
-async function sogBundle(n, first = 0) {
+/** `n` splats on the x axis (x = first + i), with one band of spherical harmonics (so that a SOG of them has shN planes). */
+function splats(n, first = 0) {
   const f = (fn) => Float32Array.from({ length: n }, (_, i) => fn(i));
-  const columns = [
+  return new DataTable([
     new Column('x', f((i) => first + i)), new Column('y', f(() => 2)), new Column('z', f(() => 3)),
     new Column('rot_0', f(() => 1)), new Column('rot_1', f(() => 0)), new Column('rot_2', f(() => 0)), new Column('rot_3', f(() => 0)),
     new Column('scale_0', f(() => -3)), new Column('scale_1', f(() => -3)), new Column('scale_2', f(() => -3)),
     new Column('opacity', f(() => 2)), new Column('f_dc_0', f((i) => i / 10)), new Column('f_dc_1', f(() => 0)), new Column('f_dc_2', f(() => 0)),
     ...Array.from({ length: 9 }, (_, k) => new Column(`f_rest_${k}`, f((i) => (i + k) / 20))),
-  ];
+  ]);
+}
+
+/** A bundled SOG of `splats(n, first)`. */
+async function sogBundle(n, first = 0) {
   const out = new MemoryFileSystem();
-  await writeSog({ dataTable: new DataTable(columns), filename: 'a.sog', bundle: true, iterations: 1, logging: 'silent' }, out);
+  await writeSog({ dataTable: splats(n, first), filename: 'a.sog', bundle: true, iterations: 1, logging: 'silent' }, out);
   return Buffer.from(out.results.get('a.sog'));
+}
+
+/** The same splats as an SPZ (version 3, gzip) or a binary 3DGS PLY: the whitepaper's other two chunk types. */
+async function splatFile(type, n, first = 0) {
+  const out = new MemoryFileSystem();
+  if (type === '.spz') await writeSpz({ dataTable: splats(n, first), filename: 'a.spz', version: 3 }, out);
+  else await writePly({ plyData: { comments: [], elements: [{ name: 'vertex', dataTable: splats(n, first) }] }, filename: 'a.ply' }, out);
+  return Buffer.from(out.results.get('a' + type));
 }
 
 /** A ZIP of `files` (name → bytes), DEFLATE entries unless `stored`. */
@@ -139,7 +151,8 @@ test('lcc2: a manifest with trailing commas, array children or the earlier field
 test('lcc2: what is not an LCC2 manifest, or has chunks this cannot read, is said so', () => {
   assert.throws(() => parseLcc2('PK\u0003\u0004'), /not JSON/);
   assert.throws(() => parseLcc2('{"root":{}}'), /no root\.splatFiles/);
-  assert.throws(() => parseLcc2(JSON.stringify({ ...manifest(), splatType: '.spz' })), /\.spz.*not supported/);
+  assert.throws(() => parseLcc2(JSON.stringify({ ...manifest(), splatType: '.splat' })), /\.splat.*not supported/);
+  assert.deepEqual(['.sog', '.spz', '.ply'].map((t) => parseLcc2(JSON.stringify({ ...manifest(), splatType: t })).splatType), ['.sog', '.spz', '.ply']);
   const m = manifest(); m.root.child[0].data['3dgs'].name = 7;
   assert.throws(() => buildTileset(parseLcc2(JSON.stringify(m)), () => 'x'), /names chunk 7/);
 });
@@ -224,4 +237,42 @@ test('lcc2: tiles are cut from one read of their chunk, the same on a host that 
   const local = await mirrorRemote(`${plain.base}/s/scene.lcc2`, 'lcc2', path.join(dir, 'mirror'));
   assert.equal((await convertLcc(local, path.join(dir, 'out2'))).tiles, 3);
   assert.ok(!plain.requests.some((r) => r.path.endsWith('environment.sog')));
+});
+
+test('lcc2: .spz and .ply chunks give the tiles a .sog chunk does, live and offline', async (t) => {
+  quiet(t);
+  const sogFiles = { '/s/scene.lcc2': Buffer.from(JSON.stringify(manifest())), '/s/data/3dgs/0_0.sog': await sogBundle(4), '/s/data/3dgs/0_0_0.sog': await sogBundle(8, 10) };
+  const sog = await host(t, sogFiles);
+  const reference = { coarse: position(await lcc2Tile(`${sog.base}/s/scene.lcc2`, '0_0_4')) };
+  const near = (a, b) => a.count === b.count && [0, 1, 2].every((k) => Math.abs(a.min[k] - b.min[k]) < 0.05 && Math.abs(a.max[k] - b.max[k]) < 0.05);
+  const fines = {};
+
+  for (const type of ['.spz', '.ply']) {
+    const m = manifest();
+    m.splatType = type;
+    m.root.splatFiles = m.root.splatFiles.map((f) => f.replace(/\.sog$/, type));
+    const files = { '/s/scene.lcc2': Buffer.from(JSON.stringify(m)), [`/s/data/3dgs/0_0${type}`]: await splatFile(type, 4), [`/s/data/3dgs/0_0_0${type}`]: await splatFile(type, 8, 10) };
+    const { base, requests } = await host(t, files);
+    const url = `${base}/s/scene.lcc2`;
+    const ts = await lcc2Tileset(url);
+    assert.equal(ts.root.children[0].content.uri, `tile/0_0_4.glb?url=${encodeURIComponent(url)}`, type);
+    const coarse = await lcc2Tile(url, '0_0_4'), fine = await lcc2Tile(url, '1_5_3');
+    assert.ok(gltf(coarse).extensionsUsed.includes('KHR_gaussian_splatting_compression_spz_2'), type);
+    // The coarse tile is the whole chunk, so it holds the SOG's splats whatever their order (a SOG sorts its rows, these
+    // keep theirs): the same box. The fine run is rows 5..7 of 8 splats one unit apart on x: 3 splats, 2 units long.
+    assert.ok(near(position(coarse), reference.coarse), `${type} coarse tile ${JSON.stringify(position(coarse))} vs SOG ${JSON.stringify(reference.coarse)}`);
+    const p = position(fine);
+    assert.ok(p.count === 3 && Math.abs(p.max[0] - p.min[0] - 2) < 0.05 && Math.abs(p.max[2] - p.min[2]) < 0.05, `${type} fine tile ${JSON.stringify(p)}`);
+    fines[type] = p;
+    assert.equal(await lcc2Tile(url, '1_6_3'), null, `${type}: rows past the chunk's end are no tile`);
+    // A chunk that cannot be read in part is read whole, once, for all of its tiles.
+    assert.deepEqual(requests.filter((r) => r.path === `/s/data/3dgs/0_0_0${type}`).map((r) => r.range), [null], type);
+
+    const dir = await mkdtemp(path.join(tmpdir(), 'lcc2-')); t.after(() => rm(dir, { recursive: true, force: true }));
+    await mkdir(path.join(dir, 'in', 'data', '3dgs'), { recursive: true });
+    for (const [p, bytes] of Object.entries(files)) await writeFile(path.join(dir, 'in', p.slice(3)), bytes);
+    assert.deepEqual((await convertLcc(path.join(dir, 'in'), path.join(dir, 'out'))).tiles, 3, type);
+    assert.equal(Buffer.compare(await readFile(path.join(dir, 'out', 'tiles', '1_5_3.glb')), fine), 0, `${type}: the offline tile is the live one`);
+  }
+  assert.ok(near(fines['.spz'], fines['.ply']), `the SPZ and the PLY of the same splats cut the same fine tile: ${JSON.stringify(fines)}`);
 });

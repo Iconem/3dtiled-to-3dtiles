@@ -11,15 +11,16 @@ description: "LCC2 is XGRIDS's successor to LCC: a JSON manifest holding a tree 
 LCC2 keeps LCC's purpose (large scans with levels of detail, streamed) and its coordinate frame, and replaces its
 layout. LCC packs a flat grid of units into `Index.bin` and `Data.bin`, in a splat encoding of its own. LCC2 is a JSON
 manifest that holds a tree of nodes, and leaves the splats to an existing codec: each node names a run of rows in a
-chunk file, a bundled SOG or an SPZ. What follows is the whitepaper checked against the one public scene we found,
-**Tunis** (`https://code.playcanvas.com/examples_data/tunis_01/03-19-195651.lcc2`, an XGRIDS PortalCam capture).
+chunk file, a bundled SOG, an SPZ or a PLY. What follows is the whitepaper checked against the first public scene we
+found, **Tunis** (`https://code.playcanvas.com/examples_data/tunis_01/03-19-195651.lcc2`, an XGRIDS PortalCam
+capture); the other public scenes, and what they add, are in [the datasets section](#the-public-datasets-2026-11-10).
 
 ## File set
 
 | File | Req | Purpose |
 |------|-----|---------|
 | `<name>.lcc2` | ✔ | the manifest, JSON: scene metadata and the whole node tree (Tunis: 1.1 MB for 571 nodes) |
-| `data/3dgs/*` | ✔ | chunk files, all of one type (`splatType`: `.sog`, `.spz`; the whitepaper also lists `.ply`) |
+| `data/3dgs/*` | ✔ | chunk files, all of one type (`splatType`: `.sog`, `.spz` or `.ply`; XGRIDS' own scenes seen are `.sog`, radix's conversions cover the other two) |
 | `data/mesh/*.ply`, `*.btree` | optional | collision meshes and their BVH, per node |
 
 ## The manifest
@@ -102,5 +103,61 @@ Measured on Tunis from a laptop that got about 1 MB/s from the CDN: the root til
 (the 1.1 MB manifest's download); the first tile of a chunk in 5 to 11 s, nearly all of it the chunk's download; a
 tile of a chunk already decoded in 4 to 140 ms for 723 to 162 865 splats.
 
+A `.spz` or `.ply` chunk cannot be read in part: the server downloads it whole and decodes it with `splat-transform`'s
+`readSpz` / `readPly` into the same table (`sog-to-3dtiles/src/sogChunk.js`), on the serving thread. Checked on the
+radix samples below: the rows of a run land in their node's box on every axis where the node is interior to the scene
+(the SPZ and PLY of the Unreal scene decode to the metre the LCC v1 original is at).
+
 Not carried over: spherical harmonics above degree 0 (as for every splat format here), the environment chunk, the
-collision meshes, `virtualLoD`, and chunks of type `.spz` or `.ply`, which are refused with a message.
+collision meshes and `virtualLoD`.
+
+## The public datasets (2026-11-10)
+
+Everything found that can be fetched without an account, tested through `/stream/tileset.json?format=lcc2` (and
+`format=lcc` for the v1 ones) on a 700 KB/s link. "Served" means the files are on a host that answers HTTP Range,
+so the library streams them; "download" means an archive to extract and serve yourself.
+
+| Dataset | URL | Publisher · terms | Size · splats · levels | Georef. | Served? | Result |
+|---|---|---|---|---|---|---|
+| Tunis | `code.playcanvas.com/examples_data/tunis_01/03-19-195651.lcc2` | XGRIDS PortalCam capture, hosted by PlayCanvas for its `streamed-lcc2` example; no licence stated | 1.40 GB · 84.2 M · 8, `.sog` | no (`epsg` 0) | served | 571 tiles, root 202 KB in 1.9 s (yesterday's entry) |
+| Unreal street | `storage.googleapis.com/forge-dev-public/asundqui/radix/261012/lcc2/street/LCC2.lcc2` | XGRIDS, `Content/3DGSData/lcc2` of [3dgs-unreal-example](https://github.com/xgrids/3dgs-unreal-example) (MIT repo, "sample data"); mirrored on Spark's radix bucket (World Labs), byte for byte | 46 MB · 2.83 M · 6, `.sog`, 3 collision meshes | no (`epsg: 1`, not a CRS: read as none) | served | root 7.2 KB, 18 tiles, 0.8 s; tiles 662 KB / 1.4 MB / 2.2 MB at depths 1, 3, 5 in 2.7–8 s (chunk downloads) |
+| Unreal statues | `…/radix/261012/lcc2/lcc2-1/LCC2.lcc2` | XGRIDS, `Content/3DGSData/LCC2_1` of the same pack, same mirror | 19 MB · 1.51 M · 7, `.sog` | no | served | root 4.8 KB, 12 tiles, 0.3 s; tiles 99 KB → 3.2 MB at depths 1, 3, 5, 7 |
+| Bicycle | `…/radix/261012/lcc2/bicycle-sog/bicycle-sog.lcc2` | Mip-NeRF 360's bicycle, trained PLY converted to LCC then LCC2 by radix's tools ("modified data"); dataset terms are Mip-NeRF 360's | 250 MB · 11.9 M · 5, `.sog`, SH 3 | no | served | root 234 KB, 585 tiles, 1.3 s; tiles 1.0 MB / 89 KB / 77 KB at depths 1, 3, 5, each 22 s (a 9 MB chunk first) |
+| Showroom | `…/radix/261012/lcc2/showroom2-spz/showroom2-spz.lcc2` | XGRIDS PortalCam showroom (the v1 sample below) converted by radix to `.spz` chunks | 182 MB · 11.6 M · 5, `.spz`, 62 collision meshes | no | served | root 242 KB, 593 tiles, 1.5 s; tiles 2.2 MB / 2.2 KB / 1.3 KB at depths 1, 3, 5 in 10–31 s (whole 20 MB chunks) |
+| Sutro Tower | `…/radix/261012/lcc2/sutro-spz/sutro-spz.lcc2` | Spark's Sutro Tower scene converted to LCC then LCC2 by radix, `.spz` chunks with SH 3 | 119 MB · 3.75 M · 4, `.spz` | no | served | root 59 KB, 149 tiles, 0.3 s; tiles 638 KB / 78 KB at depths 1, 3 (the first took 323 s: GCS stalled a 7.7 MB read, which the source layer retried) |
+| Unreal scene, PLY | `…/radix/261012/lcc2/unreal-ply/unreal-ply.lcc2` | the pack's LCC v1 scene converted by radix to `.ply` chunks | 199 MB · 3.45 M · 5, `.ply`, 59 collision meshes | no (the v1 original is EPSG:4547; the conversion dropped it) | served | root 207 KB, 521 tiles, 1.3 s; tiles 350 KB / 17 KB / 5.9 KB at depths 1, 3, 5 in 9–34 s |
+| Content.zip | `github.com/xgrids/3dgs-unreal-example/releases/download/v1.0/Content.zip` | XGRIDS, release asset of the example project (361 MB) | holds the street, the statues and the v1 Unreal scene above, plus `Strawberry.sog`, `R12.spz`, `scene/scene_0.ply` | as above | download | see below: the same tiles as the mirror, byte for byte |
+| LCC v1, same bucket | `…/radix/261012/lcc/{unreal/meta.lcc, showroom2/showroom2.lcc, sutro/meta.lcc, bicycle/meta.lcc}` | as the LCC2 rows | 115 MB · 3.45 M · 5 / 372 MB · 11.6 M · 5 / 360 MB · 3.75 M · 4 / 1.1 GB · 11.9 M · 5 | `unreal`: EPSG:4547 + offset → 112.916 E, 27.864 N (Hunan); the others `epsg` 0 | served | roots 5.9 / 2.3 / 44 / 64 KB in 0.3–0.6 s; `showroom2` is one 30 m cell, so its finest tile is 6.0 M splats and a 192 MB range read, which timed out here (252 s per attempt) and would not on a faster link |
+
+Not obtainable: XGRIDS' own sample scenes on [developer.xgrids.com](https://developer.xgrids.com/#/download?page=sampledata)
+(the Stanford campus, 60.7 M splats with a collision mesh, and "NWU"), which need an account and are licensed for
+testing only; `lcc-viewer.xgrids.com` shares, which load through XGRIDS' API with a token; `lcc-pub` on
+`da9i2vj1xvtoc.cloudfront.net` holds only LCC v1 (`fine_v2/Guan_Temple.zip`, in the LCC library). SuperSplat scenes
+published from LCC Studio are republished as streamed SOG, not LCC2. No LCC2 with a usable `epsg` was found: the one
+georeferenced XGRIDS scene is the LCC v1 of the content pack, and its LCC2 conversion has `epsg` 0.
+
+How the converted radix samples differ from XGRIDS' own: their node boxes are the LCC cells cut by level, and the
+splats of a node are not clipped to its box. In the Sutro and bicycle scenes (aerial and outdoor captures) a node's
+run has many splats far outside it, up to 400 m for Sutro; in the Unreal scene one leaf of 1 167 splats sits 11 m
+outside its box on y. A viewer that culls by the box will show those splats late or not at all; XGRIDS' own scenes
+(Tunis, the street, the statues) keep every run inside its node.
+
+### Running the content pack from disk
+
+```sh
+mkdir -p sample-data/input/LCC2/unreal-example && cd sample-data/input/LCC2/unreal-example
+curl -L -o Content.zip https://github.com/xgrids/3dgs-unreal-example/releases/download/v1.0/Content.zip
+unzip -q Content.zip                     # Content/3DGSData/{lcc2, LCC2_1, lcc, scene, Strawberry.sog, R12.spz}
+cd ../../../..
+node scripts/static-server.mjs 3016 sample-data &   # any static host will do; this one ignores Range, which the adapter allows for
+PORT=3014 node packages/tile-server/server.js &
+curl "http://localhost:3014/stream/tileset.json?format=lcc2&url=http://localhost:3016/input/LCC2/unreal-example/Content/3DGSData/lcc2/LCC2.lcc2"
+curl "http://localhost:3014/stream/tileset.json?format=lcc2&url=http://localhost:3016/input/LCC2/unreal-example/Content/3DGSData/LCC2_1/LCC2.lcc2"
+curl "http://localhost:3014/stream/tileset.json?format=lcc&url=http://localhost:3016/input/LCC2/unreal-example/Content/3DGSData/lcc/meta.lcc"
+node packages/convert/cli.js sample-data/input/LCC2/unreal-example/Content/3DGSData/LCC2_1 sample-data/output/lcc2/unreal-statues
+```
+
+Measured: the street's root in 0.12 s and its tiles in 0.4–0.8 s, the statues' in 0.3–0.8 s, the v1 scene's finest
+3-unit tile (876 388 splats, 12.4 MB) in 3.4 s; the statues converted offline in 2.2 s to 11 tiles (20 MB). The
+coarse tile of the street from disk is byte for byte the one streamed from the bucket, and the statues' finest tile
+is the same from disk, from the bucket and from the offline converter.
