@@ -20,7 +20,8 @@
  * copc-to-3dtiles, which refuses it for the same reason). They are skipped, counted and reported in
  * `asset.extras.vpc` and in the `X-VPC-*` response headers; a VPC with no COPC item at all is a 422.
  */
-import { fetchSourceJson, fetchSourceRange, crsToEcef, epsgOfCrs, ensureCrs, llhToEcef } from '../core/index.js';
+import { gunzipSync } from 'node:zlib';
+import { fetchSource, fetchSourceRange, crsToEcef, epsgOfCrs, ensureCrs, llhToEcef } from '../core/index.js';
 
 /** Past this extent a box is sampled on a grid: its faces follow the ellipsoid (as copc-live's curved placement does). */
 const CURVED_MIN_EXTENT = 20000;
@@ -361,6 +362,21 @@ const cache = new Map();                           // `${sniff} ${url}` → { at
 const CACHE_MAX = 32;
 
 /**
+ * The bytes of a .vpc → its JSON. A gzipped file (`.vpc.gz`, or any file that starts with the gzip
+ * magic, whatever its name or Content-Type) is inflated first: a country's VPC is 10 000 items and
+ * more, 11 MB of JSON that gzip takes to 1.2 MB, and a static host serves it as is.
+ */
+export function parseVpcBytes(bytes, url = '') {
+  let b = Buffer.from(bytes);
+  if (b.length >= 2 && b[0] === 0x1f && b[1] === 0x8b) {
+    try { b = gunzipSync(b); }
+    catch { throw Object.assign(new Error(`not a VPC: ${url.split('?')[0].slice(-80)} is gzip that does not inflate`), { status: 422 }); }
+  }
+  try { return JSON.parse(new TextDecoder().decode(b)); }
+  catch { throw Object.assign(new Error(`not a VPC: ${url.split('?')[0].slice(-80)} is not JSON`), { status: 422 }); }
+}
+
+/**
  * Fetch a .vpc and turn it into `{ set, report }`. Kept for `ttlMs` (a day, like the mosaic built from
  * it; `&ttl=0` re-reads), failures for a minute. The only reads are the .vpc itself and, for items
  * named `.laz`, the 589-byte COPC check.
@@ -373,9 +389,7 @@ export function vpcSet(url, { ttlMs = DEFAULT_TTL_MS, sniff = 'auto' } = {}) {
   const entry = { at: Date.now(), failed: false };
   entry.promise = (async () => {
     const t0 = performance.now();
-    let doc;
-    try { doc = await fetchSourceJson(url); }
-    catch (e) { if (e instanceof SyntaxError) throw Object.assign(new Error(`not a VPC: ${url.split('?')[0].slice(-80)} is not JSON`), { status: 422 }); throw e; }
+    const doc = parseVpcBytes(await fetchSource(url), url);
     const parsed = parseVpc(doc, url);
     const sorted = await sortAmbiguous(parsed.ambiguous, sniff);
     const out = vpcToSet(parsed, sorted, { url });

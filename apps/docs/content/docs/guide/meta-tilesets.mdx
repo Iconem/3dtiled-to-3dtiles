@@ -16,6 +16,7 @@ GET /aggregate/tileset.json?urls=<u1>,<u2>,…           # comma form (each URL-
 GET /aggregate/tileset.json?set=opendata|iconem-open|world|flai|aerometrex|vexcel|…  # a named set (below)
 GET /aggregate/tileset.json?vpc=<url of a .vpc>         # a PDAL/QGIS virtual point cloud as the set (below)
     [&nest=auto|mercator|geodetic|flat]  [&bv=cell|sphere|region|box]  [&snap=0|1|<terrain>]  [&ttl=<seconds>]
+    [&cut=auto|<depth>|0] [&cell=<key>]               # external tilesets past <depth> group levels (below)
     [&format=…] [&only=…] [&exclude=…] [&hide=<id>] [&latest=1] [&from=…] [&to=…]
 GET /aggregate/snap.ndjson?<same query, with &snap=>  # the snap offsets, one line per dataset as each resolves
 GET /aggregate/index.json?<same query>                 # one row per dataset, for UIs
@@ -450,6 +451,66 @@ which is why the TTL is a day rather than forever. Failures get a much shorter T
 host cannot pin a degraded mosaic for a day. `&ttl=0` bypasses the cache **in both directions** — use
 it while a dataset is actively being re-tiled.
 
+## Tens of thousands of children: the depth cut
+
+A national LiDAR campaign is a regular grid of 1 km (IGN) or 500 m (Luxembourg) tiles, tens to hundreds of
+thousands of them, and a [VPC](/docs/references/pointclouds/vpc) makes such a grid one set. Measured on
+2026-11-10, geodetic scheme, bounds baked from the `.vpc` so no child is fetched:
+
+| Set | Items | Tree | Root, inline | Build |
+|---|---:|---|---:|---:|
+| Luxembourg 2019, 500 m tiles | 10 906 | depth 8, 1 060 groups, 3 at the root | 6.87 MB | 65 ms |
+| IGN LiDAR HD, Paris 100 km block, 1 km tiles | 5 712 | depth 6, 555 groups | 3.54 MB | 18 ms |
+| IGN LiDAR HD, from the tile names | 10 000 | depth 10, 1 017 groups | 6.21 MB | 50 ms |
+| | 100 000 | depth 11, 8 580 groups | 61.6 MB | 356 ms, 1.7 s to serialise |
+| | 337 206 (all flai mirrors) | depth 11, 28 530 groups | 207.6 MB | 1.35 s, 4.3 s to serialise |
+
+**The tree is a quadtree.** Above the leaves a group has at most four sub-groups (6 830 of the 28 530 groups at
+337 206 have exactly four, the rest fewer after path compression), and a parent's geometric error is twice its
+children's. The deepest cell is the one still 4× a tile: at 49° N that is level 12 for a 1 km tile, 3.2 km of
+longitude by 4.9 km of latitude, so the leaf groups hold 3 × 5 tiles (median 15, at most 20 by construction,
+28 where tiles straddle). Bounding volumes are tight where it matters: with `bv=cell` a group's region is its
+cell widened to its children, 1.10× the union of its children on average at 337 206 (1.14× at 100 000), and
+loose only at the top, where a hemisphere cell holds one country (170× there).
+
+**The root was the problem.** It carried the whole tree inline, 616 bytes per dataset, so a client had 62 MB to
+download and parse before its first tile at 100 000 items and 208 MB at 337 206; and `Math.max(...children)`
+overflowed the call stack past about 125 000 children (a loop now). So the tree is **cut**: past `cut` group
+levels (the root is level 0), a group with 8 datasets or more below it is emitted as a tile whose content is
+another `tileset.json`, this same URL with `&cell=<its key>`, and no children, the one form the spec allows
+for an external tileset. That request answers with the group as a root, cut again the same way, so every
+`tileset.json` on the way down holds a few hundred tiles whatever the size of the set.
+
+```
+…&cut=auto      the default: no cut under 1 024 datasets, every 4 group levels from there
+…&cut=<depth>   cut every <depth> group levels
+…&cut=0         the whole tree inline, as before
+…&cell=<key>    one group as a tileset (what the external tiles point at); a 404 names no group
+```
+
+The cut is a view of the one cached tree: a subtree is the same node, so volumes and geometric errors are
+those of the inline tree, `index.json` still lists every dataset, and a set below 1 024 datasets is served
+byte for byte as before (`set=flai`, 113 children: no `cut` in `asset.extras`). The root reports
+`asset.extras.cut: { depth, externals }`, a subtree adds `cell` and its `datasets`. Same sets, same machine:
+
+| Set | Root, cut | Externals at the root | Hops to a leaf | Subtrees on the way |
+|---|---:|---:|---:|---|
+| Luxembourg, 10 906 | **105 KB**, 157 ms warm, 420 ms cold with the 1 MB `.vpc.gz` | 72 | 1 | 8 KB, 12 ms |
+| Paris block, 5 712 | **94 KB**, 96 ms warm | 104 | 1 | 37 KB, 49 ms |
+| 10 000 | **21 KB**, 113 ms warm | 17 | 1 | 35 KB |
+| 100 000 | **26 KB**, 0.75 s warm, 3.4 s cold | 36 | 2 | 54 KB then 11 KB, 21 and 17 ms |
+| 337 206 | **22 KB**, 2.6 s warm, 12.7 s cold (225 MB of `.vpc`) | 34 | 2 | 16 KB then 10 KB, 58 ms each |
+
+A subtree request reuses the cache key the root request derived (kept per request for ten minutes): that is
+what makes it 58 ms rather than the 3.5 s it took at 337 206 before, since deriving the selection from every
+item again was the cost, not the tree. The warm root at 100 000 and 337 206 is still that derivation, once
+per client.
+
+End to end on Luxembourg, from the root to a leaf's first points: root 157 ms, subtree 12 ms, the leaf's COPC
+`tileset.json` 714 ms (its header and hierarchy from S3), its 440 KB root tile 1.05 s. Four requests, 1.9 s.
+On the Paris block, 96 and 49 ms, then 984 ms and 3.7 s for a 777 KB root tile. The cut adds one request of
+some 10 ms per four levels; what a client waits for is the point cloud.
+
 ## What a mosaic costs: caches, upfront work, per-dataset fetches
 
 A mosaic is cheap to describe and expensive only where it touches the sources. This section lists
@@ -596,8 +657,10 @@ GET /stream/tileset.json?format=vpc&url=https://<host>/<set>.vpc      # the same
 
 Each COPC item becomes a `format: copc` entry whose `bounds` are computed from the item's own `proj:bbox`,
 reprojected to ECEF: the mosaic is built from the one `.vpc` file, with no child root fetched
-(`childRootsBaked` = the item count). Measured on 1 000 tiles of Luxembourg's 2019 LiDAR (a 1.06 MB `.vpc`,
-7.0 G points): a 643 KB root in 161 ms, 138 groups, depth 8, 3 children at the root, and no COPC file opened.
+(`childRootsBaked` = the item count). Measured on all 10 906 tiles of Luxembourg's 2019 LiDAR (a 1.00 MB
+`.vpc.gz`, 80 G points): a 105 KB root in 157 ms, cut into 72 external subtrees above a tree of 1 060 groups
+8 deep, and no COPC file opened; 5 712 tiles of IGN's LiDAR HD around Paris, a 94 KB root in 96 ms (the
+depth cut above has the numbers up to 337 206 items).
 Items that are not COPC (plain LAS/LAZ, EPT, local paths) are skipped and counted in `asset.extras.vpc`
 and the `X-VPC-*` response headers; with none left the answer is a 422 that says why. Every selection and
 nesting parameter of this page applies. `scripts/vpc-to-manifest.mjs` writes the manifest to a file

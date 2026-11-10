@@ -5,6 +5,42 @@ Format loosely follows [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+### Added — 2026-11-10 (whole-country VPCs: Luxembourg, IGN LiDAR HD, and a depth cut for the mosaic root)
+- **Luxembourg 2019, complete**: `packages/tile-server/samples/luxembourg-2019.vpc.gz`, every one of the 10 906
+  500 m COPC tiles of flai's mirror of the national LiDAR (CC0), 80.35 G points, each item with `proj:bbox`,
+  `pc:count` and `proj:epsg` 2169. 11.58 MB of JSON, 1.00 MB gzipped, built in 206 s (10 906 header reads of 2 KB
+  at 16 in flight). In the library under the VPC pill.
+- **IGN LiDAR HD, Paris 100 km block**: `france-lidarhd-paris-100km.vpc.gz`, the 5 712 1 km tiles of Lambert-93
+  block X 600–700 / Y 6800–6900 km (Paris and most of Île-de-France) among the 337 206 `.copc.laz` tiles flai
+  mirrors of IGN's LiDAR HD (Licence Ouverte 2.0), 127.0 G points, each item with the files' Lambert-93 WKT.
+  10.14 MB of JSON, 0.52 MB gzipped, 133 s. In the library. All of France was not built: 337 206 header reads
+  are an hour on this link and the VPC some 220 MB; a VPC of all 337 206 written from the tile names alone
+  (footprint from the name, no counts) served as the scale fixture below and is not committed.
+- **IGN's index** is the WFS layer `IGNF_LIDAR-HD_TA:nuage-dalle` on `data.geopf.fr/private/wfs` (one feature per
+  tile, `name` and download `url`), read by the download portal with the key `interface_catalogue`; from outside
+  the portal it answers 403, and the public WFS lists only the metadata layer. Whether IGN's own files are COPC
+  could not be checked; flai's mirror is, in every file read.
+- **`.vpc.gz` is read**: the gzip magic is checked, whatever the name or Content-Type; `.vpc.gz` is detected as a
+  VPC. `scripts/copc-to-vpc.mjs` reads 2 KB per file instead of 64 KB (header, `copc`, laszip and WKT VLRs; the
+  64 KB reader takes over when the VLRs run past), and writes `-o x.vpc.gz` gzipped.
+- **The mosaic root is cut into external tilesets** (`&cut=auto|<depth>|0`, `&cell=<key>`). The geodetic
+  nesting of a country-sized 1 km grid is a path-compressed quadtree (at most four sub-groups per group, 6 830
+  of 28 530 groups with exactly four at 337 206 items; leaf cells of 3 × 5 tiles, median 15; group regions
+  1.10× the union of their children on average), but the root held the whole tree inline at 616 bytes per
+  dataset: 6.2 MB at 10 000 items, 61.6 MB at 100 000, 207.6 MB at 337 206. Past `cut` group levels a group with
+  8 datasets or more below becomes a childless tile whose content is this same URL with `&cell=<key>`, answered
+  as that group cut again the same way. Default: no cut under 1 024 datasets (every existing set is served byte
+  for byte as before), every 4 levels from there. Roots now: Luxembourg 105 KB (72 externals), Paris 94 KB,
+  10 000 items 21 KB, 100 000 26 KB, 337 206 22 KB; one subtree hop to a leaf at 10 906, two at 100 000 and
+  337 206; a subtree answers in 12–58 ms because it reuses the cache key the root request derived (it took
+  3.5 s at 337 206 before that). Root to a leaf's first point tile on Luxembourg: 157 + 12 + 714 + 1 051 ms,
+  four requests. `index.json` still lists every dataset.
+- **`Math.max(...children)` overflowed the call stack** past about 125 000 children (the 337 206-tile build
+  died on it): a loop now.
+- Tests: the quadtree shape of a 48 × 48 km grid, the cut's contract (childless externals, the tree left
+  whole, every dataset reached exactly once through root and subtrees, subtree root equal to its external
+  tile), a gzipped VPC of 1 156 items served cut end to end through `/stream`.
+
 ### Added — 2026-11-09 (LCC2, XGRIDS' successor to LCC, streamed and converted)
 - **`format=lcc2`** on `/stream`, detected from a `.lcc2` URL. An LCC2 scene is a JSON manifest holding a tree of
   nodes, each a box and a run of rows in a chunk file; the tree becomes the tileset node for tile, with no splat

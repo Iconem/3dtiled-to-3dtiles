@@ -111,6 +111,12 @@ export const FORMATS: FormatMeta[] = [
     { id: 'qgis-sunshine-coast', label: 'QGIS test · Sunshine Coast, 4 tiles ⬀', src: 'https://raw.githubusercontent.com/qgis/QGIS/master/tests/testdata/point_clouds/virtual/sunshine-coast/combined-with-overview.vpc' },
     // Self-made (scripts/copc-to-vpc.mjs) over flai's public COPC mirror of NYU's Dublin 2015 scan, CC BY 4.0.
     { id: 'dublin-2015', label: 'Dublin City 2015, 35 tiles (NYU via flai, 1.4G, self-made VPC) ⬀', src: 'https://raw.githubusercontent.com/jo-chemla/3dtiled-to-3dtiles/main/packages/tile-server/samples/dublin-city-2015.vpc' },
+    // Self-made over flai's mirror of Luxembourg's 2019 national LiDAR (CC0): every one of its 10 906 500 m tiles, gzipped to 1.0 MB.
+    // The mosaic is served cut into external tilesets every 4 group levels (the root is 10 KB, not 7 MB).
+    { id: 'luxembourg-2019', label: 'Luxembourg 2019, all 10 906 tiles (via flai, 80G, self-made VPC) ⬀', src: 'https://raw.githubusercontent.com/jo-chemla/3dtiled-to-3dtiles/main/packages/tile-server/samples/luxembourg-2019.vpc.gz' },
+    // Self-made over flai's COPC mirror of IGN's LiDAR HD (Licence Ouverte 2.0): the 100 km Lambert-93 block X 600–700 / Y 6800–6900 km,
+    // Paris and most of Île-de-France, 5 712 of the 337 206 tiles mirrored. 127 G points.
+    { id: 'france-lidarhd-paris', label: 'IGN LiDAR HD, Paris 100 km block, 5 712 tiles (via flai, 127G, self-made VPC) ⬀', src: 'https://raw.githubusercontent.com/jo-chemla/3dtiled-to-3dtiles/main/packages/tile-server/samples/france-lidarhd-paris-100km.vpc.gz' },
   ] },
   { fmt: 'potree', icon: '🌲', label: 'Potree', type: 'pointcloud', octree: true, stream: true, assets: [
     // Real source: potree.org's own hosted Potree-2.0 build of the lion scan.

@@ -4,9 +4,11 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import http from 'node:http';
 import { once } from 'node:events';
+import { gzipSync } from 'node:zlib';
 import { llhToEcef, httpStatusOf } from '../core/index.js';
 import { resolveHref, kindOfHref, itemBounds, parseVpc, sortAmbiguous, isCopc, vpcToSet, sniffParam } from './vpc-live.js';
 import { handleStream } from './stream-live.js';
+import { handleAggregate } from './aggregate-live.js';
 
 const quiet = (t) => { t.mock.method(console, 'log', () => {}); t.mock.method(console, 'warn', () => {}); };
 const BASE = 'https://data.example.org/lidar/set/index.vpc';
@@ -211,7 +213,8 @@ async function host(t, files) {
 }
 async function streamServer(t) {
   const server = http.createServer(async (req, res) => {
-    try { if (!await handleStream(req, res, new URL(req.url, 'http://x'))) { res.writeHead(404); res.end(); } }
+    // /stream, and /aggregate for the external tilesets a cut mosaic points back at (server.js routes both)
+    try { const u = new URL(req.url, 'http://x'); if (!await handleStream(req, res, u) && !await handleAggregate(req, res, u)) { res.writeHead(404); res.end(); } }
     catch (e) { res.writeHead(httpStatusOf(e)); res.end(String(e.message)); }
   }).listen(0, '127.0.0.1');
   await once(server, 'listening');
@@ -256,6 +259,61 @@ test('/stream?format=vpc serves one mosaic of COPC streams, built from the .vpc 
   assert.deepEqual(h.hits, { '/set/index.vpc': 1 });
   // a VPC has no tiles of its own
   assert.equal((await fetch(`${s}/stream/tile/0-0-0-0.glb?format=vpc&url=${encodeURIComponent(`${h.base}/set/index.vpc`)}`)).status, 404);
+});
+
+test('a gzipped .vpc of a country is read as is, and served cut into external tilesets that reach every item once', async (t) => {
+  quiet(t);
+  // 34 × 34 = 1 156 tiles of 1 km, past the 1 024 at which the cut starts
+  const features = [];
+  for (let i = 0; i < 34; i++) for (let j = 0; j < 34; j++) {
+    features.push(item(`./tiles/t${i}_${j}.copc.laz`, { 'proj:wkt2': UTM32, 'proj:bbox': [540000 + i * 1000, 5724000 + j * 1000, 220, 541000 + i * 1000, 5725000 + j * 1000, 320] }));
+  }
+  const gz = gzipSync(JSON.stringify({ type: 'FeatureCollection', features }));
+  assert.ok(gz.length < 100_000);
+  const h = await host(t, { '/set/index.vpc.gz': gz });
+  const s = await streamServer(t);
+  const r = await fetch(`${s}/stream/tileset.json?url=${encodeURIComponent(`${h.base}/set/index.vpc.gz`)}&cache=none`);   // format detected from .vpc.gz
+  assert.equal(r.status, 200);
+  assert.equal(r.headers.get('x-vpc-streamed'), '1156');
+  const ts = await r.json();
+  assert.equal(ts.asset.extras.datasets, 1156);
+  assert.equal(ts.asset.extras.cut.depth, 4);
+  assert.ok(ts.asset.extras.cut.externals > 0);
+  assert.ok(leavesOf(ts).length < 1156);                            // the root no longer holds every item
+  // follow every external tileset: each is this server's /aggregate with &vpc= and &cell=, never &set=
+  const seen = new Set();
+  let hops = 0;
+  const follow = async (tileset, depth) => {
+    hops = Math.max(hops, depth);
+    for (const tile of (function all(n) { const out = [n]; for (const c of n.children || []) out.push(...all(c)); return out; })(tileset.root)) {
+      if (!tile.content?.uri || tile.children) continue;
+      const u = new URL(tile.content.uri);
+      if (u.searchParams.has('cell')) {
+        assert.equal(u.origin + u.pathname, `${s}/aggregate/tileset.json`);
+        assert.equal(u.searchParams.get('vpc'), `${h.base}/set/index.vpc.gz`);
+        assert.equal(u.searchParams.get('set'), null);
+        const sr = await fetch(u.href);
+        assert.equal(sr.status, 200);
+        const sub = await sr.json();
+        assert.equal(sub.asset.extras.cell, u.searchParams.get('cell'));
+        assert.deepEqual(sub.root.boundingVolume, tile.boundingVolume);
+        assert.equal(sub.root.geometricError, tile.geometricError);
+        await follow(sub, depth + 1);
+      } else {
+        assert.ok(!seen.has(u.searchParams.get('url')), 'an item reached twice');
+        seen.add(u.searchParams.get('url'));
+      }
+    }
+  };
+  await follow(ts, 0);
+  assert.equal(seen.size, 1156);
+  assert.ok(hops >= 1);
+  assert.deepEqual(h.hits, { '/set/index.vpc.gz': 1 });            // one read of the .vpc.gz for the root and every subtree
+  // &cut=0 serves the whole tree inline, as before the cut existed; an unknown cell is a 404
+  const flat = await (await fetch(`${s}/stream/tileset.json?url=${encodeURIComponent(`${h.base}/set/index.vpc.gz`)}&cache=none&cut=0`)).json();
+  assert.equal(leavesOf(flat).length, 1156);
+  assert.equal(flat.asset.extras.cut, undefined);
+  assert.equal((await fetch(`${s}/stream/tileset.json?url=${encodeURIComponent(`${h.base}/set/index.vpc.gz`)}&cache=none&cell=nowhere`)).status, 404);
 });
 
 test('/stream?format=vpc: a .laz item is read once to tell, a VPC of plain files is a 422, a missing one a 404', async (t) => {
