@@ -8,7 +8,7 @@
  * refines it. The hierarchy is therefore spread over every file, exactly as in 3MX, and is served the same way: one
  * `.osgb` → one tileset.json fragment, fetched as the camera refines in (packages/osgb-to-3dtiles reads the files).
  *
- *   GET /stream/tileset.json?url=<…/metadata.xml | dataset folder | one .osgb>&format=osgb
+ *   GET /stream/tileset.json?url=<…/metadata.xml | dataset folder | one .osgb | …/tile.zip | …/GridIdx_OSGB.csv>&format=osgb
  *   GET /stream/osgb/node/<encRelPath>.json?url=<same>[&ge=&bs=]      (lazy fragment for a finer .osgb)
  *   GET /stream/tile/<encRelPath>__<unit>.glb?url=<same>&format=osgb
  *
@@ -17,6 +17,17 @@
  * index of `Data/`), then by asking for the names the exporters use (`Data/Tile_+xxx_+yyy/Tile_+xxx_+yyy.osgb` walked
  * outwards from the tiles found, `Block/Block.osgb`, `Data/Model/Model.osgb`). A dataset laid out otherwise is opened
  * by the URL of its root `.osgb`.
+ *
+ * A DATASET IN A ZIP (`url=…/tile.zip`) is read in place: its central directory is the listing, each `.osgb` one range
+ * read of the archive (core/zip.js). What Hong Kong's Planning Department ships: every 250 m tile of the territory's
+ * photo-realistic model as one zip of 200 to 1 000 files. Its index, a CSV of tiles with their extents and zip URLs
+ * (`url=…/GridIdx_OSGB.csv`), is a COLLECTION: one tileset whose children are the tiles, each an external tileset of
+ * its zip, opened when the camera comes near (geometric error = half the tile's width). The CSV needs a column naming
+ * the file (`OSGB_URL` or `FILE_URL`) and either `MIN_LNG, MIN_LAT, MAX_LNG, MAX_LAT` or `MIN_X, MIN_Y, MAX_X, MAX_Y`
+ * with `&srs=` on the dataset URL.
+ *
+ * PLACEMENT HINTS in the dataset URL's own query stand in for a missing `metadata.xml`: `?srs=EPSG:2326&origin=x,y,z`
+ * (the same two fields), ignored when the dataset has one. A collection passes its hints to every tile.
  *
  * TILE = one PagedLOD of one file ("unit"): bounding sphere as OSG has it (the PagedLOD's user-defined centre and
  * radius, which bound the finer levels too), content = its inline mesh, children = the file that refines it, as an
@@ -37,7 +48,7 @@
 import path from 'node:path';
 import fs from 'node:fs/promises';
 import proj4 from 'proj4';
-import { georefFromCrs, crsDefinition, llhToEcef, enuMatrix, mat4Multiply, memoizeAsync, fetchSource, requestSource, isAbsent, parallelMap, tilePool, runTileTaskOr, ownBytes } from '../core/index.js';
+import { georefFromCrs, crsDefinition, crsToEcef, llhToEcef, ecefToLlh, enuMatrix, mat4Multiply, mat4Invert, memoizeAsync, fetchSource, requestSource, isAbsent, parallelMap, tilePool, runTileTaskOr, ownBytes, openZip } from '../core/index.js';
 import { parseOsgb, osgbUnits } from '../osgb-to-3dtiles/src/osgb-reader.js';
 import { osgbUnitGlb } from './mesh-tile.js';
 
@@ -58,8 +69,10 @@ function readFile(ctx, rel) {
   if (hit) { files.delete(key); files.set(key, hit); return hit.promise; }
   if (rel.startsWith('../') || rel === '..' || path.posix.isAbsolute(rel)) return Promise.reject(Object.assign(new Error(`osgb: ${rel} is outside the dataset`), { status: 404 }));
   const entry = { bytes: 0 };
-  entry.promise = (ctx.http ? fetchSource(ctx.base + encRel(rel))
-    : fs.readFile(path.join(ctx.base, rel)).catch((e) => { throw e.code === 'ENOENT' ? Object.assign(e, { status: 404 }) : e; }))
+  const absent = (e) => { throw e.code === 'ENOENT' ? Object.assign(e, { status: 404 }) : e; };
+  entry.promise = (ctx.zip ? ctx.zip.read(rel).then((b) => b || absent(Object.assign(new Error(`osgb: ${rel} is not in the archive`), { code: 'ENOENT' })))
+    : ctx.http ? fetchSource(ctx.base + encRel(rel))
+      : fs.readFile(path.join(ctx.base, rel)).catch(absent))
     .then((buf) => {
       entry.bytes = buf.length; cached += buf.length;
       for (const [k, e] of files) { if (cached <= CACHE_BYTES || e === entry) break; files.delete(k); cached -= e.bytes; }
@@ -193,34 +206,117 @@ async function probeRoots(ctx) {
 }
 
 // ── per-URL context ──────────────────────────────────────────────────────────────────────────────────────────────
+/** The dataset URL split: the location without its query, and the placement hints the query holds (`srs`, `origin`). */
+export function splitSourceUrl(url) {
+  const http = isHttp(url), hash = http ? url.split('#')[0] : url, q = hash.indexOf('?');
+  const at = q < 0 ? hash : hash.slice(0, q), clean = http ? at : at.replace(/\\/g, '/');     // a local path keeps its characters
+  const params = new URLSearchParams(q < 0 ? '' : hash.slice(q + 1));
+  const hints = { srs: params.get('srs') || null, origin: params.get('origin') || null };
+  return { http, clean, hints, query: [...params].filter(([k]) => k === 'srs' || k === 'origin').map(([k, v]) => `${k}=${encodeURIComponent(v)}`).join('&') };
+}
+
 const getCtx = memoizeAsync(async (url) => {
-  const http = isHttp(url);
-  const clean = http ? url.split('#')[0].split('?')[0] : url.replace(/\\/g, '/');
-  const ctx = { http, base: '', roots: [], transform: null, srs: null };
-  const isFile = /\.osgb$/i.test(clean);
+  const { http, clean, hints } = splitSourceUrl(url);
+  const ctx = { http, base: '', roots: [], transform: null, srs: null, zip: null };
+  const isFile = /\.osgb$/i.test(clean), isZip = /\.zip$/i.test(clean);
   ctx.base = isFile || /metadata\.xml$/i.test(clean) ? clean.slice(0, clean.lastIndexOf('/') + 1) : clean.replace(/\/?$/, '/');
 
-  // metadata.xml sits at the top of the dataset: beside the root .osgb, or up to two folders above it (Data/Tile/…)
+  // metadata.xml sits at the top of the dataset: beside the root .osgb, or up to two folders above it (Data/Tile/…);
+  // in an archive, the shallowest one
   let meta = null;
-  for (const up of isFile ? ['', '../', '../../'] : ['']) {
-    try {
-      const at = http ? new URL(`${up}metadata.xml`, ctx.base).href : path.posix.join(ctx.base, up, 'metadata.xml');
-      meta = parseOsgbMetadata((http ? await fetchSource(at, { attempts: 2 }) : await fs.readFile(at)).toString('utf8'));
-      break;
-    } catch (e) { if (e.transient) throw e; }
+  if (isZip) {
+    ctx.zip = await openZip(clean);
+    const at = ctx.zip.names.filter((n) => /(^|\/)metadata\.xml$/i.test(n)).sort((a, b) => a.split('/').length - b.split('/').length)[0];
+    if (at) meta = parseOsgbMetadata((await ctx.zip.read(at)).toString('utf8'));
+  } else {
+    for (const up of isFile ? ['', '../', '../../'] : ['']) {
+      try {
+        const at = http ? new URL(`${up}metadata.xml`, ctx.base).href : path.posix.join(ctx.base, up, 'metadata.xml');
+        meta = parseOsgbMetadata((http ? await fetchSource(at, { attempts: 2 }) : await fs.readFile(at)).toString('utf8'));
+        break;
+      } catch (e) { if (e.transient) throw e; }
+    }
   }
+  if (!meta?.srs && hints.srs) meta = parseOsgbMetadata(`<SRS>${hints.srs}</SRS><SRSOrigin>${hints.origin || '0,0,0'}</SRSOrigin>`);
   if (meta) { ctx.srs = meta.srs; ctx.transform = await osgbGeoref(meta); }
 
   if (isFile) ctx.roots = [decodeURIComponent(clean.slice(ctx.base.length))];
   else {
-    const listing = http ? (await listGithub(ctx.base)) : await listLocal(ctx.base);
+    const listing = isZip ? ctx.zip.names : http ? (await listGithub(ctx.base)) : await listLocal(ctx.base);
     ctx.roots = listing ? osgbRootsFromListing(listing) : (await listHtmlIndex(ctx.base)) || [];
-    if (!ctx.roots.length && http) ctx.roots = await probeRoots(ctx);
-    if (!ctx.roots.length) throw Object.assign(new Error(`osgb: no root .osgb found under ${ctx.base.slice(-120)}. Give the URL of the dataset's root .osgb file.`), { status: 404 });
+    if (!ctx.roots.length && http && !isZip) ctx.roots = await probeRoots(ctx);
+    if (!ctx.roots.length) throw Object.assign(new Error(`osgb: no root .osgb found under ${clean.slice(-120)}. Give the URL of the dataset's root .osgb file.`), { status: 404 });
   }
   console.log(`[osgb-live] ${clean.slice(-100)} → ${ctx.roots.length} top tile(s), srs=${ctx.srs || 'none'}, georef=${!!ctx.transform}`);
   return ctx;
 });
+
+// ── a collection: an index of zipped tiles ───────────────────────────────────────────────────────────────────────
+/**
+ * The rows of a tile index (CSV or TSV, UTF-8 or UTF-16 with a BOM): `[{ name, url, lon: [min, max], lat: [min, max] } |
+ * { name, url, x: [min, max], y: [min, max] }]`. The file column is `OSGB_URL`, else `FILE_URL`, else any `*_URL`.
+ */
+export function parseTileIndex(buf) {
+  const text = buf[0] === 0xff && buf[1] === 0xfe ? buf.subarray(2).toString('utf16le') : buf.toString('utf8').replace(/^﻿/, '');
+  const lines = text.split(/\r?\n/).filter((l) => l.trim());
+  if (lines.length < 2) throw Object.assign(new Error('osgb: the tile index has no rows'), { status: 404 });
+  const sep = lines[0].includes('\t') ? '\t' : ',';
+  const cells = (l) => (sep === '\t' ? l.split('\t') : l.match(/("([^"]|"")*"|[^,]*)(,|$)/g).slice(0, -1).map((c) => c.replace(/,$/, ''))).map((c) => c.trim().replace(/^"(.*)"$/s, '$1').replace(/""/g, '"'));
+  const head = cells(lines[0]).map((h) => h.toUpperCase());
+  const col = (...names) => { for (const n of names) { const i = head.indexOf(n); if (i >= 0) return i; } return -1; };
+  const iUrl = col('OSGB_URL', 'FILE_URL', ...head.filter((h) => h.endsWith('_URL'))), iName = col('GRID_NAME', 'NAME', 'TILE');
+  const geo = [col('MIN_LNG', 'MIN_LON'), col('MIN_LAT'), col('MAX_LNG', 'MAX_LON'), col('MAX_LAT')], xy = [col('MIN_X'), col('MIN_Y'), col('MAX_X'), col('MAX_Y')];
+  if (iUrl < 0 || !(geo.every((i) => i >= 0) || xy.every((i) => i >= 0))) throw Object.assign(new Error(`osgb: the tile index needs a *_URL column and MIN_LNG/MIN_LAT/MAX_LNG/MAX_LAT or MIN_X/MIN_Y/MAX_X/MAX_Y (has ${head.join(', ')})`), { status: 404 });
+  const rows = [];
+  for (const l of lines.slice(1)) {
+    const c = cells(l), url = c[iUrl];
+    if (!url || !/\.zip$/i.test(url.split('?')[0])) continue;
+    const n = (i) => Number(c[i]);
+    const row = { name: iName >= 0 ? c[iName] : url.split('/').pop(), url };
+    if (geo.every((i) => i >= 0) && geo.every((i) => Number.isFinite(n(i)))) { row.lon = [n(geo[0]), n(geo[2])]; row.lat = [n(geo[1]), n(geo[3])]; }
+    else if (xy.every((i) => i >= 0) && xy.every((i) => Number.isFinite(n(i)))) { row.x = [n(xy[0]), n(xy[2])]; row.y = [n(xy[1]), n(xy[3])]; }
+    else continue;
+    rows.push(row);
+  }
+  return rows;
+}
+
+const HEIGHTS = [-50, 600];                                 // the vertical span a tile is given: no index says how tall its city is
+
+/** The tileset of a tile index: the tiles as external tilesets of their zips, grouped spatially under one root. */
+async function buildCollection(url) {
+  const { http, clean, hints, query } = splitSourceUrl(url);
+  const rows = parseTileIndex(http ? await fetchSource(clean) : await fs.readFile(clean));
+  if (!rows.length) throw Object.assign(new Error('osgb: the tile index names no zip'), { status: 404 });
+  const toEcef = rows[0].lon ? null : crsToEcef(hints.srs);
+  if (!rows[0].lon && !toEcef) throw Object.assign(new Error(`osgb: the tile index gives projected extents: name their CRS with &srs=EPSG:<n> on the dataset URL${hints.srs ? ` (${hints.srs} is unknown here)` : ''}`), { status: 400 });
+  // the root frame: east-north-up at the middle of the collection; a tile's corners go through its inverse
+  const corners = (r) => {
+    const out = [];
+    for (const h of HEIGHTS) for (const [i, j] of [[0, 0], [0, 1], [1, 0], [1, 1]]) out.push(r.lon ? llhToEcef(r.lon[i], r.lat[j], h) : toEcef(r.x[i], r.y[j], h));
+    return out;
+  };
+  const ecef = rows.map(corners);
+  const mid = [0, 1, 2].map((k) => ecef.flat().reduce((s, p) => s + p[k], 0) / (ecef.length * 8));
+  const [lon, lat] = ecefToLlhLocal(mid), origin = llhToEcef(lon, lat, 0);
+  const transform = enuMatrix(lon, lat, origin[0], origin[1], origin[2]), inv = mat4Invert(transform);
+  const local = (p) => [0, 1, 2].map((k) => inv[k] * p[0] + inv[4 + k] * p[1] + inv[8 + k] * p[2] + inv[12 + k]);
+  const tiles = rows.map((r, i) => {
+    const pts = ecef[i].map(local), min = [0, 1, 2].map((k) => Math.min(...pts.map((p) => p[k]))), max = [0, 1, 2].map((k) => Math.max(...pts.map((p) => p[k])));
+    const c = min.map((v, k) => (v + max[k]) / 2), half = max.map((v, k) => (v - min[k]) / 2);
+    const src = r.url + (query ? (r.url.includes('?') ? '&' : '?') + query : '');
+    return {
+      boundingVolume: { sphere: [...c, Math.hypot(...half)].map(num) }, geometricError: num(Math.max(half[0], half[1])), refine: 'REPLACE',
+      content: { uri: `/stream/tileset.json?format=osgb&url=${encodeURIComponent(src)}` },
+    };
+  });
+  const root = tiles.length === 1 ? tiles[0] : groupTile(groupSpatially(tiles));
+  root.transform = transform;
+  console.log(`[osgb-live] ${clean.slice(-100)} → a collection of ${tiles.length} zipped tile(s) at ${lat.toFixed(4)}, ${lon.toFixed(4)}`);
+  return tilesetOf(root);
+}
+const ecefToLlhLocal = (p) => { const [lon, lat] = ecefToLlh(p[0], p[1], p[2]); return [lon, lat]; };
+const isCollectionUrl = (url) => /\.[ct]sv$/i.test(splitSourceUrl(url).clean);
 
 // ── tiles ────────────────────────────────────────────────────────────────────────────────────────────────────────
 /** The geometric error of a unit (see the header for the formula). */
@@ -329,7 +425,7 @@ async function buildUnitGlb(ctx, relPath, unitIdx) {
 
 // Pure builders for the /stream dispatcher.
 export const osgbTileRe = /^.+__\d+$/;                       // <encodeURIComponent(relPath)>__<unit>
-export async function osgbTileset(url) { return buildRoot(await getCtx(url), url); }
+export async function osgbTileset(url) { return isCollectionUrl(url) ? buildCollection(url) : buildRoot(await getCtx(url), url); }
 export async function osgbTile(url, key) {
   const us = key.lastIndexOf('__');
   return buildUnitGlb(await getCtx(url), decodeURIComponent(key.slice(0, us)), Number(key.slice(us + 2)));

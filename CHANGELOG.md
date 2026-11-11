@@ -5,6 +5,35 @@ Format loosely follows [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+### Added — 2026-11-11 (OSGB at city scale: Hong Kong's 2 150 zipped tiles, read in place)
+- **A city-scale OSGB dataset in the library**: the Hong Kong Planning Department's 3D Photo-realistic Model
+  (data.gov.hk, free commercial and non-commercial reuse), Kowloon and Hong Kong Island in 2 150 tiles of 250 m,
+  each one zip on `pdmap.pland.gov.hk`, **467.2 GB in all** (a `HEAD` of every zip; 0 to 1 394 MB each) and, from
+  three tiles measured, of the order of 10 G vertices in some 700 000 files. Two families: 822 ContextCapture tiles
+  over Kowloon (version 91, 12 levels, 101 GB) and 1 328 OSG-converted tiles over the island (version 97, an exact
+  quadtree of 1 024 leaves, 366 GB), the family of the tile 21-25 already in the library. Two pills: the whole set by
+  its `GridIdx_OSGB.csv` index, and one Mong Kok tile. The answer to "nothing in the 100 M range?": the only
+  city-scale OSGB found in the open; every other open city mesh (LandsD's own, Helsinki, Melbourne, Estonia, Taiwan)
+  is OBJ, 3D Tiles or I3S, and the big OSGB "shares" on CSDN are Google Earth re-exports on Baidu pan.
+- **Datasets in zip archives are served without unpacking** (`url=…/tile.zip`): `core/zip.js` reads an archive
+  member by member, over range requests or from disk, from its central directory (zip64 included); each `.osgb` is
+  one range read, inflated in memory. `core/source-fetch.js` falls back to Node's lenient HTTP parser for a host
+  whose answers `fetch` refuses (pdmap folds a long header over two lines), from the first refusal on.
+- **A CSV index of zips is a collection**: one tileset whose children are the zips, each an external tileset placed
+  by its extent (WGS84 columns, or projected ones with `&srs=` on the URL) and opened when the camera comes within
+  twice the tile's width. `?srs=EPSG:2326&origin=x,y,z` on a dataset URL stand in for a missing `metadata.xml`.
+  `_OSGB.zip` and `GridIdx_OSGB.csv` names are detected as OSGB.
+- Measured through the server: a zip's root tileset in 3.0 s, an L22 leaf in 14 s, root to L17 in 49 s; the
+  collection of 2 150 in 35 s (694 KB, 9 levels of groups). `scripts/osgb-stats.mjs` crawls a zip (`--max-files`,
+  `--max-depth` for a big one, the unread files counted per depth): `Tile_+005_+006` 873 354 vertices, 1 187 533
+  triangles, 309 tiles, 96 leaves, 12 levels; `tile_16_11` 3 234 618 vertices, 1 365 tiles, 1 024 leaves; `tile_18_27` (Central) 6 414 429 vertices, 2 138 143 triangles, the densest of the three (442.6 MB of files in a 332 MB zip).
+  The host gives about 650 KB/s a connection and drops requests under many: 156 s, 802 s (4 DNS failures, re-run
+  from the cache in 25 s) and 922 s for the three.
+- 6 tests: the lenient client on a server that folds its headers; zip members by range and from a file, deflated and
+  stored; a zipped dataset served member by member; the placement hints and their yielding to a `metadata.xml`; a
+  tile index as a collection (the Planning Department's UTF-16 columns), its hints passed to each tile; osgb-stats
+  on a zip, whole and cut by `--max-files` / `--max-depth`.
+
 ### Added — 2026-11-11 (Nexus: 3DHOP's multiresolution meshes, live and offline)
 - **Nexus (`.nxs` / `.nxz`, CNR-ISTI Visual Computing Lab, the format of 3DHOP) is read, live and offline.**
   `GET /stream/tileset.json?format=nexus&url=<….nxz>` (`packages/tile-server/nexus-live.js`) builds the tileset

@@ -11,7 +11,12 @@
  *     `err.transient` says a retry might yet work: an adapter may treat a file the host lacks as optional, never one it
  *     could not read.
  *   • A range read returns the bytes asked for, even from a host that ignores Range and answers with the whole file.
+ *   • A HOST WHOSE HEADERS `fetch` REFUSES is read with Node's own client in lenient mode. Some servers fold a long header
+ *     over several lines (pdmap.pland.gov.hk's Content-Security-Policy, the Hong Kong 3D model host): obsolete line folding,
+ *     which undici rejects as malformed HTTP. Once a host has failed that way, every read of it goes the lenient way.
  */
+import http from 'node:http';
+import https from 'node:https';
 const MAX_PER_HOST = Number(process.env.TILED_RANGE_MAX_PER_HOST) || 32;
 const MIN_PER_HOST = 4;
 const TRANSIENT = /ECONNRESET|ETIMEDOUT|ECONNREFUSED|EPIPE|EAI_AGAIN|socket hang up|fetch failed|other side closed|UND_ERR|network/i;
@@ -51,6 +56,35 @@ export const httpStatusOf = (e) => (!e.status && !e.transient ? 500 : isAbsent(e
 /** The url for a message or a log: its query may hold a token. */
 const shortUrl = (url) => url.split('?')[0].slice(-120);
 
+// ── the lenient client ───────────────────────────────────────────────────────────────────────────────────────────
+const lenientHosts = new Set();
+/** True when fetch gave up on the answer's framing rather than on the network: the host's HTTP is odd, not down. */
+const isMalformedHttp = (e) => /HPE_|HTTPParserError|does not match the HTTP\/1\.1 protocol|invalid header/i
+  .test(`${e.cause?.code || ''} ${e.cause?.message || ''} ${e.cause?.name || ''} ${e.message || ''}`);
+/** True when the host's answers are read with the lenient client (tests, logs). */
+export const isLenientHost = (host) => lenientHosts.has(host);
+
+/** One GET through node:http(s) with `insecureHTTPParser`, redirects followed, → the same shape as fetch's answer. */
+function lenientFetch(url, { headers, signal } = {}, hops = 0) {
+  return new Promise((resolve, reject) => {
+    const u = new URL(url);
+    const req = (u.protocol === 'https:' ? https : http).request(u, { method: 'GET', headers, signal, insecureHTTPParser: true }, (res) => {
+      if ([301, 302, 303, 307, 308].includes(res.statusCode) && res.headers.location && hops < 5) {
+        res.resume();
+        return lenientFetch(new URL(res.headers.location, url).href, { headers, signal }, hops + 1).then(resolve, reject);
+      }
+      const h = new Headers();
+      for (const [k, v] of Object.entries(res.headers)) for (const x of [].concat(v ?? [])) h.append(k, x);
+      const chunks = [];
+      res.on('data', (c) => chunks.push(c));
+      res.on('error', reject);
+      res.on('end', () => { const body = Buffer.concat(chunks); resolve({ status: res.statusCode, headers: h, arrayBuffer: async () => body }); });
+    });
+    req.on('error', reject);
+    req.end();
+  });
+}
+
 /**
  * One GET with the cap, the status check and the retries → { status, headers, body: Buffer }. `ok(status)` says which answers
  * are data, default 2xx. `timeoutMs` covers the whole read, default none: a full download may rightly take long, and undici
@@ -64,7 +98,18 @@ export async function requestSource(url, { headers, signal, attempts = 3, timeou
     let err;
     try {
       const signals = [signal, timeoutMs && AbortSignal.timeout(timeoutMs)].filter(Boolean);
-      const r = await fetch(url, { headers, signal: signals.length > 1 ? AbortSignal.any(signals) : signals[0] });
+      const opts = { headers, signal: signals.length > 1 ? AbortSignal.any(signals) : signals[0] };
+      let r;
+      if (lenientHosts.has(host)) r = await lenientFetch(url, opts);
+      else {
+        try { r = await fetch(url, opts); }
+        catch (e) {
+          if (!isMalformedHttp(e)) throw e;
+          console.warn(`[source] ${host} answers with HTTP that fetch refuses (${e.cause?.message || e.message}): reading it with the lenient client from now on`);
+          lenientHosts.add(host);
+          r = await lenientFetch(url, opts);
+        }
+      }
       if (ok(r.status)) { noteOutcome(host, false); return { status: r.status, headers: r.headers, body: Buffer.from(await r.arrayBuffer()) }; }
       await r.arrayBuffer().catch(() => {});        // drain so the connection can be reused
       err = Object.assign(new Error(`read ${shortUrl(url)}${headers?.Range ? ` [${headers.Range}]` : ''} → HTTP ${r.status}`), { status: r.status, transient: r.status === 429 || r.status >= 500 });

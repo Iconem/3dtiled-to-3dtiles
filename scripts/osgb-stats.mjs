@@ -3,8 +3,13 @@
  * osgb-stats.mjs — measured geometry statistics of an OSGB (OpenSceneGraph binary tiled mesh) dataset: files, bytes,
  * vertices, triangles, leaf tiles, LOD depth, embedded texture bytes, and the finest level alone.
  *
- *   node scripts/osgb-stats.mjs <…/metadata.xml | …/root.osgb | dataset folder> [--server=http://localhost:3016]
- *        [--cache=sample-data/osgb] [--concurrency=8] [--out=stats.json] [--quiet]
+ *   node scripts/osgb-stats.mjs <…/metadata.xml | …/root.osgb | dataset folder | …/tile.zip> [--server=http://localhost:3016]
+ *        [--cache=sample-data/osgb] [--concurrency=8] [--max-files=N] [--max-depth=D] [--out=stats.json] [--quiet]
+ *
+ * A dataset zipped as one archive (Hong Kong's Planning Department tiles) is read in place through core/zip.js, member
+ * by member, and cached extracted. `--max-files` stops the crawl after N files, `--max-depth` keeps it to the first D
+ * levels: the counts are then those of the files read, and the JSON says what was left (`cut`: the files named and
+ * not read, per depth), for a total to be extrapolated from the levels that were.
  *
  * The crawl follows the dataset the way a client does, file by file: every root `.osgb`, then every finer file a
  * PagedLOD names, down to the files that name none. The files themselves are read with packages/osgb-to-3dtiles's
@@ -30,7 +35,7 @@ import fs from 'node:fs/promises';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { parseOsgb, osgbUnits } from '../packages/osgb-to-3dtiles/src/osgb-reader.js';
 import { osgbRootsFromListing } from '../packages/tile-server/osgb-live.js';
-import { fetchSource, isAbsent, parallelMap } from '../packages/core/index.js';
+import { fetchSource, isAbsent, parallelMap, openZip } from '../packages/core/index.js';
 
 const REPO = fileURLToPath(new URL('..', import.meta.url));
 const isHttp = (u) => /^https?:\/\//i.test(u);
@@ -52,17 +57,19 @@ export function cacheSlug(base) {
 export function openSource(src, { cache } = {}) {
   const http = isHttp(src);
   const clean = http ? src.split('#')[0].split('?')[0] : path.resolve(src).replace(/\\/g, '/');
-  const isFile = /\.osgb$/i.test(clean), isMeta = /metadata\.xml$/i.test(clean);
+  const isFile = /\.osgb$/i.test(clean), isMeta = /metadata\.xml$/i.test(clean), isZip = /\.zip$/i.test(clean);
   const base = isFile || isMeta ? clean.slice(0, clean.lastIndexOf('/') + 1) : clean.replace(/\/?$/, '/');
   const entry = isFile ? decodeURIComponent(clean.slice(base.length)) : null;
-  const cacheDir = http && cache ? path.join(cache, cacheSlug(base)) : null;
-  const s = { http, base, entry, cacheDir, bytesFetched: 0, bytesCached: 0, requests: 0 };
+  const remote = http || isZip;                               // a zip is read member by member, even from disk
+  const cacheDir = remote && cache ? path.join(cache, isZip ? cacheSlug(http ? clean : pathToFileURL(clean).href) : cacheSlug(base)) : null;
+  const s = { http, base, entry, cacheDir, zip: null, bytesFetched: 0, bytesCached: 0, requests: 0 };
+  s.open = async () => { if (isZip && !s.zip) s.zip = await openZip(clean); return s; };
 
-  const local = (rel) => fs.readFile(path.join(http ? cacheDir : base, rel)).catch((e) => { if (e.code === 'ENOENT') return null; throw e; });
+  const local = (rel) => fs.readFile(path.join(remote ? cacheDir : base, rel)).catch((e) => { if (e.code === 'ENOENT') return null; throw e; });
   s.read = async (rel, { count = true } = {}) => {
     rel = path.posix.normalize(rel);
     if (rel.startsWith('../') || path.posix.isAbsolute(rel)) throw new Error(`${rel} is outside the dataset`);
-    if (!http) return local(rel);
+    if (!remote) return local(rel);
     if (cacheDir) {
       const hit = await local(rel);
       if (hit) { if (count) s.bytesCached += hit.length; return hit; }
@@ -70,9 +77,12 @@ export function openSource(src, { cache } = {}) {
     }
     s.requests++;
     let buf;
-    try { buf = await fetchSource(base + encRel(rel), { attempts: 3, timeoutMs: 120_000 }); }
+    try { buf = isZip ? await (await s.open()).zip.read(rel) : await fetchSource(base + encRel(rel), { attempts: 3, timeoutMs: 120_000 }); }
     catch (e) {
       if (!isAbsent(e.status)) throw e;
+      buf = null;
+    }
+    if (!buf) {
       if (cacheDir) { await fs.mkdir(path.dirname(path.join(cacheDir, rel)), { recursive: true }); await fs.writeFile(path.join(cacheDir, `${rel}.missing`), ''); }
       return null;
     }
@@ -119,6 +129,7 @@ async function listGithub(base) {
 /** The top tiles of the dataset: the given .osgb, a listing of the folder, or what the tile-server finds. */
 export async function findRoots(s, src, { server, log = () => {} } = {}) {
   if (s.entry) return [s.entry];
+  if (s.zip) return osgbRootsFromListing(s.zip.names);
   if (!s.http) return osgbRootsFromListing(await listLocal(s.base));
   if (server) {
     try {
@@ -180,23 +191,28 @@ export function fileStats(buf) {
 /**
  * Crawl a dataset and count it.
  * @param {string} src a metadata.xml or root .osgb URL, or a local folder / file
- * @param {{ server?: string, cache?: string, concurrency?: number, log?: (line: string) => void }} opts
+ * @param {{ server?: string, cache?: string, concurrency?: number, maxFiles?: number, maxDepth?: number, log?: (line: string) => void }} opts
  */
-export async function osgbStats(src, { server, cache, concurrency = 8, log = () => {} } = {}) {
+export async function osgbStats(src, { server, cache, concurrency = 8, maxFiles = Infinity, maxDepth = Infinity, log = () => {} } = {}) {
   const t0 = performance.now();
-  const s = openSource(src, { cache });
+  const s = await openSource(src, { cache }).open();
   const roots = await findRoots(s, src, { server, log });
   if (!roots.length) throw new Error(`no root .osgb found under ${s.base}`);
   log(`${roots.length} root file(s) under ${s.base}`);
   // keep the dataset's metadata.xml with its files (the cache only holds what is under the base folder); not counted
-  if (s.http && s.cacheDir) try { await s.read('metadata.xml', { count: false }); } catch { /* none */ }
+  if (s.zip) { for (const n of s.zip.names) if (/(^|\/)metadata\.xml$/i.test(n)) try { await s.read(n, { count: false }); } catch { /* none */ } }
+  else if (s.http && s.cacheDir) try { await s.read('metadata.xml', { count: false }); } catch { /* none */ }
 
   const total = fresh(), perDepth = [], versions = {}, compressors = {}, textureKinds = {}, skipped = new Set(), misread = new Set();
-  const missing = [], failed = [], seen = new Set(roots), unitRecords = [];
-  let duplicates = 0;
+  const missing = [], failed = [], seen = new Set(roots), unitRecords = [], cut = [];
+  let duplicates = 0, read = 0;
   let queue = roots.map((rel) => ({ rel, depth: 1 }));
   while (queue.length) {
     const depth = queue[0].depth, next = [];
+    // the limits: a level past --max-depth, or the files past --max-files, are named but not read
+    if (depth > maxDepth || read >= maxFiles) { cut[depth - 1] = (cut[depth - 1] || 0) + queue.length; break; }
+    if (read + queue.length > maxFiles) { const keep = maxFiles - read; cut[depth - 1] = (cut[depth - 1] || 0) + queue.length - keep; queue = queue.slice(0, keep); }
+    read += queue.length;
     await parallelMap(queue, async ({ rel }) => {
       let buf;
       try { buf = await s.read(rel); } catch (e) { failed.push({ file: rel, error: e.message }); return; }
@@ -222,40 +238,45 @@ export async function osgbStats(src, { server, cache, concurrency = 8, log = () 
     queue = next;
   }
 
-  // leaf tiles: units with no finer file reachable (none named, or every one named missing from this copy)
+  // leaf tiles: units with no finer file reachable (none named, or every one named missing from this copy); a unit
+  // whose finer files a limit left unread names files that are neither read nor missing, so it is not a leaf
   const absent = new Set(missing);
   const finest = { units: 0, vertices: 0, triangles: 0, cut: 0 };
+  const cutTotal = cut.reduce((n, v) => n + (v || 0), 0);
   for (const u of unitRecords) {
     if (u.finer.length && !u.finer.every((f) => absent.has(f))) continue;
     finest.units++; finest.vertices += u.vertices; finest.triangles += u.triangles;
     if (u.finer.length) finest.cut++;
   }
   const seconds = (performance.now() - t0) / 1000;
+  await s.zip?.close?.();
   return {
     source: src, base: s.base, roots: roots.length, depth: perDepth.length,
     ...total, leafTiles: finest.units, finest,
     perDepth, versions, compressors, textureKinds, skipped: [...skipped], misread: [...misread],
     missing: missing.length, missingFiles: missing.slice(0, 50), failed, duplicateReferences: duplicates,
+    cut: cutTotal ? Array.from(cut, (v) => v || 0) : null, limits: cutTotal ? { maxFiles: Number.isFinite(maxFiles) ? maxFiles : null, maxDepth: Number.isFinite(maxDepth) ? maxDepth : null } : null,
     bytesFetched: s.bytesFetched, bytesCached: s.bytesCached, requests: s.requests, seconds: Number(seconds.toFixed(1)),
     cacheDir: s.cacheDir, date: new Date().toISOString().slice(0, 10),
   };
 }
-
 export const summaryLine = (r) => {
   const mb = (b) => (b && b < 1e6 ? `${Math.round(b / 1e3)} KB` : `${(b / 1e6).toFixed(1)} MB`);
   const lose = r.missing || r.failed.length ? `, ${r.missing} missing, ${r.failed.length} failed` : '';
-  return `${r.files} files (${mb(r.bytes)}, ${r.roots} roots, depth ${r.depth}${lose}) · ${r.units} tiles, ${r.leafTiles} leaves · ${r.vertices.toLocaleString('en')} vertices, ${r.triangles.toLocaleString('en')} triangles (finest level ${r.finest.vertices.toLocaleString('en')} / ${r.finest.triangles.toLocaleString('en')}) · ${r.textures} textures (${Object.entries(r.textureKinds).map(([k, v]) => `${v} ${k}`).join(', ') || 'none'}), ${mb(r.textureBytes)} · versions ${Object.keys(r.versions).join(',')}${r.skipped.length ? ` · skipped ${r.skipped.join(',')}` : ''}${r.misread.length ? ` · misread ${r.misread.join(',')}` : ''} · ${r.seconds} s, ${mb(r.bytesFetched)} downloaded`;
+  const cut = r.cut ? ` · CUT: ${r.cut.reduce((n, v) => n + v, 0)} file(s) named and not read (${r.cut.map((v, i) => `${v} at depth ${i + 1}`).filter((_, i) => r.cut[i]).join(', ')})` : '';
+  return `${r.files} files (${mb(r.bytes)}, ${r.roots} roots, depth ${r.depth}${lose}) · ${r.units} tiles, ${r.leafTiles} leaves · ${r.vertices.toLocaleString('en')} vertices, ${r.triangles.toLocaleString('en')} triangles (finest level ${r.finest.vertices.toLocaleString('en')} / ${r.finest.triangles.toLocaleString('en')}) · ${r.textures} textures (${Object.entries(r.textureKinds).map(([k, v]) => `${v} ${k}`).join(', ') || 'none'}), ${mb(r.textureBytes)} · versions ${Object.keys(r.versions).join(',')}${r.skipped.length ? ` · skipped ${r.skipped.join(',')}` : ''}${r.misread.length ? ` · misread ${r.misread.join(',')}` : ''}${cut} · ${r.seconds} s, ${mb(r.bytesFetched)} downloaded`;
 };
 
 // ── CLI ──────────────────────────────────────────────────────────────────────────────────────────────────────────
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
   const args = process.argv.slice(2), flag = (n, d) => { const a = args.find((x) => x.startsWith(`--${n}=`)); return a ? a.slice(n.length + 3) : d; };
   const src = args.find((a) => !a.startsWith('--'));
-  if (!src) { console.error('usage: node scripts/osgb-stats.mjs <metadata.xml | root.osgb URL | folder> [--server=http://localhost:3016] [--cache=sample-data/osgb] [--concurrency=8] [--out=file.json] [--quiet]'); process.exit(2); }
+  if (!src) { console.error('usage: node scripts/osgb-stats.mjs <metadata.xml | root.osgb URL | folder | tile.zip> [--server=http://localhost:3016] [--cache=sample-data/osgb] [--concurrency=8] [--max-files=N] [--max-depth=D] [--out=file.json] [--quiet]'); process.exit(2); }
   const quiet = args.includes('--quiet');
   const opts = {
     server: flag('server', 'http://localhost:3016'), cache: path.resolve(REPO, flag('cache', 'sample-data/osgb')),
     concurrency: Number(flag('concurrency', 8)), log: quiet ? () => {} : (l) => console.error(`[osgb-stats] ${l}`),
+    maxFiles: Number(flag('max-files', Infinity)), maxDepth: Number(flag('max-depth', Infinity)),
   };
   try {
     const r = await osgbStats(src, opts);

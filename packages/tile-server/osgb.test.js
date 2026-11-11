@@ -15,9 +15,9 @@ import { parseOsgb, readOsgbHeader, osgbUnits } from '../osgb-to-3dtiles/src/osg
 import { osgbTexture, decodeS3tc } from '../osgb-to-3dtiles/src/osgb-image.js';
 import { encodeOsgb, quad } from '../osgb-to-3dtiles/test/osgb-fixture.js';
 import { osgbUnitGlb } from './mesh-tile.js';
-import { parseOsgbMetadata, osgbGeoref, osgbRootsFromListing, osgbGeometricError } from './osgb-live.js';
+import { parseOsgbMetadata, osgbGeoref, osgbRootsFromListing, osgbGeometricError, splitSourceUrl, parseTileIndex } from './osgb-live.js';
 import { handleStream } from './stream-live.js';
-import { ecefToLlh, httpStatusOf, detectFormatByName } from '../core/index.js';
+import { ecefToLlh, httpStatusOf, detectFormatByName, writeZip } from '../core/index.js';
 
 const quiet = (t) => { t.mock.method(console, 'log', () => {}); t.mock.method(console, 'warn', () => {}); };
 const JPEG = jpeg.encode({ data: Buffer.alloc(8 * 8 * 4, 200), width: 8, height: 8 }, 90).data;
@@ -178,6 +178,8 @@ test('metadata.xml: ENU, projected EPSG and geographic origins land where they s
   assert.ok(near(await place(metadata('EPSG:4326', '120.0717,30.4936,22.9')), [120.0717, 30.4936, 22.9], 1e-6)); // DJI Terra: lon, lat, height
   assert.equal(await osgbGeoref(parseOsgbMetadata('<ModelMetadata></ModelMetadata>')), null);
   assert.equal(detectFormatByName('metadata.xml'), 'osgb');
+  assert.equal(detectFormatByName('https://pdmap.pland.gov.hk/PLANDWEB/public/3d_photo_realistic_models/OSGB/Tile_+005_+006_OSGB.zip'), 'osgb');
+  assert.equal(detectFormatByName('https://pdmap.pland.gov.hk/PLANDWEB/public/3d_photo_realistic_models/Metadata/GridIdx_OSGB.csv'), 'osgb');
   assert.equal(detectFormatByName('Tile_+000_+000.osgb'), 'osgb');
 });
 
@@ -317,4 +319,85 @@ test('stream: a file outside the dataset is not read, and a dataset with no root
   assert.equal((await get(`${s}/stream/tile/${encodeURIComponent('../Tile_+001_+000/Tile_+001_+000.osgb')}__0.glb?format=osgb&${q}`)).status, 404);
   const empty = await serve(t, { 'metadata.xml': DATASET['metadata.xml'] });
   assert.equal((await get(`${s}/stream/tileset.json?format=osgb&url=${encodeURIComponent(`${empty.base}/metadata.xml`)}`)).status, 404);
+});
+
+// ── a dataset in a zip, placement hints, a collection of zipped tiles ────────────────────────────
+
+/** A host that honours Range, as a zip needs (the tail, the central directory, one member at a time). */
+async function serveRanges(t, files) {
+  const hits = {};
+  const server = http.createServer((req, res) => {
+    const p = decodeURIComponent(new URL(req.url, 'http://x').pathname).slice(1);
+    hits[p] = (hits[p] ?? 0) + 1;
+    const body = files[p];
+    if (!body) { res.writeHead(404); return res.end(); }
+    const range = /^bytes=(\d*)-(\d*)$/.exec(req.headers.range || '');
+    if (!range) { res.writeHead(200, { 'Content-Length': body.length }); return res.end(body); }
+    const a = range[1] === '' ? Math.max(0, body.length - Number(range[2])) : Number(range[1]);
+    const b = range[2] === '' || range[1] === '' ? body.length - 1 : Math.min(Number(range[2]), body.length - 1);
+    res.writeHead(206, { 'Content-Range': `bytes ${a}-${b}/${body.length}`, 'Content-Length': b - a + 1 });
+    res.end(body.subarray(a, b + 1));
+  }).listen(0, '127.0.0.1');
+  await once(server, 'listening');
+  t.after(() => new Promise((r) => { server.close(r); server.closeAllConnections(); }));
+  return { base: `http://127.0.0.1:${server.address().port}`, hits };
+}
+
+// The same dataset zipped as Hong Kong's Planning Department ships a tile: a top folder, the files below it
+const ZIPPED = Object.fromEntries([['tile/', Buffer.alloc(0)], ...Object.entries(DATASET).map(([k, v]) => [`tile/${k}`, v])]);
+
+test('stream: a dataset in a zip is read member by member, its metadata.xml found in the archive', async (t) => {
+  quiet(t);
+  const zip = writeZip(ZIPPED);
+  const h = await serveRanges(t, { 'tile.zip': zip }), s = await streamServer(t);
+  const ts = await walk(s, `${h.base}/tile.zip`);
+  assert.ok(ts.root.children.every((c) => /tile%2FData%2FTile_/.test(c.content.uri)), 'tile keys are paths inside the archive');
+  assert.ok(h.hits['tile.zip'] >= 3 && h.hits['tile.zip'] <= 12, `${h.hits['tile.zip']} range reads: the tail, then members`);
+  assert.deepEqual(osgbRootsFromListing(Object.keys(ZIPPED)), [`tile/${T0}.osgb`, `tile/${T1}.osgb`]);
+});
+
+test('stream: placement hints in the dataset URL stand in for a missing metadata.xml, and yield to one', async (t) => {
+  quiet(t);
+  const bare = Object.fromEntries(Object.entries(ZIPPED).filter(([k]) => !k.endsWith('metadata.xml')));
+  const h = await serveRanges(t, { 'bare.zip': writeZip(bare), 'tile.zip': writeZip(ZIPPED) }), s = await streamServer(t);
+  const at = async (src) => { const ts = await json(`${s}/stream/tileset.json?format=osgb&url=${encodeURIComponent(src)}`); return ts.root.transform ? ecefToLlh(ts.root.transform[12], ts.root.transform[13], ts.root.transform[14]) : null; };
+  assert.equal(await at(`${h.base}/bare.zip`), null, 'no metadata.xml, no hint: served local');
+  assert.ok(near(await at(`${h.base}/bare.zip?srs=ENU:22.3,114.17&origin=0,0,5`), [114.17, 22.3, 5], 1e-6), 'the hint places it');
+  const hk = await at(`${h.base}/bare.zip?srs=EPSG:2326&origin=835786.0,820848.9,0`);
+  assert.ok(near(hk, [114.17, 22.32, 0], 0.02), `a projected hint through its CRS: ${hk}`);
+  assert.ok(near(await at(`${h.base}/tile.zip?srs=ENU:22.3,114.17`), [2.2945, 48.8584, 0], 1e-6), 'the archive has a metadata.xml: it wins');
+  assert.deepEqual(splitSourceUrl('C:\\data\\tile.zip'), { http: false, clean: 'C:/data/tile.zip', hints: { srs: null, origin: null }, query: '' });
+  assert.deepEqual(splitSourceUrl('https://h/t.zip?origin=1,2,3&srs=EPSG:2326&x=1#f').hints, { srs: 'EPSG:2326', origin: '1,2,3' });
+});
+
+test('stream: a tile index is a collection, each zip an external tileset placed by its extent, the hints passed on', async (t) => {
+  quiet(t);
+  const h = await serveRanges(t, { 'a.zip': writeZip(ZIPPED), 'b.zip': writeZip(ZIPPED) }), s = await streamServer(t);
+  // the Planning Department's index: UTF-16, tab-separated, an extent in HK1980 and in WGS84, a zip URL per row
+  const rows = [
+    ['OBJECTID', 'GRID_NAME', 'LOC_EN', 'MIN_X', 'MIN_Y', 'MAX_X', 'MAX_Y', 'MIN_LNG', 'MIN_LAT', 'MAX_LNG', 'MAX_LAT', 'FILE_URL', 'MODI_DATE'],
+    ['1', 'Tile_+005_+006', '"Mong Kok, Yau Ma Tei"', '834872', '818398', '835122', '818648', '114.163302', '22.304511', '114.165772', '22.306809', `${h.base}/a.zip`, '28/01/2019'],
+    ['2', 'Tile_+006_+006', '"Mong Kok, Yau Ma Tei"', '835122', '818402', '835372', '818652', '114.165726', '22.304553', '114.168196', '22.306852', `${h.base}/b.zip`, '28/01/2019'],
+    ['3', 'no file', '', '0', '0', '0', '0', '0', '0', '0', '0', '', ''],
+  ];
+  const csv = Buffer.concat([Buffer.from([0xff, 0xfe]), Buffer.from(rows.map((r) => r.join('\t')).join('\r\n') + '\r\n', 'utf16le')]);
+  assert.deepEqual(parseTileIndex(csv).map((r) => [r.name, r.url, r.lon, r.lat]), [['Tile_+005_+006', `${h.base}/a.zip`, [114.163302, 114.165772], [22.304511, 22.306809]], ['Tile_+006_+006', `${h.base}/b.zip`, [114.165726, 114.168196], [22.304553, 22.306852]]]);
+  assert.deepEqual(parseTileIndex(Buffer.from('NAME,MIN_X,MIN_Y,MAX_X,MAX_Y,OSGB_URL\n"t, quoted",1,2,3,4,http://h/t.zip\n')).map((r) => [r.name, r.x, r.y, r.lon]), [['t, quoted', [1, 3], [2, 4], undefined]]);
+  assert.throws(() => parseTileIndex(Buffer.from('a,b\n1,2\n')), /needs a \*_URL column/);
+
+  const idx = await serveRanges(t, { 'GridIdx_OSGB.csv': csv });
+  const ts = await json(`${s}/stream/tileset.json?format=osgb&url=${encodeURIComponent(`${idx.base}/GridIdx_OSGB.csv?srs=EPSG:2326&origin=835786.0,820848.9,0`)}`);
+  assert.deepEqual([ts.root.children.length, ts.root.content, ts.root.refine], [2, undefined, 'REPLACE']);
+  const [mid] = ecefToLlh(ts.root.transform[12], ts.root.transform[13], ts.root.transform[14]);
+  assert.ok(Math.abs(mid - 114.1657) < 1e-3, 'the root frame sits at the middle of the collection');
+  const [a, b] = [...ts.root.children].sort((p, q) => p.boundingVolume.sphere[0] - q.boundingVolume.sphere[0]);
+  assert.ok(a.boundingVolume.sphere[0] < 0 && b.boundingVolume.sphere[0] > 0 && Math.abs(b.boundingVolume.sphere[0] - a.boundingVolume.sphere[0] - 250) < 5, 'the tiles sit 250 m apart');
+  assert.ok(Math.abs(a.geometricError - 127) < 3, `a tile is opened at half its width: ${a.geometricError}`);
+  assert.ok(a.boundingVolume.sphere[3] > 300 && a.boundingVolume.sphere[3] < 400, 'the sphere holds the tile and the height a city may have');
+  assert.match(a.content.uri, /^\/stream\/tileset\.json\?format=osgb&url=/);
+  const child = new URL(a.content.uri, 'http://x').searchParams.get('url');
+  assert.equal(child, `${h.base}/a.zip?srs=EPSG%3A2326&origin=835786.0%2C820848.9%2C0`, 'the hints go to each tile');
+  const sub = await json(s + a.content.uri);
+  assert.ok(near(ecefToLlh(sub.root.transform[12], sub.root.transform[13], sub.root.transform[14]), [2.2945, 48.8584, 0], 1e-6), 'the tile has its own metadata.xml, which wins over the hint');
+  assert.equal(sub.root.children.length, 2);
 });
