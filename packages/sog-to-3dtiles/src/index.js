@@ -20,6 +20,7 @@ import fs   from 'fs/promises';
 import path from 'path';
 import { fileURLToPath } from 'node:url';
 import { decodeChunk, extractRange } from './sogChunk.js';
+import { lodGeometricErrors } from './lodMeta.js';
 import { sogChunkToFiles } from './tile-task.js';
 
 const TILE_TASK = new URL('./tile-task.js', import.meta.url).href;
@@ -95,12 +96,12 @@ export async function convert(input, outDir, opts = {}) {
 
     const levels = Object.keys(node.lods ?? {}).map(Number).sort((p, q) => p - q); // ascending: 0=finest
     if (!levels.length) { const ge = geAt(depth); return { ge, tile: { boundingVolume: { box }, geometricError: ge, refine: 'REPLACE' } }; }
-    const maxL = levels[levels.length - 1];
-
-    // Finest (level 0) first; nest each coarser level as its parent. chainDepth = depth + maxL − L.
+    // Finest (level 0) first; nest each coarser level as its parent: halving per level, or the leaf's own `errors`
+    // when lod-meta.json carries them (lodMeta.js).
+    const ges = lodGeometricErrors(node, levels, depth, geAt, lod.lodErrors === true);
     let child = null, outerGe = 0;
     for (const level of levels) {
-      const ge = geAt(depth + (maxL - level));
+      const ge = ges.get(level);
       const uri = `tiles/node_${nextId++}.glb`;
       pending.push({ uri, run: node.lods[String(level)] });
       const tile = { boundingVolume: { box }, geometricError: ge, refine: 'REPLACE', content: { uri } };

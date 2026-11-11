@@ -7,7 +7,10 @@
     "sog-to-3dtiles": "src/index.js"
   },
   "dependencies": {
-    "@playcanvas/splat-transform": "^3.10.3"
+    "@playcanvas/splat-transform": "^3.11.1"
   },
-  "main": "src/index.js"
+  "main": "src/index.js",
+  "scripts": {
+    "test": "node --test test/*.test.js"
+  }
 }

@@ -17,7 +17,7 @@ glTF; our own readers for LCC and RAD and our own SPZ v2 writer (the
 
 | Tool | Repository | Licence | Language, runtime | Latest release | Activity |
 |---|---|---|---|---|---|
-| splat-transform | [playcanvas/splat-transform](https://github.com/playcanvas/splat-transform) | MIT | TypeScript; Node ≥ 22 CLI and library (ESM and CJS); browser-capable through `UrlReadFileSystem` and `MemoryFileSystem` | 3.10.3, 2026-10-21 | very active |
+| splat-transform | [playcanvas/splat-transform](https://github.com/playcanvas/splat-transform) | MIT | TypeScript; Node ≥ 22 CLI and library (ESM and CJS); browser-capable through `UrlReadFileSystem` and `MemoryFileSystem` | 3.11.1, 2026-11-10 | very active |
 | GaussForge | [3dgscloud/GaussForge](https://github.com/3dgscloud/GaussForge) | Apache-2.0 | C++17 library and `gfconvert` CLI; `@gaussforge/wasm` for browser and Node; `pip install gaussforge` | 0.6.0, 2026-05-12 | last commit 2026-05-25 |
 | gsbox | [gotoeasy/gsbox](https://github.com/gotoeasy/gsbox) | GPL-3.0 | Go, CLI only | 4.8.4, 2026-06-18 | pushed 2026-10-28 |
 | Niantic spz | [nianticlabs/spz](https://github.com/nianticlabs/spz) | MIT | C++ library; Emscripten build with TypeScript types; Python bindings; `ply_to_spz`, `spz_to_ply` CLIs | 3.0.0, 2026-05-05 (library; file format at v4) | active |
@@ -31,14 +31,14 @@ The GPL of gsbox rules it out as a library in this repo; it is a CLI anyway.
 
 R = reads, W = writes, – = neither.
 
-| Format | splat-transform 3.10 | GaussForge 0.6 | gsbox 4.8 | Niantic spz | Spark (WASM and `build-lod`) | ffsplat |
+| Format | splat-transform 3.11 | GaussForge 0.6 | gsbox 4.8 | Niantic spz | Spark (WASM and `build-lod`) | ffsplat |
 |---|---|---|---|---|---|---|
 | `.ply` (INRIA) | R W | R W | R W | R W | R | R W |
 | `.compressed.ply` | R W | R W | R | – | R | – |
 | `.splat` | R | R W | R W | – | R | – |
 | `.ksplat` | R | R W | R | – | R | – |
 | `.spz` | R v2 to v4, W v3 or v4 | R; W v2, v3, v4 | R W (v3, v4) | R v1 to v4, W v4 | R; W v2 or v3 | – |
-| SOG (`meta.json` + WebP) | R W | R W | R W | – | R | templates |
+| SOG (`meta.json` + WebP) | R W (v2 and v3, 3.11 writes v3) | R W | R W | – | R | templates |
 | streamed SOG (`lod-meta.json`) | R W | – | R W | – | – | – |
 | LCC (XGRIDS) | R | – | – | – | – | – |
 | LCC2 | R | – | – | – | – | – |
@@ -83,3 +83,21 @@ What we changed to move: SOG chunks go through `readSog(fileSystem, 'meta.json')
 matter to us: LCC is decoded by our own reader, and of LCC2 (read since 2026-11-09) we parse the manifest ourselves
 and hand each chunk, a bundled SOG, to `readSog`. The read path uses no GPU; `webgpu` (Dawn) is a dependency the
 package installs but only the CLI imports. Node 22 or later is required.
+
+### 3.11 and SOG v3 (2026-11-10)
+
+3.11 ([#370](https://github.com/playcanvas/splat-transform/pull/370), proposed in
+[#362](https://github.com/playcanvas/splat-transform/issues/362)) writes [SOG version 3](https://developer.playcanvas.com/user-manual/gaussian-splatting/formats/sog/)
+by default (`--sog-version 2` for older viewers) and reads both. What v3 changes: no `quats.webp`, the rotation is a
+24-bit exponential map in the alpha channels of `means_l`, `means_u` and `scales`; the opacity byte is `(b / 204)²`,
+up to 1.5625, so a gaussian merged by decimation keeps its mass (`meta.opacity.max` says when some exceed 1);
+SH palette labels on 24 bits (262 144 entries from the CLI) and a 4th SH band; optional blind data, `extras` and
+`comments`. `lod-meta.json` stays version 1, so a streamed SOG may mix v2 and v3 chunks as SuperSplat publishes new
+ones; it may also carry `lodErrors` and per-leaf `errors` (3.3 to 3.7 wrote them). Nothing of the layout reaches
+this repo: `readSog` yields the same columns for both, rows in the same order. What does reach it is the opacity:
+the table's `opacity` logit is `+Infinity` for exactly 1 and the logit of the largest float below 1 (16.64) for
+anything above, with the true value in an `opacity_linear` column. Our tiles are SPZ v2, one alpha byte of [0, 1],
+and the viewers of this repo draw no opaque core, so `sogChunk.js` takes `opacity_linear` when it is there and
+clamps at 1: a v3 chunk gives the tile its v2 encoding would (the fixtures of `packages/sog-to-3dtiles/test`, one
+scene as both versions, agree within a quantization step). The per-leaf `errors`, when a `lod-meta.json` has them,
+set the geometric errors of the leaf's LOD chain (`lodMeta.js`); the halving stays otherwise.

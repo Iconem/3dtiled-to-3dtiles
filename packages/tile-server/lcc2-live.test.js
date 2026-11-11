@@ -162,7 +162,9 @@ test('bundled SOG: the kept files are the same read whole, by ranges, stored or 
   const all = await bundledSogFiles(bundle, bundle.length, null, () => true);
   assert.ok(all['shN_centroids.webp'] && all['shN_labels.webp'], 'the fixture has SH planes');
   const kept = await bundledSogFiles(bundle, bundle.length);
-  assert.deepEqual(Object.keys(kept).sort(), ['means_l.webp', 'means_u.webp', 'meta.json', 'quats.webp', 'scales.webp', 'sh0.webp']);
+  // splat-transform 3.11 writes SOG v3: no quats.webp, the rotation sits in the alpha channels of the other planes
+  assert.equal(JSON.parse(Buffer.from(all['meta.json'])).version, 3);
+  assert.deepEqual(Object.keys(kept).sort(), ['means_l.webp', 'means_u.webp', 'meta.json', 'scales.webp', 'sh0.webp']);
   assert.equal(JSON.parse(Buffer.from(kept['meta.json'])).shN, undefined, 'meta.json no longer names the planes left out');
   assert.ok(JSON.parse(Buffer.from(all['meta.json'])).shN);
 
