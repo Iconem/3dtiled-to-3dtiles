@@ -5,6 +5,53 @@ Format loosely follows [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+### Added — 2026-11-11 (VPC of VPCs: a country as a hierarchy of VPC files, and four more countries' worth)
+- **`scripts/vpc-split.mjs <in.vpc[.gz]> -o <dir>/<name>.vpc.gz [--max-items 2048] [--max-bytes 2000000]`** cuts a
+  VPC into a quadtree of child VPC files, each under the item count and the JSON size (Potree's hierarchy pages,
+  for VPCs), and writes a root whose items stand for the children: `pc:type: "vpc"`, the child file as the data
+  asset, `vpc:items`, the sum of `pc:count`, and the union of the items' `bbox` / `geometry` / `proj:bbox` (the
+  native box when they share one CRS); the same children as `links` of `rel: child`, each child linking back to
+  its parent. The root lists the leaves directly when it fits the limits itself; intermediate levels only when
+  not. Quadkeys 0 SW, 1 SE, 2 NW, 3 NE from the root's extent. All of France: 337 206 items → a 60 KB root
+  over 563 files of 9–1 200 items (each with its WKT), 48 s.
+- **Nested VPCs are served**: an item whose asset is a `.vpc` / `.vpc.gz` (or says `pc:type: "vpc"`), and a
+  root-level child link, become `format: vpc` entries of the mosaic whose leaf content is this server's own
+  mosaic of that child (`/stream/tileset.json?format=vpc&url=<child>`), placed from the item's `proj:bbox`
+  like any other: the root mosaic is built from the root file alone and a child is read only when a client
+  refines into it, where it is cut every four group levels past 1 024 items as any VPC. A child named only by a
+  link is placed by reading its mosaic root. `asset.extras.vpc.nested` counts them; `index.json` lists them as
+  `vpc` rows. The tile-server also serves its committed samples read-only at `/samples/<name>`, so a split set
+  opens locally as `/aggregate/tileset.json?vpc=http://localhost:<port>/samples/<name>.vpc.gz` with the
+  children resolved relative to it. Walked end to end on each set below: root (10–293 KB, 0.2–0.7 s) → child
+  mosaic (19–317 KB, 0.2–0.3 s, cut when over 1 024 items) → subtree (27–29 ms) → COPC root (0.8–1.4 s from S3) →
+  first tile (0.7–1.2 MB, 0.9–1.8 s).
+- **Four more sets in the library, split**: **all of IGN's LiDAR HD** (`france-lidarhd.vpc.gz`, the 337 206
+  `.copc.laz` tiles flai mirrors, every header read in about 70 minutes over three runs, 10 071 G points, Lambert-93 WKT per item,
+  563 children, 30 MB gzipped in all under a 60 KB root), **swissSURFACE3D** (`switzerland-swisssurface3d.vpc.gz`:
+  the 15 643 of swisstopo's 58 987 STAC items served as COPC on 2026-11-10, 514.8 G points, LV95 WKT, 27
+  children), **CanElevation New Brunswick + Prince Edward Island** (`canada-canelevation-nb-pei.vpc.gz`: every
+  COPC under `NB/` and `PEI/` of NRCan's bucket, 90 764 of its 751 929 tiles, 39 projects, 1 733 G points,
+  NAD83(CSRS) UTM 19N / 20N WKT, 147 children, 9.9 MB gzipped in all) and a **USGS 3DEP project through NOAA's
+  Digital Coast** (`usgs-3dep-fairbanks-2017.vpc.gz`: Fairbanks North Star Borough 2017 QL1 + QL2, dataset
+  8663, 7 471 tiles, 63.0 G points, 15 children). USGS's own 3DEP is EPT (public) or COPC behind signed URLs,
+  so NOAA's plain-COPC copies are what a static VPC can point at. Every header of the four was read.
+- **`scripts/copc-to-vpc.mjs` for a country**: `--cache headers.ndjson` keeps every header read as it lands and
+  resumes a killed run (France's and New Brunswick's each took several runs); the FeatureCollection is streamed
+  out feature by feature, and `vpc-split` scans one in the same way, since all of France (557 MB of JSON) is more
+  than one V8 string holds; `--listing keys.tsv` keeps the
+  bucket listing (`--prefix` may repeat); `--concurrency N`; `--estimate <grid>` writes a country in two
+  minutes from the listing alone, the footprint from the tile name (grids: `ign-lidarhd`, `swisstopo`) and
+  `pc:count` from the file size through a bytes-per-point ratio fitted on `--calibrate N` real headers (IGN:
+  5.609 B/point over 3 000 files, a count within 10.4 % at the median, 28 % at p90), heights from the nearest
+  calibrated tiles, the items marked `3dtiled:estimated`; `--grid <grid> --extent … --url <template>` writes
+  every cell of an extent with nothing read, a cell with no file 404ing at the leaf. Found on the way: IGN's
+  tile names end in `_PTS_C_` (258 474) or `_PTS_O_` (78 716) and the grid does not say which, so a URL
+  template over France misses a quarter of the tiles; the listing is what tells.
+- 7 tests: the split (the union item; under the limits nothing is split; a 4 900-tile grid into leaves each item
+  reaches once, the root's items and links naming every file; the byte limit and intermediate levels; items
+  without a box kept) and the serving (a root of child items and links parsed to nested entries with bounds;
+  a split set served through `/stream` from the root file alone, the leaf its child's mosaic, the child read
+  once, `index.json` listing `vpc` rows).
 ### Changed — 2026-11-11 (SOG v3: splat-transform 3.11, opacity above 1, mixed-version streamed SOG)
 - **SOG v3 is read**, live and offline, next to v2: `@playcanvas/splat-transform` ^3.11.1 (was 3.10.3) in
   `sog-to-3dtiles` and `tile-server`. Version 3 ([#370](https://github.com/playcanvas/splat-transform/pull/370),

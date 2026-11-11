@@ -19,6 +19,14 @@
  * Only COPC items are streamed: a plain LAS/LAZ file has no levels of detail to map onto tiles (see
  * copc-to-3dtiles, which refuses it for the same reason). They are skipped, counted and reported in
  * `asset.extras.vpc` and in the `X-VPC-*` response headers; a VPC with no COPC item at all is a 422.
+ *
+ * A VPC may also NEST: an item whose data asset is itself a `.vpc` / `.vpc.gz` (scripts/vpc-split.mjs
+ * writes such a root over a country, one child VPC per quadtree cell, each under 2 048 items), or a
+ * root-level `links: [{ rel: "child", href: "….vpc" }]`. A nested item becomes a `format: 'vpc'` entry
+ * whose leaf is this server's own mosaic of that child (`/stream/tileset.json?format=vpc&url=<child>`),
+ * placed from the item's `proj:bbox` like any other: the root mosaic is built from the root file alone,
+ * and a child VPC is read only when a client refines into its cell. A `links` child carries no bounds,
+ * so /aggregate reads that child's mosaic root to place it (one request, not one per item).
  */
 import { gunzipSync } from 'node:zlib';
 import { fetchSource, fetchSourceRange, crsToEcef, epsgOfCrs, ensureCrs, llhToEcef } from '../core/index.js';
@@ -51,10 +59,11 @@ export function resolveHref(href, base) {
 /**
  * What the file name says: 'copc' (`.copc.laz`), 'laz' (may be a COPC: a COPC is a valid LAZ 1.4 and
  * nothing forces the double extension, so only the file's first VLR can tell), 'las' (never a COPC),
- * 'ept', or null.
+ * 'ept', 'vpc' (a nested virtual point cloud, `.vpc` / `.vpc.gz`), or null.
  */
 export function kindOfHref(href) {
   const p = pathOf(href).toLowerCase();
+  if (p.endsWith('.vpc') || p.endsWith('.vpc.gz') || p.endsWith('.vpc.json')) return 'vpc';
   if (p.endsWith('.copc.laz') || p.endsWith('.copc')) return 'copc';
   if (p.endsWith('.laz')) return 'laz';
   if (p.endsWith('.las')) return 'las';
@@ -222,10 +231,12 @@ const SKIP = {
 /**
  * A parsed VPC document → the pieces of an /aggregate set. Pure: no file is opened.
  *
- *   entries    COPC by name, ready to stream: { format, url, name, crs?, bounds?, points?, date? }
+ *   entries    COPC by name, ready to stream: { format, url, name, crs?, bounds?, points?, date? };
+ *              a nested VPC (`format: 'vpc'`) is one entry too, its leaf the child's own mosaic
  *   ambiguous  `.laz` items, same shape: COPC or not is only known once `isCopc` has read 589 bytes
  *   skipped    [{ href, reason }] — plain LAS, EPT, local paths, items without a data asset
  *   overviews  absolute URLs of the `overview` assets, deduplicated (an overview is shared by items)
+ *   nested     how many of the entries are nested VPCs (items whose asset is a .vpc, or child links)
  *
  * `base` is the URL the document came from; without one (a local file) relative hrefs are local paths.
  */
@@ -234,33 +245,55 @@ export function parseVpc(doc, base = null) {
     : doc?.type === 'Feature' ? [doc] : null;
   if (!features) throw Object.assign(new Error('not a VPC: expected a STAC ItemCollection (a GeoJSON FeatureCollection of items)'), { status: 422 });
   const entries = [], ambiguous = [], skipped = [], overviews = new Set();
+  let nested = 0;
   for (const [i, f] of features.entries()) {
     const p = f?.properties ?? {};
     for (const h of overviewAssets(f?.assets)) { const o = resolveHref(h, base); if (o.url && kindOfHref(o.url) === 'copc') overviews.add(o.url); }
-    const href = dataAsset(f?.assets)?.href;
+    const asset = dataAsset(f?.assets);
+    const href = asset?.href;
     const where = resolveHref(href, base);
-    const kind = where.url ? kindOfHref(where.url) : null;
+    // a nested VPC: the href says so, or the item does (`pc:type: "vpc"`, an asset typed as a VPC)
+    const kind = !where.url ? null : kindOfHref(where.url) ?? (isVpcItem(p, asset) ? 'vpc' : null);
     const label = typeof href === 'string' ? href : `item ${f?.id ?? i}`;
     if (!where.url) { skipped.push({ href: label, reason: where.reason }); continue; }
-    if (kind !== 'copc' && kind !== 'laz') { skipped.push({ href: label, reason: SKIP[kind] ?? 'not a LAS/LAZ/COPC file' }); continue; }
+    if (kind !== 'copc' && kind !== 'laz' && kind !== 'vpc') { skipped.push({ href: label, reason: SKIP[kind] ?? 'not a LAS/LAZ/COPC file' }); continue; }
     const b = itemBounds(f);
     const epsg = streamCrs(p);
     const count = Number.isFinite(p['pc:count']) ? p['pc:count'] : null;
     const date = typeof p.datetime === 'string' && /^\d{4}-\d{2}-\d{2}/.test(p.datetime) ? p.datetime.slice(0, 10) : null;
     const entry = {
-      format: 'copc', url: where.url,
+      format: kind === 'vpc' ? 'vpc' : 'copc', url: where.url,
       name: String(f.id ?? decodeURIComponent(pathOf(where.url).split('/').pop())),
       // /stream's &crs=, for a file that carries no CRS of its own (see streamCrs)
-      ...(epsg ? { crs: epsg } : {}),
+      ...(epsg && kind !== 'vpc' ? { crs: epsg } : {}),
       ...(count != null ? { points: count } : {}),
       ...(date ? { date } : {}),
       ...(b ? { bounds: { sphere: b.sphere, geometricError: b.geometricError } } : {}),
     };
     Object.defineProperty(entry, 'boundsFrom', { value: b?.from ?? 'probe', enumerable: false });
-    (kind === 'copc' ? entries : ambiguous).push(entry);
+    if (kind === 'vpc') nested++;
+    (kind === 'laz' ? ambiguous : entries).push(entry);
   }
-  return { items: features.length, entries, ambiguous, skipped, overviews: [...overviews] };
+  // STAC's other way of pointing down: `links` of rel "child" to further VPC files. No bounds travel on
+  // a link, so such an entry is placed by reading its mosaic's root (`boundsFrom.probe`). A link to a
+  // child an item already names (vpc-split.mjs writes both forms) adds nothing.
+  const named = new Set(entries.map((e) => e.url));
+  for (const l of Array.isArray(doc.links) ? doc.links : []) {
+    if (l?.rel !== 'child' || typeof l.href !== 'string') continue;
+    const where = resolveHref(l.href, base);
+    if (!where.url) { skipped.push({ href: l.href, reason: where.reason }); continue; }
+    if (named.has(where.url)) continue;
+    if (kindOfHref(where.url) !== 'vpc' && !/vpc/i.test(l.type ?? '')) { skipped.push({ href: l.href, reason: 'child link that is not a VPC' }); continue; }
+    const entry = { format: 'vpc', url: where.url, name: String(l.title ?? decodeURIComponent(pathOf(where.url).split('/').pop())) };
+    Object.defineProperty(entry, 'boundsFrom', { value: 'probe', enumerable: false });
+    nested++;
+    entries.push(entry);
+  }
+  return { items: features.length, entries, ambiguous, skipped, overviews: [...overviews], nested };
 }
+
+/** Whether an item says it is a nested VPC without its href saying so: `pc:type: "vpc"`, or a data asset typed as one. */
+const isVpcItem = (p, asset) => String(p?.['pc:type'] ?? '').toLowerCase() === 'vpc' || /vpc/i.test(String(asset?.type ?? ''));
 
 // ── COPC or not ──────────────────────────────────────────────────────────────────────────────────
 
@@ -342,6 +375,8 @@ export function vpcToSet(parsed, sorted = { copc: [], skipped: [], sniffed: 0 },
     // where each streamed item's box came from; `probe` = the item gave none, so /aggregate reads that file's root
     boundsFrom,
     points: entries.reduce((n, e) => n + (e.points ?? 0), 0),
+    // nested VPCs among the streamed entries: each is one leaf here, a whole mosaic of its own below
+    ...(parsed.nested ? { nested: parsed.nested } : {}),
     ...(parsed.overviews.length ? { overviews: parsed.overviews } : {}),
   };
   if (!entries.length) {
@@ -395,7 +430,7 @@ export function vpcSet(url, { ttlMs = DEFAULT_TTL_MS, sniff = 'auto' } = {}) {
     const out = vpcToSet(parsed, sorted, { url });
     out.report.readMs = Math.round(performance.now() - t0);
     const r = out.report;
-    console.log(`[vpc] ${url.split('?')[0].slice(-80)}: ${r.items} items, ${r.streamed} COPC streamed, ${r.skipped} skipped`
+    console.log(`[vpc] ${url.split('?')[0].slice(-80)}: ${r.items} items, ${r.streamed} streamed${r.nested ? ` (${r.nested} nested VPC)` : ''}, ${r.skipped} skipped`
       + (r.skipped ? ` (${Object.entries(r.skippedReasons).map(([k, n]) => `${n} ${k}`).join('; ')})` : '') + (r.sniffed ? `, ${r.sniffed} read to tell` : ''));
     return out;
   })();

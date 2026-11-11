@@ -21,6 +21,7 @@
  */
 import http from 'node:http';
 import { readFileSync } from 'node:fs';
+import { readFile } from 'node:fs/promises';
 
 // Machine-local secrets (API keys for proxied providers, e.g. VEXCEL_API_KEY) live in the gitignored
 // .local/tile-server.env as KEY=value lines. Real environment variables win.
@@ -117,10 +118,28 @@ async function handleTiles(req, res, u) {
   return cache === 'full' ? handleConvert(req, res, u2) : handleStream(req, res, u2);
 }
 
+// The committed sample VPCs (packages/tile-server/samples/: countries' LiDAR as virtual point clouds,
+// some split into a root and child files), served read-only so a local server can open them as
+// /aggregate/tileset.json?vpc=http://localhost:<port>/samples/<name>.vpc.gz without a second server.
+const SAMPLES_DIR = new URL('./samples/', import.meta.url);
+const SAMPLE_TYPES = { '.vpc': 'application/geo+json', '.gz': 'application/gzip', '.json': 'application/json' };
+async function handleSamples(req, res, u) {
+  if (!u.pathname.startsWith('/samples/')) return false;
+  const rel = decodeURIComponent(u.pathname.slice('/samples/'.length));
+  if (!/^[\w.-]+(\/[\w.-]+)*$/.test(rel) || rel.split('/').includes('..')) { res.writeHead(404, CORS); res.end('no such sample'); return true; }
+  let data;
+  try { data = await readFile(new URL(rel, SAMPLES_DIR)); } catch { res.writeHead(404, CORS); res.end('no such sample'); return true; }
+  const ext = rel.slice(rel.lastIndexOf('.'));
+  res.writeHead(200, { 'Content-Type': SAMPLE_TYPES[ext] ?? 'application/octet-stream', 'Content-Length': data.length, ...CORS });
+  res.end(data);
+  return true;
+}
+
 http.createServer(async (req, res) => {
   try {
     if (req.method === 'OPTIONS') { res.writeHead(204, CORS); return res.end(); }
     const u = new URL(req.url, `http://localhost:${PORT}`);
+    if (await handleSamples(req, res, u)) return;     // /samples/<file> — the committed sample VPCs
     if (u.pathname === '/progress') {                // server-side progress of cache=hierarchy/full ops
       const snap = progressGet(u.searchParams.get('key') || '');
       res.writeHead(200, { 'Content-Type': 'application/json', ...CORS });
