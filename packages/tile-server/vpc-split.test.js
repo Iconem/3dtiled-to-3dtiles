@@ -2,7 +2,7 @@
 // items stand for the children, and the root parsed back by vpc-live as nested entries with bounds. No network.
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { splitVpc, summaryItem, featureBox } from '../../scripts/vpc-split.mjs';
+import { splitVpc, summaryItem, featureBox, readCollection } from '../../scripts/vpc-split.mjs';
 import { parseVpc } from './vpc-live.js';
 
 const UTM32 = 'PROJCS["ETRS89 / UTM zone 32N",GEOGCS["ETRS89",DATUM["European_Terrestrial_Reference_System_1989",SPHEROID["GRS 1980",6378137,298.257222101]],PRIMEM["Greenwich",0],UNIT["degree",0.0174532925199433]],PROJECTION["Transverse_Mercator"],PARAMETER["latitude_of_origin",0],PARAMETER["central_meridian",9],PARAMETER["scale_factor",0.9996],PARAMETER["false_easting",500000],PARAMETER["false_northing",0],UNIT["metre",1],AUTHORITY["EPSG","25832"]]';
@@ -125,4 +125,21 @@ test('items without a box ride along in the first quadrant and are never lost', 
   const ids = new Set([...files.values()].flatMap((fc) => fc.features.map((f) => f.id)));
   assert.equal(ids.size, 905);
   for (let i = 0; i < 5; i++) assert.ok(ids.has(`nowhere_${i}`));
+});
+
+test('a collection past the string cap is scanned feature by feature, braces and quotes inside strings and multi-byte text included, and reads as JSON.parse does', () => {
+  const g = grid(6, 5);
+  g.links = [{ rel: 'self', href: './g.vpc' }];
+  g.features[3].properties.title = 'a "quoted" {brace} \ and ] bracket — été, 東京';
+  g.features[7].properties.description = '}{][';
+  for (const text of [JSON.stringify(g), JSON.stringify(g, null, 2)]) {
+    const bytes = Buffer.from(text, 'utf8');
+    const scanned = readCollection(bytes, 0);                 // cap 0: the scanning path on a small document
+    assert.deepEqual(scanned, JSON.parse(text));
+    assert.equal(scanned.features.length, 30);
+    assert.deepEqual(scanned.links, g.links);
+  }
+  assert.deepEqual(readCollection(Buffer.from(JSON.stringify(g))), JSON.parse(JSON.stringify(g)));   // under the cap: one parse
+  assert.throws(() => readCollection(Buffer.from('{"type":"FeatureCollection"}'), 0), /no "features"/);
+  assert.throws(() => readCollection(Buffer.from('{"features":[1]}'), 0), /unexpected byte/);
 });
