@@ -208,12 +208,15 @@ export async function osgbStats(src, { server, cache, concurrency = 8, maxFiles 
   let duplicates = 0, read = 0;
   let queue = roots.map((rel) => ({ rel, depth: 1 }));
   while (queue.length) {
-    const depth = queue[0].depth, next = [];
+    // children are gathered per parent and joined in the parents' order afterwards, so the files a --max-files budget
+    // keeps are the same whichever read finishes first (the cut would otherwise follow the host's timing)
+    const depth = queue[0].depth, perParent = queue.map(() => []);
     // the limits: a level past --max-depth, or the files past --max-files, are named but not read
     if (depth > maxDepth || read >= maxFiles) { cut[depth - 1] = (cut[depth - 1] || 0) + queue.length; break; }
     if (read + queue.length > maxFiles) { const keep = maxFiles - read; cut[depth - 1] = (cut[depth - 1] || 0) + queue.length - keep; queue = queue.slice(0, keep); }
     read += queue.length;
-    await parallelMap(queue, async ({ rel }) => {
+    await parallelMap(queue, async ({ rel }, qi) => {
+      const next = perParent[qi];
       let buf;
       try { buf = await s.read(rel); } catch (e) { failed.push({ file: rel, error: e.message }); return; }
       if (!buf) { missing.push(rel); return; }
@@ -234,6 +237,7 @@ export async function osgbStats(src, { server, cache, concurrency = 8, maxFiles 
         for (const f of finer) { if (seen.has(f)) duplicates++; else { seen.add(f); next.push({ rel: f, depth: depth + 1 }); } }
       }
     }, { concurrency });
+    const next = perParent.flat();
     log(`depth ${depth}: ${queue.length} file(s), ${(total.bytes / 1e6).toFixed(1)} MB so far, ${next.length} finer file(s) named`);
     queue = next;
   }
