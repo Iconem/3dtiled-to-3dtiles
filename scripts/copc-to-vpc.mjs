@@ -42,7 +42,7 @@
  */
 import fs from 'node:fs/promises';
 import { existsSync, createWriteStream } from 'node:fs';
-import { gzipSync } from 'node:zlib';
+import { createGzip } from 'node:zlib';
 import { crsToEcef, ecefToLlh, fetchSourceRange } from '../packages/core/index.js';
 import { copcHeaderInfo } from '../packages/tile-server/copc-live.js';
 
@@ -348,16 +348,35 @@ function gridItems(grid) {
     return makeItem(url, { min: [x0, y0, z0], max: [x1, y1, z1], pointCount: points, wkt: null, created: null, estimated: ['pc:count', 'z', 'exists'] }); }), failed: [], fit: null };
 }
 
+/**
+ * The FeatureCollection, one feature at a time through the (gzip) stream: 337 206 items each carrying
+ * their own WKT are more JSON than the 512 MB string V8 can hold, so the document is never one string.
+ */
+async function writeCollection(file, features, pretty) {
+  const sink = createWriteStream(file);
+  const gz = file.endsWith('.gz') ? createGzip({ level: 9 }) : null;
+  if (gz) gz.pipe(sink);
+  const w = gz ?? sink;
+  let json = 0;
+  const put = (s) => { json += Buffer.byteLength(s); return w.write(s) ? Promise.resolve() : new Promise((r) => w.once('drain', r)); };
+  await put(pretty ? '{\n  "type": "FeatureCollection",\n  "features": [\n' : '{"type":"FeatureCollection","features":[');
+  for (let i = 0; i < features.length; i++) {
+    const f = pretty ? JSON.stringify(features[i], null, 2).replace(/^/gm, '    ') : JSON.stringify(features[i]);
+    await put((i ? (pretty ? ',\n' : ',') : '') + f);
+  }
+  await put(pretty ? '\n  ]\n}\n' : ']}\n');
+  await new Promise((resolve, reject) => { sink.on('finish', resolve); sink.on('error', reject); w.end(); });
+  return { json, written: (await fs.stat(file)).size };
+}
+
 // ── run ──────────────────────────────────────────────────────────────────────────────────────────
 
 const t0 = performance.now();
 const { items, failed, fit } = gridMode ? gridItems(gridMode) : estimateGrid ? await estimateItems(estimateGrid) : await pooled(urls, headerItem, 'headers').then((r) => ({ items: r.results, failed: r.failed, fit: null }));
 const kept = items.filter(Boolean);
-const json = JSON.stringify({ type: 'FeatureCollection', features: kept }, null, argv.includes('--pretty') ? 2 : 0) + '\n';
-const bytes = out.endsWith('.gz') ? gzipSync(json, { level: 9 }) : Buffer.from(json);
-await fs.writeFile(out, bytes);
+const { json: jsonBytes, written } = await writeCollection(out, kept, argv.includes('--pretty'));
 console.log(`${urls.length} files → ${kept.length} items (${kept.reduce((n, f) => n + f.properties['pc:count'], 0).toLocaleString('en')} points${fit ? `, ${fit.estimated} estimated from ${fit.calibrated} calibrated` : ''}) → ${out}, `
-  + `${(json.length / 1e6).toFixed(2)} MB of JSON${out.endsWith('.gz') ? ` (${(bytes.length / 1e6).toFixed(2)} MB gzipped)` : ''}, ${Math.round(performance.now() - t0)} ms`);
+  + `${(jsonBytes / 1e6).toFixed(2)} MB of JSON${out.endsWith('.gz') ? ` (${(written / 1e6).toFixed(2)} MB gzipped)` : ''}, ${Math.round(performance.now() - t0)} ms`);
 if (failed.length) console.warn(`${failed.length} failed:\n  ${failed.slice(0, 10).join('\n  ')}`);
 if (cache.out) { await new Promise((r) => cache.out.end(r)); await new Promise((r) => setImmediate(r)); }
 process.exit(0);

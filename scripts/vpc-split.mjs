@@ -172,6 +172,43 @@ export function splitVpc(doc, { maxItems = DEFAULTS.maxItems, maxBytes = DEFAULT
 
 const inflate = (b) => (b.length >= 2 && b[0] === 0x1f && b[1] === 0x8b ? gunzipSync(b) : b);
 
+/**
+ * The VPC as an object. A document under V8's string cap is one JSON.parse; a larger one (all of
+ * France is 557 MB of JSON, each item with its own WKT) is scanned feature by feature over the bytes —
+ * JSON's structural characters are ASCII and every byte of a multi-byte UTF-8 character is ≥ 0x80, so
+ * braces and quotes are found without decoding — and the document around the array is parsed on its own.
+ */
+export function readCollection(bytes, cap = 500_000_000) {
+  if (bytes.length < cap) return JSON.parse(bytes.toString('utf8'));
+  const key = Buffer.from('"features"');
+  let i = bytes.indexOf(key);
+  if (i < 0) throw new Error('not a VPC: no "features" array');
+  const keyAt = i;
+  i += key.length;
+  while (bytes[i] !== 0x5b) { if (!/\s|:/.test(String.fromCharCode(bytes[i]))) throw new Error('not a VPC: "features" is not an array'); i++; }
+  const arrayAt = i++;
+  const features = [];
+  for (;;) {
+    while (bytes[i] === 0x20 || bytes[i] === 0x0a || bytes[i] === 0x0d || bytes[i] === 0x09 || bytes[i] === 0x2c) i++;
+    if (bytes[i] === 0x5d) break;                    // ]
+    if (bytes[i] !== 0x7b) throw new Error(`unexpected byte 0x${bytes[i].toString(16)} at ${i} in the features array`);
+    const start = i;
+    let depth = 0, inString = false;
+    for (; i < bytes.length; i++) {
+      const c = bytes[i];
+      if (inString) { if (c === 0x5c) i++; else if (c === 0x22) inString = false; }
+      else if (c === 0x22) inString = true;
+      else if (c === 0x7b) depth++;
+      else if (c === 0x7d && --depth === 0) { i++; break; }
+    }
+    if (depth) throw new Error('unterminated feature');
+    features.push(JSON.parse(bytes.toString('utf8', start, i)));
+  }
+  const rest = JSON.parse(bytes.toString('utf8', 0, keyAt) + '"features":[]' + bytes.toString('utf8', i + 1));
+  rest.features = features;
+  return rest;
+}
+
 async function main() {
   const argv = process.argv.slice(2);
   const flag = (n) => { const i = argv.indexOf(`--${n}`); return i >= 0 ? argv[i + 1] : null; };
@@ -180,7 +217,7 @@ async function main() {
   if (!input || !out) { console.error('usage: node scripts/vpc-split.mjs <in.vpc[.gz] | url> -o <dir>/<name>.vpc[.gz] [--max-items 2048] [--max-bytes 2000000] [--pretty]'); process.exit(1); }
   const t0 = performance.now();
   const bytes = /^https?:\/\//.test(input) ? Buffer.from(await (await fetch(input)).arrayBuffer()) : await fs.readFile(input);
-  const doc = JSON.parse(inflate(bytes).toString('utf8'));
+  const doc = readCollection(inflate(bytes));
   const gz = out.endsWith('.gz'), ext = gz ? '.vpc.gz' : '.vpc';
   const name = path.basename(out).replace(/\.vpc(\.gz)?$/i, '');
   const { root, files, stats } = splitVpc(doc, { maxItems: Number(flag('max-items')) || DEFAULTS.maxItems, maxBytes: Number(flag('max-bytes')) || DEFAULTS.maxBytes, name, ext });
