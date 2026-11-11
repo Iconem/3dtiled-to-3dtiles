@@ -8,6 +8,30 @@ Format loosely follows [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+### Changed — 2026-11-11 (SOG v3: splat-transform 3.11, opacity above 1, mixed-version streamed SOG)
+- **SOG v3 is read**, live and offline, next to v2: `@playcanvas/splat-transform` ^3.11.1 (was 3.10.3) in
+  `sog-to-3dtiles` and `tile-server`. Version 3 ([#370](https://github.com/playcanvas/splat-transform/pull/370),
+  the default of splat-transform's CLI from 3.11 and what SuperSplat will publish) drops `quats.webp` for a 24-bit
+  exponential-map rotation in the alpha channels of `means_l`/`means_u`/`scales`, stores opacity as `(b / 204)²` up
+  to 1.5625 (`meta.opacity.max` when some exceed 1), labels its SH palette on 24 bits and allows a 4th SH band. None
+  of that reaches our reader: `readSog` gives the same columns and row order for both. A streamed SOG's
+  `lod-meta.json` stays version 1 and its chunks may mix v2 and v3; both routes take them chunk by chunk.
+- **Opacity above 1 is clamped to 1 in the tile.** The DataTable's `opacity` logit saturates (`+Infinity` for 1,
+  16.64 above it) and the true value comes as `opacity_linear`; `sogChunk.js`'s `extractRange` takes that column when
+  it is there and clamps, since SPZ v2 holds one alpha byte of [0, 1] and this repo's viewers draw no opaque core.
+  So a v3 chunk gives the tile its v2 encoding would (v2 clamps on write). The tile worker hands the column over
+  too, and the GeoSplats and worker paths of `splat-tile.js` now go through the same `extractRange`.
+- **`lodErrors`**: when a `lod-meta.json` says so, a leaf's `errors` (one per LOD level, relative magnitudes) set
+  the geometric errors of its LOD chain: the coarsest level keeps its depth's error, each finer one its share, the
+  finest refining to 0 (`sog-to-3dtiles/src/lodMeta.js`, shared by the converter and `sog-live.js`). Halving stays
+  for a leaf without usable errors.
+- Fixtures (`packages/sog-to-3dtiles/test/fixtures`, 829 KB, from `scripts/make-fixtures.mjs` and the seeded scene
+  of `test/scene.mjs`, 3 000 splats with one SH band): the scene as SOG v2 and v3, and as a streamed SOG of three
+  LOD levels in each version, whose decimated level holds opacity above 1 (`opacity.max` 1.05). 5 tests
+  (`pnpm --filter sog-to-3dtiles test`): v2 and v3 decode alike (positions within 1e-4, colours within a codebook
+  step, alphas within 0.01, rotations within 2.5°) and are the scene; the over-unity chunk clamps and its SPZ
+  positions equal the v2 chunk's; a scene mixing v2 and v3 chunks converts offline and serves live; `lodErrors`.
+
 ### Added — 2026-11-11 (Nexus: 3DHOP's multiresolution meshes, live and offline)
 - **Nexus (`.nxs` / `.nxz`, CNR-ISTI Visual Computing Lab, the format of 3DHOP) is read, live and offline.**
   `GET /stream/tileset.json?format=nexus&url=<….nxz>` (`packages/tile-server/nexus-live.js`) builds the tileset

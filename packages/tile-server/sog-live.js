@@ -13,6 +13,7 @@
 import path from 'node:path';
 import { readSog, MemoryReadFileSystem } from '@playcanvas/splat-transform';
 import { extractRange } from '../sog-to-3dtiles/src/sogChunk.js';
+import { lodGeometricErrors } from '../sog-to-3dtiles/src/lodMeta.js';
 import { memoizeAsync, fetchSource as fetchBuf, tilePool, runTileTaskOr, ownBytes } from '../core/index.js';
 import { splatArraysGlb } from './splat-tile.js';
 
@@ -104,12 +105,13 @@ function buildTileset(ctx, urlParam, centroids = false) {
     }
     const levels = Object.keys(node.lods ?? {}).map(Number).sort((p, q) => p - q);
     if (!levels.length) return { tile: { boundingVolume: { box }, geometricError: geAt(depth), refine: 'REPLACE' } };
-    const maxL = levels[levels.length - 1];
+    // Halving per LOD level, or the leaf's own `errors` when lod-meta.json carries them (sog-to-3dtiles/lodMeta.js).
+    const ges = lodGeometricErrors(node, levels, depth, geAt, ctx.lod.lodErrors === true);
     let child = null;
     for (const level of levels) {
       const r = node.lods[String(level)];
       const uri = `tile/${r.file}_${r.offset}_${r.count}.glb?url=${enc}`;
-      const tile = { boundingVolume: { box }, geometricError: geAt(depth + (maxL - level)), refine: 'REPLACE', content: { uri } };
+      const tile = { boundingVolume: { box }, geometricError: ges.get(level), refine: 'REPLACE', content: { uri } };
       if (child) tile.children = [child];
       child = tile;
     }

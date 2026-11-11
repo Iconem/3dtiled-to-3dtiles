@@ -358,8 +358,8 @@ importers:
   packages/sog-to-3dtiles:
     dependencies:
       '@playcanvas/splat-transform':
-        specifier: ^3.10.3
-        version: 3.10.3(playcanvas@2.19.7)
+        specifier: ^3.11.1
+        version: 3.11.1(playcanvas@2.19.7)
 
   packages/threemx-to-3dtiles: {}
 
@@ -378,8 +378,8 @@ importers:
         specifier: ^4.4.3
         version: 4.4.3(@loaders.gl/core@4.4.3)
       '@playcanvas/splat-transform':
-        specifier: ^3.10.3
-        version: 3.10.3(playcanvas@2.19.7)
+        specifier: ^3.11.1
+        version: 3.11.1(playcanvas@2.19.7)
       copc:
         specifier: ^0.0.8
         version: 0.0.8
@@ -434,8 +434,8 @@ packages:
     engines: {node: '>=18.0.0'}
     hasBin: true
 
-  '@adobe/spz@0.2.3':
-    resolution: {integrity: sha512-iMiIB+FUxQ2vaNxP012fdIVd4yugyq0PUXBaknGfYDE3xpTNU5PrhbLtnDTGFE9anKOwjneOuanSKqaaNpC68Q==}
+  '@adobe/spz@0.3.1':
+    resolution: {integrity: sha512-3HVGFYny7rGrpPFvAApDLM9U0owm0wO1+ipcEC52JIy+Vj0p/Mmuuq95utVmdZ7FLAfWb4mvme+H0JBvpc3HFw==}
 
   '@ai-sdk/gateway@3.0.13':
     resolution: {integrity: sha512-g7nE4PFtngOZNZSy1lOPpkC+FAiHxqBJXqyRMEG7NUrEVZlz5goBdtHg1YgWRJIX776JTXAmbOI5JreAKVAsVA==}
@@ -1452,8 +1452,8 @@ packages:
   '@phosphor-icons/core@2.1.1':
     resolution: {integrity: sha512-v4ARvrip4qBCImOE5rmPUylOEK4iiED9ZyKjcvzuezqMaiRASCHKcRIuvvxL/twvLpkfnEODCOJp5dM4eZilxQ==}
 
-  '@playcanvas/splat-transform@3.10.3':
-    resolution: {integrity: sha512-+jzoQtM1EHDwE2WKuEcaX9RGCGzk6VKnSAmOAiTB2TiNwB1kx2RhesXoSzrGvjKSKEPx6Pr/8kJhcl2WY70Ffg==}
+  '@playcanvas/splat-transform@3.11.1':
+    resolution: {integrity: sha512-CQ+EzLED5gLsacSJpKJcCv7+abOQkEB0zW2vUVa/K/trPx3v3tXxgcGyDNkqqu76cbsez5YurJcGw+lRj5istw==}
     engines: {node: '>=22.0.0'}
     hasBin: true
     peerDependencies:
@@ -3080,9 +3080,6 @@ packages:
     resolution: {integrity: sha512-e89uuTLMh0U5cZ9iDpEI2senqPGfbPRTHM/0AaQkcxnpqjkZqDYP8rpfm7edOz8s+pOCOROEy1PIveSW8+fL5g==}
     peerDependencies:
       vue: ^3.5.0
-
-  '@webgpu/types@0.1.70':
-    resolution: {integrity: sha512-LFiNHHKMvmAEvwVew3JLJmTdShhbdwRFSImUshGhE2mGE8ybQzIo63l5uRp+YKnNx+8Qno8Kf6gN+DKMreIJCA==}
 
   '@webgpu/types@0.1.74':
     resolution: {integrity: sha512-lgiI4hbuLcI9unnm2cL/tvCaQU45dp0xcLWJh5uB/9MBGvIA4F8XIk7nSiBeg+K4xWGYwgZKn80LmERI5CxoTA==}
@@ -6964,7 +6961,7 @@ snapshots:
       - bare-buffer
       - react-native-b4a
 
-  '@adobe/spz@0.2.3': {}
+  '@adobe/spz@0.3.1': {}
 
   '@ai-sdk/gateway@3.0.13(zod@4.4.3)':
     dependencies:
@@ -8042,9 +8039,9 @@ snapshots:
 
   '@phosphor-icons/core@2.1.1': {}
 
-  '@playcanvas/splat-transform@3.10.3(playcanvas@2.19.7)':
+  '@playcanvas/splat-transform@3.11.1(playcanvas@2.19.7)':
     dependencies:
-      '@adobe/spz': 0.2.3
+      '@adobe/spz': 0.3.1
       playcanvas: 2.19.7
       webgpu: 0.6.2
     transitivePeerDependencies:
@@ -9868,8 +9865,6 @@ snapshots:
   '@vueuse/shared@13.9.0(vue@3.5.39(typescript@6.0.3))':
     dependencies:
       vue: 3.5.39(typescript@6.0.3)
-
-  '@webgpu/types@0.1.70': {}
 
   '@webgpu/types@0.1.74': {}
 
@@ -13067,7 +13062,7 @@ snapshots:
   playcanvas@2.19.7:
     dependencies:
       '@types/webxr': 0.5.24
-      '@webgpu/types': 0.1.70
+      '@webgpu/types': 0.1.74
     optionalDependencies:
       canvas: 3.2.3
 

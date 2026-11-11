@@ -12,6 +12,15 @@
  *   rot_0..3         quaternion in (w,x,y,z) order (PLY convention)
  *   f_dc_0..2        SH DC coefficient          → color = 0.5 + SH_C0·f_dc
  *   opacity          logit                      → alpha = sigmoid()
+ *   opacity_linear   the opacity itself, only when some splat's exceeds 1 (SOG v3) → alpha = min(1, ·)
+ *
+ * SOG v2 and v3 (splat-transform 3.11, November 2026) come out of `readSog` through the same columns: v3 keeps its
+ * rotation in the alpha channels of means_l/means_u/scales instead of a quats.webp, its SH palette labels on 24 bits
+ * and up to 4 SH bands, none of which this reader sees. What it does see is v3's opacity, a byte `(b/204)²` that
+ * reaches 1.5625 for gaussians merged by decimation: the DataTable's `opacity` logit is then `+Infinity` for exactly 1
+ * and the logit of the largest float below 1 (16.64) for anything above, both of which sigmoid to 1, and the true
+ * value is in `opacity_linear`. A tile here is SPZ v2, whose alpha is one byte of [0, 1]: opacity above 1 is clamped
+ * to 1 (the renderers of this repo draw no opaque core), so a v3 chunk gives the same tile its v2 encoding would.
  */
 
 import fs   from 'fs/promises';
@@ -94,7 +103,7 @@ export function extractRange(table, offset, count) {
   const s0 = col('scale_0'), s1 = col('scale_1'), s2 = col('scale_2');
   const r0 = col('rot_0'), r1 = col('rot_1'), r2 = col('rot_2'), r3 = col('rot_3');
   const c0 = col('f_dc_0'), c1 = col('f_dc_1'), c2 = col('f_dc_2');
-  const op = col('opacity');
+  const ol = col('opacity_linear'), op = col('opacity');
 
   const positions = new Float32Array(count * 3);
   const alphas    = new Float32Array(count);
@@ -106,8 +115,10 @@ export function extractRange(table, offset, count) {
     const i = offset + j;
     positions[j*3]   = x[i]; positions[j*3+1] = y[i]; positions[j*3+2] = z[i];
 
-    // opacity is a logit in the DataTable (PLY/SOG convention) → sigmoid to [0,1].
-    alphas[j] = op ? Math.max(0, Math.min(1, sigmoid(op[i]))) : 1;
+    // opacity is a logit in the DataTable (PLY/SOG convention) → sigmoid to [0,1]; a SOG v3 chunk with opacity above
+    // 1 carries the true value in opacity_linear, clamped to 1 here (SPZ alpha is a byte of [0, 1], see above).
+    const a = ol ? ol[i] : op ? sigmoid(op[i]) : 1;
+    alphas[j] = a > 1 ? 1 : a >= 0 ? a : 0;   // NaN → 0
 
     if (rgb) {
       rgb[j*3]   = Math.max(0, Math.min(1, 0.5 + c0[i] * SH_C0));
