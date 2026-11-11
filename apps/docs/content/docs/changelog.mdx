@@ -31,6 +31,10 @@ Format loosely follows [Keep a Changelog](https://keepachangelog.com/).
   (`pnpm --filter sog-to-3dtiles test`): v2 and v3 decode alike (positions within 1e-4, colours within a codebook
   step, alphas within 0.01, rotations within 2.5°) and are the scene; the over-unity chunk clamps and its SPZ
   positions equal the v2 chunk's; a scene mixing v2 and v3 chunks converts offline and serves live; `lodErrors`.
+- Checked end to end on the Skatepark preset through `/stream/tileset.json?format=sog`: the tileset (2 054 tiles,
+  516 leaves) in 0.7 s, a 125-splat leaf GLB in 12.7 s with its chunk decoded cold, SPZ v2 payload and GLB chunk
+  lengths as expected. The tile-server and core suites stay at 194 passing (one lcc2 expectation updated: a SOG
+  written by 3.11 has no `quats.webp`); the viewer type-checks.
 
 ### Added — 2026-11-11 (Nexus: 3DHOP's multiresolution meshes, live and offline)
 - **Nexus (`.nxs` / `.nxz`, CNR-ISTI Visual Computing Lab, the format of 3DHOP) is read, live and offline.**
