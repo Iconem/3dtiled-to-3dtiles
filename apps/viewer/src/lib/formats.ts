@@ -117,9 +117,9 @@ export const FORMATS: FormatMeta[] = [
     // Self-made over flai's COPC mirror of IGN's LiDAR HD (Licence Ouverte 2.0): the 100 km Lambert-93 block X 600–700 / Y 6800–6900 km,
     // Paris and most of Île-de-France, 5 712 of the 337 206 tiles mirrored. 127 G points.
     { id: 'france-lidarhd-paris', label: 'IGN LiDAR HD, Paris 100 km block, 5 712 tiles (via flai, 127G, self-made VPC) ⬀', src: 'https://raw.githubusercontent.com/jo-chemla/3dtiled-to-3dtiles/main/packages/tile-server/samples/france-lidarhd-paris-100km.vpc.gz' },
-    // Self-made over ALL of flai's IGN LiDAR HD mirror: 337 206 tiles, footprints from the names and counts from the sizes (scripts/copc-to-vpc.mjs --estimate),
-    // split by scripts/vpc-split.mjs into a 30 KB root over 385 child VPCs (24 MB gzipped in all). 10.0 T points estimated.
-    { id: 'france-lidarhd', label: 'IGN LiDAR HD, all of France, 337 206 tiles (via flai, ~10T, split VPC of VPCs) ⬀', src: 'https://raw.githubusercontent.com/jo-chemla/3dtiled-to-3dtiles/main/packages/tile-server/samples/france-lidarhd.vpc.gz' },
+    // Self-made over ALL of flai's IGN LiDAR HD mirror: 337 206 tiles, every header read (scripts/copc-to-vpc.mjs, about 70 min over three runs resumed from --cache),
+    // 10.07 T points, split by scripts/vpc-split.mjs into a 60 KB root over 563 child VPCs (30 MB gzipped in all; 557 MB as one JSON file).
+    { id: 'france-lidarhd', label: 'IGN LiDAR HD, all of France, 337 206 tiles (via flai, 10.07T, split VPC of VPCs) ⬀', src: 'https://raw.githubusercontent.com/jo-chemla/3dtiled-to-3dtiles/main/packages/tile-server/samples/france-lidarhd.vpc.gz' },
     // Self-made from swisstopo's STAC API: every swissSURFACE3D 1 km tile served as COPC (15 643 of 58 987 items on 2026-11-10), headers read, split into 27 children.
     { id: 'switzerland-swisssurface3d', label: 'swissSURFACE3D, 15 643 COPC tiles (swisstopo, 515G, split VPC) ⬀', src: 'https://raw.githubusercontent.com/jo-chemla/3dtiled-to-3dtiles/main/packages/tile-server/samples/switzerland-swisssurface3d.vpc.gz' },
     // Self-made over NRCan's CanElevation bucket (OGL-Canada): the whole of New Brunswick and Prince Edward Island, 90 764 of its 751 929 COPC tiles,

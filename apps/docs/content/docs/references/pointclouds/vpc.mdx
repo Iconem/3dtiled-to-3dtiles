@@ -68,8 +68,9 @@ From the root of Luxembourg to a leaf's first points: root 157 ms, subtree 12 ms
 ### A VPC of VPCs: the hierarchy past a few thousand items
 
 The cut keeps the *tileset* small, but the server still parses the whole `.vpc` before answering: all of
-France is 337 206 items, 323 MB of JSON (24 MB gzipped), 12 s cold, and whoever else opens the file (QGIS,
-PDAL) parses every item before showing the first. So past a few thousand items the VPC itself is made
+France is 337 206 items, 557 MB of JSON (29 MB gzipped) — more than one JavaScript string holds, so the
+writer streams the features out and `vpc-split` scans them in — and whoever else opens the file (QGIS, PDAL)
+parses every item before showing the first. So past a few thousand items the VPC itself is made
 hierarchical, the way Potree's hierarchy is cut into pages: **a root VPC whose items stand for child VPC
 files**, each child under an item count and a JSON size.
 
@@ -108,16 +109,18 @@ from the root to the first points of a leaf, measured on this machine with the f
 
 | Set | Items | Root | Children | Root → child VPC → (subtree) → COPC root → first tile |
 |---|---:|---:|---|---|
-| IGN LiDAR HD, all of France | 337 206 | 385 items, 30 KB gzipped (364 KB JSON); served 204 KB in 173 ms | 385 files of 24–2 044 items (median 662), 1.96 MB of JSON at most, 24 MB gzipped in all, quadtree 5 deep | 173 ms · 19 KB in 135 ms (1 054 items, cut: 30 externals) · 34 KB in 25 ms · 4.9 s · 1.25 MB in 11.2 s |
-| swissSURFACE3D | 15 643 | 27 items, 4 KB (47 KB JSON); 16 KB in 89 ms | 27 files of 22–1 033 items, 1.5 MB in all, quadtree 3 deep | 89 ms · 317 KB in 44 ms (498 items, no cut) · 4.9 s · 1.09 MB in 3.8 s |
-| USGS 3DEP Fairbanks 2017 | 7 471 | 15 items, 2.6 KB (28 KB JSON); 10 KB in 106 ms | 15 files of 121–980 items, 0.8 MB in all, quadtree 3 deep | 106 ms · 197 KB in 52 ms (316 items) · 8.1 s · 661 KB in 5.4 s |
-| CanElevation, New Brunswick + PEI | 90 764 | 147 items, 16.5 KB (207 KB JSON); 83 KB in 70 ms | 147 files of 13–1 213 items (median 619), 1.99 MB of JSON at most, 9.9 MB gzipped in all, quadtree 5 deep | 70 ms · 106 KB in 96 ms (1 123 items, cut: 32 externals) · 24 KB in 7 ms · 7.0 s · 878 KB in 8.4 s |
+| IGN LiDAR HD, all of France | 337 206 | 563 items, 60 KB gzipped (993 KB JSON); served 293 KB in 669 ms | 563 files of 9–1 200 items (median 525), 1.98 MB of JSON at most, 30 MB gzipped in all, quadtree 5 deep | 669 ms · 19 KB in 326 ms (1 054 items, cut: 30 externals) · 34 KB in 29 ms · 0.8 s · 1.25 MB in 1.3 s |
+| swissSURFACE3D | 15 643 | 27 items, 4 KB (47 KB JSON); 16 KB in 257 ms | 27 files of 22–1 033 items, 1.5 MB in all, quadtree 3 deep | 257 ms · 317 KB in 208 ms (498 items, no cut) · 0.9 s · 1.09 MB in 0.9 s |
+| USGS 3DEP Fairbanks 2017 | 7 471 | 15 items, 2.6 KB (28 KB JSON); 10 KB in 208 ms | 15 files of 121–980 items, 0.8 MB in all, quadtree 3 deep | 208 ms · 197 KB in 162 ms (316 items) · 1.3 s · 661 KB in 1.1 s |
+| CanElevation, New Brunswick + PEI | 90 764 | 147 items, 16.5 KB (207 KB JSON); 83 KB in 244 ms | 147 files of 13–1 213 items (median 619), 1.99 MB of JSON at most, 9.9 MB gzipped in all, quadtree 5 deep | 244 ms · 106 KB in 199 ms (1 123 items, cut: 32 externals) · 24 KB in 27 ms · 1.4 s · 878 KB in 1.8 s |
 
-Against the depth cut alone on the same 337 206 items (a 22 KB root, but 12.7 s cold to parse the 225 MB
-`.vpc` and 2.6 s warm), the split root is a 30 KB file that answers in 173 ms with nothing else read, and a
-child of 2 000 items costs what Luxembourg's first 1 000 did. What a client waits for is still the point
-cloud: the COPC root (header and hierarchy from S3) and its first tile are seconds, the three index hops
-together under half a second.
+Against the depth cut alone on the same 337 206 items (measured on the estimated build, 225 MB without each
+item's WKT: a 22 KB root, but 12.7 s cold to parse the `.vpc` and 2.6 s warm; the final 557 MB one no longer
+fits a JavaScript string at all), the split root is a 60 KB file that answers in 0.7 s with nothing else
+read, and a child of 1 000 items costs what Luxembourg's first 1 000 did. What a client waits for is still
+the point cloud: the COPC root (header and hierarchy from S3) and its first tile are a second or two each
+(timings from one morning; the same walk the evening before saw 5–11 s per S3 read), the three index hops
+together about a second.
 
 ### Which items are streamed
 
@@ -208,7 +211,7 @@ Three ways to know where a tile is and how many points it holds, from the exact 
 
 | Mode | Reads | Gives | When |
 |---|---|---|---|
-| default | one 2 KB header per file | exact extent, count, WKT, date | always right; 337 206 files are FRANCE_HOURS at 32 in flight |
+| default | one 2 KB header per file | exact extent, count, WKT, date | always right; 337 206 files are about 70 minutes of reads at 16–32 in flight, over three runs resumed from `--cache` |
 | `--estimate <grid>` (`ign-lidarhd`, `swisstopo`) | `--calibrate N` headers (500) drawn at random | the footprint from the tile **name**, `pc:count` from the file **size** the `--s3` listing gives through a fitted bytes-per-point ratio (printed), heights from the nearest calibrated tiles; items marked `"3dtiled:estimated": ["pc:count", "z"]` | a country in two minutes; a later run without it replaces the estimates |
 | `--grid <grid> --extent x0,y0,x1,y1 --url <template>` | nothing | every cell of the extent (km) as an item, `{x}` / `{y}` filled into the template, `--points N` each, `--z lo,hi`; marked `["pc:count", "z", "exists"]` | no listing at all. A cell with no file 404s when a client reaches it, which `/aggregate` reports as a failed child and the viewer skips; it only works where the file name is a pure function of the grid (swisstopo's is; IGN's `_C_` / `_O_` suffix is not) |
 
@@ -229,9 +232,13 @@ into a root and child files (`<name>.vpc.gz` + `<name>/<quadkey>.vpc.gz`, see ab
   X 600–700 km, Y 6800–6900 km (Paris and most of Île-de-France; what flai had mirrored of it on 2026-11-10,
   X 600–686, Y 6832–6899), 127.0 G points, each item with the files' own `RGF93 v1 / Lambert-93` WKT. 10.14 MB
   of JSON, 0.52 MB gzipped, 133 s.
-- **`france-lidarhd.vpc.gz`**: **all 337 206 tiles** of flai's mirror of IGN's LiDAR HD, FRANCE_READ_NOTE,
-  FRANCE_POINTS points, Lambert-93 WKT per item, split into 385 child files (24 MB gzipped in all) under a 30 KB
-  root.
+- **`france-lidarhd.vpc.gz`**: **all 337 206 tiles** of flai's mirror of IGN's LiDAR HD, every header read (about
+  70 minutes over three runs resumed from `--cache`, the S3 link dropping now and then and retried), 10 071 G
+  points, Lambert-93 WKT per item, dated 2023-05 to 2024-12. The heights are what the headers say: 326 165 tiles
+  within −500 to 5 000 m, 11 031 with noise points down to −2 682 m or up to 9 559 m, and 10 tiles (Languedoc
+  and the Pyrenees) whose headers claim +1 074 km or −2 145 km, which widen four of the root's 563 items to
+  match. 557 MB of JSON as one file, 29.4 MB gzipped — past what one V8 string holds, so it is committed split
+  only: 563 child files (30 MB gzipped in all) under a 60 KB root.
 - **`switzerland-swisssurface3d.vpc.gz`**: every swissSURFACE3D 1 km tile swisstopo serves as COPC, found through
   its STAC API (`data.geo.admin.ch/api/stac/v0.9/collections/ch.swisstopo.swisssurface3d/items`, 58 987 items in
   590 pages on 2026-11-10, of which 15 643 carry a `.copc.laz` asset — the tiles reprocessed since 2024; the
@@ -273,7 +280,8 @@ under the Licence Ouverte 2.0. Found on 2026-11-10:
   109 s): the footprint from the tile name, the count from the file size through a bytes-per-point ratio fitted
   on 3 000 header reads (5.609 B/point; median 5.593, p10 4.25, p90 6.60; a tile's count is within 10.4 % of
   the truth at the median and 28 % at the 90th percentile), the heights from the nearest calibrated tiles.
-  Then FRANCE_READ_NOTE2, the set that is committed, split in 385 child files. The
+  Then from every header (10 071 G points against the 10 043 G estimated, the sum 0.3 % off; 557 MB of JSON,
+  29.4 MB gzipped, about 70 minutes of reads), the set that is committed, split in 563 child files. The
   tile name alone is NOT enough to write the URL: flai's files are named `_PTS_C_` (classified, 258 474) or
   `_PTS_O_` (78 716), never both for one square, and nothing in the grid says which — so a `--grid` template
   over IGN's extent 404s on a quarter of its cells. The listing is what tells.
