@@ -335,13 +335,44 @@ concurrently, I3S loads each node-page level concurrently (then builds the fragm
 hundreds of simultaneous range requests. **Parallel tile fetch** is inherent — the renderer requests
 many tiles at once and Node serves them concurrently; a single tile is one range read + decode.
 
-**COPC range reads are coalesced and retried** (`tile-server/range-getter.js`, 2026-10-29): reads
-issued in the same tick are sorted by offset and merged when adjacent or less than 64 KB apart (COPC
-writers lay hierarchy pages out back-to-back, so draining DEFRA 2008's 96 pages is one request, not
-96), capped at 32 in flight per host (`TILED_RANGE_MAX_PER_HOST`), retried three times on resets,
+**Range reads are coalesced and retried** (`tile-server/range-getter.js`, COPC since 2026-10-29,
+Potree 2.0, LCC, LCC2 and Nexus since 2026-11-11): reads of one file issued in the same tick are
+sorted by offset and merged when adjacent or less than 64 KB apart, capped at 8 MB a merged request
+(COPC writers lay hierarchy pages out back-to-back, so draining DEFRA 2008's 96 pages is one request,
+not 96), capped at 32 in flight per host (`TILED_RANGE_MAX_PER_HOST`), retried three times on resets,
 hang-ups, timeouts and 429/5xx, and any other non-2xx throws instead of being parsed as data. A
 failed page read puts the page back in the pending set, and a failed root load is cached for only
 60 s (`memoizeAsync` `failureTtlMs`), so one S3 hiccup no longer hides a dataset until restart.
+
+The getter is **one per source URL, shared by every tile request** of that dataset (`sharedRangeGetter`,
+a small LRU of URLs), so a viewer's burst of sibling tiles, which the formats above lay out
+back-to-back (Potree's `octree.bin` by level, Nexus nodes and textures, LCC's `data.bin` by unit, the
+planes of a bundled SOG chunk), is read as a few merged requests rather than one per tile. The window
+is one tick by default; `TILED_RANGE_COALESCE_MS=<ms>` holds the first read of a window back by that
+long so that requests a few milliseconds apart merge too, at the cost of that latency on every read.
+`RANGE_DEBUG=1` logs each flush (reads → requests, bytes asked → fetched); `rangeStats` counts them.
+
+Measured 2026-11-11 through the server, from one client fetching a tileset and every tile of its first
+levels with 16 in flight, against the public hosts (so wall time is mostly theirs; it varies by a few
+hundred ms between runs of the same build). Requests are those sent to the source; bytes, the bytes
+read from it; the tiles are byte-identical in every build:
+
+| Burst | main | shared getter, one tick | `TILED_RANGE_COALESCE_MS=5` | `=20` | Bytes read |
+|---|---|---|---|---|---|
+| Potree 2.0 lion, hierarchy drain (`cache=hierarchy`, `hierarchy.bin`) | 422 req, 3.2 s | **29 req**, 3.0 s | 29 req, 3.2 s | 29 req, 3.8 s | 47 KB |
+| Potree 2.0 lion, 40 tiles to depth 2 (`octree.bin`) | 40 req, 3.3 s | 26 req, 3.7 s | 24 req, 3.9 s | 18 req, 4.7 s | 2.97 MB |
+| Potree 2.0 lion, 155 tiles to depth 3 | 155 req, 10.4 s | 151 req, 10.5 s | 129 req, 12.0 s | 124 req, 11.5 s | 10.46 MB (+1.3 % read through gaps with a window) |
+| Nexus gargoyle, 6 tiles to depth 4 (nodes + textures) | 6 req, 0.76 s | 3 req, 0.61 s | 1 req, 0.58 s | 1 req, 0.57 s | 283 KB |
+| Nexus gargoyle, 23 tiles to depth 6 | 23 req, 1.56 s | 12 req, 1.50 s | 9 req, 1.90 s | 3 req, 1.98 s | 1.12 MB |
+| Nexus gargoyle, 91 tiles to depth 8 | 91 req, 4.58 s | 74 req, 4.77 s | 36 req, 5.51 s | 22 req, 5.58 s | 4.10 MB |
+| LCC2 Tunis, 30 tiles to depth 2 (3 bundled chunks) | 6 req, 13.6 s | 6 req, 14.8 s | — | — | 12.17 MB |
+
+So: a hierarchy drain sends 14× fewer requests, a burst of sibling tiles 1.5 to 4× fewer (the rest arrive
+in later ticks), LCC2 none fewer (a chunk is already a tail read plus one span per run of kept planes,
+and the `shN` planes between the spans are larger than the 64 KB gap). Wall time, from here against
+these hosts, does not move: the hosts answer one 2 MB request no faster than 16 small ones. A window
+merges more and costs its latency on every read, so the default stays at 0; set it on a host that
+rate-limits by request count.
 
 **Curved COPC trees are built once and `/aggregate` never asks for them.** A country-scale COPC gets
 an explicit tree (15–25 k tiles, each box fitted to placed corners); that build is CPU on the event

@@ -8,6 +8,32 @@ Format loosely follows [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+### Changed — 2026-11-11 (range reads of Potree 2.0, LCC, LCC2 and Nexus coalesced, one getter per source URL)
+- **The Potree 2.0, LCC, LCC2 and Nexus live adapters read through the coalescing range getter** that COPC has used
+  since 2026-10-29 (`packages/tile-server/range-getter.js`): reads of one file issued in the same tick are sorted by
+  offset and merged when less than 64 KB apart, 8 MB at most a request, each caller given its own bytes. The getter
+  is now **one per source URL, shared across tile requests** (`sharedRangeGetter`, an LRU of 256 URLs; `readRange`
+  is the adapters' call), so a viewer's burst of sibling tiles, which these formats lay out back-to-back (Potree's
+  `octree.bin` and `hierarchy.bin`, Nexus nodes and textures, LCC's `data.bin`, the planes of a bundled SOG chunk),
+  is a few merged requests. Error semantics are unchanged: a merged request that fails rejects each of its reads with
+  the host's error (`status`, `transient`), the per-host cap and retries of `core/source-fetch.js` apply to the
+  merged request. A Nexus texture kept in the cache is copied out of the merged read so the cache does not pin it.
+- `TILED_RANGE_COALESCE_MS=<ms>` (or `windowMs`) widens the batching window from one tick (`setImmediate`, the
+  default, COPC's behaviour unchanged) to that many milliseconds, so that tile requests a few milliseconds apart
+  merge too, at the cost of that latency on every read. `RANGE_DEBUG=1` logs each flush (reads → requests, bytes
+  asked → fetched) and `rangeStats` counts them.
+- Measured through the server (one client, a tileset and every tile of its first levels with 16 in flight, the public
+  hosts; the table and the method in the architecture guide): the Potree lion's hierarchy drain goes from 422
+  requests to 29 for the same 47 KB; 40 lion tiles from 40 requests to 26 (18 with a 20 ms window); 23 gargoyle
+  nodes with their textures from 23 to 12 (3 with 20 ms), 91 from 91 to 74 (22); LCC2 Tunis stays at 6 requests
+  for 30 tiles (a chunk is already a tail read plus one span per run of kept planes). Bytes read are the same
+  (+1.3 % read through gaps on 155 lion tiles with a window) and wall time does not move against these hosts, so
+  the default window stays at 0.
+- Tests: `range-getter.test.js` (4): merging across gaps up to `gap` and the `maxBytes` cap, each read its own bytes
+  and an invalid range refused; a failed merged request rejecting each read with the host's error; the shared
+  per-URL getter, its keys and counters; the batching window against the one-tick default. The Nexus stream test
+  now expects a node and its two textures as one merged read.
+
 ### Added — 2026-11-11 (Nexus: 3DHOP's multiresolution meshes, live and offline)
 - **Nexus (`.nxs` / `.nxz`, CNR-ISTI Visual Computing Lab, the format of 3DHOP) is read, live and offline.**
   `GET /stream/tileset.json?format=nexus&url=<….nxz>` (`packages/tile-server/nexus-live.js`) builds the tileset

@@ -12,7 +12,8 @@
  *   GET /potree/tileset.json?url=<metadata.json | cloud.js URL>
  *   GET /potree/tile/<name>.glb?url=<…>                       → that node's points as a POINTS GLB
  */
-import { tilePool, runTileTaskOr, ownBytes, coordsToKey, keyToCoords, buildSubtreeBuffer, georefFromCrs, buildImplicitTileset, parallelMap, defaultConcurrency, progressStart, progressTick, progressDone, memoizeAsync, fetchSource, fetchSourceRange } from '../core/index.js';
+import { tilePool, runTileTaskOr, ownBytes, coordsToKey, keyToCoords, buildSubtreeBuffer, georefFromCrs, buildImplicitTileset, parallelMap, defaultConcurrency, progressStart, progressTick, progressDone, memoizeAsync, fetchSource } from '../core/index.js';
+import { readRange } from './range-getter.js';
 import { preparePotree2Schema, parsePotree2Hierarchy, parsePotree2Chunk, decodePotree2Node } from '../potree-to-3dtiles/src/potree2.js';
 import { loadPotree1 } from '../potree-to-3dtiles/src/potree1.js';
 import { withCrsOverride } from './copc-live.js';
@@ -32,7 +33,10 @@ function coordsOfBox(box, rootBox, depth) {
 const georef = (origin, crs) => georefFromCrs(origin, crs, 'potree-live');
 
 const fetchFull = fetchSource;
-const rangeGet = fetchSourceRange;      // one contiguous range read from octree.bin (the per-tile fetch — this is the streaming core)
+// One contiguous range read of hierarchy.bin or octree.bin (the per-tile fetch — this is the streaming core), through the
+// getter every read of that file shares (range-getter.js): a chunk drain, or a burst of sibling tiles whose nodes Potree
+// wrote back-to-back, is a few merged requests. The bytes are a view into the merged read, parsed or copied at once.
+const rangeGet = readRange;
 // A Potree 1.x node's file and what decodes it, for a tile worker (see serveTileGlb).
 const raw1 = async (src, node) => { const raw = await src.readBytes(node); return raw ? { kind: '1', raw, node, spec: src.decodeSpec } : null; };
 const finishCtx = (nodes, rootBox, crs, spacingMeta, readTile) => {

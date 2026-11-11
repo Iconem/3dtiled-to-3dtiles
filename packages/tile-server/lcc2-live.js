@@ -19,7 +19,8 @@
  * `.ply` chunk (the whitepaper's other two types; LCC Studio writes SPZ too) is downloaded whole and decoded by
  * splat-transform's reader into the same table (sogChunk.js), so the tiles are cut the same way.
  */
-import { memoizeAsync, fetchSource as fetchBuf, fetchSourceRange, requestSource } from '../core/index.js';
+import { memoizeAsync, fetchSource as fetchBuf, requestSource } from '../core/index.js';
+import { readRange } from './range-getter.js';
 import { parseLcc2, lcc2Tileset as buildTileset } from '../lcc-to-3dtiles/src/lcc2Manifest.js';
 import { bundledSogFiles } from '../sog-to-3dtiles/src/sogBundle.js';
 import { decodeSplatFile } from '../sog-to-3dtiles/src/sogChunk.js';
@@ -42,7 +43,9 @@ async function fetchBundle(url) {
   // suffix range (416), or does not say how long the file is, is asked for the whole bundle.
   const total = status === 206 ? Number(headers.get('content-range')?.match(/\/(\d+)\s*$/)?.[1]) : status === 416 ? NaN : body.length;
   if (!Number.isFinite(total)) { const whole = await fetchBuf(url); return bundledSogFiles(whole, whole.length); }
-  return bundledSogFiles(body, total, (begin, length) => fetchSourceRange(url, begin, length));
+  // The spans missing from the tail are asked for together, through the bundle's shared getter (range-getter.js): the
+  // planes that are kept are merged into one read where the shN planes between them are small, left out where they are not.
+  return bundledSogFiles(body, total, (begin, length) => readRange(url, begin, length));
 }
 
 // A chunk backs many tiles (Tunis: 570 tiles in 140 chunks), so its decode is cached as an in-flight promise, like sog-live's.

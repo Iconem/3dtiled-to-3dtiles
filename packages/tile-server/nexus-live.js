@@ -14,7 +14,8 @@
  * which is then kept and sliced (core's fetchSourceRange), so such a host still works, at the cost of one download.
  */
 import fs from 'node:fs/promises';
-import { memoizeAsync, fetchSourceRange, tilePool, runTileTaskOr } from '../core/index.js';
+import { memoizeAsync, tilePool, runTileTaskOr } from '../core/index.js';
+import { readRange as readHttpRange } from './range-getter.js';
 import { parseNexusHeader, parseNexusIndex, indexBytes, HEADER_BYTES, nodeRange, nodeTextures } from '../nexus-to-3dtiles/src/nexus-reader.js';
 import { nexusTileset as buildTileset, DAG_MODES, DEFAULT_GE_SCALE } from '../nexus-to-3dtiles/src/nexus-tileset.js';
 import { nexusNodeGlb } from '../nexus-to-3dtiles/src/nexus-glb.js';
@@ -24,10 +25,14 @@ const isHttp = (u) => /^https?:\/\//i.test(u);
 const MESH_TASKS = new URL('./tile-tasks-mesh.js', import.meta.url).href;
 const TEXTURE_CACHE = 64;                                   // raw images kept per file (a texture serves several nodes)
 
-/** `[begin, begin + length)` of the source, from the host or the disk. */
+/**
+ * `[begin, begin + length)` of the source, from the host or the disk. Over HTTP it goes through the getter every read of
+ * the file shares (range-getter.js): a node and its textures, and the sibling nodes a viewer asks for in one burst, lie
+ * back-to-back in the file and are read as a few merged requests. The bytes are then a view into the merged read.
+ */
 async function readRange(ctx, begin, length) {
   if (length <= 0) return Buffer.alloc(0);
-  if (ctx.http) return fetchSourceRange(ctx.url, begin, length);
+  if (ctx.http) return readHttpRange(ctx.url, begin, length);
   const fh = await fs.open(ctx.url, 'r').catch((e) => { throw e.code === 'ENOENT' ? Object.assign(e, { status: 404 }) : e; });
   try { const b = Buffer.alloc(length); const { bytesRead } = await fh.read(b, 0, length, begin); return b.subarray(0, bytesRead); }
   finally { await fh.close(); }
@@ -49,7 +54,8 @@ function textureBytes(ctx, t) {
   const hit = ctx.textures.get(t);
   if (hit) { ctx.textures.delete(t); ctx.textures.set(t, hit); return hit; }
   const tx = ctx.index.textures[t];
-  const p = readRange(ctx, tx.offset, tx.end - tx.offset).catch((e) => { ctx.textures.delete(t); throw e; });
+  // Copied: a cached texture must not pin the merged read it was sliced from.
+  const p = readRange(ctx, tx.offset, tx.end - tx.offset).then((b) => Buffer.from(b), (e) => { ctx.textures.delete(t); throw e; });
   ctx.textures.set(t, p);
   if (ctx.textures.size > TEXTURE_CACHE) ctx.textures.delete(ctx.textures.keys().next().value);
   return p;

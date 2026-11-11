@@ -276,7 +276,10 @@ test('/stream?format=nexus: the tileset from two range reads, tiles by node rang
   const doc = await readGlb(glb3.body);
   assert.equal(doc.getRoot().listTextures().length, 2);
   const r3 = nodeRange(idx, 3), tx = idx.textures;
-  assert.deepEqual(h.ranges.sort(), [`model.nxs ${r3.begin}-${r3.end - 1}`, `model.nxs ${tx[0].offset}-${tx[0].end - 1}`, `model.nxs ${tx[1].offset}-${tx[1].end - 1}`].sort(), 'the node and its two textures');
+  // The node and its two textures are asked for together and lie back-to-back, so the shared getter (range-getter.js)
+  // reads them as one range, from the node's first byte to the last texture's.
+  assert.equal(tx[0].offset, r3.end); assert.equal(tx[1].offset, tx[0].end);
+  assert.deepEqual(h.ranges, [`model.nxs ${r3.begin}-${tx[1].end - 1}`], 'the node and its two textures, in one merged read');
 
   h.ranges.length = 0;
   const glb0 = await get(`${s}/stream/tile/0.glb?format=nexus&${q}`);
