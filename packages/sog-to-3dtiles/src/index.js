@@ -5,9 +5,20 @@
  * Converts a PlayCanvas **Streamed SOG** dataset (lod-meta.json + per-chunk unbundled
  * SOG dirs) to OGC 3D Tiles 1.1 with KHR_gaussian_splatting_compression_spz_2 GLB tiles.
  *
- *   node src/index.js <scene-dir-or-lod-meta.json> <outDir>
+ *   node src/index.js <scene-dir-or-lod-meta.json> <outDir> [--splat-budget N]   (0: one tile per leaf run)
  *
- * The streamed-SOG spatial tree maps almost 1:1 onto a 3D Tiles HLOD tree:
+ * The streamed-SOG spatial tree is a binary k-d tree whose leaves hold one run of every LOD
+ * level: a big scene (Shramko's 103 M-splat Lublin) has 31,668 leaves 15 levels deep, so the
+ * coarsest level alone would be 31,668 tiles of ~50 splats under 14 empty levels, and a 3D Tiles
+ * renderer refines all of them before it draws anything. The tree is therefore COLLAPSED per LOD
+ * level with a splat budget (`splatBudget`, default 100 k, `--splat-budget` on the CLI):
+ *   • for each level, the shallowest nodes whose splats of that level fit the budget become the
+ *     tiles of that level; the content of such a tile is the concatenation of its leaves' runs
+ *     (contiguous slices of the chunk files), re-encoded as one SPZ-v2 GLB
+ *   • a tile of level L has as children the tiles of level L−1 under it (the node itself when
+ *     it still fits, else its shallowest fitting descendants), refine REPLACE
+ *   • interior nodes above the coarsest level's tiles are empty tiles with children
+ * With the budget at 0 the old 1:1 mapping is used:
  *   • interior SOG node → empty 3D Tiles tile (bounds + two children)
  *   • leaf SOG node     → a REPLACE chain of tiles, coarsest LOD level (highest index)
  *                         as ancestor down to level 0 (finest); each tile's content is
@@ -27,7 +38,7 @@ const TILE_TASK = new URL('./tile-task.js', import.meta.url).href;
 // Shared, parallel-friendly encoder from core (async gzip on the libuv threadpool) +
 // bounded-concurrency map — same import lcc uses. (Replaced the former local synchronous
 // ./spzGlb.js, which was byte-identical and is now deleted.)
-import { buildSplatTileGlb, computeBounds, defaultConcurrency, convertTiles } from '../../core/index.js';
+import { buildSplatTileGlb, computeBounds, defaultConcurrency, convertTiles, parallelMap } from '../../core/index.js';
 
 // Geometric error: anchored to the ROOT bound diagonal and halved at every step down
 // the tree (interior level AND each LOD-chain step), matching the reference
@@ -36,6 +47,12 @@ import { buildSplatTileGlb, computeBounds, defaultConcurrency, convertTiles } fr
 // tree instead blows the root GE up to tens of thousands (→ refine-everything).
 const ROOT_GE_FACTOR = 0.05;  // root geometricError = rootBoundDiagonal × this (reference ≈ 0.04)
 const DEPTH_RATIO    = 0.5;   // GE multiplier per depth step (samplingRatePerLevel)
+// Collapsed tree: a tile's geometricError is its node's bound diagonal × NODE_GE_FACTOR, halved per
+// LOD level below the coarsest (a level keeps a quarter of the splats of the finer one, so the
+// spacing doubles). Child diagonals never exceed the parent's, so the errors stay monotone.
+const DEFAULT_SPLAT_BUDGET = 100_000;
+const NODE_GE_FACTOR = 0.1;
+const TABLE_CACHE = 8;        // decoded chunk tables kept while merged tiles are written (~30 MB each)
 
 const ensureDir = d => fs.mkdir(d, { recursive: true });
 
@@ -111,34 +128,104 @@ export async function convert(input, outDir, opts = {}) {
     return { ge: outerGe, tile: child };
   }
 
-  console.log('Walking tree…');
-  const root = build(lod.tree, 0);
+  // ── Collapsed tree (splat budget) ──
+  const budget = opts.splatBudget != null ? Number(opts.splatBudget) : DEFAULT_SPLAT_BUDGET;
+  const maxLevel = lodLevels - 1;
+  const merged = [];    // { uri, runs:[{file,offset,count}] }  (budget > 0)
+  const counts = (node) => {       // per-level splat counts under a node, memoised
+    if (node._counts) return node._counts;
+    const c = {};
+    if (node.children) for (const ch of node.children) for (const [L, n] of Object.entries(counts(ch))) c[L] = (c[L] ?? 0) + n;
+    else for (const [L, run] of Object.entries(node.lods ?? {})) c[L] = run.count;
+    return (node._counts = c);
+  };
+  const total = (node) => Object.values(counts(node)).reduce((a, b) => a + b, 0);
+  const runsOf = (node, L, out = []) => {
+    if (node.children) node.children.forEach(ch => runsOf(ch, L, out));
+    else if (node.lods?.[L]?.count) out.push(node.lods[L]);
+    return out;
+  };
+  const fits = (node, L) => !node.children || (counts(node)[L] ?? 0) <= budget;
+  const emitters = (node, L) => fits(node, L) ? [node] : node.children.filter(total).flatMap(ch => emitters(ch, L));
+  const geOf = (node, L) => boundDiagonal(node.bound.min, node.bound.max) * NODE_GE_FACTOR * Math.pow(DEPTH_RATIO, maxLevel - L);
+  function tileAt(node, L) {         // node fits the budget at level L
+    const tile = { boundingVolume: { box: boundToZUpBox(node.bound.min, node.bound.max) }, geometricError: geOf(node, L), refine: 'REPLACE' };
+    const runs = runsOf(node, String(L));
+    if (runs.length) { const uri = `tiles/node_${nextId++}.glb`; tile.content = { uri }; merged.push({ uri, runs }); }
+    if (L > 0) {
+      const kids = emitters(node, String(L - 1)).map(ch => tileAt(ch, L - 1)).filter(t => t.content || t.children?.length);
+      if (kids.length) tile.children = kids;
+    }
+    return tile;
+  }
+  function tileFor(node, L) {        // any node: empty tile over the fitting descendants when it does not fit
+    if (fits(node, String(L))) return tileAt(node, L);
+    return { boundingVolume: { box: boundToZUpBox(node.bound.min, node.bound.max) }, geometricError: geOf(node, L), refine: 'REPLACE',
+             children: emitters(node, String(L)).map(ch => tileAt(ch, L)) };
+  }
 
-  // ── Phase 2: write GLBs grouped by chunk file (decode once, release) ──
+  console.log(budget > 0 ? `Walking tree, collapsing to ≤ ${budget.toLocaleString()} splats per tile…` : 'Walking tree…');
+  const root = budget > 0 ? { tile: tileFor(lod.tree, maxLevel) } : build(lod.tree, 0);
+
+  // ── Phase 2 (collapsed): one GLB per merged tile, its runs cut from a small cache of decoded chunks ──
+  // Tiles are written in order of their first chunk, so consecutive tiles share decoded chunks.
+  let tilesWritten = 0;
+  if (budget > 0) {
+    console.log(`Writing ${merged.length} merged tiles from ${lod.filenames.length} chunks…`);
+    merged.sort((a, b) => a.runs[0].file - b.runs[0].file || a.runs[0].offset - b.runs[0].offset);
+    const cache = new Map();                        // fileIdx → Promise<DataTable>, insertion-ordered for eviction
+    const tableOf = (fileIdx) => {
+      if (!cache.has(fileIdx)) {
+        cache.set(fileIdx, decodeChunk(path.join(sceneDir, lod.filenames[fileIdx])));
+        while (cache.size > TABLE_CACHE) cache.delete(cache.keys().next().value);
+      }
+      return cache.get(fileIdx);
+    };
+    const concat = (parts, key) => {
+      if (parts.some(p => !p[key])) return null;
+      const n = parts.reduce((s, p) => s + p[key].length, 0), out = new Float32Array(n);
+      let o = 0; for (const p of parts) { out.set(p[key], o); o += p[key].length; }
+      return out;
+    };
+    await parallelMap(merged, async ({ uri, runs }) => {
+      const parts = [];
+      for (const r of runs) parts.push(extractRange(await tableOf(r.file), r.offset, r.count));   // sequential: chunk order
+      const count = runs.reduce((s, r) => s + r.count, 0);
+      const arrays = { positions: concat(parts, 'positions'), alphas: concat(parts, 'alphas'), rgb: concat(parts, 'rgb'),
+                       scales: concat(parts, 'scales'), rotations: concat(parts, 'rotations') };
+      const glb = await buildSplatTileGlb(arrays, count, computeBounds(arrays.positions, count), !!opts.centroidsOnly);
+      await fs.writeFile(path.join(outDir, uri), glb);
+      tilesWritten++;
+      if (tilesWritten % 20 === 0 || tilesWritten === merged.length) process.stdout.write(`\r  ${tilesWritten}/${merged.length} tiles`);
+    }, { concurrency: 2 });
+    process.stdout.write('\n');
+  }
+
+  // ── Phase 2 (1:1 tree): write GLBs grouped by chunk file (decode once, release) ──
   const byFile = new Map();                       // fileIdx → [{uri, run}]
   for (const p of pending) {
     if (!byFile.has(p.run.file)) byFile.set(p.run.file, []);
     byFile.get(p.run.file).push(p);
   }
-  console.log(`Writing ${pending.length} tiles from ${byFile.size} chunks…`);
+  if (pending.length) console.log(`Writing ${pending.length} tiles from ${byFile.size} chunks…`);
   // The unit of work is the chunk (tile-task.js): its WebP planes are decoded once, then every tile cut from it is
   // encoded and written. On this thread: one chunk at a time, its tiles in lanes, so memory stays bounded to one
   // decoded table. With tile workers (TILED_WORKERS, --workers, opts.workers): one chunk per worker at a time.
   const lanes = defaultConcurrency();
-  let tilesWritten = 0, chunksDone = 0;
+  let chunksDone = 0;
   // Biggest chunks first (by splat count): a chunk is one worker's unit of work, and a 4 000-tile chunk handed out last
   // would run alone at the end while the other workers sit idle.
   const chunks = [...byFile].map(([fileIdx, tasks]) => ({
     metaPath: path.join(sceneDir, lod.filenames[fileIdx]), outDir, centroids: !!opts.centroidsOnly,
     tiles: tasks.map(({ uri, run }) => ({ uri, offset: run.offset, count: run.count })),
   })).sort((a, b) => b.tiles.reduce((n, t) => n + t.count, 0) - a.tiles.reduce((n, t) => n + t.count, 0));
-  await convertTiles(chunks, {
+  if (chunks.length) await convertTiles(chunks, {
     module: TILE_TASK, fn: 'sogChunkToFiles', workers: opts.workers, concurrency: 1,
     task: (chunk) => ({ ...chunk, concurrency: 2 }),
     here: (chunk) => sogChunkToFiles({ ...chunk, concurrency: lanes }),
     onResult: (_chunk, n) => { tilesWritten += n; chunksDone++; process.stdout.write(`\r  ${chunksDone}/${byFile.size} chunks, ${tilesWritten} tiles`); },
   });
-  process.stdout.write('\n');
+  if (chunks.length) process.stdout.write('\n');
 
   // Optional environment SOG → one always-coarse child so it streams in early.
   if (lod.environment) {
@@ -190,6 +277,11 @@ export async function convert(input, outDir, opts = {}) {
 
 // ── CLI shim: run only when invoked directly (not when imported by the meta-converter) ──
 if (process.argv[1] && fileURLToPath(import.meta.url) === path.resolve(process.argv[1])) {
-  const a = process.argv.slice(2).filter(x => !x.startsWith('--'));
-  convert(a[0], a[1]).then(() => process.exit(0)).catch(e => { console.error(e); process.exit(1); });
+  const argv = process.argv.slice(2), a = [];
+  let splatBudget;
+  for (let i = 0; i < argv.length; i++) {
+    if (argv[i] === '--splat-budget') splatBudget = Number(argv[++i]);
+    else if (!argv[i].startsWith('--')) a.push(argv[i]);
+  }
+  convert(a[0], a[1], { splatBudget }).then(() => process.exit(0)).catch(e => { console.error(e); process.exit(1); });
 }
