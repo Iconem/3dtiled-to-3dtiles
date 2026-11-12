@@ -46,6 +46,10 @@ Format loosely follows [Keep a Changelog](https://keepachangelog.com/).
   simply not listed. The page now says so.
 - Library: `france-lidarhd` is now the grid VPC with heights and counts; `france-lidarhd-grid` the 9.5 KB
   availability-only one; `france-lidarhd-stac` the split STAC VPC.
+- The streamed-SOG reference page gains **Producing one: the chained 50 % recipe** (splat-transform 3.10+:
+  `-H 0 -m` for level 0, `--decimate-adaptive 50%` of the previous level for each next one, the bundle from
+  `-l`-tagged PLYs with the four chunking flags), and the note that a halved count is a √2 spacing step while
+  `collapseLodTree` halves the geometric error per level.
 
 ### Changed — 2026-11-12 (the country VPC sets leave the repository for a GitHub release)
 - The four split sets (France, Canada NB + PEI, Switzerland, USGS Fairbanks: 757 files, 44 MB) are assets of the

@@ -9,8 +9,9 @@ description: "Streamed SOG splits a Gaussian splat scene into spatial chunks at 
 Streamed SOG splits a Gaussian splat scene into spatial chunks at multiple **levels of
 detail (LOD)**. A viewer walks a binary spatial tree to decide which chunks/levels to load
 for the current camera, so very large scenes (tens of millions of Gaussians) stream
-progressively. Authored with [SplatTransform](https://github.com/playcanvas/splat-transform)
-(`--generate-lod` / "Generating Streamed SOG"). Each chunk is a standard unbundled [SOG](sog.md).
+progressively. Authored with [SplatTransform](https://github.com/playcanvas/splat-transform) by chaining
+decimated PLYs into one bundle (see [Producing one](#producing-one-the-chained-50--recipe) below; the
+`--generate-lod` flag of earlier versions is gone). Each chunk is a standard unbundled [SOG](sog.md).
 
 This is the structure `sog-to-3dtiles` consumes — it maps almost 1:1 onto an OGC 3D Tiles
 HLOD tree (each node already carries an AABB; leaves carry per-LOD splat ranges).
@@ -79,6 +80,38 @@ Optional `environment` → unbundled SOG of far-field splats outside the LOD sch
   and may have `"environment": null`. Ignore unknown fields.
 
 ---
+
+## Producing one: the chained 50 % recipe
+
+splat-transform 3.10+ builds a streamed SOG from a list of PLYs, one per level, tagged with `-l <level>`; the
+levels themselves are made beforehand by **chained adaptive decimation**, each one 50 % of the previous, which
+is the recipe behind the Lublin and Itaka Stadium bundles the library streams and the one Iconem used for its
+own 174 M scene (ten levels, 348 M gaussians in the bundle). Three steps:
+
+1. `lod0` is the source with its SH bands dropped (`-H 0`, DC colour only, 62 → 17 floats per splat) and
+   Morton-ordered once (`-m`).
+2. `lod1` … `lodN` are each `--decimate-adaptive 50%` of the **previous** level, not of the source: adaptive
+   decimation merges neighbouring pairs by moment matching rather than dropping every other splat, so busy
+   geometry keeps its detail and flat walls thin out first, and a merged splat grows to cover what it
+   replaced (its opacity may exceed 1: `opacity_linear`). Decimation must be the last action of an
+   invocation and writes a `.ply`, so each level is one run; on a 174 M scene the first halving takes about
+   26 min on an RTX 4090, less for each level after, and `--scratch-dir` holds the intermediates.
+3. The levels are bundled, `splat-transform lods/lod0.ply -l 0 lods/lod1.ply -l 1 … out/lod-meta.json`, with the
+   chunking flags: `--lod-chunk-extent` (a leaf wider than this is split, 16 m by default), `--lod-chunk-count`
+   (K gaussians per leaf summed over all levels, 512 by default), `--lod-chunk-min` (below this many K a wide
+   leaf is not split, which keeps sky and background whole) and `--lod-file-count` (K gaussians per file, per
+   level from the finest). A leaf is what a viewer culls and picks one level of; a file is what it downloads
+   whole. Only this step re-runs when the leaf or file flags change. `-r x,y,z` rotates every input first
+   (a Blender Z-up scene needs `-r -90,0,0` for the Y-down PlayCanvas frame).
+
+Each level halves the **count**, so on the surfaces splats cover the spacing grows by about √2 per level, not 2.
+`collapseLodTree` halves the declared geometric error per level (`LEVEL_RATIO` in `lodMeta.js`), the same
+anchoring the tree's own errors use (the root diagonal, halved per depth): over ten levels that declares the
+finest level 512 × finer than the coarsest where its spacing is 32 × finer, so a client refines the fine levels
+somewhat later than their real error would ask (no knob trims it yet). The per-leaf `errors` a bundle may carry
+(`lodErrors: true`) are the measured values and are honoured by the 1:1 mapping (`--splat-budget 0`). Numbers from the PlayCanvas thread
+[splat-transform#310](https://github.com/playcanvas/splat-transform/issues/310), where the chained recipe was
+settled after the one-pass per-leaf error build of a 517 M bundle stalled for 13.6 CPU-hours.
 
 ## Mapping to 3D Tiles (this repo's `sog-to-3dtiles`)
 
