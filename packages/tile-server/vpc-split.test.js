@@ -19,7 +19,7 @@ function grid(n, m, { epsg = false, from = 0 } = {}) {
       bbox: [lon, lat, 200 + j, lon + dLon, lat + dLat, 300 + i],
       properties: { datetime: `2024-01-${String(1 + (i + j) % 28).padStart(2, '0')}T00:00:00Z`, 'pc:count': 1000 + i, 'pc:type': 'lidar',
         'proj:bbox': [x, y, 200 + j, x + 1000, y + 1000, 300 + i], ...(epsg ? { 'proj:epsg': 25832 } : { 'proj:wkt2': UTM32 }) },
-      links: [], assets: { data: { href: `./tiles/t_${i + from}_${j}.copc.laz`, roles: ['data'] } },
+      links: [], assets: { data: { href: `./tiles/t_${i + from}_${j}.copc.laz`, roles: ['data'] }, overview: { href: 'https://host.example/set/overview/overview.copc.laz', roles: ['overview'] } },
     });
   }
   return { type: 'FeatureCollection', features };
@@ -73,6 +73,7 @@ test('a grid is cut into leaves under the item limit, each item in exactly one l
   // the root: one item per leaf, pointing at the child file in both forms, whose counts add up
   assert.equal(root.features.length, files.size);
   assert.equal(root.links.filter((l) => l.rel === 'child').length, files.size);
+  assert.deepEqual(root.links.filter((l) => l.rel === 'overview').map((l) => l.href), ['https://host.example/set/overview/overview.copc.laz']);
   for (const f of root.features) {
     const key = /^\.\/country\/([0-3]+)\.vpc\.gz$/.exec(f.assets.data.href)?.[1];
     assert.ok(key && files.has(key), f.assets.data.href);

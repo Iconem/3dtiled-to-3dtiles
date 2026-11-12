@@ -29,7 +29,7 @@ import { createHash, randomUUID } from 'node:crypto';
 import { datasetGroundSamples, offsetFromSamples } from '../core/dataset-ground.js';
 import { sampleTerrain, TERRAINS } from '../core/terrain.js';
 import { llhToEcef, ecefToLlh, curvedParam, httpStatusOf } from '../core/index.js';
-import { vpcSet, sniffParam } from './vpc-live.js';
+import { vpcSet, sniffParam, planOverview, overviewParam, leafErrorParam } from './vpc-live.js';
 
 const CORS = { 'Access-Control-Allow-Origin': '*', 'Access-Control-Allow-Headers': '*' };
 
@@ -963,9 +963,11 @@ function childUrlFor(entry, origin, cache = 'none', prefetch = null) {
   // scans) — /stream's own &lon=&lat= placement, which a real georeference always overrides.
   const place = Number.isFinite(entry.lon) && Number.isFinite(entry.lat)
     ? `&lon=${entry.lon}&lat=${entry.lat}` + (entry.alt != null ? `&alt=${entry.alt}` : '') + (entry.heading != null ? `&heading=${entry.heading}` : '') : '';
+  // `params`: further query parameters the entry's stream is given (a nested VPC's `overview=0&leafError=`)
+  const params = Object.entries(entry.params ?? {}).map(([k, v]) => `&${encodeURIComponent(k)}=${encodeURIComponent(v)}`).join('');
   return `${origin}/stream/tileset.json?format=${encodeURIComponent(fmt)}&url=${encodeURIComponent(entry.url)}&cache=${cache}`
     + (prefetch != null ? `&prefetch=${prefetch}` : '')
-    + (entry.crs ? `&crs=${encodeURIComponent(entry.crs)}` : '') + place;
+    + (entry.crs ? `&crs=${encodeURIComponent(entry.crs)}` : '') + place + params;
 }
 
 /** Source format of an ad-hoc ?url= child: this server's /stream URLs say so; anything else is 3D Tiles. */
@@ -1233,14 +1235,18 @@ export async function handleAggregate(req, res, u) {
       res.end(JSON.stringify({ error: status === 404 ? `no .vpc at ${vpcUrl.split('?')[0]}` : String(e.message || e), ...(e.detail ?? {}) }));
       return true;
     }
+    // The overview of the whole set, when the VPC names one, is placed as a leaf beside the groups, and
+    // the file leaves open at the error the overview leaves (&overview=0 drops it, &leafError=<m> sets
+    // the error by hand). See planOverview in vpc-live.js and the VPC docs page.
+    const plan = await planOverview(vpc.set, vpc.report, { overview: overviewParam(u.searchParams.get('overview')), leafError: leafErrorParam(u.searchParams.get('leafError')) });
+    vpc.set = plan.set;
     sets.vpc = vpc.set;
     u = new URL(u.href);
     u.searchParams.set('set', 'vpc');
     const proto = (req.headers['x-forwarded-proto'] || 'http').split(',')[0].trim();
     const origin = `${proto}://${req.headers['x-forwarded-host'] || req.headers.host}`;
     const r = vpc.report;
-    // The overview of the whole set, when the VPC names one: reported as a ready stream, not placed in the tree (see the VPC docs page for why).
-    vpc.extras = { ...r, ...(r.overviews ? { overviews: r.overviews.map((o) => ({ url: o, stream: childUrlFor({ format: 'copc', url: o, crs: vpc.set.entries[0]?.crs }, origin) })) } : {}) };
+    vpc.extras = { ...r, ...(r.overviews ? { overviews: r.overviews.map((o) => ({ url: o, stream: childUrlFor({ format: 'copc', url: o, crs: vpc.set.entries[0]?.crs }, origin) })) } : {}), ...plan.extras };
     vpc.headers = {
       'X-VPC-Items': String(r.items), 'X-VPC-Streamed': String(r.streamed), 'X-VPC-Skipped': String(r.skipped),
       ...(r.skipped ? { 'X-VPC-Skipped-Reasons': Object.entries(r.skippedReasons).map(([k, n]) => `${n} ${k}`).join('; ').replace(/[^\x20-\x7e]/g, '?') } : {}),

@@ -142,23 +142,53 @@ together about a second.
 
 ### What a client sees, from the whole country down
 
-The mosaic's groups have no content of their own: only a leaf, a COPC file's own stream, draws points. So:
+The mosaic's groups have no content of their own: only a leaf draws points. Two kinds of leaf exist, and which
+ones a VPC has decides what a country looks like from afar.
 
-- **Seen whole, a country shows nothing.** The client reads the root (23 to 293 KB) and the few subtrees its
-  screen-space error asks for, all of them JSON. No COPC file is opened: 337 206 tiles cost no request.
-- **A tile opens when the group above it refines.** A group's geometric error is twice its largest child's,
-  and a 1 km leaf declares 1 732 m (the diagonal of its octree cube), so the group over four tiles has 3 464 m.
-  At the usual 16 px threshold on a 1 000 px, 60° viewport that group refines within about **190 km** of the
-  camera, and each tile under it then reads its COPC root: one `tileset.json` (header and hierarchy, two range
-  reads on the source) and one root node, 0.4 to 1.3 MB.
-- **From there on it is the file's own octree**, refined by its own errors (a 1 km tile's root node declares
-  about 7 m).
+**With an overview** (an `assets.overview` on the items, or a root-level `links` entry of `rel: "overview"`,
+which is how `vpc-split.mjs` hands it up from the items it split away: flai's mirror ships one per dataset,
+QGIS's VPC writer can build one). The server reads its LAS header, 375 bytes, and does two things:
 
-190 km is early: a camera that high over dense coverage has tens of thousands of tiles in view, and their
-roots are requested as fast as the renderer's queue lets them. It is correct, and it is the cost of a mosaic
-without an overview; the fix is the overview asset as the groups' content (below), not yet built. Until then,
-open a country zoomed in, or raise the renderer's error threshold while flying in. (The distance is computed
-from the errors the server writes, not observed in a browser.)
+1. **Places it as a leaf of its own**, as large as the set, beside the groups right under the root. The
+   quadtree puts a dataset in the cell its size fits, so a country-sized sphere lands next to the groups of
+   its country, and the root refines with `ADD`: the overview's own octree carries the far view, from the
+   whole country down to its finest level, and the files add their points on top as the camera comes in.
+   The whole country is seen with the first request below the root: the overview's root node.
+2. **Lowers what a file is worth.** Not opening a file now costs the overview's *resolution* there, not the
+   file's *size*: each file leaf's geometric error becomes **4 × the overview's spacing**, with the spacing
+   the overview's points over the set's footprint, √(area ÷ points). A group's error is twice its largest
+   child's, so at the usual 16 px threshold the group over four tiles refines when the overview's points
+   are 2 px apart, which is where its view starts to show gaps and the file's root node (0.4 to 1.3 MB,
+   two range reads and a `tileset.json`) earns its cost. `asset.extras.vpc.overview` reports
+   `{ url, points, spacing, areaKm2, placed }` and `asset.extras.vpc.leafError` the error in metres.
+
+| Set | Overview | Spacing | A file leaf declares | The four-tile group refines at (16 px, 1 000 px, 60°) | Tiles in view there |
+|---|---:|---:|---:|---:|---:|
+| Dublin 2015, 35 tiles | 3.4 M points over 6.8 km² | 1.41 m | 5.64 m (was 866 m) | 0.6 km (was 94 km) | all 35 |
+| Luxembourg 2019, 10 906 tiles | 1.0 G points over 2 649 km² | 1.63 m | 6.52 m (was 866 m) | 0.7 km (was 94 km) | about 2, against 10 906 |
+| IGN LiDAR HD, 337 206 tiles | 1.26 G points over 337 290 km² | 16.3 m | 65.4 m (was 1 732 m) | 7 km (was 190 km) | about 50, against tens of thousands |
+
+Before this, a 1 km leaf declared 1 732 m, the diagonal of its octree cube, the group over four 3 464 m, and
+that group refined within 190 km of the camera, where tens of thousands of tiles were in view and each of them
+read its COPC root at once. (Distances computed from the errors the server writes, as before.) The overview's
+points and the files' overlap once both show, by the overview's share of the data: 0.01 % for France, 2 % for
+Luxembourg, whose overview is a dense 1 G points. The far view costs the overview alone.
+
+**Without an overview** (Canada, Switzerland, USGS Fairbanks: their hosts publish none), a country seen whole
+shows nothing: the client reads the root and the subtrees its screen-space error asks for, all JSON, and no
+COPC file is opened. A tile opens when the group above it refines, within those 190 km, which is correct and
+is the cost of a mosaic without an overview. Open such a set zoomed in, raise the renderer's error threshold
+while flying in, or give the leaves an error by hand.
+
+Two parameters, on `/stream?format=vpc` and `/aggregate?vpc=` alike:
+
+- **`&overview=0`** leaves the overview out and keeps the strict errors (the file's size);
+- **`&leafError=<m>`** sets every file leaf's geometric error in metres, with or without an overview
+  (`leafError=65` on Canada opens its files 7 km out, as France does).
+
+A nested child is told `&overview=0&leafError=<m>` by its parent, so the overview is placed once and every
+leaf of the set agrees. The viewer's **VPC** presets `france-lidarhd`, `france-lidarhd-grid`,
+`france-lidarhd-stac`, `luxembourg-2019`, `france-lidarhd-paris` and `dublin-2015` all carry an overview.
 
 ### Which items are streamed
 
@@ -217,18 +247,24 @@ mirror), and the COPC files QGIS itself writes keep it in a private `qgis` recor
 file's own CRS always overrides. A code this server does not know is registered from the item's own WKT when
 the VPC is read, for the life of the process.
 
-### The overview asset
-
-Not used as root content, and reported instead: `asset.extras.vpc.overviews` lists each overview with a ready
-`/stream/tileset.json?format=copc&url=…` URL.
+### The overview asset: why a leaf beside the groups, not the root's content
 
 The natural design, the overview as the root's content with `refine: REPLACE` over the per-file leaves, is
-not valid 3D Tiles: a tile whose content is an external tileset may not have children. The workaround is to
-put one GLB of the overview (its root node) on the root. That needs the overview's header read before the
-root can answer, a root transform that every leaf then has to undo, and it shows one level of a file that has
-a whole pyramid. Without it the mosaic's groups are empty, so from far away every leaf in view opens its
-COPC root: for the 10 906 Luxembourg tiles seen whole, 10 906 small requests. That is the cost of leaving the
-overview out, and the next thing to build here.
+not valid 3D Tiles: a tile whose content is an external tileset may not have children. The next idea, one GLB
+of the overview (its root node) as the root's content, needs the overview's header and root read before the
+root can answer, a root transform that every leaf then has to undo, and shows one level of a file that has a
+whole pyramid; cutting the overview's octree into one GLB per group would show every level, at the price of a
+clipped read of the overview per group, repeated for every group a client opens.
+
+Placing the overview as **a leaf of its own under an `ADD` root** gets all of its pyramid for nothing new: the
+leaf is the same `/stream/tileset.json?format=copc&url=<overview>` any COPC is, its octree refines on its own
+spacing, and the quadtree puts a country-sized dataset beside the groups of its country by itself. What it
+costs is the overlap once a file shows (the overview's share of the points, 0.01 % for France) and one more
+subtree in the tree. The lowered leaf error is what keeps the files closed while the overview is enough; the
+overview alone, with the old errors, would still have opened every tile within 190 km.
+
+`asset.extras.vpc.overviews` still lists each overview with a ready stream URL, for a client that wants it on
+its own.
 
 ## Writing one without PDAL
 

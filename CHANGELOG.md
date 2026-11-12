@@ -5,6 +5,25 @@ Format loosely follows [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+### Changed — 2026-11-12 (a VPC's overview carries the far view; a country no longer opens every tile within 190 km)
+- **The overview a VPC names is placed in the mosaic**, as a leaf as large as the set, beside the groups under
+  an `ADD` root: its own COPC octree is the view from afar, and the files add theirs as the camera comes in.
+  With it, **a file leaf's geometric error is 4 × the overview's spacing** (its points over the set's
+  footprint, from a 375-byte header read) instead of the file's size: a group of four IGN tiles refines about
+  7 km out (it was 190 km, with tens of thousands of tiles in view, each reading its COPC root), Luxembourg's
+  0.7 km (its overview is 1 G points, 1.6 m apart). `&overview=0` leaves it out, `&leafError=<m>` sets the
+  error by hand (also for sets without an overview: Canada, Switzerland, USGS Fairbanks have none). A nested
+  child is told `&overview=0&leafError=<m>`, so the overview is placed once. `asset.extras.vpc` reports
+  `overview: { url, points, spacing, areaKm2, placed }`, `leafError`, `areaKm2`, or `overviewError`.
+- `scripts/vpc-split.mjs` writes the items' overview on the root as a `links` entry of `rel: "overview"` (an
+  ItemCollection has no assets), and the parser reads one; the France split root on `sample-assets-v1`
+  (`france-lidarhd.vpc.gz`) was re-uploaded with it. The VPC docs page says what was weighed (the overview as
+  the root's content, one GLB of it, a GLB per group) and why a leaf beside the groups won.
+- Checked after the 12 November history rewrite of `main`: the ten rewritten commits (the 13 between
+  `255c227` and `4fd8616` kept their hashes) have the same author, dates, message, trees and diffs outside the
+  eight purged sample paths, and no purged path exists anywhere in the new history; the Iconem fork is synced
+  to `66211bd`. The pre-rewrite tip is kept here as the local branch `backup/main-before-purge-fe7f705`.
+
 ### Added — 2026-11-12 (grid VPC: a national campaign as its grid, all of France in 9.5 KB)
 - **A grid VPC** (`packages/tile-server/vpc-grid.js`, `"type": "3dtiled:GridVPC"`, `.gridvpc.json[.gz]`, detected as
   `vpc`): the grid (CRS, cell size, the corner a name gives), a URL template with `{x}`, `{y}` and a variant `{v}`,

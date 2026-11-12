@@ -159,6 +159,11 @@ export function splitVpc(doc, { maxItems = DEFAULTS.maxItems, maxBytes = DEFAULT
           files.set(l.key, fileOf(l.key, items, { links: [{ rel: 'parent', href: parentHref(key), type: 'application/geo+json' }] })); }), flat)
       : subKeys.map((k) => build(k, depth + 1));
     const links = children.map((c) => ({ rel: 'child', href: c.assets.data.href, type: 'application/geo+json', title: c.id }));
+    // the root keeps the set's overview, which the items it summarises carried as an asset (the server
+    // places it beside the groups, and lowers every leaf's error to what it leaves unseen): an
+    // ItemCollection has no assets, so it travels as a link. Only an absolute href survives the move.
+    const overview = key === '' ? mine.flatMap((l) => l.rows).map((r) => r.f.assets?.overview?.href).find((h) => /^https?:\/\//i.test(h ?? '')) : null;
+    if (overview) links.push({ rel: 'overview', href: overview, type: 'application/vnd.laszip+copc' });
     const node = fileOf(key, children, { links });
     if (key === '') return node;
     files.set(key, node);

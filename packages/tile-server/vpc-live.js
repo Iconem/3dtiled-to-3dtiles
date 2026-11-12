@@ -188,7 +188,8 @@ export function boxBounds(box, toEcef) {
   if (n > 1) r += (Math.max(sides[0], sides[1]) / n / 2) ** 2 / (2 * EARTH_R);
   if (![...c, r].every(Number.isFinite)) return null;
   r = Math.max(r, 0.01);
-  return { sphere: [+c[0].toFixed(3), +c[1].toFixed(3), +c[2].toFixed(3), +r.toFixed(3)], geometricError: +Math.max(side * Math.sqrt(3), r).toFixed(3) };
+  // `area`: the footprint (m²), summed over a set to tell how dense its overview is (see planOverview)
+  return { sphere: [+c[0].toFixed(3), +c[1].toFixed(3), +c[2].toFixed(3), +r.toFixed(3)], geometricError: +Math.max(side * Math.sqrt(3), r).toFixed(3), area: +(sides[0] * sides[1]).toFixed(1) };
 }
 
 const wgs84ToEcef = (lon, lat, h) => llhToEcef(lon, lat, h);
@@ -275,6 +276,7 @@ export function parseVpc(doc, base = null) {
       ...(b ? { bounds: { sphere: b.sphere, geometricError: b.geometricError } } : {}),
     };
     Object.defineProperty(entry, 'boundsFrom', { value: b?.from ?? 'probe', enumerable: false });
+    Object.defineProperty(entry, 'area', { value: b?.area ?? 0, enumerable: false });
     if (kind === 'vpc') nested++;
     (kind === 'laz' ? ambiguous : entries).push(entry);
   }
@@ -283,6 +285,9 @@ export function parseVpc(doc, base = null) {
   // child an item already names (vpc-split.mjs writes both forms) adds nothing.
   const named = new Set(entries.map((e) => e.url));
   for (const l of Array.isArray(doc.links) ? doc.links : []) {
+    // `rel: "overview"` at the root: how scripts/vpc-split.mjs hands the set's overview up from the
+    // items it split away (an ItemCollection has no assets of its own)
+    if (l?.rel === 'overview' && typeof l.href === 'string') { const o = resolveHref(l.href, base); if (o.url && kindOfHref(o.url) === 'copc') overviews.add(o.url); continue; }
     if (l?.rel !== 'child' || typeof l.href !== 'string') continue;
     const where = resolveHref(l.href, base);
     if (!where.url) { skipped.push({ href: l.href, reason: where.reason }); continue; }
@@ -379,6 +384,8 @@ export function vpcToSet(parsed, sorted = { copc: [], skipped: [], sniffed: 0 },
     // where each streamed item's box came from; `probe` = the item gave none, so /aggregate reads that file's root
     boundsFrom,
     points: entries.reduce((n, e) => n + (e.points ?? 0), 0),
+    // the footprint of the streamed items (a nested child counts the box over its items)
+    areaKm2: +(entries.reduce((n, e) => n + (e.area ?? 0), 0) / 1e6).toFixed(1),
     // nested VPCs among the streamed entries: each is one leaf here, a whole mosaic of its own below
     ...(parsed.nested ? { nested: parsed.nested } : {}),
     ...(parsed.overviews.length ? { overviews: parsed.overviews } : {}),
@@ -394,6 +401,115 @@ export function vpcToSet(parsed, sorted = { copc: [], skipped: [], sniffed: 0 },
   }
   const name = label || (url ? decodeURIComponent(pathOf(url).split('/').pop()) : 'Virtual point cloud');
   return { set: { label: name, entries, manifest: true, local: false, provider: null, attribution: null }, report };
+}
+
+// ── the overview, and what a file is worth once the overview shows ───────────────────────────────
+//
+// A mosaic's groups have no content: seen whole, a country shows nothing, and every file in view
+// opens the moment the group over it refines. With the leaf's error being the file's SIZE (1 732 m
+// for a 1 km tile), that is 190 km away at 16 px, where tens of thousands of tiles are in view, each
+// costing a tileset.json and a root node. The overview (one COPC over the whole set, which flai's
+// mirror and QGIS's VPC writer both provide) fixes both halves of that:
+//
+//   1. it is placed as one more leaf, as large as the set, so it lands beside the groups right under
+//      the root (the quadtree puts a dataset in the cell its size fits). The root refines with ADD,
+//      so the overview's own octree carries the far view, and the files add theirs on top;
+//   2. with the overview showing, not opening a file costs the overview's RESOLUTION there, not the
+//      file's size: the leaf error becomes `LEAF_ERROR_FACTOR × spacing`, where the spacing is the
+//      overview's points over the set's footprint, √(area / points). At 16 px a group of four tiles
+//      then refines when the overview's points are 2 px apart (8 × spacing projects to 16 px):
+//      France (1.26 G points over 337 206 km², 16.3 m) opens its files about 7 km out, where some
+//      fifty tiles are in view, instead of 190 km.
+//
+// A VPC without an overview keeps the strict error (and `&leafError=<m>` sets one by hand); a nested
+// child is told `&overview=0&leafError=<m>` so the overview is placed once and every leaf agrees.
+const LEAF_ERROR_FACTOR = 4;
+
+const overviewHeads = new Map();                   // url → promise of { points, extent }
+/** The LAS header of an overview (375 bytes, one range read): its point count and horizontal extent. */
+export async function overviewHead(url, fetchRange = fetchSourceRange) {
+  if (!overviewHeads.has(url)) {
+    if (overviewHeads.size > 64) overviewHeads.clear();
+    const p = (async () => {
+      const b = Buffer.from(await fetchRange(url, 0, 375, { attempts: 2, timeoutMs: 20_000 }));
+      if (b.length < 375 || b.toString('latin1', 0, 4) !== 'LASF') throw new Error('not a LAS file');
+      const points = b[24] === 1 && b[25] >= 4 ? Number(b.readBigUInt64LE(247)) : b.readUInt32LE(107);
+      if (!(points > 0)) throw new Error('the LAS header has no point count');
+      return { points, extent: [b.readDoubleLE(179) - b.readDoubleLE(187), b.readDoubleLE(195) - b.readDoubleLE(203)] };
+    })();
+    p.catch(() => overviewHeads.delete(url));
+    overviewHeads.set(url, p);
+  }
+  return overviewHeads.get(url);
+}
+
+/** `overview=` of a request → whether the overview is placed in the tree (default yes). */
+export function overviewParam(v) {
+  return !['0', 'off', 'false', 'no', 'none'].includes(String(v ?? '1').toLowerCase());
+}
+
+/** `leafError=` of a request → metres, or null for auto. */
+export function leafErrorParam(v) {
+  const n = Number(v);
+  return v != null && v !== '' && v !== 'auto' && Number.isFinite(n) && n > 0 ? n : null;
+}
+
+/** One sphere around a set of spheres [x, y, z, r]: centred on their mean, reaching the farthest one. */
+function sphereAround(spheres) {
+  let x = 0, y = 0, z = 0;
+  for (const s of spheres) { x += s[0]; y += s[1]; z += s[2]; }
+  x /= spheres.length; y /= spheres.length; z /= spheres.length;
+  let r = 0;
+  for (const s of spheres) r = Math.max(r, Math.hypot(s[0] - x, s[1] - y, s[2] - z) + s[3]);
+  return [+x.toFixed(3), +y.toFixed(3), +z.toFixed(3), +r.toFixed(3)];
+}
+
+const plans = new WeakMap();                       // set → Map<`${overview} ${leafError}`, promise of { set, extras }>
+/**
+ * The set as served: the overview placed as a leaf of its own (when the VPC names one and `overview`
+ * is on), the file leaves' geometric error lowered to what the overview leaves unseen (or to
+ * `leafError` metres when given), and nested children told the same. The set given is not changed:
+ * it is cached for a day and shared by every request. → { set, extras } with `extras` for
+ * `asset.extras.vpc`: `overview: { url, points, spacing, areaKm2 }`, `leafError`, or `overviewError`.
+ */
+export function planOverview(set, report, { overview = true, leafError = null } = {}) {
+  const key = `${overview ? 1 : 0} ${leafError ?? 'auto'}`;
+  let byKey = plans.get(set);
+  if (!byKey) plans.set(set, byKey = new Map());
+  if (!byKey.has(key)) byKey.set(key, planOverviewNow(set, report, { overview, leafError }));
+  return byKey.get(key);
+}
+
+async function planOverviewNow(set, report, { overview, leafError }) {
+  const extras = {};
+  const url = overview ? report.overviews?.[0] ?? null : null;
+  let error = leafError, placed = null;
+  if (url) {
+    try {
+      const head = await overviewHead(url);
+      // the set's own footprint; a set without placed items (every item probed) falls back to the overview's extent
+      const area = report.areaKm2 > 0 ? report.areaKm2 * 1e6 : head.extent[0] * head.extent[1];
+      const spacing = +Math.sqrt(area / head.points).toFixed(2);
+      if (error == null) error = +Math.max(1, LEAF_ERROR_FACTOR * spacing).toFixed(2);
+      const spheres = set.entries.map((e) => e.bounds?.sphere).filter((s) => Array.isArray(s) && s.length === 4);
+      if (spheres.length) {
+        const sphere = sphereAround(spheres);
+        placed = { format: 'copc', url, name: 'overview', role: 'overview', ...(set.entries[0]?.crs ? { crs: set.entries[0].crs } : {}), bounds: { sphere, geometricError: sphere[3] } };
+      }
+      extras.overview = { url, points: head.points, spacing, areaKm2: +(area / 1e6).toFixed(1), placed: !!placed };
+    } catch (e) {
+      extras.overviewError = `${url.split('?')[0].slice(-80)}: ${String(e.message || e)}`;
+    }
+  }
+  if (error != null) extras.leafError = error;
+  const entries = set.entries.map((e) => {
+    // a nested child places no overview of its own, and its leaves open at the same error as these
+    if (e.format === 'vpc') return { ...e, params: { ...(e.params ?? {}), overview: '0', ...(error != null ? { leafError: String(error) } : {}) } };
+    if (error != null && e.bounds && e.bounds.geometricError > error) return { ...e, bounds: { ...e.bounds, geometricError: error } };
+    return e;
+  });
+  if (placed) entries.unshift(placed);
+  return { set: { ...set, entries }, extras };
 }
 
 const DEFAULT_TTL_MS = 24 * 3600 * 1000;

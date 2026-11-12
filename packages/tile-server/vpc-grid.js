@@ -121,6 +121,7 @@ export function parseGridVpc(doc, base, { boxBounds }) {
     const e = { format: 'copc', url, name: decodeURIComponent(url.split(/[?#]/)[0].split('/').pop()), crs: doc.crs,
       ...(Number.isFinite(points) ? { points } : {}), bounds: { sphere: b.sphere, geometricError: b.geometricError } };
     Object.defineProperty(e, 'boundsFrom', { value: from, enumerable: false });
+    Object.defineProperty(e, 'area', { value: b.area ?? 0, enumerable: false });
     entries.push(e);
   };
   let k = 0;

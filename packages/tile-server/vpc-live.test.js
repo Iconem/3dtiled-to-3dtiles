@@ -255,8 +255,10 @@ test('/stream?format=vpc serves one mosaic of COPC streams, built from the .vpc 
   assert.equal(x.vpc.skippedItems.length, 2);
   assert.equal(x.vpc.overviews.length, 1);
   assert.match(x.vpc.overviews[0].stream, /\/stream\/tileset\.json\?format=copc&url=.*overview\.copc\.laz/);
-  // the whole point: the .vpc was the only file read
-  assert.deepEqual(h.hits, { '/set/index.vpc': 1 });
+  // the whole point: the .vpc was the only file read, plus the overview's 375-byte header (which here is not there)
+  assert.deepEqual(h.hits, { '/set/index.vpc': 1, '/set/overview.copc.laz': 1 });
+  assert.match(x.vpc.overviewError, /overview\.copc\.laz: /);
+  assert.equal(x.vpc.leafError, undefined);
   // a VPC has no tiles of its own
   assert.equal((await fetch(`${s}/stream/tile/0-0-0-0.glb?format=vpc&url=${encodeURIComponent(`${h.base}/set/index.vpc`)}`)).status, 404);
 });
@@ -343,6 +345,58 @@ test('/stream?format=vpc: a .laz item is read once to tell, a VPC of plain files
 
 // ── nested VPCs: a root whose items are child .vpc files (scripts/vpc-split.mjs) ──────────────────
 
+/** A LAS 1.4 header (375 bytes) saying `points` points over [x0, y0]–[x1, y1]: what planOverview reads of an overview. */
+function lasHeader(points, [x0, y0, x1, y1]) {
+  const b = Buffer.alloc(375);
+  b.write('LASF', 0, 'latin1'); b[24] = 1; b[25] = 4; b.writeUInt16LE(375, 94);
+  b.writeDoubleLE(x1, 179); b.writeDoubleLE(x0, 187); b.writeDoubleLE(y1, 195); b.writeDoubleLE(y0, 203);
+  b.writeBigUInt64LE(BigInt(points), 247);
+  return b;
+}
+const groupsOf = (ts) => { const out = []; (function walk(n) { if (n.children && !n.content) out.push(n); for (const c of n.children || []) walk(c); })(ts.root); return out; };
+
+test('the overview is placed as a leaf beside the groups, and the files open at the error it leaves', async (t) => {
+  quiet(t);
+  // 12 tiles of 1 km², an overview of 12 M points over them: 1 m between its points, so a file is worth 4 m
+  const features = Array.from({ length: 12 }, (_, i) => utmItem(`./tiles/t${i}.copc.laz`, 540000 + i * 1000, { overview: './overview.copc.laz' }));
+  const h = await host(t, { '/set/index.vpc': { type: 'FeatureCollection', features }, '/set/overview.copc.laz': lasHeader(12_000_000, [540000, 5724000, 552000, 5725000]) });
+  const s = await streamServer(t);
+  const url = `${h.base}/set/index.vpc`;
+  const ts = await (await fetch(`${s}/stream/tileset.json?url=${encodeURIComponent(url)}&cache=none`)).json();
+  const leaves = leavesOf(ts);
+  assert.equal(leaves.length, 13);
+  const ov = leaves.find((l) => /overview\.copc\.laz/.test(l.content.uri));
+  const files = leaves.filter((l) => l !== ov);
+  assert.equal(files.length, 12);
+  // every file leaf: 4 m, down from the 1 732 m its size says; the overview leaf: as large as the set
+  for (const f of files) assert.equal(f.boundingVolume.geometricError ?? f.geometricError, 4);
+  assert.ok(ov.geometricError > 6000 && ov.geometricError === ov.boundingVolume.sphere[3]);
+  assert.equal(new URL(ov.content.uri).searchParams.get('crs'), 'EPSG:25832');
+  // beside the groups: its parent is a group with at least one group among its children, refined with ADD
+  const parent = groupsOf(ts).find((g) => g.children.includes(ov));
+  assert.ok(parent && parent.refine === 'ADD' && parent.children.some((c) => c.children && !c.content));
+  assert.ok(parent.geometricError > ov.geometricError);
+  const x = ts.asset.extras.vpc;
+  assert.deepEqual(x.overview, { url: `${h.base}/set/overview.copc.laz`, points: 12_000_000, spacing: 1, areaKm2: 12, placed: true });
+  assert.deepEqual([x.leafError, x.areaKm2], [4, 12]);
+  assert.deepEqual(h.hits, { '/set/index.vpc': 1, '/set/overview.copc.laz': 1 });
+  // &overview=0: no overview leaf, the strict error is back; &leafError=50 is taken as given
+  const off = await (await fetch(`${s}/stream/tileset.json?url=${encodeURIComponent(url)}&cache=none&overview=0`)).json();
+  assert.equal(leavesOf(off).length, 12);
+  assert.ok(leavesOf(off).every((l) => Math.abs(l.geometricError - 1000 * Math.sqrt(3)) < 1));
+  assert.deepEqual([off.asset.extras.vpc.overview, off.asset.extras.vpc.leafError], [undefined, undefined]);
+  const fifty = await (await fetch(`${s}/stream/tileset.json?url=${encodeURIComponent(url)}&cache=none&leafError=50`)).json();
+  assert.ok(leavesOf(fifty).filter((l) => !/overview/.test(l.content.uri)).every((l) => l.geometricError === 50));
+  assert.equal(leavesOf(fifty).length, 13);
+  // a .vpc read once, the overview's header once, whatever the view
+  assert.deepEqual(h.hits, { '/set/index.vpc': 1, '/set/overview.copc.laz': 1 });
+});
+
+test('a root-level overview link stands in for the assets a split root no longer has', () => {
+  const doc = { type: 'FeatureCollection', features: [utmItem('./tiles/a.copc.laz')], links: [{ rel: 'overview', href: './overview.copc.laz' }] };
+  assert.deepEqual(parseVpc(doc, BASE).overviews, ['https://data.example.org/lidar/set/overview.copc.laz']);
+});
+
 const childItem = (href, x0, x1, extra = {}) => ({
   type: 'Feature', id: extra.id ?? href, geometry: null,
   bbox: [9.5, 51.6, 200, 9.7, 51.7, 320],
@@ -404,6 +458,8 @@ test('/stream?format=vpc serves a root of child VPCs from the root file alone; a
     assert.equal(u.searchParams.get('format'), 'vpc');
     assert.match(u.searchParams.get('url'), new RegExp(`^${h.base}/set/index/[01]\\.vpc\\.gz$`));
     assert.ok(Math.abs(lf.boundingVolume.sphere[3] - Math.hypot(2500, 500, 50)) < 3);
+    // a child places no overview of its own (the root does, when it names one)
+    assert.deepEqual([u.searchParams.get('overview'), u.searchParams.get('leafError')], ['0', null]);
   }
   assert.deepEqual([ts.asset.extras.vpc.nested, ts.asset.extras.build.childRootsFetched], [2, 0]);
   assert.deepEqual(h.hits, { '/set/index.vpc.gz': 1 });            // no child opened to build the root
