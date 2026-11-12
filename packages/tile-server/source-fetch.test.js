@@ -1,5 +1,8 @@
 // core/source-fetch.js: a host whose answers fetch refuses (obsolete header line folding, as pdmap.pland.gov.hk sends) is
 // read with Node's lenient client from the first failure on; and core/zip.js over such a host and over a file.
+// The fixture folds a header like that host does and also puts a control character in it: undici's parser has come to
+// tolerate the folding (Node 22.22, undici 6.24) but refuses the control character on every version, while Node's own
+// client with `insecureHTTPParser` reads both, so the fallback is exercised whatever Node runs the tests.
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import net from 'node:net';
@@ -11,7 +14,7 @@ import { fetchSource, fetchSourceRange, isLenientHost, openZip, writeZip } from 
 
 const quiet = (t) => { t.mock.method(console, 'log', () => {}); t.mock.method(console, 'warn', () => {}); };
 
-/** A raw HTTP/1.1 server that folds a long header over two lines and honours Range. */
+/** A raw HTTP/1.1 server that folds a long header over two lines (with a control character in it) and honours Range. */
 async function foldedServer(t, files) {
   let requests = 0;
   const server = net.createServer((sock) => {
@@ -24,7 +27,7 @@ async function foldedServer(t, files) {
       requests++;
       const [, , p] = /^(\w+) (\S+)/.exec(head), range = /\r\nRange: bytes=(\d*)-(\d*)/i.exec(head);
       const body = files[decodeURIComponent(p.split('?')[0].slice(1))];
-      const folded = 'Content-Security-Policy: default-src \'none\';\r\n\t\timg-src \'self\' data:;\r\n';
+      const folded = 'Content-Security-Policy: default-src \'none\';\r\n\t\timg-src \'self\' data:;\x01\r\n';
       if (!body) { sock.write(`HTTP/1.1 404 Not Found\r\n${folded}Content-Length: 0\r\nConnection: close\r\n\r\n`); return; }
       if (range) {
         const a = range[1] === '' ? Math.max(0, body.length - Number(range[2])) : Number(range[1]);
