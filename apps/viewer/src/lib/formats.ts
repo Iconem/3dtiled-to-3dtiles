@@ -117,16 +117,22 @@ export const FORMATS: FormatMeta[] = [
     // Self-made over flai's COPC mirror of IGN's LiDAR HD (Licence Ouverte 2.0): the 100 km Lambert-93 block X 600–700 / Y 6800–6900 km,
     // Paris and most of Île-de-France, 5 712 of the 337 206 tiles mirrored. 127 G points.
     { id: 'france-lidarhd-paris', label: 'IGN LiDAR HD, Paris 100 km block, 5 712 tiles (via flai, 127G, self-made VPC) ⬀', src: 'https://raw.githubusercontent.com/jo-chemla/3dtiled-to-3dtiles/main/packages/tile-server/samples/france-lidarhd-paris-100km.vpc.gz' },
-    // Self-made over ALL of flai's IGN LiDAR HD mirror: 337 206 tiles, every header read (scripts/copc-to-vpc.mjs, about 70 min over three runs resumed from --cache),
-    // 10.07 T points, split by scripts/vpc-split.mjs into a 60 KB root over 563 child VPCs (30 MB gzipped in all; 557 MB as one JSON file).
-    { id: 'france-lidarhd', label: 'IGN LiDAR HD, all of France, 337 206 tiles (via flai, 10.07T, split VPC of VPCs) ⬀', src: 'https://raw.githubusercontent.com/jo-chemla/3dtiled-to-3dtiles/main/packages/tile-server/samples/france-lidarhd.vpc.gz' },
+    // ALL of flai's IGN LiDAR HD mirror, 337 206 tiles, 10.07 T points, three ways. The country-scale sets are assets of the
+    // `sample-assets-v1` GitHub release (too large for the repository), every file a sibling (scripts/vpc-split.mjs --flat).
+    // 1. a GRID VPC (packages/tile-server/vpc-grid.js): the Lambert-93 km grid, a URL template and the rows of squares that
+    //    exist, with each tile's heights and count from its header. One 1.5 MB file.
+    { id: 'france-lidarhd', label: 'IGN LiDAR HD, all of France, 337 206 tiles (via flai, 10.07T, grid VPC, 1.5 MB) ⬀', src: 'https://github.com/jo-chemla/3dtiled-to-3dtiles/releases/download/sample-assets-v1/france-lidarhd-stats.gridvpc.json.gz' },
+    // 2. the same grid with the availability alone: 9.5 KB, every square given the country's height range (so a tile opens from further away).
+    { id: 'france-lidarhd-grid', label: 'IGN LiDAR HD, all of France, availability-only grid VPC (9.5 KB) ⬀', src: 'https://raw.githubusercontent.com/jo-chemla/3dtiled-to-3dtiles/main/packages/tile-server/samples/france-lidarhd.gridvpc.json.gz' },
+    // 3. the STAC VPC a PDAL / QGIS reader opens, every header read, split by scripts/vpc-split.mjs into a 60 KB root over 563 child VPCs (30 MB).
+    { id: 'france-lidarhd-stac', label: 'IGN LiDAR HD, all of France, split STAC VPC of VPCs (563 children, 30 MB) ⬀', src: 'https://github.com/jo-chemla/3dtiled-to-3dtiles/releases/download/sample-assets-v1/france-lidarhd.vpc.gz' },
     // Self-made from swisstopo's STAC API: every swissSURFACE3D 1 km tile served as COPC (15 643 of 58 987 items on 2026-11-10), headers read, split into 27 children.
-    { id: 'switzerland-swisssurface3d', label: 'swissSURFACE3D, 15 643 COPC tiles (swisstopo, 515G, split VPC) ⬀', src: 'https://raw.githubusercontent.com/jo-chemla/3dtiled-to-3dtiles/main/packages/tile-server/samples/switzerland-swisssurface3d.vpc.gz' },
+    { id: 'switzerland-swisssurface3d', label: 'swissSURFACE3D, 15 643 COPC tiles (swisstopo, 515G, split VPC) ⬀', src: 'https://github.com/jo-chemla/3dtiled-to-3dtiles/releases/download/sample-assets-v1/switzerland-swisssurface3d.vpc.gz' },
     // Self-made over NRCan's CanElevation bucket (OGL-Canada): the whole of New Brunswick and Prince Edward Island, 90 764 of its 751 929 COPC tiles,
     // every header read (1.73 T points, 39 projects 2015–2024), split into 147 child VPCs (9.9 MB gzipped in all) under a 16 KB root.
-    { id: 'canada-canelevation-nb-pei', label: 'CanElevation, New Brunswick + PEI, 90 764 tiles (NRCan, 1.7T, split VPC) ⬀', src: 'https://raw.githubusercontent.com/jo-chemla/3dtiled-to-3dtiles/main/packages/tile-server/samples/canada-canelevation-nb-pei.vpc.gz' },
+    { id: 'canada-canelevation-nb-pei', label: 'CanElevation, New Brunswick + PEI, 90 764 tiles (NRCan, 1.7T, split VPC) ⬀', src: 'https://github.com/jo-chemla/3dtiled-to-3dtiles/releases/download/sample-assets-v1/canada-canelevation-nb-pei.vpc.gz' },
     // Self-made over NOAA Digital Coast's unsigned COPC copy of a USGS 3DEP project (Fairbanks, AK, 2017, QL1 + QL2): 7 471 tiles, 63 G points, headers read.
-    { id: 'usgs-3dep-fairbanks-2017', label: 'USGS 3DEP Fairbanks 2017 via NOAA, 7 471 tiles (63G, split VPC) ⬀', src: 'https://raw.githubusercontent.com/jo-chemla/3dtiled-to-3dtiles/main/packages/tile-server/samples/usgs-3dep-fairbanks-2017.vpc.gz' },
+    { id: 'usgs-3dep-fairbanks-2017', label: 'USGS 3DEP Fairbanks 2017 via NOAA, 7 471 tiles (63G, split VPC) ⬀', src: 'https://github.com/jo-chemla/3dtiled-to-3dtiles/releases/download/sample-assets-v1/usgs-3dep-fairbanks-2017.vpc.gz' },
   ] },
   { fmt: 'potree', icon: '🌲', label: 'Potree', type: 'pointcloud', octree: true, stream: true, assets: [
     // Real source: potree.org's own hosted Potree-2.0 build of the lion scan.

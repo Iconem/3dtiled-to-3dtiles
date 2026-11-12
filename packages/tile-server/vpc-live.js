@@ -27,9 +27,13 @@
  * placed from the item's `proj:bbox` like any other: the root mosaic is built from the root file alone,
  * and a child VPC is read only when a client refines into its cell. A `links` child carries no bounds,
  * so /aggregate reads that child's mosaic root to place it (one request, not one per item).
+ *
+ * And a GRID VPC (vpc-grid.js, `"type": "3dtiled:GridVPC"`): a national campaign said as its grid, a URL
+ * template and the rows of cells that exist, instead of one STAC item per tile. Same route, same mosaic.
  */
 import { gunzipSync } from 'node:zlib';
 import { fetchSource, fetchSourceRange, crsToEcef, epsgOfCrs, ensureCrs, llhToEcef } from '../core/index.js';
+import { isGridVpc, parseGridVpc } from './vpc-grid.js';
 
 /** Past this extent a box is sampled on a grid: its faces follow the ellipsoid (as copc-live's curved placement does). */
 const CURVED_MIN_EXTENT = 20000;
@@ -425,9 +429,11 @@ export function vpcSet(url, { ttlMs = DEFAULT_TTL_MS, sniff = 'auto' } = {}) {
   entry.promise = (async () => {
     const t0 = performance.now();
     const doc = parseVpcBytes(await fetchSource(url), url);
-    const parsed = parseVpc(doc, url);
+    // a grid VPC (vpc-grid.js) says the same thing as a STAC VPC over a national grid, once: expanded here
+    const parsed = isGridVpc(doc) ? parseGridVpc(doc, url, { boxBounds }) : parseVpc(doc, url);
     const sorted = await sortAmbiguous(parsed.ambiguous, sniff);
-    const out = vpcToSet(parsed, sorted, { url });
+    const out = vpcToSet(parsed, sorted, { url, label: parsed.label ?? null });
+    if (isGridVpc(doc)) out.report.grid = { crs: doc.crs, cell: doc.cell ?? doc.unit ?? 1000, width: doc.width, height: doc.height, variants: doc.variants ?? [] };
     out.report.readMs = Math.round(performance.now() - t0);
     const r = out.report;
     console.log(`[vpc] ${url.split('?')[0].slice(-80)}: ${r.items} items, ${r.streamed} streamed${r.nested ? ` (${r.nested} nested VPC)` : ''}, ${r.skipped} skipped`

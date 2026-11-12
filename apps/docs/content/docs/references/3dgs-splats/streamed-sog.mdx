@@ -81,6 +81,30 @@ Optional `environment` → unbundled SOG of far-field splats outside the LOD sch
 ---
 
 ## Mapping to 3D Tiles (this repo's `sog-to-3dtiles`)
+
+**By default the tree is collapsed per LOD level under a splat budget**, offline and live alike
+(`collapseLodTree` in `packages/sog-to-3dtiles/src/lodMeta.js`). The 1:1 mapping described below gives every
+leaf one tile per level: Andrii Shramko's Lublin scan (259 M gaussians at level 0, 518 M over 13 levels,
+9 534 leaves) is 117 689 tiles and a 40.9 MB `tileset.json`, the coarsest level alone thousands of tiles of a
+few dozen splats, all of which a renderer refines before it draws anything. Collapsed:
+
+- the tiles of a level are the **shallowest nodes whose splats of that level fit the budget** (100 000 by
+  default); a tile's content is the runs of all the leaves below it, end to end;
+- a tile of level L has as children the tiles of level L−1 under it, `refine: REPLACE`;
+- its geometric error is its node's bound diagonal × 0.1, halved per level below the coarsest.
+
+Lublin becomes 7 169 tiles (median 65 000 splats, one or two chunk files each, 32 at most) and a 2.3 MB
+`tileset.json`; its root tile is the whole scene at the coarsest level, 1 MB. The same cap on what a client
+must read before it sees anything that the depth cut puts on a mosaic and `vpc-split` on a VPC.
+
+| | Offline | Live |
+|---|---|---|
+| Budget | `--splat-budget N` (`3dtiled … --splat-budget N`) | `&splatBudget=N`, `TILED_SOG_SPLAT_BUDGET` |
+| A merged tile | `tiles/node_<n>.glb` | `tile/m<path>_<level>.glb`: the node (one child index per character from the root) and the level; the server collects the runs |
+| `0` | the 1:1 mapping below | the same |
+
+`lodErrors` (a leaf's own error per level) is honoured by the 1:1 mapping only: a merged tile spans many
+leaves. With `0`:
 - Interior SOG node → empty 3D Tiles tile (boundingVolume from `bound`, children = its two subtrees).
 - Leaf SOG node → a **vertical chain** of tiles, coarsest LOD (highest level) as ancestor down to
   level 0 (finest), `refine: REPLACE`, each tile's content = the decoded `[offset,count)` run from

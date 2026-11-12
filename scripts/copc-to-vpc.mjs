@@ -45,30 +45,10 @@ import { existsSync, createWriteStream } from 'node:fs';
 import { createGzip } from 'node:zlib';
 import { crsToEcef, ecefToLlh, fetchSourceRange } from '../packages/core/index.js';
 import { copcHeaderInfo } from '../packages/tile-server/copc-live.js';
+import { GRIDS } from '../packages/tile-server/vpc-grid.js';
 
-// ── the regular grids a tile name encodes ────────────────────────────────────────────────────────
-//
-// parse(name) → { x, y } in km, box(x, y) → [x0, y0, x1, y1] in metres of the grid's CRS, name(x, y) the
-// file name of a cell (for --grid).
-export const GRIDS = {
-  // IGN LiDAR HD: 1 km Lambert-93 tiles named by their NORTH-WEST corner in km (LHD_FXX_0600_6833 spans
-  // X 600 000–601 000, Y 6 832 000–6 833 000). flai's mirror keeps IGN's names, plus 16 older
-  // `LHD_C_LA93-IGN69_0932-6503_2021` ones, same convention. Verified on both forms' headers.
-  'ign-lidarhd': {
-    epsg: 2154, size: 1000,
-    parse: (name) => { const m = /LHD_(?:FXX_(\d{4})_(\d{4})|C_LA93-IGN69_(\d{4})-(\d{4}))/.exec(name); return m ? { x: +(m[1] ?? m[3]), y: +(m[2] ?? m[4]) } : null; },
-    box: (x, y) => [x * 1000, (y - 1) * 1000, x * 1000 + 999.99, y * 1000 - 0.01],
-    name: (x, y) => `LHD_FXX_${String(x).padStart(4, '0')}_${String(y).padStart(4, '0')}_PTS_C_LAMB93_IGN69`,
-  },
-  // swisstopo swissSURFACE3D: 1 km LV95 tiles named by their SOUTH-WEST corner in km
-  // (swisssurface3d_2026_2671-1221 spans E 2 671 000–2 672 000, N 1 221 000–1 222 000). Verified on a header.
-  'swisstopo': {
-    epsg: 2056, size: 1000,
-    parse: (name) => { const m = /_(\d{4})-(\d{4})(?:_|\.|$)/.exec(name); return m ? { x: +m[1], y: +m[2] } : null; },
-    box: (x, y) => [x * 1000, y * 1000, x * 1000 + 999.99, y * 1000 + 999.99],
-    name: (x, y) => `swisssurface3d_${x}-${y}`,
-  },
-};
+// The regular grids a tile name encodes (IGN LiDAR HD, swisstopo) live in the tile-server, which reads them too (grid VPCs).
+export { GRIDS };
 
 const argv = process.argv.slice(2);
 const flag = (n) => { const i = argv.indexOf(`--${n}`); return i >= 0 ? argv[i + 1] : null; };

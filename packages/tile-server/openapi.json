@@ -75,7 +75,7 @@
                 "vpc"
               ]
             },
-            "description": "Source format. Auto-detected from the URL/extension when omitted for most formats. `vpc` (a PDAL/QGIS virtual point cloud, `.vpc`) answers with a mosaic of its COPC items, built by /aggregate: tileset.json only."
+            "description": "Source format. Auto-detected from the URL/extension when omitted for most formats. `vpc` (a PDAL/QGIS virtual point cloud, `.vpc` / `.vpc.gz`, nested ones included, or a grid VPC, `.gridvpc.json[.gz]`: a national grid as a URL template and the rows of cells that exist) answers with a mosaic of its COPC items, built by /aggregate: tileset.json only."
           },
           {
             "name": "cache",
@@ -339,6 +339,16 @@
               "default": false
             },
             "description": "Splat formats only — centroids-only (points, no covariance) preview instead of full Gaussian splats."
+          },
+          {
+            "name": "splatBudget",
+            "in": "query",
+            "schema": {
+              "type": "integer",
+              "default": 100000,
+              "minimum": 0
+            },
+            "description": "Streamed SOG only. The tree is collapsed per LOD level: a tile holds every run of one level under the shallowest node whose splats of that level fit this budget (tile/m<path>_<level>.glb). 0 keeps one tile per leaf run. Default from TILED_SOG_SPLAT_BUDGET."
           },
           {
             "name": "attributes",

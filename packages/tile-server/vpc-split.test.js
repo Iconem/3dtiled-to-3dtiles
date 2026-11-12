@@ -105,7 +105,8 @@ test('the byte limit splits further than the item limit, and a tiny item limit a
     assert.ok(fc.features.length <= 8);
     for (const f of fc.features) {
       if (f.properties['pc:type'] === 'vpc') {
-        const key = /^\.\/d\/([0-3]+)\.vpc$/.exec(f.assets.data.href)?.[1];
+        // the root (beside the `d/` folder) says ./d/<key>, a file inside the folder says ./<key>: both resolve to d/<key>.vpc
+        const key = (depth === 0 ? /^\.\/d\/([0-3]+)\.vpc$/ : /^\.\/([0-3]+)\.vpc$/).exec(f.assets.data.href)?.[1];
         assert.ok(deep.files.has(key), f.assets.data.href);
         const child = deep.files.get(key);
         assert.equal(f.properties['vpc:items'], (function count(x) { return x.features.reduce((n, y) => n + (y.properties['pc:type'] === 'vpc' ? count(deep.files.get(/([0-3]+)\.vpc$/.exec(y.assets.data.href)[1])) : 1), 0); })(child));
@@ -115,6 +116,19 @@ test('the byte limit splits further than the item limit, and a tiny item limit a
   };
   walk(deep.root, 0);
   assert.equal(reached.size, 1600);
+  // every href resolves, from the file that writes it, to the file it means (a nested child's parent link too)
+  const at = (key) => (key === '' ? 'https://h/d.vpc' : `https://h/d/${key}.vpc`);
+  for (const [key, fc] of [['', deep.root], ...deep.files]) {
+    for (const f of fc.features) if (f.properties['pc:type'] === 'vpc') assert.ok(deep.files.has(/\/d\/([0-3]+)\.vpc$/.exec(new URL(f.assets.data.href, at(key)).href)?.[1]), `${key}: ${f.assets.data.href}`);
+    for (const l of fc.links ?? []) if (l.rel === 'parent') { const up = new URL(l.href, at(key)).href; assert.ok(up === at('') || deep.files.has(/\/d\/([0-3]+)\.vpc$/.exec(up)?.[1]), `${key}: ${l.href}`); }
+  }
+  // --flat: every file a sibling, <name>.<key>, for a host without folders
+  const flat = splitVpc(g, { maxItems: 8, maxBytes: 50e6, name: 'd', ext: '.vpc', flat: true });
+  assert.equal(flat.files.size, deep.files.size);
+  for (const [key, fc] of [['', flat.root], ...flat.files]) {
+    for (const f of fc.features) if (f.properties['pc:type'] === 'vpc') assert.ok(flat.files.has(/^\.\/d\.([0-3]+)\.vpc$/.exec(f.assets.data.href)?.[1]), f.assets.data.href);
+    for (const l of fc.links ?? []) if (l.rel === 'parent') assert.match(l.href, key.length <= 1 || !flat.files.has(key.slice(0, -1)) ? /^\.\/d(\.[0-3]+)?\.vpc$/ : /^\.\/d\.[0-3]+\.vpc$/);
+  }
   assert.throws(() => splitVpc({ type: 'Feature' }), /not a VPC/);
 });
 

@@ -5,6 +5,81 @@ Format loosely follows [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+### Added — 2026-11-12 (grid VPC: a national campaign as its grid, all of France in 9.5 KB)
+- **A grid VPC** (`packages/tile-server/vpc-grid.js`, `"type": "3dtiled:GridVPC"`, `.gridvpc.json[.gz]`, detected as
+  `vpc`): the grid (CRS, cell size, the corner a name gives), a URL template with `{x}`, `{y}` and a variant `{v}`,
+  and `rows`, one character per square saying whether it exists and under which variant; optionally each present
+  square's heights and point count, and `extra` for files whose name is not of the grid. The server expands it in
+  memory into the entries a STAC VPC gives and builds the same mosaic (`asset.extras.vpc.boundsFrom: { grid }`).
+  **All of IGN's LiDAR HD (337 206 tiles) is 9.5 KB** with the availability alone, 1.5 MB with every tile's
+  heights and count, against 30 MB of split STAC VPC in 564 files. Root 23 KB with 34 external subtrees, a subtree
+  0.15 s; the first root of a server takes about 30 s (337 206 boxes projected and keyed), 0.1 s after.
+- **`scripts/vpc-to-grid.mjs <in.vpc[.gz]> --grid ign-lidarhd|swisstopo --url <template> -o x.gridvpc.json.gz
+  [--no-stats]`** writes one from a flat or split VPC, placing each item from its name. The grids
+  (`GRIDS`) moved from `copc-to-vpc.mjs` to `vpc-grid.js`, which the script imports.
+- **Corrected**: the VPC page said a grid template over IGN "404s on a quarter of its cells" and concluded the
+  grid could not describe the set. The observation stands (flai names a square `_PTS_C_` or `_PTS_O_`, 258 474 and
+  78 716, never both), the conclusion did not: one character per square says which, and a missing square is
+  simply not listed. The page now says so.
+- Library: `france-lidarhd` is now the grid VPC with heights and counts; `france-lidarhd-grid` the 9.5 KB
+  availability-only one; `france-lidarhd-stac` the split STAC VPC.
+
+### Changed — 2026-11-12 (the country VPC sets leave the repository for a GitHub release)
+- The four split sets (France, Canada NB + PEI, Switzerland, USGS Fairbanks: 757 files, 44 MB) are assets of the
+  release **`sample-assets-v1`** and are removed from `packages/tile-server/samples/`, which is back to 1.6 MB
+  (Dublin, Luxembourg, the Paris block, the 9.5 KB France grid). The library's presets and the docs point at
+  `https://github.com/jo-chemla/3dtiled-to-3dtiles/releases/download/sample-assets-v1/<name>.vpc.gz`; the public
+  tile-server and a local one read them from there alike (checked: Canada's root in 0.6 s, a child mosaic of 553
+  items in 1.1 s, a COPC leaf in 1.0 s). The files remain in the history of `main` up to this commit.
+- **`scripts/vpc-split.mjs --flat`** writes the children beside the root as `<name>.<quadkey>.vpc.gz`, since a
+  release has no folders. **Fixed** on the way: with intermediate levels, a child file named its own children
+  `./<name>/<key>` although it sits inside `<name>/` itself; it now says `./<key>`, and its parent link names
+  the file that lists it (no committed set had an intermediate level).
+- `/aggregate`: a VPC's root request reuses the mosaic key the first one derived, for as long as the mosaic
+  lives (it was reused for `&cell=` subtrees only): 10 s → 0.1 s on a repeated root of 337 206 items.
+- Docs, VPC page: how the splitter's quadtree is built (2 048 items and 2 MB of JSON per file, the cut, the
+  quadkeys, when an intermediate level appears), where the sets are kept, and what a client sees from the whole
+  country down (nothing until a group refines; a 1 km tile opens within about 190 km at 16 px, computed from the
+  errors the server writes, not observed in a browser).
+
+### Changed — 2026-11-12 (streamed SOG: the tree collapsed per LOD level, offline and live)
+- **`sog-to-3dtiles --splat-budget N`** (default 100 000; `0` keeps one tile per leaf run): the tiles of a LOD level
+  are the shallowest nodes whose splats of that level fit the budget, each holding the runs of all its leaves; a
+  tile of level L has as children the tiles of level L−1 under it. Made for Andrii Shramko's Lublin scan, whose
+  1:1 tree drew nothing in cesium-native until 126 672 tiles had loaded.
+- **The live route collapses the same way** (`collapseLodTree` in `sog-to-3dtiles/src/lodMeta.js`, shared):
+  `&splatBudget=N`, `TILED_SOG_SPLAT_BUDGET`. A merged tile is `tile/m<path>_<level>.glb`, its node and its level,
+  and the server collects the runs under it. Lublin live (259 M gaussians at level 0, 518 M over 13 levels):
+  **7 169 tiles and a 2.3 MB `tileset.json`, was 117 689 tiles and 40.9 MB**; median 65 000 splats a tile, one or
+  two chunk files each (32 at most); the root tile is the whole scene at the coarsest level, 1 MB in 7.6 s cold.
+  `lodErrors` is honoured by the 1:1 mapping only.
+- Library: **Lublin, Poland** (259 M, CC BY, the scene PlayCanvas showed at the Metaverse Standards Forum town
+  hall) and **Itaka Stadium, Opole** (212 M, CC BY), both by Andrii Shramko on SuperSplat's CDN.
+- Docs: `KHR_gaussian_splatting` is marked **ratified** (it said release candidate), with a table of the
+  extensions built on it, every one still an open pull request on 2026-11-12: `_compression_spz_2` (#2531),
+  `_compression_lgsc` (#2551), `_compression_EGSC` (#2605), `MPEG_gaussian_splatting_transport` (#2573),
+  `_wide_gamut_color` (#2539).
+
+### Researched — 2026-11-11 (what was looked into and not built, and why)
+- **OSGB in the 100 M-vertex range and above**: the only public one found is Hong Kong's Planning Department model
+  (2 150 zipped tiles, 467 GB, about 10 G vertices, 4.7 M a tile on average, 6.4 M in the Central tile), now in
+  the library. Every other public OSGB sample is under 10 M vertices.
+- **Metaverse Standards Forum, 3D Gaussian Splat Compression Town Hall (2026-11-03)**: Streamed SOG is the only
+  tiled format with levels of detail that has large public scenes (the 259 M one above); SOG v3 shipped a week
+  later and is read here; SPZ 4 is one blob per file, chunks and levels of detail are a version 5 roadmap item
+  with nothing published; L-GSC (Qualcomm) and EGSC compress one primitive's payload and have no public
+  JavaScript decoder; MPEG's two codecs (V-PCC and G-PCC based) are not public. Nothing to build yet beyond SOG v3.
+- **Range-request coalescing** (the idea in deck.gl-raster 0.10): built for Potree 2.0, LCC, LCC2 and Nexus, see
+  the entry of 2026-11-11. Fewer requests (422 → 29 on a Potree hierarchy drain), the same wall time.
+- **Open USD scenes as tiling candidates**: Kitchen Set, ALab, Intel Sponza, the da Vinci Workshop and the
+  usd-wg assets are too small to need tiles; only Disney's Moana Island (about 90 M polygons, 28 M instances,
+  research licence) is, and it is not built.
+- **I3S point clouds** were already supported (three library entries). **Open samples of other formats**: Hexagon
+  HSPC, Metashape TLS, Nearmap and Vexcel publish no native sample and export 3D Tiles; Skyline 3DML has one
+  (262 MB); 3DBAG publishes 3D Tiles 1.1 directly; Matterport has no open tiled sample.
+- **IGN's own LiDAR HD index** (the WFS layer `IGNF_LIDAR-HD_TA:nuage-dalle`) answers 403 outside IGN's portal, so
+  the France sets are built from flai's COPC mirror and its listing of 2026-11-10.
+
 ### Added — 2026-11-11 (VPC of VPCs: a country as a hierarchy of VPC files, and four more countries' worth)
 - **`scripts/vpc-split.mjs <in.vpc[.gz]> -o <dir>/<name>.vpc.gz [--max-items 2048] [--max-bytes 2000000]`** cuts a
   VPC into a quadtree of child VPC files, each under the item count and the JSON size (Potree's hierarchy pages,

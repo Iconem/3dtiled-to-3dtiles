@@ -22,10 +22,11 @@
  *      which a STAC crawler follows and vpc-live.js also accepts (placed by reading the child's mosaic
  *      root, since a link carries no bounds). The two name the same files; the server reads each once.
  *
- *   node scripts/vpc-split.mjs <in.vpc[.gz] | https://…vpc> -o <dir>/<name>.vpc.gz [--max-items 2048] [--max-bytes 2000000] [--pretty]
+ *   node scripts/vpc-split.mjs <in.vpc[.gz] | https://…vpc> -o <dir>/<name>.vpc.gz [--max-items 2048] [--max-bytes 2000000] [--flat] [--pretty]
  *
  * writes <dir>/<name>.vpc.gz (the root) and <dir>/<name>/<quadkey>.vpc.gz (the children, gzipped when
- * the root is). Keys are quadkeys from the root's extent: 0 SW, 1 SE, 2 NW, 3 NE, one digit per level.
+ * the root is); with `--flat`, the children beside the root as <dir>/<name>.<quadkey>.vpc.gz, for a host
+ * that has no folders (the sets in the library are assets of a GitHub release). Keys are quadkeys from the root's extent: 0 SW, 1 SE, 2 NW, 3 NE, one digit per level.
  * Serve the root as any VPC: /aggregate/tileset.json?vpc=<root url>.
  */
 import fs from 'node:fs/promises';
@@ -108,7 +109,7 @@ export function summaryItem(features, { id, href, items }) {
  * items unchanged, and every parent's items the summaries of its children. `name` is the root's base
  * name (children are referenced as `./<name>/<key>.vpc[.gz]`), `ext` the children's extension.
  */
-export function splitVpc(doc, { maxItems = DEFAULTS.maxItems, maxBytes = DEFAULTS.maxBytes, name = 'root', ext = '.vpc.gz', rootHref = null } = {}) {
+export function splitVpc(doc, { maxItems = DEFAULTS.maxItems, maxBytes = DEFAULTS.maxBytes, name = 'root', ext = '.vpc.gz', rootHref = null, flat = false } = {}) {
   const features = doc?.type === 'FeatureCollection' && Array.isArray(doc.features) ? doc.features : null;
   if (!features) throw new Error('not a VPC: expected a GeoJSON FeatureCollection of STAC items');
   const WRAP = 60;                                   // the FeatureCollection around the items, and a comma per item
@@ -134,7 +135,11 @@ export function splitVpc(doc, { maxItems = DEFAULTS.maxItems, maxBytes = DEFAULT
   // 2. the parents: a node lists its leaves directly when they fit, else its four sub-nodes
   const files = new Map();
   const stats = { items: rows.length, leaves: leaves.length, files: 0, depth: 0, leafItems: [], leafBytes: [], levels: 0 };
-  const hrefOf = (key) => `./${name}/${key}${ext}`;
+  // A child's href as the file that lists it writes it. Nested layout: the root sits beside the `<name>/` folder its
+  // children are in, so the root says `./<name>/<key>` and a child says `./<key>`. Flat layout (`--flat`): every file
+  // is a sibling, `<name>.<key>`, which is what a host without folders (a GitHub release) can hold.
+  const hrefOf = (key, from = '') => (flat ? `./${name}.${key}${ext}` : from === '' ? `./${name}/${key}${ext}` : `./${key}${ext}`);
+  const parentHref = (from) => (from === '' ? (rootHref ?? (flat ? `./${name}${ext}` : `../${name}${ext}`)) : flat ? `./${name}.${from}${ext}` : `./${from}${ext}`);
   const fileOf = (key, items, extra = {}) => ({ type: 'FeatureCollection', ...extra, features: items });
   const build = (key, depth) => {                    // → the summary item of node `key` as its parent writes it, after writing the node's file
     const mine = leaves.filter((l) => l.key.startsWith(key));
@@ -143,15 +148,15 @@ export function splitVpc(doc, { maxItems = DEFAULTS.maxItems, maxBytes = DEFAULT
       const items = mine[0].rows.map((r) => r.f);
       stats.leafItems.push(items.length); stats.leafBytes.push(mine[0].rows.reduce((n, r) => n + r.bytes, WRAP));
       if (key === '') return null;                   // everything fit in the root: nothing to split
-      files.set(key, fileOf(key, items, { links: [{ rel: 'parent', href: rootHref ?? `../${name}${ext}`, type: 'application/geo+json' }] }));
-      return summaryItem(items, { id: `${name}-${key}`, href: hrefOf(key), items: items.length });
+      files.set(key, fileOf(key, items, { links: [{ rel: 'parent', href: parentHref(key.slice(0, -1)), type: 'application/geo+json' }] }));
+      return summaryItem(items, { id: `${name}-${key}`, href: hrefOf(key, key.slice(0, -1)), items: items.length });
     }
     const subKeys = [...new Set(mine.map((l) => l.key.slice(0, key.length + 1)))].sort();
-    const flat = mine.map((l) => summaryItem(l.rows.map((r) => r.f), { id: `${name}-${l.key}`, href: hrefOf(l.key), items: l.rows.length }));
+    const flat = mine.map((l) => summaryItem(l.rows.map((r) => r.f), { id: `${name}-${l.key}`, href: hrefOf(l.key, key), items: l.rows.length }));
     const flatBytes = flat.reduce((n, s) => n + JSON.stringify(s).length + 1, WRAP);
     const children = flat.length <= maxItems && flatBytes <= maxBytes
       ? (mine.forEach((l) => { const items = l.rows.map((r) => r.f); stats.leafItems.push(items.length); stats.leafBytes.push(l.rows.reduce((n, r) => n + r.bytes, WRAP));
-          files.set(l.key, fileOf(l.key, items, { links: [{ rel: 'parent', href: key === '' ? (rootHref ?? `../${name}${ext}`) : `./${key}${ext}`, type: 'application/geo+json' }] })); }), flat)
+          files.set(l.key, fileOf(l.key, items, { links: [{ rel: 'parent', href: parentHref(key), type: 'application/geo+json' }] })); }), flat)
       : subKeys.map((k) => build(k, depth + 1));
     const links = children.map((c) => ({ rel: 'child', href: c.assets.data.href, type: 'application/geo+json', title: c.id }));
     const node = fileOf(key, children, { links });
@@ -159,7 +164,7 @@ export function splitVpc(doc, { maxItems = DEFAULTS.maxItems, maxBytes = DEFAULT
     files.set(key, node);
     stats.levels++;
     const all = mine.flatMap((l) => l.rows.map((r) => r.f));
-    return summaryItem(all, { id: `${name}-${key}`, href: hrefOf(key), items: all.length });
+    return summaryItem(all, { id: `${name}-${key}`, href: hrefOf(key, key.slice(0, -1)), items: all.length });
   };
   const root = build('', 0) ?? { ...doc };
   stats.files = files.size;
@@ -214,19 +219,20 @@ async function main() {
   const flag = (n) => { const i = argv.indexOf(`--${n}`); return i >= 0 ? argv[i + 1] : null; };
   const out = argv.includes('-o') ? argv[argv.indexOf('-o') + 1] : null;
   const input = argv.find((a, i) => !a.startsWith('-') && !['-o', '--max-items', '--max-bytes'].includes(argv[i - 1]));
-  if (!input || !out) { console.error('usage: node scripts/vpc-split.mjs <in.vpc[.gz] | url> -o <dir>/<name>.vpc[.gz] [--max-items 2048] [--max-bytes 2000000] [--pretty]'); process.exit(1); }
+  if (!input || !out) { console.error('usage: node scripts/vpc-split.mjs <in.vpc[.gz] | url> -o <dir>/<name>.vpc[.gz] [--max-items 2048] [--max-bytes 2000000] [--flat] [--pretty]'); process.exit(1); }
   const t0 = performance.now();
   const bytes = /^https?:\/\//.test(input) ? Buffer.from(await (await fetch(input)).arrayBuffer()) : await fs.readFile(input);
   const doc = readCollection(inflate(bytes));
   const gz = out.endsWith('.gz'), ext = gz ? '.vpc.gz' : '.vpc';
   const name = path.basename(out).replace(/\.vpc(\.gz)?$/i, '');
-  const { root, files, stats } = splitVpc(doc, { maxItems: Number(flag('max-items')) || DEFAULTS.maxItems, maxBytes: Number(flag('max-bytes')) || DEFAULTS.maxBytes, name, ext });
+  const flat = argv.includes('--flat');
+  const { root, files, stats } = splitVpc(doc, { maxItems: Number(flag('max-items')) || DEFAULTS.maxItems, maxBytes: Number(flag('max-bytes')) || DEFAULTS.maxBytes, name, ext, flat });
   const pretty = argv.includes('--pretty') ? 2 : 0;
   const encode = (d) => { const j = JSON.stringify(d, null, pretty) + '\n'; return { json: j, bytes: gz ? gzipSync(j, { level: 9 }) : Buffer.from(j) }; };
-  const dir = path.join(path.dirname(out), name);
+  const dir = flat ? path.dirname(out) : path.join(path.dirname(out), name);
   if (files.size) await fs.mkdir(dir, { recursive: true });
   let total = 0, totalJson = 0;
-  for (const [key, d] of files) { const e = encode(d); await fs.writeFile(path.join(dir, `${key}${ext}`), e.bytes); total += e.bytes.length; totalJson += e.json.length; }
+  for (const [key, d] of files) { const e = encode(d); await fs.writeFile(path.join(dir, flat ? `${name}.${key}${ext}` : `${key}${ext}`), e.bytes); total += e.bytes.length; totalJson += e.json.length; }
   const r = encode(root);
   await fs.writeFile(out, r.bytes);
   const sorted = (a) => [...a].sort((x, y) => x - y), med = (a) => sorted(a)[Math.floor(a.length / 2)] ?? 0;

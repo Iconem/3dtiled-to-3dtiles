@@ -11,7 +11,30 @@ SPDX-License-Identifier: CC-BY-4.0
 # KHR\_gaussian\_splatting
 
 > Source: https://github.com/KhronosGroup/glTF/blob/main/extensions/2.0/Khronos/KHR_gaussian_splatting/README.md
-> Status: Release Candidate (2026)
+> Status: **Complete, Ratified by the Khronos Group** (the README on `main`; merged 2026-01-27 in [#2490](https://github.com/KhronosGroup/glTF/pull/2490), editorial review 2026-04-15, component types rebased 2026-10-13)
+
+## Status of the family (checked 2026-11-12)
+
+The base extension is ratified. **Every extension built on it is still an open pull request**: none is merged,
+none is ratified, and each can still change. Only `KHR_gaussian_splatting` (and `KHR_meshopt_compression`) sit
+under `extensions/2.0/Khronos/` on `main`.
+
+| Extension | PR | By | Opened, last touched | What it adds |
+|---|---|---|---|---|
+| `KHR_gaussian_splatting` | [#2490](https://github.com/KhronosGroup/glTF/pull/2490), merged | Cesium (weegeekps) | merged 2026-01-27 | **ratified**: splats as a `POINTS` primitive, uncompressed accessors |
+| `KHR_gaussian_splatting_compression_spz_2` | [#2531](https://github.com/KhronosGroup/glTF/pull/2531), open | Cesium (weegeekps) | 2025-09-29, 2026-10-30 | the primitive's data as one SPZ v2 blob (Niantic's format) in a buffer view. What this toolbox writes and what CesiumJS reads |
+| `KHR_gaussian_splatting_compression_lgsc` | [#2551](https://github.com/KhronosGroup/glTF/pull/2551), open | Qualcomm (ibouazizi) | 2026-01-16, 2026-10-29 | L-GSC, Qualcomm's codec (`qualcomm/lite-3Dgsplat-codec`, C++ reference, no public JavaScript decoder) |
+| `KHR_gaussian_splatting_compression_EGSC` | [#2605](https://github.com/KhronosGroup/glTF/pull/2605), open | caiky-HW | 2026-06-13, 2026-10-14 | EGSC: the attributes in one binary payload, the higher SH bands as GPU textures (ASTC / UASTC) the GPU samples without a CPU decode |
+| `MPEG_gaussian_splatting_transport` | [#2573](https://github.com/KhronosGroup/glTF/pull/2573), open | haudiobe | 2026-05-01, 2026-11-07 | carries MPEG's coded splats (the V-PCC and G-PCC based codecs) in glTF; a vendor-prefixed extension, not a `KHR_` one |
+| `KHR_gaussian_splatting_wide_gamut_color` | [#2539](https://github.com/KhronosGroup/glTF/pull/2539), open | Cesium (weegeekps) | 2025-11-04, 2026-02-11 | wide-gamut and HDR colour encodings; not a compression extension |
+
+What follows from it here: the tiles this toolbox writes declare `KHR_gaussian_splatting` and
+`KHR_gaussian_splatting_compression_spz_2` as **required**, because CesiumJS draws only that pair (it rejects
+the plain, ratified extension without the SPZ child). They therefore depend on a draft: if #2531 changes
+before it is merged, the writer (`packages/core`'s splat tile encoder) changes with it. None of the three
+codecs is tiled or carries levels of detail: each compresses the payload of one primitive, and the
+hierarchy stays the business of 3D Tiles. SPZ itself is at version 4, still one blob per file; chunking and
+levels of detail are on Niantic's roadmap for a version 5, with nothing published.
 
 ## Overview
 
@@ -87,7 +110,7 @@ See full spec at: https://github.com/KhronosGroup/glTF/blob/main/extensions/2.0/
 ## Compression extension: KHR_gaussian_splatting_compression_spz_2
 
 > Source: https://github.com/KhronosGroup/glTF/pull/2531
-> Status: Draft (2026)
+> Status: **Open PR** (opened 2025-09-29, last touched 2026-10-30, not merged)
 
 Extension for compressing 3D Gaussian splats using the SPZ v2 format (Niantic Spatial). Depends on
 `KHR_gaussian_splatting` above.

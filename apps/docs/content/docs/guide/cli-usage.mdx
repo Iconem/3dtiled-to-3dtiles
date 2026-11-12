@@ -332,8 +332,11 @@ npm install                                  # pulls @playcanvas/splat-transform
 node src/index.js path/to/scene/ ./out-sog   # dir containing lod-meta.json, or the json itself
 ```
 
-**How it works:** the streamed-SOG binary spatial tree maps almost 1:1 onto a 3D Tiles HLOD
-tree — interior nodes become empty grouping tiles, and each leaf becomes a `REPLACE` chain of
+**How it works:** the streamed-SOG binary spatial tree is collapsed per LOD level under a splat budget
+(`--splat-budget N`, 100 000 by default): the tiles of a level are the shallowest nodes whose splats of that
+level fit, each holding the runs of all its leaves, so a 259 M-splat scene is 7 169 tiles rather than 117 689
+(see [Streamed SOG](/docs/references/3dgs-splats/streamed-sog#mapping-to-3d-tiles-this-repos-sog-to-3dtiles)).
+With `--splat-budget 0` the tree maps 1:1 — interior nodes become empty grouping tiles, and each leaf becomes a `REPLACE` chain of
 tiles from coarsest LOD level down to level 0 (finest). Bounds are emitted in the Z-up tileset
 frame (`RX+90°`), matching the RAD path.
 

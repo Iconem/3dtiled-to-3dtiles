@@ -29,7 +29,7 @@ the `pointcloud` and `projection` extensions. Not a STAC *Collection*: everythin
 ## How it is served: a mosaic of COPC streams
 
 ```
-GET /stream/tileset.json?format=vpc&url=<https://….vpc>      # format is detected from the .vpc (or .vpc.gz) extension
+GET /stream/tileset.json?format=vpc&url=<https://….vpc>      # format is detected from .vpc, .vpc.gz and .gridvpc.json[.gz]
 GET /aggregate/tileset.json?vpc=<https://….vpc>               # the same mosaic, with /aggregate's own defaults
 GET /aggregate/index.json?vpc=<https://….vpc>                 # one row per streamed item
     [&nest=geodetic|mercator|flat] [&bv=…] [&cut=auto|<depth>|0] [&cache=none|hierarchy] [&prefetch=N] [&sniff=auto|all|0] [&ttl=<s>]
@@ -75,16 +75,34 @@ hierarchical, the way Potree's hierarchy is cut into pages: **a root VPC whose i
 files**, each child under an item count and a JSON size.
 
 ```bash
-node scripts/vpc-split.mjs country.vpc.gz -o samples/country.vpc.gz [--max-items 2048] [--max-bytes 2000000]
-#  → samples/country.vpc.gz              the root: one item per child, the union of the child's extents
-#    samples/country/<quadkey>.vpc.gz     the children, the items unchanged
+node scripts/vpc-split.mjs country.vpc.gz -o out/country.vpc.gz [--max-items 2048] [--max-bytes 2000000] [--flat]
+#  → out/country.vpc.gz                  the root: one item per child, the union of the child's extents
+#    out/country/<quadkey>.vpc.gz         the children, the items unchanged
+#  --flat: the children beside the root as out/country.<quadkey>.vpc.gz, for a host without folders
 ```
 
-The items are cut into a quadtree on their WGS 84 centres (quadkeys 0 SW, 1 SE, 2 NW, 3 NE, one digit per
-level) until every cell fits the limits (2 048 items and 2 MB of JSON by default; `--max-bytes 5000000` for
-5 MB pages). The root lists the leaf files directly when it fits the same limits itself, so a reader hops
-once; an intermediate level of VPC files is written only when it would not (France at `--max-items 8`
-is such a tree). A child is named in the root in both STAC forms at once:
+**How the quadtree is built.** Two limits, and a cell is cut until it meets both:
+
+| Limit | Default | Flag |
+|---|---:|---|
+| items in one VPC file | **2 048** | `--max-items` |
+| JSON of one VPC file, before gzip | **2 MB** (2 000 000 bytes) | `--max-bytes` (`5000000` for 5 MB pages) |
+
+1. Every item gets a point: the centre of its WGS 84 `bbox` (or of its `geometry`).
+2. Starting from all the items as one cell: if the cell has at most 2 048 items **and** their JSON is at most
+   2 MB, it is a leaf and becomes one child file. Otherwise it is cut in four at the midpoint of its items'
+   centres (quadrant 0 south-west, 1 south-east, 2 north-west, 3 north-east), and each non-empty quadrant is
+   cut again the same way. A child's name is its **quadkey**, one digit per cut: `france-lidarhd.1203.vpc.gz`
+   is the north-east quarter of the south-west quarter of the north-west quarter of the south-east quarter.
+   The tree is as deep as the densest corner needs and no deeper: France's leaves are 3 to 5 digits.
+3. The root is then written. It holds one item per leaf file when those items fit the same two limits
+   themselves (563 summary items are 1 MB of JSON: they do), so a reader hops once from the root to any
+   child. Only when they would not fit does a level of intermediate VPC files appear between the two, each
+   listing its own quadrants (France at `--max-items 8` is such a tree).
+
+The byte limit is what bites when items are heavy: an IGN item carries its own Lambert-93 WKT, about 1.65 KB
+of JSON, so 2 MB is reached at 1 200 items, before the 2 048. France's 563 children hold 9 to 1 200 items
+(median 525) and none is over 1.98 MB of JSON. A child is named in the root in both STAC forms at once:
 
 1. **an item** whose `assets.data.href` is the child file, `pc:type: "vpc"`, `pc:encoding:
    "application/geo+json"`, `vpc:items` the number of point cloud files below it, `pc:count` their sum,
@@ -103,9 +121,9 @@ The tree a client walks is then root → (child VPC → subtree)… → COPC roo
 no extension but `pc:type: "vpc"` (or an asset typed as one) is taken for a nested VPC as well.
 
 A PDAL `readers.stac` that cannot read a `.vpc` asset filters the items out on `pc:type`; QGIS draws the
-extents and fails only the sub-index it tries to open. What the split did to the committed sets, and the walk
+extents and fails only the sub-index it tries to open. What the split did to the four country sets, and the walk
 from the root to the first points of a leaf, measured on this machine with the files served from
-`/samples/` on localhost:
+`/samples/` on localhost (they have since moved to a GitHub release, [see below](#where-the-sets-are-kept)):
 
 | Set | Items | Root | Children | Root → child VPC → (subtree) → COPC root → first tile |
 |---|---:|---:|---|---|
@@ -121,6 +139,26 @@ read, and a child of 1 000 items costs what Luxembourg's first 1 000 did. What a
 the point cloud: the COPC root (header and hierarchy from S3) and its first tile are a second or two each
 (timings from one morning; the same walk the evening before saw 5–11 s per S3 read), the three index hops
 together about a second.
+
+### What a client sees, from the whole country down
+
+The mosaic's groups have no content of their own: only a leaf, a COPC file's own stream, draws points. So:
+
+- **Seen whole, a country shows nothing.** The client reads the root (23 to 293 KB) and the few subtrees its
+  screen-space error asks for, all of them JSON. No COPC file is opened: 337 206 tiles cost no request.
+- **A tile opens when the group above it refines.** A group's geometric error is twice its largest child's,
+  and a 1 km leaf declares 1 732 m (the diagonal of its octree cube), so the group over four tiles has 3 464 m.
+  At the usual 16 px threshold on a 1 000 px, 60° viewport that group refines within about **190 km** of the
+  camera, and each tile under it then reads its COPC root: one `tileset.json` (header and hierarchy, two range
+  reads on the source) and one root node, 0.4 to 1.3 MB.
+- **From there on it is the file's own octree**, refined by its own errors (a 1 km tile's root node declares
+  about 7 m).
+
+190 km is early: a camera that high over dense coverage has tens of thousands of tiles in view, and their
+roots are requested as fast as the renderer's queue lets them. It is correct, and it is the cost of a mosaic
+without an overview; the fix is the overview asset as the groups' content (below), not yet built. Until then,
+open a country zoomed in, or raise the renderer's error threshold while flying in. (The distance is computed
+from the errors the server writes, not observed in a browser.)
 
 ### Which items are streamed
 
@@ -213,14 +251,35 @@ Three ways to know where a tile is and how many points it holds, from the exact 
 |---|---|---|---|
 | default | one 2 KB header per file | exact extent, count, WKT, date | always right; 337 206 files are about 70 minutes of reads at 16–32 in flight, over three runs resumed from `--cache` |
 | `--estimate <grid>` (`ign-lidarhd`, `swisstopo`) | `--calibrate N` headers (500) drawn at random | the footprint from the tile **name**, `pc:count` from the file **size** the `--s3` listing gives through a fitted bytes-per-point ratio (printed), heights from the nearest calibrated tiles; items marked `"3dtiled:estimated": ["pc:count", "z"]` | a country in two minutes; a later run without it replaces the estimates |
-| `--grid <grid> --extent x0,y0,x1,y1 --url <template>` | nothing | every cell of the extent (km) as an item, `{x}` / `{y}` filled into the template, `--points N` each, `--z lo,hi`; marked `["pc:count", "z", "exists"]` | no listing at all. A cell with no file 404s when a client reaches it, which `/aggregate` reports as a failed child and the viewer skips; it only works where the file name is a pure function of the grid (swisstopo's is; IGN's `_C_` / `_O_` suffix is not) |
+| `--grid <grid> --extent x0,y0,x1,y1 --url <template>` | nothing | every cell of the extent (km) as an item, `{x}` / `{y}` filled into the template, `--points N` each, `--z lo,hi`; marked `["pc:count", "z", "exists"]` | no listing at all. A cell with no file 404s when a client reaches it, which `/aggregate` reports as a failed child and the viewer skips. Fits a grid whose file name is a function of the cell alone; where a name has a second part (IGN's `_C_` / `_O_`), or the extent has holes worth not asking for, write a [grid VPC](#a-grid-vpc-the-campaigns-grid-said-once) from a listing instead |
 
 `--cache headers.ndjson` keeps every header read as it lands and skips it on the next run, so a run that is
 killed or a link that drops resumes where it was (a WKT is written once, the files that share it point at it);
 `--listing keys.tsv` does the same for the bucket listing; `--concurrency N` (16) sets the reads in flight.
 
-Six sets are committed next to it, all in the library under the VPC pill; the four large ones are split
-into a root and child files (`<name>.vpc.gz` + `<name>/<quadkey>.vpc.gz`, see above):
+### Where the sets are kept
+
+The sets are in the library under the VPC pill. The small ones are committed in
+`packages/tile-server/samples/` (1.6 MB in all) and read from `raw.githubusercontent.com`; a local server
+also serves that folder read-only at `/samples/<name>`. The four country sets are too large for a repository
+(44 MB, 757 files) and are assets of the GitHub release
+[`sample-assets-v1`](https://github.com/jo-chemla/3dtiled-to-3dtiles/releases/tag/sample-assets-v1), split
+`--flat` since a release has no folders: `<name>.vpc.gz` and its children `<name>.<quadkey>.vpc.gz` side by
+side. Any tile-server reads them from there, the public one and a local one alike:
+
+```
+/stream/tileset.json?format=vpc&url=https://github.com/jo-chemla/3dtiled-to-3dtiles/releases/download/sample-assets-v1/france-lidarhd.vpc.gz
+```
+
+| In the repository | On the release |
+|---|---|
+| `dublin-city-2015.vpc` (36 KB) | `france-lidarhd.vpc.gz` + 563 children (30 MB) |
+| `luxembourg-2019.vpc.gz` (1.0 MB) | `france-lidarhd-stats.gridvpc.json.gz` (1.5 MB) |
+| `france-lidarhd-paris-100km.vpc.gz` (0.5 MB) | `canada-canelevation-nb-pei.vpc.gz` + 147 children (9.9 MB) |
+| `france-lidarhd.gridvpc.json.gz` (9.5 KB) | `switzerland-swisssurface3d.vpc.gz` + 27 children (1.5 MB) |
+| | `usgs-3dep-fairbanks-2017.vpc.gz` + 15 children (0.8 MB) |
+
+A rebuilt set goes to a new release (`sample-assets-v2`), so a URL keeps meaning the same files. The sets:
 
 - **`luxembourg-2019.vpc.gz`**: every one of the 10 906 500 m tiles of Luxembourg's 2019 national LiDAR
   (Administration du cadastre et de la topographie, CC0) as flai mirrors them (`data/LU/Gouvernement_LUX/Lidar_2019/copc/`),
@@ -232,19 +291,19 @@ into a root and child files (`<name>.vpc.gz` + `<name>/<quadkey>.vpc.gz`, see ab
   X 600–700 km, Y 6800–6900 km (Paris and most of Île-de-France; what flai had mirrored of it on 2026-11-10,
   X 600–686, Y 6832–6899), 127.0 G points, each item with the files' own `RGF93 v1 / Lambert-93` WKT. 10.14 MB
   of JSON, 0.52 MB gzipped, 133 s.
-- **`france-lidarhd.vpc.gz`**: **all 337 206 tiles** of flai's mirror of IGN's LiDAR HD, every header read (about
+- **`france-lidarhd.vpc.gz`** (release): **all 337 206 tiles** of flai's mirror of IGN's LiDAR HD, every header read (about
   70 minutes over three runs resumed from `--cache`, the S3 link dropping now and then and retried), 10 071 G
   points, Lambert-93 WKT per item, dated 2023-05 to 2024-12. The heights are what the headers say: 326 165 tiles
   within −500 to 5 000 m, 11 031 with noise points down to −2 682 m or up to 9 559 m, and 10 tiles (Languedoc
   and the Pyrenees) whose headers claim +1 074 km or −2 145 km, which widen four of the root's 563 items to
-  match. 557 MB of JSON as one file, 29.4 MB gzipped — past what one V8 string holds, so it is committed split
+  match. 557 MB of JSON as one file, 29.4 MB gzipped — past what one V8 string holds, so it is published split
   only: 563 child files (30 MB gzipped in all) under a 60 KB root.
-- **`switzerland-swisssurface3d.vpc.gz`**: every swissSURFACE3D 1 km tile swisstopo serves as COPC, found through
+- **`switzerland-swisssurface3d.vpc.gz`** (release): every swissSURFACE3D 1 km tile swisstopo serves as COPC, found through
   its STAC API (`data.geo.admin.ch/api/stac/v0.9/collections/ch.swisstopo.swisssurface3d/items`, 58 987 items in
   590 pages on 2026-11-10, of which 15 643 carry a `.copc.laz` asset — the tiles reprocessed since 2024; the
   others are plain LAZ and are not listed), 514.8 G points, heights 253–3 612 m, each item with the files'
   `CH1903+ / LV95` WKT (EPSG 2056). 27.1 MB of JSON, 1.46 MB gzipped, 329 s; split into 27 children.
-- **`canada-canelevation-nb-pei.vpc.gz`**: the whole of New Brunswick and Prince Edward Island as NRCan's CanElevation
+- **`canada-canelevation-nb-pei.vpc.gz`** (release): the whole of New Brunswick and Prince Edward Island as NRCan's CanElevation
   series keeps them (Open Government Licence – Canada): every `.copc.laz` under `pointclouds_nuagespoints/NB/`
   and `/PEI/` of the `canelevation-lidar-point-clouds` bucket (751 929 COPC keys in all under the provinces'
   and NRCan's own folders, listed once in 763 pages; 84 114 NB + 6 650 PEI), 90 764 tiles of 39 projects
@@ -253,7 +312,7 @@ into a root and child files (`<name>.vpc.gz` + `<name>/<quadkey>.vpc.gz`, see ab
   CGVD2013 heights; heights −2 104 to 3 306 m, the extremes noise as in Luxembourg). 154.9 MB of JSON, 9.76 MB
   gzipped; the 90 764 header reads took three runs resumed from `--cache`, the last 898 s for the final 43 000
   at 32 in flight; split into 147 children (9.9 MB gzipped in all).
-- **`usgs-3dep-fairbanks-2017.vpc.gz`**: a USGS 3DEP project as NOAA's Digital Coast keeps it in COPC on a public
+- **`usgs-3dep-fairbanks-2017.vpc.gz`** (release): a USGS 3DEP project as NOAA's Digital Coast keeps it in COPC on a public
   bucket (`noaa-nos-coastal-lidar-pds.s3.amazonaws.com/laz/geoid12b/8663/`, dataset 8663: Fairbanks North Star
   Borough, Alaska, 2017, QL1 and QL2), 7 471 tiles, 63.0 G points, heights 34–1 889 m, `NAD83(2011) / UTM zone 6N`
   (EPSG 6335) with NAVD88 heights. 13.3 MB of JSON, 0.81 MB gzipped, 230 s; split into 15 children. USGS's own
@@ -281,10 +340,84 @@ under the Licence Ouverte 2.0. Found on 2026-11-10:
   on 3 000 header reads (5.609 B/point; median 5.593, p10 4.25, p90 6.60; a tile's count is within 10.4 % of
   the truth at the median and 28 % at the 90th percentile), the heights from the nearest calibrated tiles.
   Then from every header (10 071 G points against the 10 043 G estimated, the sum 0.3 % off; 557 MB of JSON,
-  29.4 MB gzipped, about 70 minutes of reads), the set that is committed, split in 563 child files. The
-  tile name alone is NOT enough to write the URL: flai's files are named `_PTS_C_` (classified, 258 474) or
-  `_PTS_O_` (78 716), never both for one square, and nothing in the grid says which — so a `--grid` template
-  over IGN's extent 404s on a quarter of its cells. The listing is what tells.
+  29.4 MB gzipped, about 70 minutes of reads), the set that is published, split in 563 child files.
+- **The name is the place, and the grid is enough to build the set.** `LHD_FXX_<x>_<y>` is the north-west
+  corner of the square kilometre in Lambert-93 km: nothing else is needed to place a tile, and every header
+  read agreed with its name. What a name does not say is which squares exist (the programme is in progress,
+  and the bounding box of France is 1.1 M squares for 337 206 tiles: the rest are sea, neighbours and blocks
+  not yet delivered, where a 404 is simply true) and, on flai's mirror, whether a square is called
+  `_PTS_C_` (258 474) or `_PTS_O_` (78 716; never both for one square). An earlier version of this page
+  concluded from the second point that a grid template "404s on a quarter of its cells". That was a wrong
+  conclusion from a right observation: a template with **one** fixed name misses the `_O_` squares, but the
+  remedy is to write down, per square, that it exists and which of the two it is. That is one character per
+  square, and it is the [grid VPC](#a-grid-vpc-the-campaigns-grid-said-once) below: all of France in 9.5 KB.
+
+### A grid VPC: the campaign's grid, said once
+
+A STAC VPC over a national campaign repeats per tile what the grid already says: a URL that differs by two
+numbers, a polygon, two boxes, a WKT. For France that is 557 MB of JSON, 30 MB gzipped in 563 files, after
+70 minutes of header reads. The **grid VPC** (`packages/tile-server/vpc-grid.js`, `"type": "3dtiled:GridVPC"`,
+`.gridvpc.json[.gz]`) says it once:
+
+```json
+{
+  "type": "3dtiled:GridVPC", "version": 1,
+  "title": "IGN LiDAR HD, all of France", "license": "Licence Ouverte 2.0 (Etalab)",
+  "crs": "EPSG:2154", "unit": 1000, "cell": 1000, "anchor": "nw",
+  "url": "https://open-lidar-data.s3.eu-central-1.amazonaws.com/data/FR/IGN/Lidar_2021/copc/LHD_FXX_{x}_{y}_PTS_{v}_LAMB93_IGN69.copc.laz",
+  "pad": 4, "variants": ["C", "O"],
+  "x0": 186, "y0": 6047, "width": 1057, "height": 1065,
+  "zRange": [-30, 2871], "pointsPerCell": 29866661,
+  "rows": ["...........0000011100....", "…"],
+  "z": { "min": [31, 30, "…"], "max": [121, 99, "…"] },
+  "points": { "unit": 100000, "counts": [213, 90, "…"] },
+  "extra": [{ "url": "https://…/LHD_C_LA93-IGN69_0932-6503_2021.copc.laz", "bbox": [932000, 6502000, 279.19, 932999.99, 6502999.99, 576.42], "points": 33377564 }]
+}
+```
+
+| Field | Meaning |
+|---|---|
+| `crs`, `unit`, `cell`, `anchor` | the grid: its CRS, the metres one unit of an index stands for, the side of a tile, and the corner a name gives (`nw` for IGN, `sw` for swisstopo) |
+| `url`, `pad`, `variants` | the name of a square: `{x}` and `{y}` zero-padded to `pad`, `{v}` one of the variants. Absolute, or relative to the descriptor |
+| `x0`, `y0`, `rows` | **the availability**: one string per row from `y0` upwards, one character per square from `x0`; `.` no tile, else the index of its variant |
+| `z`, `points` | optional, per present square in row order: its heights in metres (clamped to −1 000…9 000: ten IGN headers claim ±1 000 km) and its count in units of `points.unit` |
+| `zRange`, `pointsPerCell` | what a square is given when `z` / `points` are left out |
+| `extra` | files that are not of the grid (IGN's 16 older names), each with its own box in `crs` |
+
+The server expands it in memory into the entries a STAC VPC gives (`asset.extras.vpc.boundsFrom` says
+`grid`), and the mosaic is built, cut and served as any other. Two files for all of France:
+
+| | Size | A square's box | Use |
+|---|---:|---|---|
+| `france-lidarhd.gridvpc.json.gz` (repository) | **9.5 KB** | the country's range, −30 to 2 871 m, for every square: a box 2.9 km tall, so a tile opens from about three times further than it should, and a summit above the range can be culled | the availability alone; no header was needed to write it, a bucket listing is enough |
+| `france-lidarhd-stats.gridvpc.json.gz` (release) | 1.5 MB | each tile's own heights from its header, to the metre; counts to 100 000 points | the library's default for France |
+
+```bash
+node scripts/vpc-to-grid.mjs france.vpc.gz --grid ign-lidarhd \
+  --url 'https://…/copc/LHD_FXX_{x}_{y}_PTS_{v}_LAMB93_IGN69.copc.laz' -o france.gridvpc.json.gz [--no-stats]
+```
+
+reads a flat or split VPC, places each item from its **name** through the grid (`ign-lidarhd`, `swisstopo`),
+takes `{v}` from what the template leaves open, and keeps under `extra` any file whose name is not of the
+grid. Measured, all of France served from the 9.5 KB file by a local server:
+
+| | Grid VPC | Split STAC VPC |
+|---|---|---|
+| What is fetched for the root | 9.5 KB (or 1.5 MB) | 60 KB |
+| First root, cold | about 30 s: 337 206 boxes projected (4.5 s), the selection keyed (10 s), the tree built (4 s) | 0.7 s: only the 563 summaries are read |
+| Root again | 0.1 s | 0.1 s |
+| A subtree (`&cell=`) | 0.15 s, 270 KB | a child VPC, 0.3 s, then its subtree |
+| Root `tileset.json` | 23 KB, 34 external subtrees | 293 KB |
+| Opens in QGIS / PDAL | no | yes |
+| Files to host | 1 | 564 |
+
+So the grid costs one slow first request per server per day, kept in memory after that, against 30 MB less to
+host and nothing to read to build it. The split STAC VPC stays for what reads STAC.
+
+Not covered: IGN's own distribution. Its tile index is the WFS layer `IGNF_LIDAR-HD_TA:nuage-dalle`, which
+answers 403 outside IGN's portal (tried again on 2026-11-12 with the portal's key and referer), so the
+availability here is flai's listing of 2026-11-10, not IGN's, and it ages as the programme delivers blocks:
+rebuild from a fresh listing. What `_O_` stands for against `_C_` is not stated anywhere this page could cite.
 
 `scripts/vpc-to-manifest.mjs <file.vpc | url> -o set.json` goes the other way: a VPC to an `/aggregate` set
 manifest with baked bounds, to edit, to keep as a named set, or to `POST /aggregate/set`.

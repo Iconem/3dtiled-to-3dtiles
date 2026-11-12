@@ -1255,9 +1255,12 @@ export async function handleAggregate(req, res, u) {
   // and reused, instead of being derived again from every item: 0.8 s per subtree at 100 000 items.
   const cell = isTileset ? u.searchParams.get('cell') : null;
   const viewKey = viewKeyOf(u, origin);
-  const memo = cell ? viewMemo.get(viewKey) : null;
+  // A VPC's ROOT request reuses it too, for as long as the mosaic lives: the set comes whole from one URL (itself kept
+  // a day), so the same request selects the same items, and deriving the key again costs 10 s at 337 206 items.
+  const rootMemo = !!vpcUrl && isTileset && !cell;
+  const memo = cell || rootMemo ? viewMemo.get(viewKey) : null;
   let key, ttlMs, sel = null, items = null;
-  if (memo && Date.now() - memo.at < VIEW_MEMO_MS) ({ key, ttlMs } = memo);
+  if (memo && Date.now() - memo.at < (rootMemo ? Math.max(VIEW_MEMO_MS, memo.ttlMs) : VIEW_MEMO_MS)) ({ key, ttlMs } = memo);
   else {
     sel = selectChildren(req, u, sets);
     if (sel.error) { res.writeHead(400, CORS); res.end(sel.error); return true; }
