@@ -150,6 +150,9 @@ export const FORMATS: FormatMeta[] = [
     { id: 'cathedral-interior', label: 'Cathedral Interior ⬀', src: 'https://d28zzqy0iyovbz.cloudfront.net/02d5f4eb/v3/lod-meta.json' },
     { id: 'vysehrad-prague', label: 'Vyšehrad Basilica & parks, Prague (D. Dworschak, 83M) ⬀', src: 'https://d28zzqy0iyovbz.cloudfront.net/1b7afbf6/v1/lod-meta.json' },
     { id: 'jastrzebia-gora-sog', label: 'Jastrzębia Góra 4×2 km (A. Shramko, CC BY, 106M) ⬀', src: 'https://d28zzqy0iyovbz.cloudfront.net/221ee167/v1/lod-meta.json' },
+    // The scene of PlayCanvas' slide at the MSF splat-compression town hall (2026-11-03): 259 M gaussians at LOD 0, 518 M over 13 levels.
+    { id: 'lublin-sog', label: 'Lublin, Poland (A. Shramko, CC BY, 259M) ⬀', src: 'https://d28zzqy0iyovbz.cloudfront.net/2f1ddf5f/v1/lod-meta.json' },
+    { id: 'itaka-stadium-sog', label: 'Itaka Stadium, Opole (A. Shramko, CC BY, 212M) ⬀', src: 'https://d28zzqy0iyovbz.cloudfront.net/7b43aca7/v1/lod-meta.json' },
     { id: 'dittrichova-hrobka', label: 'Dittrichova hrobka, Krásná Lípa (D. Dworschak, 54M) ⬀', src: 'https://d28zzqy0iyovbz.cloudfront.net/6c09cd54/v1/lod-meta.json' },
   ] },
   { fmt: 'lcc', icon: '◆', label: 'LCC', type: 'splat', octree: false, stream: true, assets: [

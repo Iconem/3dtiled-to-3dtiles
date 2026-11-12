@@ -9,11 +9,18 @@
  *
  *   GET /sog/tileset.json?url=<lod-meta.json URL>
  *   GET /sog/tile/<file>_<offset>_<count>.glb?url=<lod-meta.json URL>   (run encoded in the name)
+ *   GET /sog/tile/m<path>_<level>.glb?url=<lod-meta.json URL>           (a merged tile: every run of a LOD level under a node)
+ *
+ * The tree is COLLAPSED per LOD level with a splat budget (lodMeta.js's collapseLodTree, the one the offline converter
+ * uses): the shallowest nodes whose splats of a level fit `&splatBudget=` (TILED_SOG_SPLAT_BUDGET, default 100 000)
+ * are the tiles of that level, so a 259 M-splat scene is a few thousand tiles and a tileset.json of about a megabyte,
+ * not 400 000 tiles and 100 MB. A merged tile names its node (`m<path>`, one child index per character from the root)
+ * and its level; the server collects the runs under it. `&splatBudget=0` is the old mapping, one tile per leaf run.
  */
 import path from 'node:path';
 import { readSog, MemoryReadFileSystem } from '@playcanvas/splat-transform';
 import { extractRange } from '../sog-to-3dtiles/src/sogChunk.js';
-import { lodGeometricErrors } from '../sog-to-3dtiles/src/lodMeta.js';
+import { lodGeometricErrors, collapseLodTree, lodNodeAt, lodRunsUnder, DEFAULT_SPLAT_BUDGET } from '../sog-to-3dtiles/src/lodMeta.js';
 import { memoizeAsync, fetchSource as fetchBuf, tilePool, runTileTaskOr, ownBytes } from '../core/index.js';
 import { splatArraysGlb } from './splat-tile.js';
 
@@ -27,6 +34,8 @@ function boundToZUpBox(min, max) {
 }
 const boundDiagonal = (min, max) => Math.hypot(max[0]-min[0], max[1]-min[1], max[2]-min[2]) || 1e-3;
 const ROOT_GE_FACTOR = 0.05, DEPTH_RATIO = 0.5;
+const envBudget = Number(process.env.TILED_SOG_SPLAT_BUDGET);
+const SPLAT_BUDGET = Number.isFinite(envBudget) && process.env.TILED_SOG_SPLAT_BUDGET !== '' && process.env.TILED_SOG_SPLAT_BUDGET != null ? Math.max(0, envBudget) : DEFAULT_SPLAT_BUDGET;
 
 // Per-URL context (just the lod-meta + a small decoded-chunk LRU), cached. memoizeAsync caches
 // FAILURES too — a broken source fails fast on retry (see cache.js's own comment).
@@ -91,7 +100,7 @@ function getChunkTable(ctx, fileIdx) {
 
 // Build the 3D Tiles tree from lod.tree (bounds persisted → no decode). Each leaf LOD run becomes a
 // REPLACE-chain tile whose content URI encodes the run: tile/<file>_<offset>_<count>.glb.
-function buildTileset(ctx, urlParam, centroids = false) {
+function buildTileset(ctx, urlParam, centroids = false, budget = SPLAT_BUDGET) {
   const enc = encodeURIComponent(urlParam);
   const rootDiag = boundDiagonal(ctx.lod.tree.bound.min, ctx.lod.tree.bound.max);
   const ROOT_GE = rootDiag * ROOT_GE_FACTOR;
@@ -121,7 +130,10 @@ function buildTileset(ctx, urlParam, centroids = false) {
   // SOG (PlayCanvas Y-up) needs RX(−90°) root transform so the scene appears upright in Cesium.
   // RX(+90°) was upside-down. Column-major: col0=X→X, col1=Y→−Z, col2=Z→Y; identity for w.
   const RX90 = [1,0,0,0, 0,0,-1,0, 0,1,0,0, 0,0,0,1];
-  const root = build(ctx.lod.tree, 0).tile;
+  const lodLevels = ctx.lod.lodLevels ?? (ctx.lod.counts?.length ?? 1);
+  const root = budget > 0
+    ? collapseLodTree(ctx.lod.tree, lodLevels, budget, { box: boundToZUpBox, content: (_runs, path, level) => ({ uri: `tile/m${path}_${level}.glb?url=${enc}` }) })
+    : build(ctx.lod.tree, 0).tile;
   root.transform = RX90;
   const ts = { asset: { version: '1.1' }, geometricError: rootDiagGE, root, extensionsUsed: ['3DTILES_content_gltf'] };
   // centroids mode emits glTF POINTS tiles → do NOT advertise the gaussian-splatting extension.
@@ -135,7 +147,24 @@ function buildTileset(ctx, urlParam, centroids = false) {
 /** Rows [offset, offset+count) of a decoded chunk → the tile's GLB, null when the chunk has no such rows. Shared with lcc2-live.js. */
 export async function sogRangeGlb(table, offset, count, centroids = false) {
   if (!(count > 0 && offset + count <= table.numRows)) return null;
-  const { positions, alphas, rgb, scales, rotations } = extractRange(table, offset, count);
+  return sogArraysGlb(extractRange(table, offset, count), count, centroids);
+}
+
+/** Several runs' columns end to end; a column any run lacks is dropped. */
+function concatSplats(parts) {
+  if (parts.length === 1) return parts[0];
+  const out = {};
+  for (const key of ['positions', 'alphas', 'rgb', 'scales', 'rotations']) {
+    if (parts.some((p) => !p[key])) { out[key] = null; continue; }
+    const col = new Float32Array(parts.reduce((n, p) => n + p[key].length, 0));
+    let o = 0;
+    for (const p of parts) { col.set(p[key], o); o += p[key].length; }
+    out[key] = col;
+  }
+  return out;
+}
+
+async function sogArraysGlb({ positions, alphas, rgb, scales, rotations }, count, centroids = false) {
   const here = async () => Buffer.from(await splatArraysGlb({ positions, alphas, rgb, scales, rotations }, count, centroids));
   const pool = tilePool();
   if (!pool) return here();
@@ -147,13 +176,25 @@ export async function sogRangeGlb(table, offset, count, centroids = false) {
 }
 
 // Pure builders for the /stream dispatcher.
-export const sogTileRe = /^\d+_\d+_\d+$/;
+export const sogTileRe = /^(\d+_\d+_\d+|m\d*_\d+)$/;
 // hierarchy/prefetch are no-ops (streamed-SOG's whole tree lives in one lod-meta.json — monolithic
 // index, cache=none ≡ cache=hierarchy; cache=full routes to /convert). `centroids` → POINTS preview.
-export async function sogTileset(url, opts = {}) { return buildTileset(await getCtx(url), url, opts.centroids); }
+export async function sogTileset(url, opts = {}) {
+  const b = opts.splatBudget == null || opts.splatBudget === '' ? SPLAT_BUDGET : Number(opts.splatBudget);
+  return buildTileset(await getCtx(url), url, opts.centroids, Number.isFinite(b) && b >= 0 ? b : SPLAT_BUDGET);
+}
 export async function sogTile(url, key, opts = {}) {
-  const [f, o, c] = key.split('_').map(Number);
   const ctx = await getCtx(url);
+  if (key[0] === 'm') {                               // a merged tile: the runs of one LOD level under a node
+    const [path, level] = key.slice(1).split('_');
+    const node = lodNodeAt(ctx.lod.tree, path);
+    const runs = node ? lodRunsUnder(node, Number(level)) : [];
+    if (!runs.length || runs.some((r) => !ctx.lod.filenames[r.file])) return null;
+    const parts = [];
+    for (const r of runs) parts.push(extractRange(await getChunkTable(ctx, r.file), r.offset, r.count));   // in run order
+    return sogArraysGlb(concatSplats(parts), runs.reduce((n, r) => n + r.count, 0), opts.centroids);
+  }
+  const [f, o, c] = key.split('_').map(Number);
   if (!ctx.lod.filenames[f]) return null;
   return sogRangeGlb(await getChunkTable(ctx, f), o, c, opts.centroids);
 }

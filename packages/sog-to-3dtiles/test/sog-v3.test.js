@@ -131,7 +131,7 @@ test('offline: a streamed SOG whose chunks mix v2 and v3 converts to one tileset
   const { dir, lod } = await mixedScene(t);
   const out = await mkdtemp(path.join(tmpdir(), 'sog-tiles-'));
   t.after(() => rm(out, { recursive: true, force: true }));
-  const result = await convert(dir, out);
+  const result = await convert(dir, out, { splatBudget: 0 });   // the 1:1 mapping: one tile per leaf LOD run
   const tileset = JSON.parse(await readFile(path.join(out, 'tileset.json'), 'utf8'));
   assert.equal(tileset.asset.version, '1.1');
   // every leaf's LOD chain is a tile per level, geometric error halving down the chain
@@ -151,6 +151,15 @@ test('offline: a streamed SOG whose chunks mix v2 and v3 converts to one tileset
   let splats = 0;
   for (const f of files) { const glb = await readFile(path.join(out, 'tiles', f)); gltf(glb); splats += spz(glb).count; }
   assert.equal(splats, lod.count, 'every gaussian of every level is in a tile');
+
+  // the default: the tree collapsed per LOD level under the splat budget, the same gaussians in fewer tiles
+  const out2 = await mkdtemp(path.join(tmpdir(), 'sog-tiles-'));
+  t.after(() => rm(out2, { recursive: true, force: true }));
+  const collapsed = await convert(dir, out2);
+  assert.ok(collapsed.tiles < tiles, `${collapsed.tiles} merged tiles for ${tiles} leaf runs`);
+  let merged = 0;
+  for (const f of (await readdir(path.join(out2, 'tiles'))).filter((n) => n.endsWith('.glb'))) { const glb = await readFile(path.join(out2, 'tiles', f)); gltf(glb); merged += spz(glb).count; }
+  assert.equal(merged, lod.count, 'collapsed: every gaussian of every level is in a tile');
 });
 
 /** The files of `dir` over HTTP, as a streamed SOG host does. */
@@ -172,7 +181,18 @@ test('live: the mixed scene served through sog-live, a tile from the v2 chunk an
   await writeFile(path.join(dir, 'lod-meta-errors.json'), JSON.stringify({ ...lod, lodErrors: true, tree: withErrors(lod.tree) }));
   const base = await host(t, dir);
 
-  const tileset = await sogTileset(`${base}/lod-meta.json`);
+  // the default tileset is collapsed per LOD level: merged tiles named by node path and level, the same gaussians
+  const collapsed = await sogTileset(`${base}/lod-meta.json`);
+  let mergedSplats = 0;
+  const each = async (tile) => {
+    if (tile.content) { const glb = await sogTile(`${base}/lod-meta.json`, /tile\/(m\d*_\d+)\.glb/.exec(tile.content.uri)[1]); gltf(glb); mergedSplats += spz(glb).count; }
+    for (const c of tile.children ?? []) await each(c);
+  };
+  await each(collapsed.root);
+  assert.equal(mergedSplats, lod.count, 'collapsed live: every gaussian of every level is in a tile');
+  assert.equal(await sogTile(`${base}/lod-meta.json`, 'm999_0'), null, 'no such node');
+
+  const tileset = await sogTileset(`${base}/lod-meta.json`, { splatBudget: 0 });
   assert.ok(tileset.extensions['3DTILES_content_gltf'].extensionsRequired.includes('KHR_gaussian_splatting_compression_spz_2'));
   const chains = [];   // [outermost (coarsest) tile of a leaf, ...]
   const walk = (tile) => { if (tile.content) chains.push(tile); else for (const c of tile.children ?? []) walk(c); };
@@ -192,7 +212,7 @@ test('live: the mixed scene served through sog-live, a tile from the v2 chunk an
   // without lodErrors the finest tile of a chain keeps a positive error; with them it refines to 0
   const finest = (tile) => { let x = tile; while (x.children?.[0]) x = x.children[0]; return x; };
   assert.ok(chains.every((c) => finest(c).geometricError > 0));
-  const withLodErrors = await sogTileset(`${base}/lod-meta-errors.json`);
+  const withLodErrors = await sogTileset(`${base}/lod-meta-errors.json`, { splatBudget: 0 });
   const chains2 = []; const walk2 = (tile) => { if (tile.content) chains2.push(tile); else for (const c of tile.children ?? []) walk2(c); }; walk2(withLodErrors.root);
   const threeLevels = chains2.find((c) => c.children?.[0]?.children?.[0]);
   assert.ok(threeLevels, 'a leaf with all three levels');

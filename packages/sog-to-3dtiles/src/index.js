@@ -31,7 +31,7 @@ import fs   from 'fs/promises';
 import path from 'path';
 import { fileURLToPath } from 'node:url';
 import { decodeChunk, extractRange } from './sogChunk.js';
-import { lodGeometricErrors } from './lodMeta.js';
+import { lodGeometricErrors, collapseLodTree, DEFAULT_SPLAT_BUDGET } from './lodMeta.js';
 import { sogChunkToFiles } from './tile-task.js';
 
 const TILE_TASK = new URL('./tile-task.js', import.meta.url).href;
@@ -47,11 +47,6 @@ import { buildSplatTileGlb, computeBounds, defaultConcurrency, convertTiles, par
 // tree instead blows the root GE up to tens of thousands (→ refine-everything).
 const ROOT_GE_FACTOR = 0.05;  // root geometricError = rootBoundDiagonal × this (reference ≈ 0.04)
 const DEPTH_RATIO    = 0.5;   // GE multiplier per depth step (samplingRatePerLevel)
-// Collapsed tree: a tile's geometricError is its node's bound diagonal × NODE_GE_FACTOR, halved per
-// LOD level below the coarsest (a level keeps a quarter of the splats of the finer one, so the
-// spacing doubles). Child diagonals never exceed the parent's, so the errors stay monotone.
-const DEFAULT_SPLAT_BUDGET = 100_000;
-const NODE_GE_FACTOR = 0.1;
 const TABLE_CACHE = 8;        // decoded chunk tables kept while merged tiles are written (~30 MB each)
 
 const ensureDir = d => fs.mkdir(d, { recursive: true });
@@ -128,44 +123,16 @@ export async function convert(input, outDir, opts = {}) {
     return { ge: outerGe, tile: child };
   }
 
-  // ── Collapsed tree (splat budget) ──
+  // ── Collapsed tree (splat budget): lodMeta.js, shared with the live route ──
   const budget = opts.splatBudget != null ? Number(opts.splatBudget) : DEFAULT_SPLAT_BUDGET;
-  const maxLevel = lodLevels - 1;
   const merged = [];    // { uri, runs:[{file,offset,count}] }  (budget > 0)
-  const counts = (node) => {       // per-level splat counts under a node, memoised
-    if (node._counts) return node._counts;
-    const c = {};
-    if (node.children) for (const ch of node.children) for (const [L, n] of Object.entries(counts(ch))) c[L] = (c[L] ?? 0) + n;
-    else for (const [L, run] of Object.entries(node.lods ?? {})) c[L] = run.count;
-    return (node._counts = c);
-  };
-  const total = (node) => Object.values(counts(node)).reduce((a, b) => a + b, 0);
-  const runsOf = (node, L, out = []) => {
-    if (node.children) node.children.forEach(ch => runsOf(ch, L, out));
-    else if (node.lods?.[L]?.count) out.push(node.lods[L]);
-    return out;
-  };
-  const fits = (node, L) => !node.children || (counts(node)[L] ?? 0) <= budget;
-  const emitters = (node, L) => fits(node, L) ? [node] : node.children.filter(total).flatMap(ch => emitters(ch, L));
-  const geOf = (node, L) => boundDiagonal(node.bound.min, node.bound.max) * NODE_GE_FACTOR * Math.pow(DEPTH_RATIO, maxLevel - L);
-  function tileAt(node, L) {         // node fits the budget at level L
-    const tile = { boundingVolume: { box: boundToZUpBox(node.bound.min, node.bound.max) }, geometricError: geOf(node, L), refine: 'REPLACE' };
-    const runs = runsOf(node, String(L));
-    if (runs.length) { const uri = `tiles/node_${nextId++}.glb`; tile.content = { uri }; merged.push({ uri, runs }); }
-    if (L > 0) {
-      const kids = emitters(node, String(L - 1)).map(ch => tileAt(ch, L - 1)).filter(t => t.content || t.children?.length);
-      if (kids.length) tile.children = kids;
-    }
-    return tile;
-  }
-  function tileFor(node, L) {        // any node: empty tile over the fitting descendants when it does not fit
-    if (fits(node, String(L))) return tileAt(node, L);
-    return { boundingVolume: { box: boundToZUpBox(node.bound.min, node.bound.max) }, geometricError: geOf(node, L), refine: 'REPLACE',
-             children: emitters(node, String(L)).map(ch => tileAt(ch, L)) };
-  }
+  const collapsed = () => collapseLodTree(lod.tree, lodLevels, budget, {
+    box: boundToZUpBox,
+    content: (runs) => { const uri = `tiles/node_${nextId++}.glb`; merged.push({ uri, runs }); return { uri }; },
+  });
 
   console.log(budget > 0 ? `Walking tree, collapsing to ≤ ${budget.toLocaleString()} splats per tile…` : 'Walking tree…');
-  const root = budget > 0 ? { tile: tileFor(lod.tree, maxLevel) } : build(lod.tree, 0);
+  const root = budget > 0 ? { tile: collapsed() } : build(lod.tree, 0);
 
   // ── Phase 2 (collapsed): one GLB per merged tile, its runs cut from a small cache of decoded chunks ──
   // Tiles are written in order of their first chunk, so consecutive tiles share decoded chunks.
