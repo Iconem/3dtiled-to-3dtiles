@@ -3,7 +3,7 @@
  * 3dtiled — meta-converter CLI. Detects the input format and converts to 3D Tiles.
  *
  *   3dtiled <input> <outDir> [--format rad|sog|lcc|lcc2|copc|potree|i3s|nexus]
- *           [--scale N] [--ge-scale N] [--ge-layer N] [--splat-budget N] [--centroids-only] [--dag levels|paths] [--verify off|counts|sample|full] [--hierarchy-errors error|warn] [-- <extra converter args>]
+ *           [--scale N] [--ge-scale N] [--ge-layer N] [--splat-budget N] [--up z|y|-y] [--centroids-only] [--dag levels|paths] [--verify off|counts|sample|full] [--hierarchy-errors error|warn] [-- <extra converter args>]
  *
  *   3dtiled serve [<input>] [--port 3001] [--format <fmt>] [--lon <deg> --lat <deg>] [--alt m]
  *           [--heading deg] [--place-scale N]
@@ -35,7 +35,7 @@ const sepIdx = rawArgv.indexOf('--');
 const argv = sepIdx >= 0 ? rawArgv.slice(0, sepIdx) : rawArgv;
 const extraArgs = sepIdx >= 0 ? rawArgv.slice(sepIdx + 1) : [];
 
-const VALUE_FLAGS = new Set(['workers', 'verify', 'hierarchy-errors', 'max-depth', 'pack', 'format', 'scale', 'ge-scale', 'ge-layer', 'tiling', 'splat-budget', 'port', 'lon', 'lat', 'alt', 'heading', 'place-scale', 'dag']);
+const VALUE_FLAGS = new Set(['workers', 'verify', 'hierarchy-errors', 'max-depth', 'pack', 'format', 'scale', 'ge-scale', 'ge-layer', 'tiling', 'splat-budget', 'up', 'port', 'lon', 'lat', 'alt', 'heading', 'place-scale', 'dag']);
 function flag(name) { const i = argv.indexOf(`--${name}`); return i >= 0 ? argv[i + 1] : undefined; }
 // --workers auto|<n>: build tiles on worker threads, in every converter that has a tile loop (same as TILED_WORKERS)
 if (flag('workers') != null) { const { setTileWorkers } = await import('3dtiles-convert-core'); setTileWorkers(flag('workers')); }
@@ -112,7 +112,7 @@ const input = positionals[0];
 const outDir = positionals[1];
 
 if (!input || !outDir) {
-  console.error(`Usage: 3dtiled <input> <outDir> [--format <fmt>] [--scale N] [--ge-scale N] [--ge-layer N] [--splat-budget N] [--centroids-only] [--verify off|counts|sample|full] [--hierarchy-errors error|warn] [-- extra args]
+  console.error(`Usage: 3dtiled <input> <outDir> [--format <fmt>] [--scale N] [--ge-scale N] [--ge-layer N] [--splat-budget N] [--up z|y|-y] [--centroids-only] [--verify off|counts|sample|full] [--hierarchy-errors error|warn] [-- extra args]
        3dtiled serve [<input>] [--port 3001] [--lon <deg> --lat <deg>] [--alt m] [--heading deg]
   formats: ${supportedFormats.join(', ')}`);
   process.exit(1);
@@ -132,6 +132,7 @@ if (!input || !outDir) {
     tiling: flag('tiling'),                             // 'implicit' | 'explicit' (copc, potree)
     dag: flag('dag'),                                   // 'levels' | 'paths' (nexus: how the DAG becomes a tree)
     splatBudget: flag('splat-budget') != null ? Number(flag('splat-budget')) : undefined,   // sog: splats per merged tile (0 = one tile per leaf run)
+    up: flag('up'),                                     // sog: the scene's native up axis, z (default) | y | -y
     extraArgs,
   };
   // The desktop app reads these lines for its bar: [step/steps] label: done/total

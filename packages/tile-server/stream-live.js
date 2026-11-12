@@ -180,6 +180,13 @@ async function handleRadSubtree(u, res) {
 }
 
 /** Try to handle a /stream/* request. Returns true iff it owned the response. */
+/**
+ * A `+` in a request's query is a literal plus: file names carry them (PlanD's `Tile_+005_+006_OSGB.zip`, which
+ * encodeURIComponent leaves as they are) and URLSearchParams would read each as a space, so the host answered 403 to
+ * `Tile_ 005_ 006`. A space arrives as %20. Applied to req.url before any route parses it (server.js).
+ */
+export const literalPlus = (reqUrl) => (reqUrl.includes('+') ? reqUrl.replace(/\+/g, '%2B') : reqUrl);
+
 export async function handleStream(req, res, u) {
   if (!u.pathname.startsWith('/stream/')) return false;
   if (await handleThreemxNode(u, res)) return true;
@@ -260,7 +267,7 @@ export async function handleStream(req, res, u) {
     // depth=0: the root tile only (no children, no hierarchy drain) — what /aggregate needs to place a
     // child; honoured by copc-live's curved explicit tree, ignored where the root is already cheap.
     const depth = u.searchParams.has('depth') ? Math.max(0, Math.trunc(Number(u.searchParams.get('depth')))) : undefined;
-    const ts = await adapter.tileset(url, { tiling: u.searchParams.get('tiling'), lazy, hierarchy, prefetch, centroids, crs, curved, depth, ...geosplatsOpts, ...nexusOpts, splatBudget: u.searchParams.get('splatBudget') });
+    const ts = await adapter.tileset(url, { tiling: u.searchParams.get('tiling'), lazy, hierarchy, prefetch, centroids, crs, curved, depth, ...geosplatsOpts, ...nexusOpts, splatBudget: u.searchParams.get('splatBudget'), up: u.searchParams.get('up') || undefined });
     // User-directed globe placement (&lon=&lat=[&alt=][&heading=][&scale=]): attach a LOCAL dataset to
     // a real location so ANY 3D Tiles client (Cesium for Unreal/Unity, QGIS, native CesiumJS) streams
     // it in place — no viewer-side reorientation needed. Composes ON TOP of the adapter's own

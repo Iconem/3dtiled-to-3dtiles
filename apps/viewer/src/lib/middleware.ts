@@ -32,7 +32,8 @@ export function streamParams(f: FormatMeta | undefined, p: Pick<MiddlewareParams
 export function buildMiddlewareUrl(rawSrc: string, p: MiddlewareParams, fOverride?: FormatMeta) {
   const f = fOverride ?? fmtMeta(p.selectedFormat);
   const fmt = f ? f.fmt : p.selectedFormat;
-  const enc = encodeURIComponent(rawSrc);
+  // `+` stays a plus (PlanD's Tile_+005_+006_OSGB.zip): encodeURIComponent leaves it, a query parser reads a space
+  const enc = encodeURIComponent(rawSrc).replace(/\+/g, '%2B');
   if (p.cacheScope === 'all' && !STREAM_ONLY_FORMATS.has(fmt)) return `${MW}/convert/tileset.json?format=${fmt}&url=${enc}${streamParams(f, p)}`;
   let q = `&cache=${p.cacheScope === 'all' ? 'hierarchy' : p.cacheScope}`;
   if (p.cacheScope === 'none') q += `&prefetch=${p.prefetchN}`;
@@ -48,7 +49,7 @@ export function assetUrl(f: FormatMeta, a: Asset, p: MiddlewareParams): string |
   if (p.viewerMode === 'stream') {
     if (!f.stream) return null;
     const rawSrc = srcUrl(p.cacheScope === 'all' ? a.src! : (a.streamSrc ?? a.src!));
-    return buildMiddlewareUrl(rawSrc, p, f);
+    return buildMiddlewareUrl(rawSrc, p, f) + (a.query ?? '');
   }
   return null;
 }

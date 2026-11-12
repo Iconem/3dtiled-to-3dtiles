@@ -9,7 +9,7 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { fetchSource, fetchSourceRange, httpStatusOf, hostLimit, memoizeAsync, buildSubtreeBuffer } from '../core/index.js';
-import { handleStream } from './stream-live.js';
+import { handleStream, literalPlus } from './stream-live.js';
 import { exportTileset } from './export-live.js';
 import { encodeOsgb, quad } from '../osgb-to-3dtiles/test/osgb-fixture.js';
 
@@ -52,6 +52,13 @@ async function streamServer(t) {
 const get = async (url) => { const r = await fetch(url); return { status: r.status, body: Buffer.from(await r.arrayBuffer()) }; };
 
 // ── the read layer ───────────────────────────────────────────────────────────────────────────────
+
+test('a + in a request query is a plus in a file name, not a space', () => {
+  const q = '/stream/tileset.json?format=osgb&url=https%3A%2F%2Fhost%2FOSGB%2FTile_+005_+006_OSGB.zip';
+  assert.equal(new URL(literalPlus(q), 'http://x').searchParams.get('url'), 'https://host/OSGB/Tile_+005_+006_OSGB.zip');
+  assert.equal(new URL(q, 'http://x').searchParams.get('url'), 'https://host/OSGB/Tile_ 005_ 006_OSGB.zip', 'what URLSearchParams reads without it');
+  assert.equal(literalPlus('/stream/tile/a%20b.glb?url=x'), '/stream/tile/a%20b.glb?url=x', 'a %20 space is untouched');
+});
 
 test('a source read retries a 503 and a 429, and gets the file', async (t) => {
   quiet(t);

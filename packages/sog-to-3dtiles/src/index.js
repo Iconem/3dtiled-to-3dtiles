@@ -31,7 +31,7 @@ import fs   from 'fs/promises';
 import path from 'path';
 import { fileURLToPath } from 'node:url';
 import { decodeChunk, extractRange } from './sogChunk.js';
-import { lodGeometricErrors, collapseLodTree, DEFAULT_SPLAT_BUDGET } from './lodMeta.js';
+import { lodGeometricErrors, collapseLodTree, DEFAULT_SPLAT_BUDGET, upTransform, upParam } from './lodMeta.js';
 import { sogChunkToFiles } from './tile-task.js';
 
 const TILE_TASK = new URL('./tile-task.js', import.meta.url).href;
@@ -218,9 +218,9 @@ export async function convert(input, outDir, opts = {}) {
     }
   }
 
-  // SOG (PlayCanvas Y-up) → 3D Tiles (Z-up): RX(−90°) root transform (col-major).
-  // col0=X→X, col1=Y→−Z, col2=Z→Y. Bounding volumes already use boundToZUpBox.
-  root.tile.transform = [1,0,0,0, 0,0,-1,0, 0,1,0,0, 0,0,0,1];
+  // The root transform undoes the client's Y-up→Z-up turn (the boxes got the same turn, boundToZUpBox), so the
+  // client sees the scene's native frame; `--up y|-y` says which native axis is up when it is not Z (lodMeta.js).
+  root.tile.transform = upTransform(upParam(opts.up));
 
   const tileset = {
     asset: { version: '1.1' },

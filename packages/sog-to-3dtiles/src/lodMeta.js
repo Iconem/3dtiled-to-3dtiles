@@ -3,14 +3,19 @@
  * converter (index.js) and the live route (tile-server/sog-live.js).
  *
  * Geometric error of a leaf's LOD chain. The tree's own errors are anchored to the root bound's diagonal and halved at
- * every step down, interior levels and LOD steps alike (`geAt(depth)`). A `lod-meta.json` with `lodErrors: true`
+ * every step down the tree (`geAt(depth)`); a LOD step divides it by √2 (`LEVEL_RATIO`): each level of a streamed SOG
+ * is a 50 % decimation of the previous one, and halving the count on the surfaces splats cover grows their spacing by
+ * √2, not 2. A `lod-meta.json` with `lodErrors: true`
  * (splat-transform 3.3 to 3.7 wrote them; 3.8 and later omit them, SuperSplat may write them) gives every leaf an
  * `errors` array, one value per LOD level, finite, non-negative and non-decreasing with the level, of which only the
  * relative magnitudes mean anything. When the leaf has them, its coarsest level keeps the geometric error of its depth
  * and each finer level takes its share of it: `ge(level) = geAt(depth) × errors[level] / errors[coarsest]`, so the
- * finest level, whose error is 0 as a rule, refines to geometric error 0, as a 3D Tiles leaf does. The halving stays
+ * finest level, whose error is 0 as a rule, refines to geometric error 0, as a 3D Tiles leaf does. The √2 step stays
  * for a leaf without usable errors (missing, not numbers, or a coarsest error of 0).
  */
+
+/** The ratio between the geometric errors of two consecutive LOD levels: a level holds half the previous one's splats. */
+export const LEVEL_RATIO = Math.SQRT1_2;
 
 /**
  * The geometric error of each LOD level of a leaf.
@@ -29,12 +34,27 @@ export function lodGeometricErrors(node, levels, depth, geAt, lodErrors = false)
   let above = Infinity;
   for (let k = levels.length - 1; k >= 0; k--) {
     const level = levels[k];
-    const value = usable ? geAt(depth) * (errors[level] / errors[maxL]) : geAt(depth + (maxL - level));
+    const value = usable ? geAt(depth) * (errors[level] / errors[maxL]) : geAt(depth) * Math.pow(LEVEL_RATIO, maxL - level);
     const v = Math.min(value, above);   // a child never refines at a larger error than its parent
     ge.set(level, v);
     above = v;
   }
   return ge;
+}
+
+// ── The scene's up axis ──────────────────────────────────────────────────────────────────────────────────────────────
+//
+// A tile's box is turned Y-up→Z-up the way a client turns its glTF content, and the root transform turns both back
+// (RX −90°), so a client ends up in the scene's NATIVE frame: a native Z-up scene stands upright. `up` names the native
+// axis that is up for the others: 'y' (a Blender-style export, Shramko's Lublin: the city lay on its side) or '-y' (a
+// 3DGS training left in the COLMAP frame). Offline `--up`, live `&up=`.
+export const UP_AXES = ['z', 'y', '-y'];
+export const upParam = (v) => (UP_AXES.includes(v) ? v : 'z');
+/** The root transform (column-major) for a scene whose native up axis is `up`. */
+export function upTransform(up) {
+  if (up === 'y') return [1,0,0,0, 0,1,0,0, 0,0,1,0, 0,0,0,1];      // RX(+90) · RX(−90): the client's own Y-up→Z-up is exact
+  if (up === '-y') return [1,0,0,0, 0,-1,0,0, 0,0,-1,0, 0,0,0,1];   // RX(−90) · RX(−90) = RX(180)
+  return [1,0,0,0, 0,0,-1,0, 0,1,0,0, 0,0,0,1];                     // RX(−90): Y→−Z, Z→Y, undoing the client's turn
 }
 
 // ── The tree collapsed per LOD level with a splat budget ─────────────────────────────────────────────────────────────
@@ -47,8 +67,7 @@ export function lodGeometricErrors(node, levels, depth, geAt, lodErrors = false)
 // it. The same cap on the size of a root that /aggregate's depth cut and vpc-split.mjs put on a mosaic.
 
 export const DEFAULT_SPLAT_BUDGET = 100_000;
-const NODE_GE_FACTOR = 0.1;   // a tile's geometric error: its node's bound diagonal × this, halved per level below the coarsest
-const LEVEL_RATIO = 0.5;
+const NODE_GE_FACTOR = 0.1;   // a tile's geometric error: its node's bound diagonal × this, ÷ √2 per level below the coarsest
 
 /** The node at `path` (one child index per character, '' the root), or null. */
 export function lodNodeAt(tree, path) {

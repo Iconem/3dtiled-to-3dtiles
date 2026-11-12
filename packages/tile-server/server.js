@@ -138,6 +138,8 @@ async function handleSamples(req, res, u) {
 http.createServer(async (req, res) => {
   try {
     if (req.method === 'OPTIONS') { res.writeHead(204, CORS); return res.end(); }
+    // `+` is a plus in a file name (PlanD's Tile_+005_+006_OSGB.zip), not a space: literalPlus in stream-live.js, tested there
+    if (req.url.includes('+')) req.url = req.url.replace(/\+/g, '%2B');
     const u = new URL(req.url, `http://localhost:${PORT}`);
     if (await handleSamples(req, res, u)) return;     // /samples/<file> — the committed sample VPCs
     if (u.pathname === '/progress') {                // server-side progress of cache=hierarchy/full ops

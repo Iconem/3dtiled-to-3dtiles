@@ -101,14 +101,15 @@ test('a v3 chunk with opacity above 1 decodes to alpha 1 in the tile, the same t
   assert.ok(tile.positions.equals(tile2.positions), 'the same SPZ positions from either version');
 });
 
-test('lodGeometricErrors: halving without errors, the leaf\'s own ratios with them, never above the parent', () => {
+test('lodGeometricErrors: a √2 step per level without errors, the leaf\'s own ratios with them, never above the parent', () => {
   const geAt = (d) => 8 / 2 ** d;
-  assert.deepEqual([...lodGeometricErrors({}, [0, 1, 2], 1, geAt, false)], [[2, 4], [1, 2], [0, 1]]);
-  assert.deepEqual([...lodGeometricErrors({ errors: [0, 1, 4] }, [0, 1, 2], 1, geAt, false)], [[2, 4], [1, 2], [0, 1]], 'errors ignored without lodErrors');
+  const step = (k) => 4 * Math.pow(Math.SQRT1_2, k);   // depth 1 is 4; each finer level ÷ √2 (a level holds half the splats)
+  assert.deepEqual([...lodGeometricErrors({}, [0, 1, 2], 1, geAt, false)], [[2, 4], [1, step(1)], [0, step(2)]]);
+  assert.deepEqual([...lodGeometricErrors({ errors: [0, 1, 4] }, [0, 1, 2], 1, geAt, false)], [[2, 4], [1, step(1)], [0, step(2)]], 'errors ignored without lodErrors');
   assert.deepEqual([...lodGeometricErrors({ errors: [0, 1, 4] }, [0, 1, 2], 1, geAt, true)], [[2, 4], [1, 1], [0, 0]], 'the coarsest keeps its depth\'s error, the rest their share');
   assert.deepEqual([...lodGeometricErrors({ errors: [0, 1, 4] }, [1, 2], 1, geAt, true)], [[2, 4], [1, 1]], 'a leaf without the finest level');
-  assert.deepEqual([...lodGeometricErrors({ errors: [0, 0, 0] }, [0, 1, 2], 1, geAt, true)], [[2, 4], [1, 2], [0, 1]], 'all-zero errors: halving');
-  assert.deepEqual([...lodGeometricErrors({ errors: [0, 'x', 4] }, [0, 1, 2], 1, geAt, true)], [[2, 4], [1, 2], [0, 1]], 'a bad value: halving');
+  assert.deepEqual([...lodGeometricErrors({ errors: [0, 0, 0] }, [0, 1, 2], 1, geAt, true)], [[2, 4], [1, step(1)], [0, step(2)]], 'all-zero errors: the √2 step');
+  assert.deepEqual([...lodGeometricErrors({ errors: [0, 'x', 4] }, [0, 1, 2], 1, geAt, true)], [[2, 4], [1, step(1)], [0, step(2)]], 'a bad value: the √2 step');
   assert.deepEqual([...lodGeometricErrors({ errors: [0, 5, 4] }, [0, 1, 2], 1, geAt, true)], [[2, 4], [1, 4], [0, 0]], 'a finer level never refines at more than its parent');
 });
 
@@ -194,6 +195,11 @@ test('live: the mixed scene served through sog-live, a tile from the v2 chunk an
 
   const tileset = await sogTileset(`${base}/lod-meta.json`, { splatBudget: 0 });
   assert.ok(tileset.extensions['3DTILES_content_gltf'].extensionsRequired.includes('KHR_gaussian_splatting_compression_spz_2'));
+  // the native frame reaches the client: Z-up by default (the client's Y-up→Z-up turn undone), `up` for the others
+  assert.deepEqual(collapsed.root.transform, [1,0,0,0, 0,0,-1,0, 0,1,0,0, 0,0,0,1]);
+  assert.deepEqual((await sogTileset(`${base}/lod-meta.json`, { up: 'y' })).root.transform, [1,0,0,0, 0,1,0,0, 0,0,1,0, 0,0,0,1], 'Y-up: the turn is exact');
+  assert.deepEqual((await sogTileset(`${base}/lod-meta.json`, { up: '-y' })).root.transform, [1,0,0,0, 0,-1,0,0, 0,0,-1,0, 0,0,0,1], 'Y-down: half a turn about X');
+  assert.deepEqual((await sogTileset(`${base}/lod-meta.json`, { up: 'sideways' })).root.transform, collapsed.root.transform, 'an unknown axis is the default');
   const chains = [];   // [outermost (coarsest) tile of a leaf, ...]
   const walk = (tile) => { if (tile.content) chains.push(tile); else for (const c of tile.children ?? []) walk(c); };
   walk(tileset.root);

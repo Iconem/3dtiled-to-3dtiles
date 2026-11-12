@@ -824,6 +824,10 @@ const Scene = forwardRef<ViewerHandle, { loadArgs: LoadArgs; tooltip: TooltipCha
     // Decide (and cache) this ONLY on the fresh-load call — see needsEnuAnchorRef's own comment for why
     // re-deriving it from `sphere.center.length()` on a later re-frame call is unsound.
     if (isFreshLoad) needsEnuAnchorRef.current = sphere.center.length() <= 6378137 * 0.5 && !planetScale(sphere) && !!ellipsoidForAnchor;
+    // A local scene lands at the frame's altitude whatever the terrain there is, inside or under it as often as
+    // not (an LCC2 showroom, a Nexus statue): a fresh load with no Z offset set by hand turns the ground snap on,
+    // which measures the scene's own ground against the terrain and keeps it there as the terrain refines.
+    if (isFreshLoad && needsEnuAnchorRef.current && store.getState().localFrame.zOffset === 0 && !store.getState().zOffsetAuto) store.getState().setZOffsetAuto(true);
     if (needsEnuAnchorRef.current && ellipsoidForAnchor) {
       const { lon, lat, alt } = store.getState().localFrame;
       const anchor = new THREE.Vector3();

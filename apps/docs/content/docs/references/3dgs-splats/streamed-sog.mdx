@@ -104,12 +104,17 @@ own 174 M scene (ten levels, 348 M gaussians in the bundle). Three steps:
    whole. Only this step re-runs when the leaf or file flags change. `-r x,y,z` rotates every input first
    (a Blender Z-up scene needs `-r -90,0,0` for the Y-down PlayCanvas frame).
 
-Each level halves the **count**, so on the surfaces splats cover the spacing grows by about √2 per level, not 2.
-`collapseLodTree` halves the declared geometric error per level (`LEVEL_RATIO` in `lodMeta.js`), the same
-anchoring the tree's own errors use (the root diagonal, halved per depth): over ten levels that declares the
-finest level 512 × finer than the coarsest where its spacing is 32 × finer, so a client refines the fine levels
-somewhat later than their real error would ask (no knob trims it yet). The per-leaf `errors` a bundle may carry
-(`lodErrors: true`) are the measured values and are honoured by the 1:1 mapping (`--splat-budget 0`). Numbers from the PlayCanvas thread
+`scripts/make-streamed-sog.ps1` runs the three steps and the 3D Tiles conversion end to end, restartable per
+level: `.\scripts\make-streamed-sog.ps1 -InputPly input.ply -OutDir output-streamed-sog -TilesDir output-3dtiles
+[-Levels 10] [-Rotate "-90,0,0"] [-Gpu 0] [-SplatBudget 100000] [-NoTiles]`; its leaf and file defaults are 8 m,
+64K per leaf, 16K minimum, 512K per file.
+
+Each level halves the **count**, so on the surfaces splats cover the spacing grows by about √2 per level, not 2,
+and that is the step between the geometric errors of two levels, collapsed or 1:1 (`LEVEL_RATIO` in
+`lodMeta.js`, 1/√2; it was 1/2 until 12 November 2026, which over ten levels declared the finest level 512 × finer
+than the coarsest where its spacing is 32 × finer, so a client refined the fine levels later than their error
+asked). The tree's own depth steps keep halving. The per-leaf `errors` a bundle may carry (`lodErrors: true`)
+are the measured values and are honoured by the 1:1 mapping (`--splat-budget 0`). Numbers from the PlayCanvas thread
 [splat-transform#310](https://github.com/playcanvas/splat-transform/issues/310), where the chained recipe was
 settled after the one-pass per-leaf error build of a 517 M bundle stalled for 13.6 CPU-hours.
 
@@ -124,7 +129,8 @@ few dozen splats, all of which a renderer refines before it draws anything. Coll
 - the tiles of a level are the **shallowest nodes whose splats of that level fit the budget** (100 000 by
   default); a tile's content is the runs of all the leaves below it, end to end;
 - a tile of level L has as children the tiles of level L−1 under it, `refine: REPLACE`;
-- its geometric error is its node's bound diagonal × 0.1, halved per level below the coarsest.
+- its geometric error is its node's bound diagonal × 0.1, divided by √2 per level below the coarsest (a level
+  holds half the previous one's splats, which on surfaces is a √2 spacing step).
 
 Lublin becomes 7 169 tiles (median 65 000 splats, one or two chunk files each, 32 at most) and a 2.3 MB
 `tileset.json`; its root tile is the whole scene at the coarsest level, 1 MB. The same cap on what a client
@@ -135,6 +141,16 @@ must read before it sees anything that the depth cut puts on a mosaic and `vpc-s
 | Budget | `--splat-budget N` (`3dtiled … --splat-budget N`) | `&splatBudget=N`, `TILED_SOG_SPLAT_BUDGET` |
 | A merged tile | `tiles/node_<n>.glb` | `tile/m<path>_<level>.glb`: the node (one child index per character from the root) and the level; the server collects the runs |
 | `0` | the 1:1 mapping below | the same |
+| Up axis | `--up z\|y\|-y` | `&up=z\|y\|-y` |
+
+**The up axis.** A tile's box is turned Y-up→Z-up the way a client turns glTF content, and the root transform
+turns both back, so a client ends up in the scene's *native* frame: a native Z-up scene stands upright, which
+is what the first scenes streamed here were. A bundle whose native up is Y (a Blender-style export, Andrii
+Shramko's Lublin and Jastrzębia Góra: the ground band sits at the low end of Y, the roofs and then the large
+sky floaters above it, so the city lay on its side) takes `up=y`; a scene whose Y points down (a 3DGS training
+left in the COLMAP frame; Shramko's Itaka Stadium, whose stands rise toward −Y) `up=-y`. The viewer's presets
+carry the knob (`query` on the asset). Nothing in `lod-meta.json` says which it is: look at where the large
+floaters are (the sky) against the dense band (the ground) along the thin axis of the root bound.
 
 `lodErrors` (a leaf's own error per level) is honoured by the 1:1 mapping only: a merged tile spans many
 leaves. With `0`:

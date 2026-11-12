@@ -20,7 +20,7 @@
 import path from 'node:path';
 import { readSog, MemoryReadFileSystem } from '@playcanvas/splat-transform';
 import { extractRange } from '../sog-to-3dtiles/src/sogChunk.js';
-import { lodGeometricErrors, collapseLodTree, lodNodeAt, lodRunsUnder, DEFAULT_SPLAT_BUDGET } from '../sog-to-3dtiles/src/lodMeta.js';
+import { lodGeometricErrors, collapseLodTree, lodNodeAt, lodRunsUnder, DEFAULT_SPLAT_BUDGET, upTransform, upParam } from '../sog-to-3dtiles/src/lodMeta.js';
 import { memoizeAsync, fetchSource as fetchBuf, tilePool, runTileTaskOr, ownBytes } from '../core/index.js';
 import { splatArraysGlb } from './splat-tile.js';
 
@@ -100,7 +100,7 @@ function getChunkTable(ctx, fileIdx) {
 
 // Build the 3D Tiles tree from lod.tree (bounds persisted → no decode). Each leaf LOD run becomes a
 // REPLACE-chain tile whose content URI encodes the run: tile/<file>_<offset>_<count>.glb.
-function buildTileset(ctx, urlParam, centroids = false, budget = SPLAT_BUDGET) {
+function buildTileset(ctx, urlParam, centroids = false, budget = SPLAT_BUDGET, up = 'z') {
   const enc = encodeURIComponent(urlParam);
   const rootDiag = boundDiagonal(ctx.lod.tree.bound.min, ctx.lod.tree.bound.max);
   const ROOT_GE = rootDiag * ROOT_GE_FACTOR;
@@ -127,14 +127,13 @@ function buildTileset(ctx, urlParam, centroids = false, budget = SPLAT_BUDGET) {
     return { tile: child };
   }
   const rootDiagGE = rootDiag * ROOT_GE_FACTOR;
-  // SOG (PlayCanvas Y-up) needs RX(−90°) root transform so the scene appears upright in Cesium.
-  // RX(+90°) was upside-down. Column-major: col0=X→X, col1=Y→−Z, col2=Z→Y; identity for w.
-  const RX90 = [1,0,0,0, 0,0,-1,0, 0,1,0,0, 0,0,0,1];
+  // The root transform undoes the client's Y-up→Z-up turn (the boxes got the same turn), so the client sees the
+  // scene's native frame; `&up=y|-y` says which native axis is up when it is not Z (lodMeta.js's upTransform).
   const lodLevels = ctx.lod.lodLevels ?? (ctx.lod.counts?.length ?? 1);
   const root = budget > 0
     ? collapseLodTree(ctx.lod.tree, lodLevels, budget, { box: boundToZUpBox, content: (_runs, path, level) => ({ uri: `tile/m${path}_${level}.glb?url=${enc}` }) })
     : build(ctx.lod.tree, 0).tile;
-  root.transform = RX90;
+  root.transform = upTransform(up);
   const ts = { asset: { version: '1.1' }, geometricError: rootDiagGE, root, extensionsUsed: ['3DTILES_content_gltf'] };
   // centroids mode emits glTF POINTS tiles → do NOT advertise the gaussian-splatting extension.
   if (!centroids) ts.extensions = { '3DTILES_content_gltf': {
@@ -181,7 +180,7 @@ export const sogTileRe = /^(\d+_\d+_\d+|m\d*_\d+)$/;
 // index, cache=none ≡ cache=hierarchy; cache=full routes to /convert). `centroids` → POINTS preview.
 export async function sogTileset(url, opts = {}) {
   const b = opts.splatBudget == null || opts.splatBudget === '' ? SPLAT_BUDGET : Number(opts.splatBudget);
-  return buildTileset(await getCtx(url), url, opts.centroids, Number.isFinite(b) && b >= 0 ? b : SPLAT_BUDGET);
+  return buildTileset(await getCtx(url), url, opts.centroids, Number.isFinite(b) && b >= 0 ? b : SPLAT_BUDGET, upParam(opts.up));
 }
 export async function sogTile(url, key, opts = {}) {
   const ctx = await getCtx(url);

@@ -43,6 +43,22 @@ Format loosely follows [Keep a Changelog](https://keepachangelog.com/).
   simply not listed. The page now says so.
 - Library: `france-lidarhd` is now the grid VPC with heights and counts; `france-lidarhd-grid` the 9.5 KB
   availability-only one; `france-lidarhd-stac` the split STAC VPC.
+- **A LOD level's geometric error is 1/√2 of the previous one's**, collapsed and 1:1 alike (`LEVEL_RATIO` in
+  `lodMeta.js`, was 1/2): a streamed SOG's levels are 50 % decimations, a √2 spacing step on surfaces. Over ten
+  levels the finest level was declared 512 × finer than the coarsest where it is 32 × finer, so clients refined the
+  fine levels later than their error asked; the tree's depth steps keep halving.
+- **`&up=z|y|-y` on a streamed SOG, `--up` offline**: the native axis that is up. A client ends up in the
+  scene's native frame (the root transform undoes its Y-up→Z-up turn), which stands a Z-up scene upright and
+  laid Shramko's Y-up Lublin on its side; the Lublin and Jastrzębia Góra presets carry `&up=y`, Itaka Stadium
+  `&up=-y` (a viewer asset's `query`). `lodMeta.js`'s `upTransform`.
+- **A `+` in a request query is a plus** (`literalPlus`, applied to `req.url` before any route): `Tile_+005_+006_OSGB.zip`
+  reached PlanD as `Tile_ 005_ 006` and got a 403, so the `hk-pland-tile` preset never loaded; the viewer
+  encodes it as `%2B` as well.
+- **The viewer snaps a local scene to the ground on load**: a tileset that needs the ENU anchor (LCC2, Nexus, a
+  SOG) turns the ground snap on when no Z offset was set by hand, instead of landing at the frame's altitude
+  inside or under the terrain.
+- `scripts/make-streamed-sog.ps1`: the chained recipe end to end (level 0, the 50 % levels, the bundle, the 3D Tiles),
+  restartable per level, with the leaf and file flags as parameters.
 - The streamed-SOG reference page gains **Producing one: the chained 50 % recipe** (splat-transform 3.10+:
   `-H 0 -m` for level 0, `--decimate-adaptive 50%` of the previous level for each next one, the bundle from
   `-l`-tagged PLYs with the four chunking flags), and the note that a halved count is a √2 spacing step while
