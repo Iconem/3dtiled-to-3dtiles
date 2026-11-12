@@ -155,24 +155,36 @@ QGIS's VPC writer can build one). The server reads its LAS header, 375 bytes, an
    whole country down to its finest level, and the files add their points on top as the camera comes in.
    The whole country is seen with the first request below the root: the overview's root node.
 2. **Lowers what a file is worth.** Not opening a file now costs the overview's *resolution* there, not the
-   file's *size*: each file leaf's geometric error becomes **4 × the overview's spacing**, with the spacing
-   the overview's points over the set's footprint, √(area ÷ points). A group's error is twice its largest
-   child's, so at the usual 16 px threshold the group over four tiles refines when the overview's points
-   are 2 px apart, which is where its view starts to show gaps and the file's root node (0.4 to 1.3 MB,
-   two range reads and a `tileset.json`) earns its cost. `asset.extras.vpc.overview` reports
+   file's *size*: each file leaf's geometric error becomes **the overview's point spacing**, its points over
+   the set's footprint, √(area ÷ points), the same number a COPC node of that spacing declares. A client
+   therefore opens a file at the screen-space error at which it would refine such a node, whatever its
+   threshold. A group's error is twice its largest child's per tree level, and the group right over the
+   leaves holds up to 16 of them (two quadtree levels), so it declares 4 × the spacing and refines when the
+   overview's points are a quarter of the threshold apart: 0.5 px at the viewer's 2 px for points, 4 px at
+   a mesh client's 16 px. There the file's root node (0.4 to 1.3 MB, two range reads and a `tileset.json`)
+   takes over from an overview that is still dense on screen. `asset.extras.vpc.overview` reports
    `{ url, points, spacing, areaKm2, placed }` and `asset.extras.vpc.leafError` the error in metres.
 
-| Set | Overview | Spacing | A file leaf declares | The four-tile group refines at (16 px, 1 000 px, 60°) | Tiles in view there |
-|---|---:|---:|---:|---:|---:|
-| Dublin 2015, 35 tiles | 3.4 M points over 6.8 km² | 1.41 m | 5.64 m (was 866 m) | 0.6 km (was 94 km) | all 35 |
-| Luxembourg 2019, 10 906 tiles | 1.0 G points over 2 649 km² | 1.63 m | 6.52 m (was 866 m) | 0.7 km (was 94 km) | about 2, against 10 906 |
-| IGN LiDAR HD, 337 206 tiles | 1.26 G points over 337 290 km² | 16.3 m | 65.4 m (was 1 732 m) | 7 km (was 190 km) | about 50, against tens of thousands |
+| Set | Overview | Spacing = a file leaf's error | The group over the leaves (4 × spacing) refines at 2 px, 460 px, 60° (at 16 px, 1 000 px) |
+|---|---:|---:|---:|
+| Dublin 2015, 35 tiles | 3.4 M points over 6.8 km² | 1.41 m (was 866 m) | 1.1 km (0.3 km); was 690 km (94 km) |
+| Luxembourg 2019, 10 906 tiles | 1.0 G points over 2 649 km² | 1.63 m (was 866 m) | 1.3 km (0.35 km); was 690 km (94 km) |
+| IGN LiDAR HD, 337 206 tiles | 1.26 G points over 337 290 km² | 16.3 m (was 1 732 m) | 13 km (3.5 km); was 1 380 km (190 km) |
 
-Before this, a 1 km leaf declared 1 732 m, the diagonal of its octree cube, the group over four 3 464 m, and
-that group refined within 190 km of the camera, where tens of thousands of tiles were in view and each of them
-read its COPC root at once. (Distances computed from the errors the server writes, as before.) The overview's
-points and the files' overlap once both show, by the overview's share of the data: 0.01 % for France, 2 % for
-Luxembourg, whose overview is a dense 1 G points. The far view costs the overview alone.
+Seen in the viewer (3DTRjs, 2 px, a 992 × 459 viewport) on the 9.5 KB France grid preset, looking straight
+down at Paris: at **19.5 km** the overview alone draws, 40 of its nodes, and no file is open; at **9.4 km**,
+180 files are open under 40 overview nodes (the group over them declares 65 m and is 6.9 km from the
+camera, 3.7 px: the availability-only grid gives every cell the campaign's whole height range, −30 to
+2 871 m, so a box's nearest point is 2.5 km nearer than the ground; the 1.5 MB grid with per-cell heights
+refines later). Before this, a 1 km leaf declared 1 732 m, the diagonal of its octree cube, and the group
+over it refined within 190 km of the camera at 16 px, within 1 380 km at 2 px, which is everywhere: tens of
+thousands of tiles were in view and each of them read its COPC root at once. The overview's points and the
+files' overlap once both show, by the overview's share of the data: 0.01 % for France, 2 % for Luxembourg,
+whose overview is a dense 1 G points. The far view costs the overview alone: its `tileset.json` is the COPC
+stream's explicit tree of its root hierarchy page, 29 192 nodes and 12 to 15 MB of JSON for France's and
+Luxembourg's, once per session, the same as opening that COPC on its own. A group's error could be its
+largest child's instead of twice it, which would open files at the threshold itself (2 px of overview
+spacing); `&leafError=` is the knob until then.
 
 **Without an overview** (Canada, Switzerland, USGS Fairbanks: their hosts publish none), a country seen whole
 shows nothing: the client reads the root and the subtrees its screen-space error asks for, all JSON, and no
@@ -184,7 +196,7 @@ Two parameters, on `/stream?format=vpc` and `/aggregate?vpc=` alike:
 
 - **`&overview=0`** leaves the overview out and keeps the strict errors (the file's size);
 - **`&leafError=<m>`** sets every file leaf's geometric error in metres, with or without an overview
-  (`leafError=65` on Canada opens its files 7 km out, as France does).
+  (`leafError=16` on Canada opens its files as France's grid does).
 
 A nested child is told `&overview=0&leafError=<m>` by its parent, so the overview is placed once and every
 leaf of the set agrees. The viewer's **VPC** presets `france-lidarhd`, `france-lidarhd-grid`,

@@ -357,9 +357,9 @@ const groupsOf = (ts) => { const out = []; (function walk(n) { if (n.children &&
 
 test('the overview is placed as a leaf beside the groups, and the files open at the error it leaves', async (t) => {
   quiet(t);
-  // 12 tiles of 1 km², an overview of 12 M points over them: 1 m between its points, so a file is worth 4 m
+  // 12 tiles of 1 km², an overview of 3 M points over them: 2 m between its points, so a file is worth 2 m
   const features = Array.from({ length: 12 }, (_, i) => utmItem(`./tiles/t${i}.copc.laz`, 540000 + i * 1000, { overview: './overview.copc.laz' }));
-  const h = await host(t, { '/set/index.vpc': { type: 'FeatureCollection', features }, '/set/overview.copc.laz': lasHeader(12_000_000, [540000, 5724000, 552000, 5725000]) });
+  const h = await host(t, { '/set/index.vpc': { type: 'FeatureCollection', features }, '/set/overview.copc.laz': lasHeader(3_000_000, [540000, 5724000, 552000, 5725000]) });
   const s = await streamServer(t);
   const url = `${h.base}/set/index.vpc`;
   const ts = await (await fetch(`${s}/stream/tileset.json?url=${encodeURIComponent(url)}&cache=none`)).json();
@@ -368,8 +368,8 @@ test('the overview is placed as a leaf beside the groups, and the files open at 
   const ov = leaves.find((l) => /overview\.copc\.laz/.test(l.content.uri));
   const files = leaves.filter((l) => l !== ov);
   assert.equal(files.length, 12);
-  // every file leaf: 4 m, down from the 1 732 m its size says; the overview leaf: as large as the set
-  for (const f of files) assert.equal(f.boundingVolume.geometricError ?? f.geometricError, 4);
+  // every file leaf: 2 m, down from the 1 732 m its size says; the overview leaf: as large as the set
+  for (const f of files) assert.equal(f.geometricError, 2);
   assert.ok(ov.geometricError > 6000 && ov.geometricError === ov.boundingVolume.sphere[3]);
   assert.equal(new URL(ov.content.uri).searchParams.get('crs'), 'EPSG:25832');
   // beside the groups: its parent is a group with at least one group among its children, refined with ADD
@@ -377,8 +377,8 @@ test('the overview is placed as a leaf beside the groups, and the files open at 
   assert.ok(parent && parent.refine === 'ADD' && parent.children.some((c) => c.children && !c.content));
   assert.ok(parent.geometricError > ov.geometricError);
   const x = ts.asset.extras.vpc;
-  assert.deepEqual(x.overview, { url: `${h.base}/set/overview.copc.laz`, points: 12_000_000, spacing: 1, areaKm2: 12, placed: true });
-  assert.deepEqual([x.leafError, x.areaKm2], [4, 12]);
+  assert.deepEqual(x.overview, { url: `${h.base}/set/overview.copc.laz`, points: 3_000_000, spacing: 2, areaKm2: 12, placed: true });
+  assert.deepEqual([x.leafError, x.areaKm2], [2, 12]);
   assert.deepEqual(h.hits, { '/set/index.vpc': 1, '/set/overview.copc.laz': 1 });
   // &overview=0: no overview leaf, the strict error is back; &leafError=50 is taken as given
   const off = await (await fetch(`${s}/stream/tileset.json?url=${encodeURIComponent(url)}&cache=none&overview=0`)).json();

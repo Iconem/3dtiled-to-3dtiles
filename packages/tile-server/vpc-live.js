@@ -415,15 +415,17 @@ export function vpcToSet(parsed, sorted = { copc: [], skipped: [], sniffed: 0 },
 //      the root (the quadtree puts a dataset in the cell its size fits). The root refines with ADD,
 //      so the overview's own octree carries the far view, and the files add theirs on top;
 //   2. with the overview showing, not opening a file costs the overview's RESOLUTION there, not the
-//      file's size: the leaf error becomes `LEAF_ERROR_FACTOR × spacing`, where the spacing is the
-//      overview's points over the set's footprint, √(area / points). At 16 px a group of four tiles
-//      then refines when the overview's points are 2 px apart (8 × spacing projects to 16 px):
-//      France (1.26 G points over 337 206 km², 16.3 m) opens its files about 7 km out, where some
-//      fifty tiles are in view, instead of 190 km.
+//      file's size: the leaf error becomes the overview's point SPACING, its points over the set's
+//      footprint, √(area / points), the same number a COPC node of that spacing declares. So a client
+//      opens a file at the screen-space error at which it would refine such a node, whatever its
+//      threshold (2 px for points in the viewer, 16 px in a mesh client): the group over four tiles
+//      (2 × spacing) refines when the overview's points are half the threshold apart. France
+//      (1.26 G points over 337 290 km², 16.3 m) opens its files 5.7 km out at 2 px on an 800 px
+//      viewport, where some fifty tiles are in view, instead of everywhere within 1 500 km.
 //
 // A VPC without an overview keeps the strict error (and `&leafError=<m>` sets one by hand); a nested
 // child is told `&overview=0&leafError=<m>` so the overview is placed once and every leaf agrees.
-const LEAF_ERROR_FACTOR = 4;
+const LEAF_ERROR_FACTOR = 1;
 
 const overviewHeads = new Map();                   // url → promise of { points, extent }
 /** The LAS header of an overview (375 bytes, one range read): its point count and horizontal extent. */

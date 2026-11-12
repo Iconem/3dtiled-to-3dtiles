@@ -8,10 +8,11 @@ Format loosely follows [Keep a Changelog](https://keepachangelog.com/).
 ### Changed — 2026-11-12 (a VPC's overview carries the far view; a country no longer opens every tile within 190 km)
 - **The overview a VPC names is placed in the mosaic**, as a leaf as large as the set, beside the groups under
   an `ADD` root: its own COPC octree is the view from afar, and the files add theirs as the camera comes in.
-  With it, **a file leaf's geometric error is 4 × the overview's spacing** (its points over the set's
-  footprint, from a 375-byte header read) instead of the file's size: a group of four IGN tiles refines about
-  7 km out (it was 190 km, with tens of thousands of tiles in view, each reading its COPC root), Luxembourg's
-  0.7 km (its overview is 1 G points, 1.6 m apart). `&overview=0` leaves it out, `&leafError=<m>` sets the
+  With it, **a file leaf's geometric error is the overview's point spacing** (its points over the set's
+  footprint, from a 375-byte header read; the number a COPC node of that spacing declares) instead of the
+  file's size. Seen in the viewer over Paris on the France grid: at 19.5 km the overview alone draws (40
+  nodes, no file open); at 9.4 km 180 files are open under it (it was every tile in view at any height,
+  each reading its COPC root). `&overview=0` leaves it out, `&leafError=<m>` sets the
   error by hand (also for sets without an overview: Canada, Switzerland, USGS Fairbanks have none). A nested
   child is told `&overview=0&leafError=<m>`, so the overview is placed once. `asset.extras.vpc` reports
   `overview: { url, points, spacing, areaKm2, placed }`, `leafError`, `areaKm2`, or `overviewError`.
