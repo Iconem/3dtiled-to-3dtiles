@@ -6,11 +6,17 @@
  *
  * Fetch the tileset's top content (the root tile, the implicit root's level-0 tile, or the first tiles
  * under a content-less root, following external tilesets), decode its positions (glb with node
- * transforms and CESIUM_RTC, b3dm with RTC_CENTER, float pnts; compressed content is skipped), and
+ * transforms and CESIUM_RTC, b3dm with RTC_CENTER, float pnts, the SPZ blob of a KHR_gaussian_splatting
+ * tile; Draco/meshopt/quantized content is skipped), and
  * bin them on a horizontal GRID × GRID grid: each bin's 10th-percentile height estimates the ground
  * there. The top content is a sparse, spatially uniform subsample (Potree/COPC root nodes, a mesh's
  * coarsest LOD), so 8 × 8 bins of a few hundred points each are both populated and robust; 3 × 3
  * mixes a building with its square, 16 × 16 leaves bins with a handful of points.
+ *
+ * A tileset with no georeference (its root near the origin) is measured where the caller has PUT it: `frame`
+ * is the column-major matrix the viewer anchors it with (an ENU basis at the Local Frame's lon/lat/alt, no
+ * Z offset), applied above the root transform. Without it such a tileset's metres would be read as ECEF
+ * and the "ground" would come out 6 400 km off (seen on a Nexus statue, 2026-11-13).
  */
 
 const A = 6378137.0, E2 = 0.00669437999014, DEG = Math.PI / 180;
@@ -49,7 +55,29 @@ function trs(n) {
   ];
 }
 
-function glbPositions(buf, tileM, out, budget, zUp) {
+/** Inflate a gzip-compressed buffer (browser and Node 18+ both have DecompressionStream). */
+async function gunzip(bytes) {
+  const ds = new DecompressionStream('gzip');
+  return new Response(new Blob([bytes]).stream().pipeThrough(ds)).arrayBuffer();
+}
+
+/**
+ * Positions of an SPZ v2/v3 payload (KHR_gaussian_splatting_compression_spz_2): a 16-byte header (magic
+ * 'NGSP', version, count, shDegree, fractionalBits, flags, reserved) then count × 3 little-endian signed
+ * 24-bit fixed-point coordinates. `step` subsamples.
+ */
+function spzPositions(raw, step) {
+  const dv = new DataView(raw);
+  if (raw.byteLength < 16 || dv.getUint32(0, true) !== 0x5053474e) return null;
+  const count = dv.getUint32(8, true), frac = dv.getUint8(13), scale = 1 / (1 << frac);
+  const bytes = new Uint8Array(raw);
+  const i24 = (o) => { const v = bytes[o] | (bytes[o + 1] << 8) | (bytes[o + 2] << 16); return (v & 0x800000 ? v - 0x1000000 : v) * scale; };
+  const out = [];
+  for (let i = 0; i < count; i += step) { const o = 16 + i * 9; if (o + 9 > raw.byteLength) break; out.push(i24(o), i24(o + 3), i24(o + 6)); }
+  return out;
+}
+
+async function glbPositions(buf, tileM, out, budget, zUp) {
   const dv = new DataView(buf);
   if (dv.getUint32(0, true) !== 0x46546c67) return false;               // 'glTF'
   const jsonLen = dv.getUint32(12, true);
@@ -60,13 +88,23 @@ function glbPositions(buf, tileM, out, budget, zUp) {
   const base = mul(mul(tileM, rtc ? translate(rtc[0], rtc[1], rtc[2]) : I4), zUp ? I4 : Y_UP_TO_Z_UP);
   const scene = json.scenes?.[json.scene ?? 0];
   let found = false;
-  const visit = (ni, parent) => {
+  const visit = async (ni, parent) => {
     const node = json.nodes[ni];
     const m = mul(parent, trs(node));
     if (node.mesh != null) {
       for (const prim of json.meshes[node.mesh].primitives ?? []) {
+        // a splat tile: its positions live in the gzip-compressed SPZ blob, not in an accessor
+        const spz = prim.extensions?.KHR_gaussian_splatting?.extensions?.KHR_gaussian_splatting_compression_spz_2 ?? prim.extensions?.KHR_gaussian_splatting_compression_spz_2;
+        if (spz && spz.bufferView != null) {
+          const sbv = json.bufferViews[spz.bufferView];
+          const raw = await gunzip(new Uint8Array(buf, binStart + (sbv.byteOffset ?? 0), sbv.byteLength)).catch(() => null);
+          const count = raw ? new DataView(raw).getUint32(8, true) : 0;
+          const pos = raw ? spzPositions(raw, Math.max(1, Math.floor(count / budget))) : null;
+          if (pos) { for (let i = 0; i < pos.length; i += 3) out.push(...apply(m, pos[i], pos[i + 1], pos[i + 2])); found = found || pos.length > 0; }
+          continue;
+        }
         const acc = json.accessors[prim.attributes?.POSITION];
-        if (!acc || acc.componentType !== 5126 || acc.sparse) continue;
+        if (!acc || acc.componentType !== 5126 || acc.sparse || acc.bufferView == null) continue;
         const bv = json.bufferViews[acc.bufferView];
         const stride = bv.byteStride || 12;
         const off = binStart + (bv.byteOffset ?? 0) + (acc.byteOffset ?? 0);
@@ -77,13 +115,13 @@ function glbPositions(buf, tileM, out, budget, zUp) {
         found = true;
       }
     }
-    for (const c of node.children ?? []) visit(c, m);
+    for (const c of node.children ?? []) await visit(c, m);
   };
-  for (const ni of scene?.nodes ?? []) visit(ni, base);
+  for (const ni of scene?.nodes ?? []) await visit(ni, base);
   return found;
 }
 
-function contentPositions(buf, tileM, out, budget, zUp) {
+async function contentPositions(buf, tileM, out, budget, zUp) {
   const dv = new DataView(buf);
   const magic = new TextDecoder().decode(new Uint8Array(buf, 0, 4));
   if (magic === 'glTF') return glbPositions(buf, tileM, out, budget, zUp);
@@ -110,10 +148,10 @@ const isJsonUrl = (abs) => {
 };
 
 /** Up to `maxFiles` top content files, breadth-first, each with its transform chain and up axis. */
-async function topContents(url, maxFiles, fetchFn, depth = 0) {
+async function topContents(url, maxFiles, fetchFn, frame) {
   const found = [];
   const ts = await (await fetchFn(url)).json();
-  const queue = [{ tile: ts.root, base: url, m: colM(ts.root.transform), zUp: ts.asset?.gltfUpAxis === 'Z' }];
+  const queue = [{ tile: ts.root, base: url, m: mul(colM(frame), colM(ts.root.transform)), zUp: ts.asset?.gltfUpAxis === 'Z' }];
   while (queue.length && found.length < maxFiles) {
     const { tile, base, m, zUp } = queue.shift();
     let uri = tile.content?.uri ?? tile.content?.url;
@@ -137,13 +175,13 @@ async function topContents(url, maxFiles, fetchFn, depth = 0) {
  * Ground samples of a tileset: [{ lon, lat, h, n }] — each bin's 10th-percentile point, ellipsoidal
  * heights. Null when nothing readable was found.
  */
-export async function datasetGroundSamples(tilesetUrl, { grid = GROUND_GRID, budget = 60000, fetch: fetchFn = globalThis.fetch } = {}) {
-  const files = await topContents(tilesetUrl, 4, fetchFn);
+export async function datasetGroundSamples(tilesetUrl, { grid = GROUND_GRID, budget = 60000, fetch: fetchFn = globalThis.fetch, frame = null } = {}) {
+  const files = await topContents(tilesetUrl, 4, fetchFn, frame);
   const pts = [];
   for (const f of files) {
     try {
       const buf = await (await fetchFn(f.url)).arrayBuffer();
-      contentPositions(buf, f.m, pts, Math.ceil(budget / files.length), f.zUp);
+      await contentPositions(buf, f.m, pts, Math.ceil(budget / files.length), f.zUp);
     } catch { /* one unreadable tile is not fatal */ }
   }
   if (pts.length < 30) return null;

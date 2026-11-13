@@ -702,6 +702,10 @@ const Scene = forwardRef<ViewerHandle, { loadArgs: LoadArgs; tooltip: TooltipCha
   // in place — so the checkbox never remounts the renderer. See lib/nativeLeaves.ts.
   const [{ native }] = useUrlState();
   const tilesUrl = loadArgs ? withNativeLeaves(loadArgs.url) : undefined;
+  // Google Photorealistic 3D Tiles loaded as the DATA (the "Google 3D" pill): its root.json names its children by
+  // root-relative paths with a session, and every one of them must also carry the key, which only
+  // GoogleCloudAuthPlugin appends (seen 2026-11-13: the root loaded, all 37 first tiles failed, a blank globe).
+  const isGoogleData = /tile\.googleapis\.com/.test(tilesUrl ?? '');
   const basemap = useViewerStore((s) => s.basemap);
   const terrainMode = useViewerStore((s) => s.terrainMode);
   const terrain = resolveTerrainMode(terrainMode, '3dtrjs');
@@ -825,9 +829,11 @@ const Scene = forwardRef<ViewerHandle, { loadArgs: LoadArgs; tooltip: TooltipCha
     // re-deriving it from `sphere.center.length()` on a later re-frame call is unsound.
     if (isFreshLoad) needsEnuAnchorRef.current = sphere.center.length() <= 6378137 * 0.5 && !planetScale(sphere) && !!ellipsoidForAnchor;
     // A local scene lands at the frame's altitude whatever the terrain there is, inside or under it as often as
-    // not (an LCC2 showroom, a Nexus statue): a fresh load with no Z offset set by hand turns the ground snap on,
-    // which measures the scene's own ground against the terrain and keeps it there as the terrain refines.
-    if (isFreshLoad && needsEnuAnchorRef.current && store.getState().localFrame.zOffset === 0 && !store.getState().zOffsetAuto) store.getState().setZOffsetAuto(true);
+    // not (an LCC2 showroom, a Nexus statue): a fresh load of one turns the ground snap on, which measures the
+    // scene's own ground against the terrain and keeps it there as the terrain refines; a georeferenced load
+    // turns it back off, since its heights are its own. Only while the user has not touched the toggle: once
+    // they have, their choice holds across loads ("auto Z reactivates by itself even when I disabled it").
+    if (isFreshLoad && store.getState().zOffsetAutoByUser == null && store.getState().zOffsetAuto !== !!needsEnuAnchorRef.current) store.getState().setZOffsetAuto(!!needsEnuAnchorRef.current);
     if (needsEnuAnchorRef.current && ellipsoidForAnchor) {
       const { lon, lat, alt } = store.getState().localFrame;
       const anchor = new THREE.Vector3();
@@ -1487,6 +1493,46 @@ const Scene = forwardRef<ViewerHandle, { loadArgs: LoadArgs; tooltip: TooltipCha
   // demand frameloop no frame would come, so the loop runs continuously in fly mode only.
   const setFrameloop = useThree((s) => s.setFrameloop);
   useEffect(() => { setFrameloop(controlMode === 'fly' ? 'always' : 'demand'); return () => setFrameloop('demand'); }, [controlMode, setFrameloop]);
+
+  // Fly look. three's FlyControls maps the cursor's ABSOLUTE offset from the viewport centre to a rotation
+  // RATE: the view keeps turning as long as the cursor is off centre, and where a drag ends sets the heading
+  // ("the camera is attached to the mouse"). Mouse-look instead: its pointer handlers are swapped for ones that
+  // turn the camera by the cursor's movement since the last event, one pixel of drag for one pixel of view
+  // (yaw about the local vertical, pitch about the camera's right axis, short of the poles). The keyboard
+  // (W A S D, R F, arrows) still goes through FlyControls.update().
+  useEffect(() => {
+    const c = controlsRef.current;
+    if (controlMode !== 'fly' || !c || !('movementSpeed' in c) || !c.domElement) return;
+    const el: HTMLElement = c.domElement;
+    for (const [ev, h] of [['pointermove', c._onPointerMove], ['pointerdown', c._onPointerDown], ['pointerup', c._onPointerUp], ['pointercancel', c._onPointerCancel]] as const) if (h) el.removeEventListener(ev, h);
+    let dragging = false, lx = 0, ly = 0;
+    const up = new THREE.Vector3(), right = new THREE.Vector3(), fwd = new THREE.Vector3(), q = new THREE.Quaternion();
+    const down = (e: PointerEvent) => { if (e.button !== 0) return; dragging = true; lx = e.clientX; ly = e.clientY; el.setPointerCapture?.(e.pointerId); };
+    const stop = (e: PointerEvent) => { if (!dragging) return; dragging = false; if (el.hasPointerCapture?.(e.pointerId)) el.releasePointerCapture(e.pointerId); };
+    const move = (e: PointerEvent) => {
+      if (!dragging) return;
+      const dx = e.clientX - lx, dy = e.clientY - ly;
+      lx = e.clientX; ly = e.clientY;
+      if (!dx && !dy) return;
+      const perPx = THREE.MathUtils.degToRad((camera as THREE.PerspectiveCamera).fov ?? fov) / Math.max(1, el.clientHeight);
+      verticalAt(camera.position, up);
+      camera.quaternion.premultiply(q.setFromAxisAngle(up, -dx * perPx));                 // drag right: look right
+      fwd.set(0, 0, -1).applyQuaternion(camera.quaternion);
+      right.crossVectors(fwd, up).normalize();
+      const cur = Math.asin(THREE.MathUtils.clamp(fwd.dot(up), -1, 1));
+      const lim = THREE.MathUtils.degToRad(89);
+      const want = THREE.MathUtils.clamp(cur - dy * perPx, -lim, lim);                     // drag up: look up
+      camera.quaternion.premultiply(q.setFromAxisAngle(right, want - cur));
+      levelFly();
+      invalidate();
+    };
+    el.addEventListener('pointerdown', down); el.addEventListener('pointermove', move);
+    el.addEventListener('pointerup', stop); el.addEventListener('pointercancel', stop);
+    return () => {
+      el.removeEventListener('pointerdown', down); el.removeEventListener('pointermove', move);
+      el.removeEventListener('pointerup', stop); el.removeEventListener('pointercancel', stop);
+    };
+  }, [controlMode, camera, fov, invalidate, levelFly, verticalAt]);
   useEffect(() => { if (controlSetting === 'auto') invalidate(); }, [controlSetting, invalidate]);
 
   // rAF-throttled: the point-size slider's onValueChange fires on every drag tick (dozens of times a
@@ -1549,9 +1595,12 @@ const Scene = forwardRef<ViewerHandle, { loadArgs: LoadArgs; tooltip: TooltipCha
    * 2. Fallback: the rendered surface picked on a grid against the rendered terrain.
    */
   const groundSamplesCache = useRef(new Map<string, Promise<GroundSample[] | null>>());
-  const groundSamplesFor = useCallback((url: string) => {
-    let p = groundSamplesCache.current.get(url);
-    if (!p) { p = datasetGroundSamples(url).catch(() => null); groundSamplesCache.current.set(url, p); }
+  // A local tileset is measured where it is anchored (frameToTileset's ENU basis at the Local Frame, without
+  // the Z offset): the samples are then absolute like a georeferenced tileset's, and the cache is per anchor.
+  const groundSamplesFor = useCallback((url: string, frame: number[] | null) => {
+    const key = frame ? `${url}|${frame.map((v) => v.toFixed(2)).join(',')}` : url;
+    let p = groundSamplesCache.current.get(key);
+    if (!p) { p = datasetGroundSamples(url, { frame }).catch(() => null); groundSamplesCache.current.set(key, p); }
     return p;
   }, []);
   const snapToGroundInternal = useCallback(async (): Promise<string> => {
@@ -1583,7 +1632,8 @@ const Scene = forwardRef<ViewerHandle, { loadArgs: LoadArgs; tooltip: TooltipCha
     };
 
     // 1. Preferred: the dataset's own top geometry, binned (lib/datasetGround.ts). Renderer-independent.
-    const samples = await groundSamplesFor(store.getState().lastLoadUrl);
+    const frame = needsEnuAnchorRef.current ? new THREE.Matrix4().compose(localAnchorRef.current, tiles.group.quaternion, new THREE.Vector3(1, 1, 1)).elements.slice() : null;
+    const samples = await groundSamplesFor(store.getState().lastLoadUrl, frame);
     if (samples) {
       const terrain = await Promise.all(samples.map((s) => groundAt(s.lon, s.lat)));
       const r = offsetFromSamples(samples, terrain);
@@ -1999,6 +2049,7 @@ const Scene = forwardRef<ViewerHandle, { loadArgs: LoadArgs; tooltip: TooltipCha
               implicit roots) never expands past the root tile. Plug-and-play, no options, and a no-op on
               explicit tilesets (only triggers on nodes that actually carry `implicitTiling`). */}
           <TilesPlugin plugin={ImplicitTilingPlugin as any} />
+          {isGoogleData && <TilesPlugin plugin={GoogleCloudAuthPlugin as any} args={{ apiToken: GOOGLE_MAPS_API_KEY, autoRefreshToken: true } as any} />}
           <TilesPlugin plugin={GLTFExtensionsPlugin as any} args={gltfArgs as any} />
           {/* point sprites: shape, min/max size, EDL — the same plugin the potree lab and the native
               Potree leaves use, so one sidebar block drives all of them */}

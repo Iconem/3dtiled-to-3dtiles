@@ -1,5 +1,5 @@
 {
   "title": "Mesh/Generic",
   "defaultOpen": true,
-  "pages": ["i3s", "osgb", "nexus"]
+  "pages": ["i3s", "osgb", "nexus", "mesh-tilers"]
 }

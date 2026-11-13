@@ -5,6 +5,49 @@ Format loosely follows [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+### Fixed — 2026-11-13 (what the viewer showed for local scenes, splats, Google 3D and the fly camera)
+- **A local scene's ground snap measured it 6 400 km off.** The ground sampler (`packages/core/dataset-ground.js`)
+  read a tileset's coarse positions as Earth-centred metres; for a scene with no georeference (a Nexus statue, an
+  LCC2 showroom, a streamed SOG) those are the scene's own metres, so the snap put the gargoyle 6 402 km up, out of
+  sight. The viewer now hands the sampler the frame it anchors such a scene with (`frame`, the Local Frame's ENU basis,
+  no Z offset) and the samples come out where the scene is: the gargoyle snaps by −13.7 m onto a flat terrain, the
+  Lublin SOG by +32.6 m. Seen headless on the Nexus gargoyle.
+- **The sampler reads splat tiles.** A `KHR_gaussian_splatting_compression_spz_2` tile keeps its positions in the
+  gzip-compressed SPZ blob, not in an accessor, so every splat scene was "unreadable" and the snap fell back to picking
+  the rendered surface, which a splat renderer does not raycast. The blob is inflated (`DecompressionStream`, browser
+  and Node) and its 24-bit fixed-point positions sampled, so **Auto Z works on SOG, LCC, LCC2 and RAD scenes** like on
+  meshes and point clouds.
+- **Auto Z no longer reactivates after the user turned it off.** The 12 November change turned the snap on at every
+  fresh local load, whatever the user had set. Now a fresh load sets it only while the user has not touched the toggle
+  (on for a local scene, off again for a georeferenced one, `zOffsetAutoByUser` in the store); once they have, their
+  choice holds across loads.
+- **Google Photorealistic 3D Tiles as the data ("Google 3D" pill) loaded its root and nothing else**: Google names
+  the children by root-relative paths with a session, and each needs the key appended, which only
+  `GoogleCloudAuthPlugin` does; the data renderer now registers it for a `tile.googleapis.com` URL (the terrain path
+  already had it). Headless: 45 tiles loaded, 0 failed, where it was 0 loaded and 37 failed. The key itself has no
+  HTTP-referrer restriction (every Referer tested answers 200), nor has the terrain-viewer's.
+- **Fly look turns with the mouse's movement**, not its position: three's `FlyControls` maps the cursor's offset from
+  the viewport centre to a rotation rate, so the view kept turning while the cursor was off centre and a drag's end
+  position set the heading. Its pointer handlers are replaced by mouse-look (yaw about the local vertical, pitch about
+  the camera's right axis, one pixel of drag for one pixel of view, short of the poles); W A S D, R F and the arrows
+  still go through `FlyControls.update()`.
+- Streamed-SOG presets: Jastrzębia Góra and Dittrichova hrobka are Y-down (`&up=-y`, seen upside down with `y`;
+  Dittrichova from its data: ground on the +Y side, 3.9° of slope). Lublin stays `y`, Itaka `-y`.
+
+### Changed — 2026-11-13 (a large streamed SOG opens on a preview; the mesh-tiler survey; the recipe in the page)
+- **The root of a collapsed streamed SOG is a preview when the coarsest level alone is over the splat budget**
+  (Jastrzębia Góra, 106 M: 838 k splats, 14 tiles and 26 MB before a first view; Lublin's 13 levels fit). The root
+  carries every stride-th splat of the level (`tile/m_<level>s<stride>.glb`, the stride the smallest that fits the
+  budget), enlarged by √stride so they still cover the surface, its geometric error grown the same, and the level's
+  tiles replace it (`thinSplats` in `lodMeta.js`, offline and live alike). The runs are in Morton order, so the stride
+  is a spatially uniform subsample.
+- New docs page **Tiling massive meshes into 3D Tiles** (`references/mesh-generic/mesh-tilers`): the four hard parts
+  (out-of-core input, partition, parent simplification, textures: cropping vs rebaking), one comparison table per
+  step for rusty-tiles, Nexus nxsbuild, mago-3d-tiler, Obj2Tiles, py3dtiles, fanvanzh/3dtiles and VTK, a section per
+  tool, 3d-tiles-tools' `mergeJson` / `merge` / `combine`, the glTF-Transform-inside-3d-tiles-tools pattern, the
+  commercial tilers, and public massive textured meshes with verified links.
+- The streamed-SOG page carries `scripts/make-streamed-sog.ps1` in full.
+
 ### Changed — 2026-11-12 (a VPC's overview carries the far view; a country no longer opens every tile within 190 km)
 - **The overview a VPC names is placed in the mosaic**, as a leaf as large as the set, beside the groups under
   an `ADD` root: its own COPC octree is the view from afar, and the files add theirs as the camera comes in.

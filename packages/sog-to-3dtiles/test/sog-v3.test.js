@@ -193,6 +193,19 @@ test('live: the mixed scene served through sog-live, a tile from the v2 chunk an
   assert.equal(mergedSplats, lod.count, 'collapsed live: every gaussian of every level is in a tile');
   assert.equal(await sogTile(`${base}/lod-meta.json`, 'm999_0'), null, 'no such node');
 
+  // a budget the coarsest level alone exceeds: the root carries a preview of it, every stride-th splat, enlarged by
+  // √stride, which the level's own tiles replace (its error is above theirs)
+  const L = lod.lodLevels - 1;
+  const coarse = (function sum(n) { return n.children ? n.children.reduce((a, c) => a + sum(c), 0) : (n.lods?.[String(L)]?.count ?? 0); })(lod.tree);
+  const thin = await sogTileset(`${base}/lod-meta.json`, { splatBudget: Math.max(1, Math.floor(coarse / 3)) });
+  const thinKey = /tile\/(m_\d+s\d+)\.glb/.exec(thin.root.content.uri)[1];
+  const stride = Number(/s(\d+)$/.exec(thinKey)[1]);
+  assert.ok(stride >= 3, `stride ${stride} for ${coarse} coarsest splats`);
+  const previewGlb = await sogTile(`${base}/lod-meta.json`, thinKey);
+  gltf(previewGlb);
+  assert.equal(spz(previewGlb).count, Math.ceil(coarse / stride), 'the preview is every stride-th splat of the coarsest level');
+  assert.ok(thin.root.children.length > 0 && thin.root.children.every((c) => c.geometricError < thin.root.geometricError), 'the preview refines into the level');
+
   const tileset = await sogTileset(`${base}/lod-meta.json`, { splatBudget: 0 });
   assert.ok(tileset.extensions['3DTILES_content_gltf'].extensionsRequired.includes('KHR_gaussian_splatting_compression_spz_2'));
   // the native frame reaches the client: Z-up by default (the client's Y-up→Z-up turn undone), `up` for the others

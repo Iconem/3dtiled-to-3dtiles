@@ -31,7 +31,7 @@ import fs   from 'fs/promises';
 import path from 'path';
 import { fileURLToPath } from 'node:url';
 import { decodeChunk, extractRange } from './sogChunk.js';
-import { lodGeometricErrors, collapseLodTree, DEFAULT_SPLAT_BUDGET, upTransform, upParam } from './lodMeta.js';
+import { lodGeometricErrors, collapseLodTree, thinSplats, DEFAULT_SPLAT_BUDGET, upTransform, upParam } from './lodMeta.js';
 import { sogChunkToFiles } from './tile-task.js';
 
 const TILE_TASK = new URL('./tile-task.js', import.meta.url).href;
@@ -128,7 +128,7 @@ export async function convert(input, outDir, opts = {}) {
   const merged = [];    // { uri, runs:[{file,offset,count}] }  (budget > 0)
   const collapsed = () => collapseLodTree(lod.tree, lodLevels, budget, {
     box: boundToZUpBox,
-    content: (runs) => { const uri = `tiles/node_${nextId++}.glb`; merged.push({ uri, runs }); return { uri }; },
+    content: (runs, _path, _level, stride = 1) => { const uri = `tiles/node_${nextId++}.glb`; merged.push({ uri, runs, stride }); return { uri }; },
   });
 
   console.log(budget > 0 ? `Walking tree, collapsing to ≤ ${budget.toLocaleString()} splats per tile…` : 'Walking tree…');
@@ -154,12 +154,12 @@ export async function convert(input, outDir, opts = {}) {
       let o = 0; for (const p of parts) { out.set(p[key], o); o += p[key].length; }
       return out;
     };
-    await parallelMap(merged, async ({ uri, runs }) => {
+    await parallelMap(merged, async ({ uri, runs, stride = 1 }) => {
       const parts = [];
       for (const r of runs) parts.push(extractRange(await tableOf(r.file), r.offset, r.count));   // sequential: chunk order
-      const count = runs.reduce((s, r) => s + r.count, 0);
-      const arrays = { positions: concat(parts, 'positions'), alphas: concat(parts, 'alphas'), rgb: concat(parts, 'rgb'),
-                       scales: concat(parts, 'scales'), rotations: concat(parts, 'rotations') };
+      const [arrays, count] = thinSplats({ positions: concat(parts, 'positions'), alphas: concat(parts, 'alphas'), rgb: concat(parts, 'rgb'),
+                                           scales: concat(parts, 'scales'), rotations: concat(parts, 'rotations') },
+                                         runs.reduce((s, r) => s + r.count, 0), stride);
       const glb = await buildSplatTileGlb(arrays, count, computeBounds(arrays.positions, count), !!opts.centroidsOnly);
       await fs.writeFile(path.join(outDir, uri), glb);
       tilesWritten++;

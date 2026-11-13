@@ -58,10 +58,10 @@ export default function LocalFrameSection({ activeHandleRef }: { activeHandleRef
       <Label className="text-xs" title="Keep the tileset on the ground, on whichever terrain is selected: the Z offset is re-measured when the terrain mode changes, when a new tileset loads and, on Google 3D or World Terrain, whenever the terrain under it refines — the dataset's own low bins against the terrain, so a scan of a building sits on its ground, not on its roof. On an /aggregate mosaic this turns the server-side per-dataset snap (&snap=) on, and it follows the terrain the same way.">
         <Checkbox checked={mosaic ? mosaicSnapped : zOffsetAuto} onCheckedChange={(v) => {
           const on = !!v;
-          if (mosaic) { setZOffsetAuto(on); if (on !== mosaicSnapped) setMosaicSnap(on); return; }
+          if (mosaic) { setZOffsetAuto(on, true); if (on !== mosaicSnapped) setMosaicSnap(on); return; }
           const st = useViewerStore.getState();
           if (on && st.zOffsetUndo == null) st.setZOffsetUndo(st.localFrame.zOffset);
-          setZOffsetAuto(on);
+          setZOffsetAuto(on, true);
         }} />
         Auto (follow the terrain)
       </Label>
@@ -85,10 +85,10 @@ export default function LocalFrameSection({ activeHandleRef }: { activeHandleRef
         {(mosaic ? mosaicSnapped : zOffsetUndo != null) && (
           <Button size="sm" variant="ghost" title={mosaic ? 'Remove the server-side snap: every dataset back at its own height' : `Back to the Z offset before the snap (${zOffsetUndo} m)`}
             onClick={() => {
-              if (mosaic) { setZOffsetAuto(false); setMosaicSnap(false); return; }
+              if (mosaic) { setZOffsetAuto(false, true); setMosaicSnap(false); return; }
               const st = useViewerStore.getState();
               const v = st.zOffsetUndo ?? 0;
-              st.setZOffsetAuto(false);
+              st.setZOffsetAuto(false, true);
               st.setLocalFrame({ zOffset: v }); h()?.applyZOffset(v);
               st.setZOffsetUndo(null);
               st.setStatus(`Z offset back to ${v} m.`);

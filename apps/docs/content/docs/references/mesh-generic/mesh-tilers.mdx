@@ -1,0 +1,310 @@
+---
+title: "Tiling massive meshes into 3D Tiles"
+description: "How a photogrammetry mesh of 0.1 to 10 billion triangles and gigabytes of textures becomes an OGC 3D Tiles 1.1 tileset, step by step, and how the open-source tilers (rusty-tiles, nxsbuild, mago-3d-tiler, Obj2Tiles, py3dtiles, fanvanzh/3dtiles, VTK) and the commercial ones do each step"
+---
+
+<InlineTOC items={toc} />
+
+> Status: a survey, not a converter of this repository. Facts come from each project's README, docs and source
+> on GitHub as read on 2026-11-13, and from the tilesets this repository reads (see [OSGB](./osgb) and
+> [Nexus](./nexus)). Where a project does not document a behaviour the table says "not documented"; no number
+> here was measured by us unless it says so.
+
+A photogrammetry mesh out of Metashape, RealityScan or iTwin Capture is one surface of 10<sup>8</sup> to 10<sup>10</sup>
+triangles with tens of 8K or 16K texture atlases. Nothing draws that as it is. A 3D Tiles tileset turns it into a
+hierarchy of levels of detail (HLOD): small leaf tiles that together hold the exact surface, and above them coarser
+tiles, each a simplified copy of what is below it, so that a client draws a few megabytes for any view, far or near.
+Building that hierarchy has four hard parts, and they are what separates the tools:
+
+- **The input does not fit in memory.** 1 G triangles is 36 GB of positions alone in float32, plus UVs, indices and
+  textures. A tiler either streams the mesh through sort-and-partition passes with scratch files (out-of-core), or
+  loads everything and is bounded by RAM.
+- **The partition** decides what a leaf is (an octree cell, a kd split, a quadtree column, a grid square) and how
+  big; leaves of 5 000 to 65 000 triangles are the usual range.
+- **Simplification of the parents** must be done per cell, from children that were simplified independently, while
+  keeping the borders between neighbours closed, or cracks appear between tiles of different depth.
+- **Textures are the hard part.** A leaf can simply cut the sub-rectangle of the source atlas its triangles use. A
+  parent cannot: its triangles span many atlases, and a 1 024² texture for a 500 m tile cannot be a crop of
+  anything. It has to be re-parametrized and the source colour re-projected onto it (rebaked), or the parent keeps
+  source UVs and a downscaled source atlas, which is simpler and visibly worse.
+
+The output side is settled: OGC 3D Tiles 1.1, glTF 2.0 content (b3dm is the 1.0 wrapper of the same glTF),
+`geometricError` per tile, `REPLACE` refinement, optionally implicit tiling, one `.3tz` archive instead of a folder of
+files, Draco or meshopt compression of the geometry and KTX2/Basis of the textures.
+
+## The steps
+
+Every table has the same rows. The commercial tilers are kept to one section further down because almost none of
+their internals is documented.
+
+### Input and memory
+
+A note on GLB. The binary glTF container stores every length in a uint32, so one `.glb` cannot exceed 4 GiB (and a
+single buffer view inside it the same). A `.gltf` with external `.bin` buffers has no such cap: a mesh above a few
+hundred million triangles has to be exported that way, or as OBJ or PLY, to be an input at all.
+
+| Tool | Reads | Memory model |
+|---|---|---|
+| rusty-tiles `mesh` | glTF 2.0: `.glb`, or `.gltf` with `.bin` and PNG/JPEG images beside it (local resources only). No OBJ, PLY, FBX, OSGB | Out-of-core: capture, external sorts and the coarse stage plan against a memory budget (`--memory-budget`, default the lesser of 4 GiB and half the free memory) and spill to `--scratch-dir`, about 0.5 KB of scratch per source triangle (0.3 KB with positions and one UV set). No triangle-count limit is stated |
+| Nexus `nxsbuild` | PLY, OBJ (`-m` for the MTL), STL, TSP | Out-of-core: `-r` sets the RAM used in MB (default 2 000), the rest streams through temporary files |
+| mago-3d-tiler | 3DS, OBJ, FBX, Collada, glTF/GLB, CityGML, IFC, plus LAS/LAZ and vector formats | Not documented; a `-t`/`--temp` directory exists. JVM heap bounds the run |
+| Obj2Tiles | OBJ only | Not documented as out-of-core; `--use-system-temp` chooses where the intermediate files go |
+| py3dtiles | LAS, LAZ, XYZ, CSV, PLY point clouds; OBJ is listed as a geometry input, its mesh pipeline is not documented | Out-of-core for point clouds (multi-process, cached to disk) |
+| fanvanzh/3dtiles | OSGB (an existing tiled HLOD), Shapefile | One OSGB file at a time, so bounded by the largest tile of the source |
+| VTK `vtkCesium3DTilesWriter` | Anything VTK reads (OBJ, CityGML, LAS/LAZ, VTP…) | In memory; out-of-core is listed as future work |
+
+### Spatial partition
+
+| Tool | Structure | Leaf size | Configurable |
+|---|---|---|---|
+| rusty-tiles | Octree, written as a 3D Tiles 1.1 implicit forest | At most 8 192 triangles per leaf, exact source triangles | No: `mesh` has no `--leaf-triangles`, tile-size or error option by design; `--profile` is the only knob |
+| nxsbuild | Batched multi-triangulation: each level is one mesh of the whole model cut into patches (nodes) along boundaries the next level does not share, a DAG rather than a tree (see [Nexus](./nexus#the-tree)) | `-f` faces per patch, default 32 768 (1 000 to 65 535); `-t` triangles in the top node, default 4 096; `-a` adaptive split 0 to 1, default 0.333 | Yes |
+| mago-3d-tiler | Not documented (a tree with `-nl`/`-xl` minimum and maximum LOD; `-tm` explicit or implicit tiling, experimental) | `-mx` maximum triangles per node | Yes |
+| Obj2Tiles | Recursive binary splits along X and Y, and Z with `-z`; `-d`/`--divisions` is the depth, so 4<sup>d</sup> tiles (8<sup>d</sup> with Z); split plane by vertex barycentre, absolute centre, global bounding or vertex median | Follows from the division count | Yes |
+| py3dtiles | Octree (point clouds) | Point budget per node | Yes, for points |
+| fanvanzh/3dtiles | The OSGB `PagedLOD` tree as the producer wrote it; one tile per file | The producer's | No |
+| VTK | Octree | Not documented | Not documented |
+
+### Simplification of parent levels
+
+| Tool | Method | Borders between cells | Geometric error |
+|---|---|---|---|
+| rusty-tiles | Welds the children's vertices by position, then the `meshopt` crate (Rust bindings to zeux/meshoptimizer) reduces the parent to at most 8 192 triangles; the cap leads, there is no error target. Three "last resort" stages for cells that cannot meet the cap; a cell whose border alone exceeds the cap is omitted, and so is every ancestor above it (issue [#344](https://github.com/BenDyson-Arch/rusty-tiles/issues/344) below) | Shared border vertices and edges at a given depth are the same in every neighbour by construction; same-depth gaps are zero, mixed-depth gaps at most an eighth of the larger error | Measured: sampled two-way distance between the decoded parent and the source, `G = max(child G, 1.05 × M)`, raised where the parent's texels are much coarser than the children's |
+| nxsbuild | Edge-collapse decimation of each level by factor `-s` (default 0.5 per level); `-S` skips it for n levels; `-v` quantizes vertices | Batched multi-triangulation: borders are kept exact, so any mix of levels draws without a crack | Per node, the decimation's error in model units |
+| mago-3d-tiler | Not documented | Not documented | `-ng`/`-mg` set the minimum and maximum geometric error |
+| Obj2Tiles | Fast Quadric Mesh Simplification (a vendored C# port), one pass per LOD before splitting, `-l`/`--lods` default 3 | Decimation runs on the whole mesh before the split, so each LOD is cut as one surface and has no inter-cell cracks of its own | `-e`/`--error` sets the root error, the levels follow |
+| py3dtiles | None for meshes (point clouds are subsampled) | n/a | From the node size |
+| fanvanzh/3dtiles | None of its own: the OSGB levels are the producer's. `--enable-simplify` runs meshoptimizer on each tile's geometry | The producer's | From the `PagedLOD` ranges |
+| VTK | None; "multiple LOD levels with simplified meshes on higher tree nodes" is listed as future work | n/a | From the tree |
+
+### Textures
+
+Two ways to give a tile a texture. **Cropping** keeps the source texels exactly: a leaf references the bounding
+rectangle of its triangles' UVs in the source atlas, and its texels are the source's, wherever its triangles sit in
+the atlas. It is cheap and lossless, and it works as long as a leaf's triangles sit in one or a few UV islands. It
+fails when they are scattered across many islands of a large atlas (a photogrammetry atlas packs charts by
+appearance, not by position): the bounding rectangle then covers most of the atlas, or the leaf needs many crops. It
+also cannot produce a coarse level: a parent's triangles come from every atlas, and its texture must be a few
+texels per metre, which no source rectangle is.
+
+**Rebaking** gives the parent new UV charts on its simplified surface and, for every texel of a fresh atlas, finds
+the nearest source point and samples the source images at that footprint: true texture reprojection. It resamples,
+so it can look softer than the source, and it costs a projection per texel, but the coarse pyramid is then a real
+image pyramid, and a 1 024² page at depth 3 is as sharp as its texel spacing allows. A tiler with no atlas
+handling that keeps the source parametrization per patch has to downscale the source atlases for its coarse nodes
+instead, and its coarse levels tend to look worse than a rebaked pyramid.
+
+| Tool | Leaves | Coarse levels | Texel budget | Encoding |
+|---|---|---|---|---|
+| rusty-tiles | Cropped: a leaf keeps only the source regions its triangles need, as aligned crops with gutters and per-level mips; a leaf whose UVs span a whole repeat period keeps that axis whole | Rebaked: fresh planar charts on the decoded parent surface, packed by shape into one page; each texel samples the nearest captured source point in linear light; base colour, emissive, metallic-roughness and occlusion are resampled, normal maps re-expressed in the new tangent frame | A page is at most 1 024 texels a side; a tile's pages hold about 2<sup>20</sup> texels per slot, shared among its materials; texel spacing `max(1.25 × G / 16, source spacing)` | KTX2: UASTC for leaves and ETC1S for coarse pages in `balanced`, UASTC everywhere in `quality`, PNG in `lossless`; every lossy page is decoded and checked against PSNR floors, re-encoded a step stronger when it misses, PNG as a last resort |
+| nxsbuild | Cropped and repacked per node into one JPEG (`-q` quality, default 95; `-O` keeps the original textures, deprecated) | Same source parametrization, source regions downscaled with the level; nothing is re-projected. `-F` weighs texels into the node size (default 0.05), `-H` skips the abort predicted for a "fragmented parametrization", which is the case cropping handles worst | Per node, from `-f` and `-F` | JPEG inside the `.nxs`; textures are passed through unchanged by this repository's reader (see [Nexus](./nexus#the-tile)) |
+| mago-3d-tiler | Not documented (a texture atlas per node is built; the method is not described) | Not documented | Not documented | `-tcp ktx2` or none |
+| Obj2Tiles | Repacked per split part with MaxRects bin packing of the used regions; `-k`/`--keeptextures` keeps the originals ("not recommended") | Same repacking on the decimated mesh, pages downscaled by `--lod-texture-scale` | Not documented | JPEG/PNG as the source |
+| py3dtiles | Not documented for meshes | n/a | n/a | n/a |
+| fanvanzh/3dtiles | The producer's JPEG per `osgb` file, written into the b3dm | The producer's (ContextCapture and the like already rebake their coarse levels) | The producer's | `--enable-texture-compress` to KTX2 |
+| VTK | Textured meshes are written as they are; property textures can be quantized into RGB | n/a (no coarse levels) | n/a | PNG/JPEG |
+
+### Output
+
+| Tool | Content | 3D Tiles version | Tree | Archive | Compression | Georeference |
+|---|---|---|---|---|---|---|
+| rusty-tiles | glTF 2.0 (GLB) with `EXT_mesh_features` feature IDs per triangle (source primitive and triangle), `KHR_mesh_quantization`, octahedral normals | 1.1 | Implicit tiling (octree subtrees) | `.3tz` only; no folder output | `EXT_meshopt_compression` always, KTX2 as above | `--anchor lon lat h` with `--orientation-xyzw`, or `--source-crs EPSG:… --source-offset E N A` (WGS84, UTM, Web Mercator in the standard build; other CRSs in the GDAL/PROJ build). Local metres otherwise |
+| nxsbuild | `.nxs`, `.nxz` after `nxcompress` (Corto), not 3D Tiles; this repository's converter writes GLB per node and a tileset, see [Nexus](./nexus) | 1.1 (through the converter) | Explicit, DAG cut by level | Folder | Corto in `.nxz`; none in the GLBs | None in the format; `&lon=&lat=` placement in the converter |
+| mago-3d-tiler | b3dm, i3dm, pnts (`-ot`); GLB only through the deprecated `-glb` | `-tv 1.0` or `1.1`, default 1.1 | Explicit, implicit experimental (`-tm`) | Folder | `-mcp none/quantize/draco`, `-tcp ktx2` | `-c`/`--crs` (default 3857), `-p` PROJ string, `-xo -yo -zo` offsets, `-ge` geoid, `-te` terrain |
+| Obj2Tiles | b3dm, or GLB with `--glb` | 1.1 when `--glb` is set; the b3dm case is not documented | Explicit | Folder, or one `.3tz` with `--3tz` | None documented | `--lat --lon --alt`; `--local` for no placement; the default is a point in Milan |
+| py3dtiles | pnts (point clouds); b3dm for the geometries it handles | Not documented | Explicit | Folder | None | From the file's CRS |
+| fanvanzh/3dtiles | b3dm per `osgb` file | Not documented | Explicit, the OSGB tree | Folder | Draco (`3 to 6×` on geometry per its README), KTX2, meshoptimizer simplification | `-c '{"x":120,"y":30,"offset":0,"max_lvl":20,"pbr":true}'`, and the dataset's `metadata.xml` |
+| VTK | b3dm and pnts; glTF/GLB through `3DTILES_content_gltf` | 1.0 with the extension | Explicit octree | Folder | None | libproj (upgraded to 8.1 for this writer) from the input CRS |
+
+### Scale, licence, activity
+
+Release and commit dates are what GitHub showed on 2026-11-13.
+
+| Tool | Largest input stated | Language | Licence | Platforms | Last release / activity |
+|---|---|---|---|---|---|
+| [rusty-tiles](https://github.com/BenDyson-Arch/rusty-tiles) | An 828 M-triangle untextured mesh in issue #344; a 24 M-triangle textured scene in the docs | Rust, Python wheel | MIT (vendored Basis Universal Apache-2.0, Zstandard BSD-3-Clause) | Linux x64/ARM64 (glibc 2.35+), macOS 15+, Windows x64; a Linux container for the GDAL/PROJ build | v0.4.0, 2026-11-12 |
+| [Nexus](https://github.com/cnr-isti-vclab/nexus) | Tens of millions of triangles in practice (the 52 M-triangle bust in [Nexus](./nexus#datasets)) | C++ (Qt, VCG) | GPL; the JavaScript parts MIT | Linux, Windows, macOS from source | No releases; last commit 2026-09-27 |
+| [mago-3d-tiler](https://github.com/Gaia3D/mago-3d-tiler) | Not documented | Java (JDK 25) | MPL-2.0, a commercial licence offered | JVM; Docker image `gaia3d/mago-3d-tiler` | v1.16.4, 2026-10-23 |
+| [Obj2Tiles](https://github.com/OpenDroneMap/Obj2Tiles) | Not documented | C# (.NET 10) | AGPL-3.0 | Windows, Linux, macOS binaries | v1.9.0, 2026-11-01 |
+| [py3dtiles](https://gitlab.com/py3dtiles/py3dtiles) | Point clouds of billions of points | Python | Apache-2.0 | pip, Docker | v12.1.1 (docs) |
+| [fanvanzh/3dtiles](https://github.com/fanvanzh/3dtiles) | City-scale OSGB (its users' datasets, not stated) | Rust + C++ (OpenSceneGraph) | Apache-2.0 | Linux x64, Windows x64, macOS ARM64 and Intel; Docker | No releases; last commit 2026-04-13 |
+| [VTK](https://www.kitware.com/3d-tiles-generation-using-vtk/) | 114 K buildings, a 966 K-point cloud, a textured OBJ terrain in the post | C++ with Python bindings | BSD-3-Clause | Everywhere VTK builds | Writer described 2023-01-16, maintained with VTK |
+
+## rusty-tiles
+
+[BenDyson-Arch/rusty-tiles](https://github.com/BenDyson-Arch/rusty-tiles) is the one open-source tiler written for
+the massive case: `rusty-tiles mesh -i model.gltf -o model.3tz --jobs auto` streams a glTF scene through a
+memory-budgeted pipeline (capture, external sorts, exact leaves, coarse stage, archive) and writes a 3D Tiles 1.1
+implicit octree in one `.3tz`. Leaves are exact, at most 8 192 source triangles each with per-triangle provenance
+IDs; parents are welded and simplified with meshoptimizer to the same cap; leaf textures are crops of the source
+atlas, coarse textures are rebaked per texel into fresh charts of about 1 M texels per tile. The geometric error is
+measured, not computed from the cell, and raised where a coarse page is much blurrier than its children so that
+CesiumJS refines before the blur shows. Four profiles (`fast`, `balanced`, `quality`, `lossless`) choose the codecs;
+there is no leaf-size, error or texture-size option, which the docs call deliberate. Input is glTF only (a `.gltf`
+with external `.bin` for anything above 4 GiB), with PNG or JPEG textures; animation, skins, alpha blending and
+extensions are refused rather than dropped. Placement is `--anchor` or `--source-crs`, and nothing is ever guessed
+from coordinate magnitudes. Known limit: on dense, hole-rich or steep surfaces the per-cell simplification with
+locked borders cannot reach the cap, cells are omitted and the omission propagates to the root, so the archive
+starts with empty levels; issue [#344](https://github.com/BenDyson-Arch/rusty-tiles/issues/344) (open, milestone
+0.4.3) reports 2 381 omitted cells and no root on an 828 M-triangle rock hill, and a missing root on a 27 M-triangle
+steep crop. Python (`rusty_tiles.mesh_to_tileset`) and Rust APIs call the same core.
+
+## Nexus nxsbuild
+
+[cnr-isti-vclab/nexus](https://github.com/cnr-isti-vclab/nexus) is the cultural-heritage world's multiresolution
+builder: `nxsbuild model.ply` reads PLY, OBJ, STL or TSP out of core (`-r` MB of RAM), builds a batched
+multi-triangulation (levels decimated by `-s`, default one half, patches of `-f` faces, default 32 768) and writes
+one `.nxs`; `nxcompress` makes the `.nxz` (about 90 % smaller, Corto). Textures are cropped and repacked per node as
+JPEG (`-q 95`), never re-projected, and the build aborts on a "fragmented parametrization" unless `-H` is given,
+which is the cropping failure mode described above. Its strength is the DAG: every level is a complete, crack-free
+mesh, so a viewer can mix levels per node by distance. It is not 3D Tiles. This repository reads `.nxs`/`.nxz`
+directly and writes a tileset from the DAG, by level or by path, see [Nexus](./nexus). GPL (Qt and VCG), C++.
+
+## mago-3d-tiler
+
+[Gaia3D/mago-3d-tiler](https://github.com/Gaia3D/mago-3d-tiler) is a Java tiler that takes most mesh formats a
+photogrammetry suite exports (OBJ, FBX, Collada, glTF, 3DS) as well as CityGML, IFC, LAS/LAZ and vector layers, and
+writes b3dm, i3dm or pnts with `-tv 1.1` by default. `-mx` caps the triangles per node, `-nl`/`-xl` and `-ng`/`-mg`
+bound the LOD range and the geometric error, `-mcp draco` and `-tcp ktx2` compress; `-pg` is an experimental
+"photogrammetry pipeline" and `-tm implicit` an experimental implicit tiling. The simplification algorithm, the
+texture atlas method and the memory model are not documented, and the run lives in the JVM heap. Georeferencing is
+the most complete of the open tools: `-c` EPSG code (default 3857), `-p` PROJ string, offsets, a geoid option and a
+terrain to drape on. MPL-2.0 with a commercial licence on offer; v1.16.4 on 2026-10-23; Docker image published.
+
+## Obj2Tiles
+
+[OpenDroneMap/Obj2Tiles](https://github.com/OpenDroneMap/Obj2Tiles) is the .NET tiler behind WebODM's 3D Tiles
+export: decimate the whole OBJ `--lods` times with Fast Quadric Mesh Simplification, split each LOD by recursive
+binary cuts in X and Y (`--divisions`, and Z with `-z`), repack each part's textures with MaxRects and write b3dm, or
+GLB and 3D Tiles 1.1 with `--glb`, optionally into a `.3tz`. Decimating before splitting means each LOD is one
+continuous surface, so there are no cracks inside a level, but it also means the whole mesh is decimated and held
+at once; nothing in the docs says it is out-of-core. It places the model with `--lat --lon --alt` and warns that the
+default is Milan. AGPL-3.0, C#, v1.9.0 on 2026-11-01.
+
+## py3dtiles
+
+[py3dtiles](https://gitlab.com/py3dtiles/py3dtiles) (Oslandia, Apache-2.0, Python) is a point-cloud tiler first:
+`py3dtiles convert cloud.las --out tiles` writes pnts from LAS/LAZ, XYZ, CSV and PLY, multi-process and out of
+core, and `merge` joins tilesets. Its site lists OBJ among "geometries" next to WKB and IFC, and the project's
+funding (NGI Zero Core) names textured-mesh handling and simplification, but the CLI reference documents `convert`
+for point clouds only and no mesh pipeline, texture handling or LOD is described: mesh support is not documented as
+shipped. Version 12.1.1 in the docs.
+
+## fanvanzh/3dtiles
+
+[fanvanzh/3dtiles](https://github.com/fanvanzh/3dtiles) does not build an HLOD; it converts one that exists.
+`_3dtile -f osgb -i Data/ -o out -c '{"x":120,"y":30,"offset":0,"max_lvl":20,"pbr":true}'` walks a ContextCapture,
+Smart3D or DJI Terra OSGB dataset (see [OSGB](./osgb)) and writes one b3dm per `.osgb` file, keeping the producer's
+`PagedLOD` tree, textures and ranges, with optional meshoptimizer simplification (`--enable-simplify`), Draco and
+KTX2 (`--enable-texture-compress`). Rust around the OpenSceneGraph C++ reader, Apache-2.0, binaries for Linux,
+Windows and macOS. The 3D Tiles version written is not documented (b3dm content). Last commit 2026-04-13.
+
+## VTK 3D Tiles writer
+
+Kitware's [vtkCesium3DTilesWriter](https://www.kitware.com/3d-tiles-generation-using-vtk/) (VTK, BSD-3-Clause)
+writes a mesh, a list of textured buildings or a point cloud as b3dm, pnts, or glTF/GLB through
+`3DTILES_content_gltf`, over an octree, with libproj for the CRS. It holds the input in memory, builds no coarse
+levels and does no simplification; the 2023 post lists out-of-core streaming and simplified LODs on upper nodes as
+future work. Useful for buildings and medium meshes from a Python script, not for the massive case.
+
+## CesiumGS 3d-tiles-tools
+
+[3d-tiles-tools](https://github.com/CesiumGS/3d-tiles-tools) (TypeScript, Apache-2.0, 0.5.4 on `main`) does no
+tiling; it post-processes tilesets: `upgrade` (1.0 to 1.1, `url` to `uri`, b3dm/pnts/i3dm/cmpt content to glTF with
+`--targetVersion 1.1`), `convert` between folder, `.3tz` and `.3dtiles`, `gzip`/`ungzip`, `glbToB3dm`, `b3dmToGlb`,
+`optimizeB3dm` (gltf-pipeline, Draco), `analyze`, `createTilesetJson`, `serve`, and `pipeline` for a JSON of tileset
+and content stages (`separateGltf`, `b3dmToGlb`, `optimizeGlb` with `dracoOptions`…). Three ways to join tilesets,
+easy to confuse:
+
+| Command | What it writes |
+|---|---|
+| `mergeJson -i a/tileset.json -i b/tileset.json -o out` | One `tileset.json` whose root children point to the input tilesets **where they are** (relative `uri`s), nothing copied |
+| `merge -i a -i b -o out` | A new tileset that still refers to the inputs as external tilesets, with their files copied under `out/` |
+| `combine -i out/merged -o out/combined` | One tileset with the external tilesets inlined: the root refers to the content files directly, no `tileset.json` below |
+
+`mergeJson` is the one to use on a disk of RealityScan or Metashape exports: the merged root costs a few kilobytes,
+and a `transform` can be added per child there to shift a whole sub-tileset (a Z offset, for instance).
+
+## glTF-Transform
+
+[glTF-Transform](https://gltf-transform.dev/) (MIT, CLI 4.5.1) is the per-tile toolbox: `simplify` (meshoptimizer's
+simplifier, with `ratio` and `error`), `weld`, `quantize`, `dedup`, `prune`, `join`, `draco` or `meshopt`
+compression, `etc1s`/`uastc` to KTX2, `resize` and `textureCompress` through Sharp. Applied to every GLB of a tileset
+it halves a tileset's bytes without touching the tree, which is what `3d-tiles-tools pipeline` cannot express. The
+pattern that works:
+
+```
+BasicTilesetProcessor.begin(src, dst)
+  .processTileContentEntries(uri => uri, async (entry, type) => {
+    if (type !== 'CONTENT_TYPE_GLB') return entry;
+    const glb2 = await GltfUtilities.upgradeGlb(entry.value, { targetVersion: '2.0' }); // glTF-Transform reads 2.0 only
+    const doc = await io.readBinary(glb2);
+    await doc.transform(prune(), dedup(), draco());          // or textureCompress, or a custom transform
+    return { key: entry.key, value: Buffer.from(await io.writeBinary(doc)) };
+  });
+await processor.end();
+```
+
+A custom transform can also undo what a tiler did: a KTX2 page is written to disk, `ktx extract` turns it into a
+PNG, `texture.setImage(png)` replaces it and the `KHR_texture_basisu` extension is disposed, for a viewer without
+Basis support. The upgrade step matters: a b3dm tileset of 2016 holds glTF 1.0.
+
+## Commercial tilers
+
+Every photogrammetry suite tiles its own mesh, and two of them tile anybody's: import the mesh into a dummy
+project with a few aligned photos, then export it as 3D Tiles with the suite's settings.
+
+- **Agisoft Metashape**: Workflow > Build Tiled Model, then File > Export > Export Tiled Model, format Cesium 3D
+  Tiles; `.zip` before 2.1, `.3tz` as 3D Tiles 1.1 from 2.1; JPEG or KTX 2.0 textures; coordinate system per
+  export, with an optional shift (that shift is not saved anywhere, which is why rusty-tiles takes an offset file).
+- **RealityScan** (Epic Games; RealityCapture until the 2.0 rename in 2025): Export > Level of Detail > Cesium 3D
+  Tiles, b3dm. If large triangles come out untextured in the tiles, raise "Large Triangle Removal Threshold" or
+  lower "Maximum node triangle count" from its default 10 000 to about 1 000.
+- **Bentley iTwin Capture Modeler** (ContextCapture): exports 3D Tiles, 3MX and OSGB from the same reconstruction;
+  the OSGB and 3MX trees are what [OSGB](./osgb) reads.
+- **Cesium ion**: upload a mesh (OBJ, FBX, glTF…), the 3D Photogrammetry Model Tiler returns a tileset that can be
+  downloaded as an archive, so ion can be used for conversion alone; storage and streaming are the priced part.
+  **Cesium ion Self-Hosted** ships the same tilers on Kubernetes or as plain container images for air-gapped sites,
+  paid, pricing on request.
+- **Safe FME**: a `cesium3dtiles` writer in FME Desktop; the licence is priced for the enterprise.
+
+## Open massive mesh tilesets
+
+Public, freely downloadable textured meshes large enough to exercise a tiler. Each landing page was reachable on
+2026-11-13 unless noted; sizes are as the pages state them, or as measured here.
+
+| Dataset | Formats | Size | Terms | Link |
+|---|---|---|---|---|
+| Hong Kong Planning Department, 3D Photo-realistic Model (Hong Kong Island and Kowloon, aerial photos 2017 and 2018) | OSGB, OBJ, Cesium 3D Tiles, each listed by a grid-index CSV of 2 150 tiles of 250 m | 467.2 GB of OSGB zips, measured here by `HEAD` on 2026-11-11, of the order of 10 G vertices (see [OSGB](./osgb#a-city-in-zips-hong-kong)) | DATA.GOV.HK terms, commercial reuse allowed | [data.gov.hk](https://data.gov.hk/en-data/dataset/hk-pland-pland1-3d-photo-realistic-model); the files are on `pdmap.pland.gov.hk`, whose host sends a header `fetch` refuses |
+| Hong Kong Lands Department, 3D Visualisation Map (tile-based models): the territory-wide mesh from oblique images | OSGB (per the data.gov.hk resource listing) | Not documented | CSDI terms | [CSDI portal](https://portal.csdi.gov.hk/csdi-webpage/dataset/landsd_rcd_1671677054006_62261) |
+| Helsinki 3D mesh (City of Helsinki, aerial survey) | OBJ, 3MX | Not documented | CC BY 4.0 | [hel.fi](https://www.hel.fi/en/decision-making/information-on-helsinki/maps-and-geospatial-data/helsinki-3d) |
+| City of Melbourne 3D Textured Mesh (Photomesh) 2018, 7.5 cm GSD | OBJ + MTL + JPG, KML tile index | 9.7 GB zip | City of Melbourne data policy | [data.melbourne.vic.gov.au](https://data.melbourne.vic.gov.au/explore/dataset/city-of-melbourne-3d-textured-mesh-photomesh-2018/information/) |
+| Berlin 3D mesh (Senate Department for Economic Affairs; flight of June 2025) | OBJ tiles with textures, one zip per tile | Not documented | Berlin open data | [GDI Berlin record](https://gdi.berlin.de/geonetwork/srv/api/records/a4144a41-90b6-3898-aeea-e2efe90f354e); the [download portal](https://www.businesslocationcenter.de/berlin3d-downloadportal/) was under maintenance on 2026-11-13 |
+
+Not textured meshes, though often cited with them: swisstopo's 3D Tiles (`ch.swisstopo.swissbuildings3d.3d`,
+b3dm buildings, at [3d.geo.admin.ch](https://docs.geo.admin.ch/visualize-data/3d-tiles.html)) and New York City's
+3D building model are untextured building models. Nexus has four public `.nxz` scans of up to 52 M triangles, listed
+on the [Nexus](./nexus#datasets) page, small for a tiler but textured.
+
+## Pointers
+
+- [OGC 3D Tiles 1.1 specification](https://github.com/CesiumGS/3d-tiles/tree/main/specification): implicit tiling,
+  `3TZ` archives, metadata.
+- [rusty-tiles](https://github.com/BenDyson-Arch/rusty-tiles), its mesh guide `docs/MESH.md` and
+  [issue #344](https://github.com/BenDyson-Arch/rusty-tiles/issues/344).
+- [zeux/meshoptimizer](https://github.com/zeux/meshoptimizer): the simplifier behind rusty-tiles, fanvanzh/3dtiles
+  and glTF-Transform's `simplify`.
+- [Nexus](https://github.com/cnr-isti-vclab/nexus) and [3DHOP](https://3dhop.net/); this repository's
+  [Nexus reader](./nexus).
+- [Gaia3D/mago-3d-tiler](https://github.com/Gaia3D/mago-3d-tiler).
+- [OpenDroneMap/Obj2Tiles](https://github.com/OpenDroneMap/Obj2Tiles).
+- [py3dtiles](https://py3dtiles.org/) and its [GitLab](https://gitlab.com/py3dtiles/py3dtiles).
+- [fanvanzh/3dtiles](https://github.com/fanvanzh/3dtiles); this repository's [OSGB reader](./osgb).
+- [Kitware, 3D Tiles generation using VTK](https://www.kitware.com/3d-tiles-generation-using-vtk/).
+- [CesiumGS/3d-tiles-tools](https://github.com/CesiumGS/3d-tiles-tools), the `mergeJson` discussion in
+  [issue #119](https://github.com/CesiumGS/3d-tiles-tools/issues/119) and the processor pattern in
+  [issue #144](https://github.com/CesiumGS/3d-tiles-tools/issues/144).
+- [glTF-Transform](https://gltf-transform.dev/) and its
+  [`simplify`](https://gltf-transform.dev/modules/functions/functions/simplify).
+- [Cesium ion Self-Hosted](https://cesium.com/platform/cesium-ion/cesium-ion-self-hosted) and the
+  [FME Cesium 3D Tiles writer](https://docs.safe.com/fme/html/FME_Desktop_Documentation/FME_ReadersWriters/cesium3dtiles/cesium3dtiles_writer.htm).

@@ -9,7 +9,8 @@
  *
  *   GET /sog/tileset.json?url=<lod-meta.json URL>
  *   GET /sog/tile/<file>_<offset>_<count>.glb?url=<lod-meta.json URL>   (run encoded in the name)
- *   GET /sog/tile/m<path>_<level>.glb?url=<lod-meta.json URL>           (a merged tile: every run of a LOD level under a node)
+ *   GET /sog/tile/m<path>_<level>[s<stride>].glb?url=<lod-meta.json URL> (a merged tile: every run of a LOD level under a node;
+ *                                                                       `s<k>`: every k-th splat of them, the root's preview of a level over the budget)
  *
  * The tree is COLLAPSED per LOD level with a splat budget (lodMeta.js's collapseLodTree, the one the offline converter
  * uses): the shallowest nodes whose splats of a level fit `&splatBudget=` (TILED_SOG_SPLAT_BUDGET, default 100 000)
@@ -20,7 +21,7 @@
 import path from 'node:path';
 import { readSog, MemoryReadFileSystem } from '@playcanvas/splat-transform';
 import { extractRange } from '../sog-to-3dtiles/src/sogChunk.js';
-import { lodGeometricErrors, collapseLodTree, lodNodeAt, lodRunsUnder, DEFAULT_SPLAT_BUDGET, upTransform, upParam } from '../sog-to-3dtiles/src/lodMeta.js';
+import { lodGeometricErrors, collapseLodTree, lodNodeAt, lodRunsUnder, thinSplats, DEFAULT_SPLAT_BUDGET, upTransform, upParam } from '../sog-to-3dtiles/src/lodMeta.js';
 import { memoizeAsync, fetchSource as fetchBuf, tilePool, runTileTaskOr, ownBytes } from '../core/index.js';
 import { splatArraysGlb } from './splat-tile.js';
 
@@ -131,7 +132,7 @@ function buildTileset(ctx, urlParam, centroids = false, budget = SPLAT_BUDGET, u
   // scene's native frame; `&up=y|-y` says which native axis is up when it is not Z (lodMeta.js's upTransform).
   const lodLevels = ctx.lod.lodLevels ?? (ctx.lod.counts?.length ?? 1);
   const root = budget > 0
-    ? collapseLodTree(ctx.lod.tree, lodLevels, budget, { box: boundToZUpBox, content: (_runs, path, level) => ({ uri: `tile/m${path}_${level}.glb?url=${enc}` }) })
+    ? collapseLodTree(ctx.lod.tree, lodLevels, budget, { box: boundToZUpBox, content: (_runs, path, level, stride = 1) => ({ uri: `tile/m${path}_${level}${stride > 1 ? `s${stride}` : ''}.glb?url=${enc}` }) })
     : build(ctx.lod.tree, 0).tile;
   root.transform = upTransform(up);
   const ts = { asset: { version: '1.1' }, geometricError: rootDiagGE, root, extensionsUsed: ['3DTILES_content_gltf'] };
@@ -175,7 +176,7 @@ async function sogArraysGlb({ positions, alphas, rgb, scales, rotations }, count
 }
 
 // Pure builders for the /stream dispatcher.
-export const sogTileRe = /^(\d+_\d+_\d+|m\d*_\d+)$/;
+export const sogTileRe = /^(?:\d+_\d+_\d+|m\d*_\d+(?:s\d+)?)$/;
 // hierarchy/prefetch are no-ops (streamed-SOG's whole tree lives in one lod-meta.json — monolithic
 // index, cache=none ≡ cache=hierarchy; cache=full routes to /convert). `centroids` → POINTS preview.
 export async function sogTileset(url, opts = {}) {
@@ -184,14 +185,17 @@ export async function sogTileset(url, opts = {}) {
 }
 export async function sogTile(url, key, opts = {}) {
   const ctx = await getCtx(url);
-  if (key[0] === 'm') {                               // a merged tile: the runs of one LOD level under a node
-    const [path, level] = key.slice(1).split('_');
+  if (key[0] === 'm') {                               // a merged tile: the runs of one LOD level under a node (`s<k>`: every k-th splat)
+    const m = /^(\d*)_(\d+)(?:s(\d+))?$/.exec(key.slice(1));
+    if (!m) return null;
+    const [, path, level, strideStr] = m;
     const node = lodNodeAt(ctx.lod.tree, path);
     const runs = node ? lodRunsUnder(node, Number(level)) : [];
     if (!runs.length || runs.some((r) => !ctx.lod.filenames[r.file])) return null;
     const parts = [];
     for (const r of runs) parts.push(extractRange(await getChunkTable(ctx, r.file), r.offset, r.count));   // in run order
-    return sogArraysGlb(concatSplats(parts), runs.reduce((n, r) => n + r.count, 0), opts.centroids);
+    const [arrays, count] = thinSplats(concatSplats(parts), runs.reduce((n, r) => n + r.count, 0), Number(strideStr || 1));
+    return sogArraysGlb(arrays, count, opts.centroids);
   }
   const [f, o, c] = key.split('_').map(Number);
   if (!ctx.lod.filenames[f]) return null;

@@ -18,15 +18,16 @@ test('every run of every level is in exactly one tile, and budgets hold', () => 
   const { tree, lodLevels } = scene(6, 4);            // 64 leaves; level 0: 64 splats a leaf, level 3: 8
   const budget = 200;
   const seen = [];
-  const root = collapseLodTree(tree, lodLevels, budget, { box, content: (runs, path, level) => { seen.push({ runs, path, level }); return { uri: `m${path}_${level}` }; } });
+  const root = collapseLodTree(tree, lodLevels, budget, { box, content: (runs, path, level, stride = 1) => { seen.push({ runs, path, level, stride }); return { uri: `m${path}_${level}${stride > 1 ? `s${stride}` : ''}` }; } });
   for (let L = 0; L < lodLevels; L++) {
-    const total = seen.filter((s) => s.level === L).reduce((n, s) => n + s.runs.reduce((m, r) => m + r.count, 0), 0);
+    const total = seen.filter((s) => s.level === L && s.stride === 1).reduce((n, s) => n + s.runs.reduce((m, r) => m + r.count, 0), 0);
     assert.equal(total, 64 * (64 >> L), `level ${L}`);
   }
-  for (const s of seen) assert.ok(s.runs.reduce((n, r) => n + r.count, 0) <= budget);
-  // the coarsest level: 512 splats in all, so 4 tiles of 128 under an empty root
-  assert.equal(root.content, undefined);
+  for (const s of seen) assert.ok(Math.ceil(s.runs.reduce((n, r) => n + r.count, 0) / s.stride) <= budget);
+  // the coarsest level: 512 splats in all, so 4 tiles of 128 under a root that previews them, every 3rd splat (171 ≤ 200)
+  assert.equal(root.content.uri, 'm_3s3');
   assert.equal(root.children.length, 4);
+  assert.ok(root.children.every((c) => c.geometricError < root.geometricError), 'the preview refines into the level');
   // far fewer tiles than the 1:1 mapping (64 leaves × 4 levels + 63 interior)
   let tiles = 0; (function walk(t) { tiles++; (t.children ?? []).forEach(walk); })(root);
   assert.ok(tiles < 64 * 4, `${tiles} tiles`);

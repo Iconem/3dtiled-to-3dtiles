@@ -92,8 +92,9 @@ export function lodRunsUnder(node, level, out = []) {
  * @param {object} tree  `lod-meta.json`'s `tree`
  * @param {number} lodLevels  how many LOD levels the scene has
  * @param {number} budget  splats of one level a tile may hold (> 0)
- * @param {{ box:(min:number[], max:number[]) => number[], content:(runs:object[], path:string, level:number) => object }} make
- *   `box` a node's bound as a 3D Tiles box; `content` the tile content of a node's runs at a level
+ * @param {{ box:(min:number[], max:number[]) => number[], content:(runs:object[], path:string, level:number, stride?:number) => object }} make
+ *   `box` a node's bound as a 3D Tiles box; `content` the tile content of a node's runs at a level, every `stride`-th
+ *   splat of them when the root is a thinned preview (see below)
  * @returns {object} the root tile (no transform)
  */
 export function collapseLodTree(tree, lodLevels, budget, { box, content }) {
@@ -126,6 +127,32 @@ export function collapseLodTree(tree, lodLevels, budget, { box, content }) {
     return tile;
   };
   if (fits(tree, String(maxLevel))) return tileAt(tree, '', maxLevel);
-  return { boundingVolume: { box: box(tree.bound.min, tree.bound.max) }, geometricError: geOf(tree, maxLevel), refine: 'REPLACE',
-           children: emitters(tree, '', String(maxLevel)).map(([ch, p]) => tileAt(ch, p, maxLevel)) };
+  // The coarsest level alone is over the budget (Jastrzębia Góra, 106 M: 838 k splats, 14 tiles and 26 MB before a
+  // first view): the root carries a PREVIEW of it, every stride-th splat so that it fits the budget, which the level's
+  // own tiles replace. The runs are in leaf (Morton) order, so a stride is a spatially uniform subsample; the thinned
+  // splats are enlarged by √stride (thinSplats) to keep covering the surface, and the root's error grows the same.
+  const coarse = counts(tree)[String(maxLevel)] ?? 0;
+  const stride = Math.max(2, Math.ceil(coarse / budget));
+  const root = { boundingVolume: { box: box(tree.bound.min, tree.bound.max) }, geometricError: geOf(tree, maxLevel) * Math.sqrt(stride), refine: 'REPLACE',
+                 children: emitters(tree, '', String(maxLevel)).map(([ch, p]) => tileAt(ch, p, maxLevel)) };
+  const runs = lodRunsUnder(tree, maxLevel);
+  if (runs.length) root.content = content(runs, '', maxLevel, stride);
+  return root;
+}
+
+/**
+ * Every `stride`-th splat of decoded arrays (`extractRange`'s shape: positions ×3, alphas ×1, rgb ×3, scales ×3 linear,
+ * rotations ×4), scales × √stride so the thinned set still covers the surface. Returns [arrays, count].
+ */
+export function thinSplats(a, count, stride) {
+  if (!(stride > 1)) return [a, count];
+  const n = Math.ceil(count / stride), grow = Math.sqrt(stride), out = {};
+  for (const [key, w] of [['positions', 3], ['alphas', 1], ['rgb', 3], ['scales', 3], ['rotations', 4]]) {
+    if (!a[key]) { out[key] = null; continue; }
+    const src = a[key], col = new Float32Array(n * w);
+    for (let i = 0, j = 0; j < n; i += stride, j++) for (let k = 0; k < w; k++) col[j * w + k] = src[i * w + k];
+    if (key === 'scales') for (let k = 0; k < col.length; k++) col[k] *= grow;
+    out[key] = col;
+  }
+  return [out, n];
 }

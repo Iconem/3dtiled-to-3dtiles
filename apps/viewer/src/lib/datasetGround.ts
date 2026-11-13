@@ -9,6 +9,6 @@ import {
 
 export { offsetFromSamples, GROUND_GRID, type GroundSample };
 
-export function datasetGroundSamples(tilesetUrl: string, { signal, ...opts }: { grid?: number; budget?: number; signal?: AbortSignal } = {}) {
+export function datasetGroundSamples(tilesetUrl: string, { signal, ...opts }: { grid?: number; budget?: number; signal?: AbortSignal; frame?: ArrayLike<number> | null } = {}) {
   return coreSamples(tilesetUrl, { ...opts, fetch: ((u: RequestInfo | URL, init?: RequestInit) => fetch(u, { ...init, signal })) as typeof fetch });
 }

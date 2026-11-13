@@ -138,10 +138,12 @@ interface ViewerStore {
   setLocalFrame: (v: Partial<ViewerStore['localFrame']>) => void;
   /** Keep the Z offset snapped to the ground, re-measured as the terrain under the tileset refines. */
   zOffsetAuto: boolean;
+  // true/false once the user has touched the Auto toggle; null while only the viewer has set it
+  zOffsetAutoByUser: boolean | null;
   /** Metres added above the measured ground by Snap and Auto, so a scan sits above most of the terrain. */
   zOffsetClearance: number;
   setZOffsetClearance: (v: number) => void;
-  setZOffsetAuto: (v: boolean) => void;
+  setZOffsetAuto: (v: boolean, byUser?: boolean) => void;
   /** The Z offset before the last snap (3DTRjs single tileset), so a snap can be undone. */
   zOffsetUndo: number | null;
   setZOffsetUndo: (v: number | null) => void;
@@ -264,7 +266,8 @@ export const useViewerStore = create<ViewerStore>((set, get) => ({
   localFrame: { lon: -122.4194, lat: 37.7749, alt: 0, range: 200, zOffset: 0 },
   setLocalFrame: (v) => set((s) => ({ localFrame: { ...s.localFrame, ...v } })),
   zOffsetAuto: false,
-  setZOffsetAuto: (v) => set({ zOffsetAuto: v }),
+  zOffsetAutoByUser: null,
+  setZOffsetAuto: (v, byUser = false) => set(byUser ? { zOffsetAuto: v, zOffsetAutoByUser: v } : { zOffsetAuto: v }),
   zOffsetClearance: 10,
   setZOffsetClearance: (v) => set({ zOffsetClearance: v }),
   zOffsetUndo: null,
