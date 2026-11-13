@@ -291,6 +291,18 @@ export const DIRECT: DirectAsset[] = [
   { id: 'lille', icon: '🏙', label: '3DT · Lille', type: 'mesh', url: 'https://webimaging.lillemetropole.fr/externe/maillage/2016_mel_10cm/3dtiles/tileset.json' },
   { id: 'marseille', icon: '🏙', label: '3DT · Marseille (root.json)', type: 'mesh', url: 'https://d3h9zulrmcj1j6.cloudfront.net/Marseille_Cesium/root.json' },
   { id: 'cgs-lod', icon: '◈', label: '3DT · CesiumGS discrete-LOD', type: 'mesh', url: 'https://raw.githubusercontent.com/CesiumGS/3d-tiles-samples/main/1.0/TilesetWithDiscreteLOD/tileset.json' },
+  // CesiumGS/3d-tiles-samples: the open tilesets that carry metadata, per vertex (EXT_mesh_features feature-ID
+  // attribute or texture), per feature (EXT_structural_metadata property tables and textures) and per tile / group /
+  // tileset (3DTILES_metadata). The Material "Features" mode colours them by feature id.
+  { id: 'cgs-mf-attr', icon: '🏷', label: '3DT · CesiumGS feature IDs by attribute', type: 'mesh', url: 'https://raw.githubusercontent.com/CesiumGS/3d-tiles-samples/main/glTF/EXT_mesh_features/FeatureIdAttribute/tileset.json' },
+  { id: 'cgs-mf-tex', icon: '🏷', label: '3DT · CesiumGS feature IDs by texture', type: 'mesh', url: 'https://raw.githubusercontent.com/CesiumGS/3d-tiles-samples/main/glTF/EXT_mesh_features/FeatureIdTexture/tileset.json' },
+  { id: 'cgs-sm-table', icon: '🏷', label: '3DT · CesiumGS property table (per feature)', type: 'mesh', url: 'https://raw.githubusercontent.com/CesiumGS/3d-tiles-samples/main/glTF/EXT_structural_metadata/FeatureIdAttributeAndPropertyTable/tileset.json' },
+  { id: 'cgs-sm-proptex', icon: '🏷', label: '3DT · CesiumGS property texture (per texel)', type: 'mesh', url: 'https://raw.githubusercontent.com/CesiumGS/3d-tiles-samples/main/glTF/EXT_structural_metadata/SimplePropertyTexture/tileset.json' },
+  { id: 'cgs-sm-points', icon: '🏷', label: '3DT · CesiumGS property attributes (per point)', type: 'pointcloud', url: 'https://raw.githubusercontent.com/CesiumGS/3d-tiles-samples/main/glTF/EXT_structural_metadata/PropertyAttributesPointCloud/tileset.json' },
+  { id: 'cgs-sm-multi', icon: '🏷', label: '3DT · CesiumGS several feature-ID sets', type: 'mesh', url: 'https://raw.githubusercontent.com/CesiumGS/3d-tiles-samples/main/glTF/EXT_structural_metadata/MultipleFeatureIdsAndProperties/tileset.json' },
+  { id: 'cgs-instances-meta', icon: '🏷', label: '3DT · CesiumGS GPU instances with metadata', type: 'mesh', url: 'https://raw.githubusercontent.com/CesiumGS/3d-tiles-samples/main/glTF/GpuInstancesMetadata/tileset.json' },
+  // 1.1 `contents` (several per tile): CesiumJS draws it, 3d-tiles-renderer 0.5 reads `content` only and shows nothing.
+  { id: 'cgs-granularities', icon: '🏷', label: '3DT · CesiumGS metadata per tileset, tile, group and content (Cesium renderer)', type: 'mesh', url: 'https://raw.githubusercontent.com/CesiumGS/3d-tiles-samples/main/1.1/MetadataGranularities/tileset.json' },
   { id: 'google-3dtiles', icon: '🌍', label: '3DT · Google Photorealistic', type: 'mesh', url: `https://tile.googleapis.com/v1/3dtiles/root.json?key=${GOOGLE_MAPS_API_KEY}` },
   { id: 'esri-portcoast', icon: '🌍', label: '3DT · ESRI Portcoast (mesh)', type: 'mesh', url: 'https://tiles.arcgis.com/tiles/V6ZHFr6zdgNZuVG0/arcgis/rest/services/Portcoast_industrial/3DTilesServer/tileset.json' },
   { id: 'esri-mantes', icon: '🌍', label: '3DT · ESRI Mantes-la-Jolie (splat)', type: 'splat', url: 'https://tiles.arcgis.com/tiles/uujCiiEZAflDbdxE/arcgis/rest/services/Coll%C3%A9giale_Mantes_la_Jolie_Drone_3D_Gaussian_Splat/3DTilesServer/tileset.json' },

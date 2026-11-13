@@ -261,7 +261,10 @@ project with a few aligned photos, then export it as 3D Tiles with the suite's s
   Tiles, b3dm. If large triangles come out untextured in the tiles, raise "Large Triangle Removal Threshold" or
   lower "Maximum node triangle count" from its default 10 000 to about 1 000.
 - **Bentley iTwin Capture Modeler** (ContextCapture): exports 3D Tiles, 3MX and OSGB from the same reconstruction;
-  the OSGB and 3MX trees are what [OSGB](../mesh-generic/osgb) reads.
+  the OSGB and 3MX trees are what [OSGB](../mesh-generic/osgb) reads. Its fourth output, **3SM** (Scalable Mesh,
+  one file with the whole hierarchy and the CRS inside), is Bentley's own: no published layout, no reader outside
+  Bentley's products (iTwin, MicroStation, Bentley View), and no public dataset ships as 3SM, the open ones are 3MX,
+  OSGB or 3D Tiles. Not worth a parser until one does.
 - **Cesium ion**: upload a mesh (OBJ, FBX, glTF…), the 3D Photogrammetry Model Tiler returns a tileset that can be
   downloaded as an archive, so ion can be used for conversion alone; storage and streaming are the priced part.
   **Cesium ion Self-Hosted** ships the same tilers on Kubernetes or as plain container images for air-gapped sites,

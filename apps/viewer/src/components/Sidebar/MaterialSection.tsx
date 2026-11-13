@@ -19,13 +19,14 @@ export default function MaterialSection({ activeHandleRef }: { activeHandleRef: 
     <SidebarCollapsibleSection title="Material & Points" defaultOpen>
       {url.renderer === '3dtrjs' && (
         <div className="flex items-center justify-between">
-          <Label className="text-xs" title="Default: the content's own materials. Point colours are set below, in every mode. X-ray: see-through — meshes as an additive tint that does not write depth, points additive at 35 %, so a scan's interior shows through its walls and overlapping datasets read through each other. Wireframe: mesh edges only.">Material</Label>
+          <Label className="text-xs" title="Default: the content's own materials. Point colours are set below, in every mode. X-ray: see-through — meshes as an additive tint that does not write depth, points additive at 35 %, so a scan's interior shows through its walls and overlapping datasets read through each other. Wireframe: mesh edges only. Features: one colour per feature (EXT_mesh_features ids: a feature-ID attribute as vertex colours, a feature-ID texture as the map), one colour per tile mesh where there are none.">Material</Label>
           <Select value={s.materialMode} onValueChange={(v) => s.setMaterialMode(v as any)}>
             <SelectTrigger size="sm"><SelectValue /></SelectTrigger>
             <SelectContent>
               <SelectItem value="default">Default</SelectItem>
               <SelectItem value="xray">X-ray</SelectItem>
               <SelectItem value="wireframe">Wireframe</SelectItem>
+              <SelectItem value="features">Features</SelectItem>
             </SelectContent>
           </Select>
         </div>

@@ -109,6 +109,14 @@ export function nexusTileset(index, contentUri, { dag = 'levels', geScale = DEFA
       return { boundingVolume: { sphere: modelSphere }, geometricError: k === 0 ? num(model[3] * 1e3 * geScale) : errorOf(k - 1), refine: 'REPLACE', children };
     };
     root = build(0);
+    // One root node (the usual Nexus file): it IS the root tile, with the content, and level 1 hangs straight under it.
+    // Through the contentless L0 and L1 a client that refines into a deep level has nothing to draw until that whole
+    // level has loaded (3DTilesRendererJS showed the bust after 26 s, 72 nodes); with the content on the root it draws
+    // the coarsest mesh from the first request and keeps it while the level loads. Same tree otherwise.
+    if (levels[0].length === 1 && levels.length > 1) {
+      const [n0, L1] = root.children;
+      root = { ...n0, geometricError: L1.geometricError, children: L1.children };
+    }
   } else {
     const build = (i) => {
       const kids = nodeChildren(index, i);

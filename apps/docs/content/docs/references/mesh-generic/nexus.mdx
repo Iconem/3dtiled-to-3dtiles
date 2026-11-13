@@ -70,7 +70,13 @@ mappings are offered (`packages/nexus-to-3dtiles/src/nexus-tileset.js`, shared b
 contentless level tile L*k*; the level tiles form a chain L0 → L1 → …; all the tiles that must switch together (the
 nodes of level *k* and L*k*+1) are given the **same** bounding sphere (the model's) and the **same** geometric
 error, so that a client decides them in the same frame, and a node tile refines through one empty child, which is
-how it disappears when its level does. Each node tile keeps its own sphere as `content.boundingVolume`, what a
+how it disappears when its level does. The usual single root node is the root tile itself, with its content, and
+level 1 hangs straight under it: a client draws the coarsest mesh from its first request and keeps it while the
+level it refines into loads (through contentless L0 and L1 tiles, 3DTilesRendererJS had nothing to draw for the
+bust until its 72 level nodes were all in, 26 s). 3DTilesRendererJS also loads, by default, every sibling of a
+used tile (`loadSiblings`), which on this tree is every node of every level on the way down (the gargoyle: all 187
+nodes before a first view, 51 s on the public server); the 3D Tiled viewer turns it off on the data renderer, as
+CesiumJS only loads what the view needs. Each node tile keeps its own sphere as `content.boundingVolume`, what a
 client culls by, so a close view loads and draws only the nodes in front of the camera. What is lost against Nexus
 is the choice of a level per node by distance: the level is the same for the near and the far side of the model,
 as for any single-mesh LOD. For an object of a few million triangles that is what Nexus models are, this is the

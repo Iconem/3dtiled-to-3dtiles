@@ -81,7 +81,7 @@ interface ViewerStore {
   pointAdaptive: boolean;
   pointShape: 'square' | 'round' | 'sphere';
   /** 3DTRjs: how the content is drawn — its own materials, see-through (x-ray) or wireframe. */
-  materialMode: 'default' | 'xray' | 'wireframe';
+  materialMode: 'default' | 'xray' | 'wireframe' | 'features';
   setMaterialMode: (v: ViewerStore['materialMode']) => void;
   /** X-ray: opacity of the points (meshes draw at 60 % of it) and whether points keep their colours or go white. */
   xrayOpacity: number;

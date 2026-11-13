@@ -77,12 +77,43 @@ function spzPositions(raw, step) {
   return out;
 }
 
-async function glbPositions(buf, tileM, out, budget, zUp) {
+/** The bytes of a glTF buffer: a data: URI (base64), or a file beside the glTF (fetched). */
+async function gltfBuffer(b, baseUrl, fetchFn) {
+  if (!b?.uri) return null;
+  if (b.uri.startsWith('data:')) {
+    const b64 = b.uri.slice(b.uri.indexOf(',') + 1);
+    if (typeof Buffer !== 'undefined') { const n = Buffer.from(b64, 'base64'); return n.buffer.slice(n.byteOffset, n.byteOffset + n.byteLength); }
+    const bin = atob(b64), u8 = new Uint8Array(bin.length);
+    for (let i = 0; i < bin.length; i++) u8[i] = bin.charCodeAt(i);
+    return u8.buffer;
+  }
+  return (await fetchFn(new URL(b.uri, baseUrl).href)).arrayBuffer();
+}
+
+/** A .glb: the JSON chunk, and buffer 0 = the BIN chunk. */
+function glbParts(buf) {
   const dv = new DataView(buf);
-  if (dv.getUint32(0, true) !== 0x46546c67) return false;               // 'glTF'
+  if (dv.getUint32(0, true) !== 0x46546c67) return null;                // 'glTF'
   const jsonLen = dv.getUint32(12, true);
   const json = JSON.parse(new TextDecoder().decode(new Uint8Array(buf, 20, jsonLen)));
   const binStart = 20 + jsonLen + 8;
+  return { json, buffers: [buf.slice(binStart)] };
+}
+
+/** A .gltf (JSON): its buffers from data: URIs or files beside it. */
+async function gltfParts(buf, baseUrl, fetchFn) {
+  const json = JSON.parse(new TextDecoder().decode(new Uint8Array(buf)));
+  if (!json.asset || !json.meshes) return null;
+  const buffers = [];
+  for (const b of json.buffers ?? []) buffers.push(await gltfBuffer(b, baseUrl, fetchFn).catch(() => null));
+  return { json, buffers };
+}
+
+async function glbPositions(buf, tileM, out, budget, zUp, baseUrl = null, fetchFn = globalThis.fetch) {
+  const first = new Uint8Array(buf, 0, Math.min(4, buf.byteLength));
+  const parts = first[0] === 0x7b || (first[0] === 0xef && first[3] === 0x7b) ? await gltfParts(buf, baseUrl, fetchFn) : glbParts(buf);
+  if (!parts) return false;
+  const { json, buffers } = parts;
   if ((json.extensionsRequired ?? []).some((e) => /draco|meshopt|quantization/i.test(e))) return false;
   const rtc = json.extensions?.CESIUM_RTC?.center;
   const base = mul(mul(tileM, rtc ? translate(rtc[0], rtc[1], rtc[2]) : I4), zUp ? I4 : Y_UP_TO_Z_UP);
@@ -96,8 +127,8 @@ async function glbPositions(buf, tileM, out, budget, zUp) {
         // a splat tile: its positions live in the gzip-compressed SPZ blob, not in an accessor
         const spz = prim.extensions?.KHR_gaussian_splatting?.extensions?.KHR_gaussian_splatting_compression_spz_2 ?? prim.extensions?.KHR_gaussian_splatting_compression_spz_2;
         if (spz && spz.bufferView != null) {
-          const sbv = json.bufferViews[spz.bufferView];
-          const raw = await gunzip(new Uint8Array(buf, binStart + (sbv.byteOffset ?? 0), sbv.byteLength)).catch(() => null);
+          const sbv = json.bufferViews[spz.bufferView], sb = buffers[sbv.buffer ?? 0];
+          const raw = sb ? await gunzip(new Uint8Array(sb, sbv.byteOffset ?? 0, sbv.byteLength)).catch(() => null) : null;
           const count = raw ? new DataView(raw).getUint32(8, true) : 0;
           const pos = raw ? spzPositions(raw, Math.max(1, Math.floor(count / budget))) : null;
           if (pos) { for (let i = 0; i < pos.length; i += 3) out.push(...apply(m, pos[i], pos[i + 1], pos[i + 2])); found = found || pos.length > 0; }
@@ -105,9 +136,11 @@ async function glbPositions(buf, tileM, out, budget, zUp) {
         }
         const acc = json.accessors[prim.attributes?.POSITION];
         if (!acc || acc.componentType !== 5126 || acc.sparse || acc.bufferView == null) continue;
-        const bv = json.bufferViews[acc.bufferView];
+        const bv = json.bufferViews[acc.bufferView], b = buffers[bv.buffer ?? 0];
+        if (!b) continue;
+        const dv = new DataView(b);
         const stride = bv.byteStride || 12;
-        const off = binStart + (bv.byteOffset ?? 0) + (acc.byteOffset ?? 0);
+        const off = (bv.byteOffset ?? 0) + (acc.byteOffset ?? 0);
         const step = Math.max(1, Math.floor(acc.count / budget));
         for (let i = 0; i < acc.count; i += step) {
           out.push(...apply(m, dv.getFloat32(off + i * stride, true), dv.getFloat32(off + i * stride + 4, true), dv.getFloat32(off + i * stride + 8, true)));
@@ -121,10 +154,10 @@ async function glbPositions(buf, tileM, out, budget, zUp) {
   return found;
 }
 
-async function contentPositions(buf, tileM, out, budget, zUp) {
+async function contentPositions(buf, tileM, out, budget, zUp, url = null, fetchFn = globalThis.fetch) {
   const dv = new DataView(buf);
   const magic = new TextDecoder().decode(new Uint8Array(buf, 0, 4));
-  if (magic === 'glTF') return glbPositions(buf, tileM, out, budget, zUp);
+  if (magic === 'glTF' || /^\s*\{/.test(magic) || magic.charCodeAt(0) === 0xfeff) return glbPositions(buf, tileM, out, budget, zUp, url, fetchFn);
   if (magic !== 'b3dm' && magic !== 'pnts') return false;
   const ftJson = dv.getUint32(12, true), ftBin = dv.getUint32(16, true), btJson = dv.getUint32(20, true), btBin = dv.getUint32(24, true);
   const ft = ftJson ? JSON.parse(new TextDecoder().decode(new Uint8Array(buf, 28, ftJson))) : {};
@@ -154,7 +187,7 @@ async function topContents(url, maxFiles, fetchFn, frame) {
   const queue = [{ tile: ts.root, base: url, m: mul(colM(frame), colM(ts.root.transform)), zUp: ts.asset?.gltfUpAxis === 'Z' }];
   while (queue.length && found.length < maxFiles) {
     const { tile, base, m, zUp } = queue.shift();
-    let uri = tile.content?.uri ?? tile.content?.url;
+    let uri = tile.content?.uri ?? tile.content?.url ?? tile.contents?.[0]?.uri;   // 1.1: several contents, the first is enough
     if (tile.implicitTiling && uri) uri = uri.replace('{level}', '0').replace('{x}', '0').replace('{y}', '0').replace('{z}', '0');
     if (uri) {
       const abs = new URL(uri, base).href;
@@ -181,7 +214,7 @@ export async function datasetGroundSamples(tilesetUrl, { grid = GROUND_GRID, bud
   for (const f of files) {
     try {
       const buf = await (await fetchFn(f.url)).arrayBuffer();
-      await contentPositions(buf, f.m, pts, Math.ceil(budget / files.length), f.zUp);
+      await contentPositions(buf, f.m, pts, Math.ceil(budget / files.length), f.zUp, f.url, fetchFn);
     } catch { /* one unreadable tile is not fatal */ }
   }
   if (pts.length < 30) return null;

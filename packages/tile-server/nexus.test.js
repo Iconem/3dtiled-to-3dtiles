@@ -135,21 +135,18 @@ test('tileset: unionSphere and the frame of a sphere', () => {
   assert.deepEqual(tileSphere([1, 2, 3, 4]), [1, -3, 2, 4], 'Y up → Z up');
 });
 
-test('tileset: by levels, every node of a level switches with the level and vanishes through an empty child', (t) => {
+test('tileset: by levels, the single root node is the root tile, every node of a level switches with the level and vanishes through an empty child', (t) => {
   quiet(t);
   const { tileset, tiles, mode, stats } = buildTileset(parseNexus(FILE), (i) => `n${i}.glb`, { dag: 'levels' });
   assert.deepEqual([tiles, mode, stats.levels], [4, 'levels', 3]);
   assert.deepEqual(tileset.asset.version, '1.1');
   const model = [5, 0, 5, 8];
-  const L0 = tileset.root;
-  assert.deepEqual([L0.geometricError, tileset.geometricError, L0.refine, L0.content], [8 * 1e3 * 8, 8 * 1e3 * 8, 'REPLACE', undefined]);
-  assert.deepEqual(L0.boundingVolume.sphere, model);
-  assert.equal(L0.children.length, 2, 'node 0 and the next level');
-  const [n0, L1] = L0.children;
-  assert.deepEqual([n0.content.uri, n0.geometricError, n0.boundingVolume.sphere, n0.content.boundingVolume.sphere], ['n0.glb', 32, model, model]);
-  assert.deepEqual(n0.children, [{ boundingVolume: { sphere: model }, geometricError: 0, refine: 'REPLACE' }]);
-  assert.deepEqual([L1.geometricError, L1.content, L1.children.length], [32, undefined, 3]);
-  const [n1, n2, L2] = L1.children;
+  // the root node's content is on the root tile (drawn from the first request, kept while a deep level loads), and
+  // the level-1 nodes and L2 are its children: no contentless L0 / L1 above them
+  const n0 = tileset.root;
+  assert.deepEqual([n0.content.uri, n0.geometricError, tileset.geometricError, n0.refine, n0.boundingVolume.sphere, n0.content.boundingVolume.sphere], ['n0.glb', 32, 32, 'REPLACE', model, model]);
+  assert.equal(n0.children.length, 3, 'the level-1 nodes and the next level');
+  const [n1, n2, L2] = n0.children;
   assert.deepEqual([n1.content.uri, n2.content.uri, n1.geometricError, n2.geometricError, L2.geometricError], ['n1.glb', 'n2.glb', 16, 16, 16]);
   assert.deepEqual(n1.content.boundingVolume.sphere, [5, 0, 5, 4], 'the content is culled by the tight sphere');
   const [n3] = L2.children;

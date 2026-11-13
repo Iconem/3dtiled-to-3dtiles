@@ -6,6 +6,34 @@ Format loosely follows [Keep a Changelog](https://keepachangelog.com/).
 ## [Unreleased]
 
 ### Fixed — 2026-11-13 (what the viewer showed for local scenes, splats, Google 3D and the fly camera)
+- **A Nexus scene smaller than a metre showed nothing** (the Stanford dragon, 0.12 m; the Unio shell): GlobeControls
+  floors the camera's near plane at 1 m and the viewer held the controls 1 m from the pivot, so a scene framed
+  0.37 m from the camera was entirely inside the near plane. Close to the content the near plane now follows the
+  distance (a wrapped `adjustCamera`), and the controls' closest approach follows the framed size (`minDistance`,
+  a twentieth of the radius, 5 mm at least; the clearance sphere around the camera, `cameraRadius`, a quarter of
+  it). Two more things then still hid it: the ground snap lifted the scene 26 m onto the terrain after the camera
+  had been framed 0.37 m from it, so the camera looked at the ground (a snap that moves the scene by more than its
+  own size within 20 s of the framing frames it again), and the controls' terrain-height rule lifted the camera 2.6 m
+  when a coarse terrain tile stood above it for a moment (`adjustHeight` is off for a scene under 20 m across). The
+  dragon is on screen 13 s after the click, its 85 nodes loaded.
+- **A local scene smaller than the terrain's height was buried and never loaded** (the CesiumGS metadata samples, a
+  metre wide, under the 16 m of San Francisco's terrain): the camera was pushed above the terrain, the scene left the
+  view, so it never loaded and the snap had nothing to measure. The ground sampler now reads plain `.gltf` content
+  (data-URI and external buffers) and 1.1 `contents` tiles, so the snap measures them before anything is drawn, and
+  when it cannot, a local scene anchored at height 0 is put on the terrain at its anchor until it can be.
+- **A Nexus mesh took 26 to 51 s to appear in 3DTilesRendererJS** (the bust, the gargoyle on the public server) where
+  CesiumJS showed it at once: the single root node's content is now on the root tile itself (not under a contentless
+  level tile), so the coarsest mesh is drawn from the first request and kept while the level the view needs loads;
+  and the data renderer no longer loads every sibling of a used tile (`loadSiblings`, 3DTilesRendererJS's default),
+  which on a levels tree meant every node of every level (the gargoyle: all 187 nodes, 51 s) and on a city what is
+  behind the camera. CesiumJS loads what the view needs; so does the viewer now. The ancestors still load, to stand
+  in while the children do.
+- **The textured Unio shell (Nexus) never completed a level in 3DTilesRendererJS**: its cache refuses a tile past
+  0.4 GB of decoded content, and the shell's nodes decode to about 30 MB each (every node carries the JPEGs its
+  patches name, at their GPU size), so the 14th node was refused and nothing was drawn. The data renderer's cache is
+  1 GB now, trimmed from 0.6 GB.
+- **The Hong Kong PlanD tile +005_+000 is empty on PlanD's server** (a 403-byte zip holding a 62-byte `.osgb`), so its
+  404 in the console is the dataset's; the index's other tiles load.
 - **Every OSGB and 3MX tile failed on production only**: their tile keys are file paths, written with `%2F` for the
   slash, and the reverse proxy in front of `3dtiled.iconem.com` answers a header-less 400 to any path holding one
   (the browser showed it as a CORS error). `packages/tile-server/path-key.js` writes a slash in a key as `~` (a
@@ -49,6 +77,18 @@ Format loosely follows [Keep a Changelog](https://keepachangelog.com/).
   Dittrichova from its data: ground on the +Y side, 3.9° of slope). Lublin stays `y`, Itaka `-y`.
 
 ### Changed — 2026-11-13 (a large streamed SOG opens on a preview; the mesh-tiler survey; the recipe in the page)
+- **Material "Features"** (3DTRjs): one colour per feature from the `EXT_mesh_features` ids a tile carries (a
+  feature-ID attribute as vertex colours, one hashed hue per id; a feature-ID texture as the map; an implicit id per
+  vertex), one colour per tile mesh where there are none. Eight **CesiumGS metadata samples** on the 3D Tiles pill
+  (feature IDs by attribute and by texture, property table, property texture, property attributes on a point cloud,
+  several feature-ID sets, GPU instances with metadata, metadata per tileset / tile / group / content), the open
+  tilesets that carry metadata per vertex, feature, texel and tile. The last one has several `contents` per tile,
+  which the Cesium renderer draws and 3d-tiles-renderer 0.5 does not (it reads `content` only).
+- **Every side-panel setting is in the address bar** (`lib/urlSettings.ts`): after controls, imagery, terrain, debug
+  and the ground snap, now the clearance, globe, collision, terrain-behind, FOV, orthographic, SSE, show-asset,
+  material and x-ray opacity, point colour mode and colour, point size, shape, adaptive size, EDL and its strength,
+  shadeless and brightness, as `clearance= globe= collision= tbehind= fov= ortho= sse= asset= material= xray= pcolor=
+  color= psize= pshape= adaptive= edl= edls= shadeless= brightness=`; a value equal to the default is left out.
 - **The root of a collapsed streamed SOG is a preview when the coarsest level alone is over the splat budget**
   (Jastrzębia Góra, 106 M: 838 k splats, 14 tiles and 26 MB before a first view; Lublin's 13 levels fit). The root
   carries every stride-th splat of the level (`tile/m_<level>s<stride>.glb`, the stride the smallest that fits the

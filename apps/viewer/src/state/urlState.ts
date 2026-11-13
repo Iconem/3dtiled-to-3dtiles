@@ -39,13 +39,33 @@ const urlStateParsers = {
   // The camera: `lon,lat,height,heading,pitch,roll` (lib/cameraPose.ts), kept up to date as it moves, so a link opens
   // on the same view and a switch between two globes (Bing 3D, Google 3D) lands on the same place.
   view: parseAsString.withDefault(''),
-  // The side panel's settings, so a link opens with the same controls, imagery, terrain, debug view and ground snap
-  // (lib/urlSettings.ts keeps them and the store in step). Empty = the store's default, and left out of the URL.
+  // The side panel's settings, so a link opens with the same controls, imagery, terrain, debug view, ground snap,
+  // material, point style and the rest (lib/urlSettings.ts keeps them and the store in step). Empty = the store's
+  // default, and left out of the URL.
   controls: parseAsString.withDefault(''),
   imagery: parseAsString.withDefault(''),
   terrain: parseAsString.withDefault(''),
   debug: parseAsString.withDefault(''),
   zauto: parseAsString.withDefault(''),
+  clearance: parseAsString.withDefault(''),
+  globe: parseAsString.withDefault(''),
+  collision: parseAsString.withDefault(''),
+  tbehind: parseAsString.withDefault(''),
+  fov: parseAsString.withDefault(''),
+  ortho: parseAsString.withDefault(''),
+  sse: parseAsString.withDefault(''),
+  asset: parseAsString.withDefault(''),
+  material: parseAsString.withDefault(''),
+  xray: parseAsString.withDefault(''),
+  pcolor: parseAsString.withDefault(''),
+  color: parseAsString.withDefault(''),
+  psize: parseAsString.withDefault(''),
+  pshape: parseAsString.withDefault(''),
+  adaptive: parseAsString.withDefault(''),
+  edl: parseAsString.withDefault(''),
+  edls: parseAsString.withDefault(''),
+  shadeless: parseAsString.withDefault(''),
+  brightness: parseAsString.withDefault(''),
 };
 
 /** One hook, one URL sync — everything in the "shareable" slice. */

@@ -179,21 +179,52 @@ function makeClearDepthHook(): THREE.Mesh {
  *   default    the content's own materials;
  *   xray       see-through: meshes as an additive, non-depth-writing tint (the structure reads through
  *              itself, a scan's interior shows through its walls), points additive at 35 %;
- *   wireframe  meshes as wireframe, points unchanged.
+ *   wireframe  meshes as wireframe, points unchanged;
+ *   features   one colour per feature: EXT_mesh_features ids (3d-tiles-renderer's GLTFMeshFeaturesExtension leaves a
+ *              MeshFeatures on `userData.meshFeatures`), a `_feature_id_N` attribute as vertex colours (hashed hue
+ *              per id), a feature-ID texture as the map (its channels are the ids), an implicit id per vertex; a
+ *              primitive without the extension gets one colour per tile mesh, so tile boundaries show.
  * The original mesh material is kept on the object and restored by `default`. Points take their colour
  * independently, in every mode: their own (`rgb`), one colour, or by height (lib/pointColors.ts).
  */
-type MaterialMode = 'default' | 'xray' | 'wireframe';
+type MaterialMode = 'default' | 'xray' | 'wireframe' | 'features';
 type MaterialOpts = { mode: MaterialMode; opacity: number; points: 'rgb' | 'color' | 'height'; color: string; range: HeightRange | null; stop: THREE.Object3D | null };
 const XRAY_MESH = new THREE.MeshBasicMaterial({ color: 0x9ad8ff, transparent: true, opacity: 0.22, blending: THREE.AdditiveBlending, depthWrite: false, side: THREE.DoubleSide });
 const WIRE_MESH = new THREE.MeshBasicMaterial({ color: 0xdddddd, wireframe: true, transparent: true, opacity: 0.6, depthWrite: false });
+const featureColor = (id: number, out: THREE.Color) => out.setHSL((((id + 1) * 2654435761) >>> 0) / 4294967296, 0.7, 0.55);
+function featureMaterial(o: any): THREE.Material {
+  if (o.userData.__featureMaterial) return o.userData.__featureMaterial;
+  const g: THREE.BufferGeometry = o.geometry, mf = o.userData.meshFeatures;
+  const info: any[] = mf?.getFeatureInfo?.() ?? [];
+  const byTexture = info.find((f) => f.texture), byAttribute = info.find((f) => 'attribute' in f && f.attribute !== undefined);
+  let mat: THREE.Material;
+  if (byTexture && !byAttribute) {
+    mat = new THREE.MeshBasicMaterial({ map: mf.getTextures()[byTexture.texture.index], side: THREE.DoubleSide });
+  } else {
+    const ids = byAttribute ? g.getAttribute(`_feature_id_${byAttribute.attribute}`) : null;
+    const idOf = ids ? (i: number) => ids.getX(i) : info.length ? (i: number) => i : () => o.id;
+    const n = g.getAttribute('position').count, c = new Float32Array(n * 3), col = new THREE.Color();
+    for (let i = 0; i < n; i++) { featureColor(idOf(i), col); c[i * 3] = col.r; c[i * 3 + 1] = col.g; c[i * 3 + 2] = col.b; }
+    if (o.userData.__origColor === undefined) o.userData.__origColor = g.getAttribute('color') ?? null;
+    g.setAttribute('color', new THREE.BufferAttribute(c, 3));
+    mat = new THREE.MeshBasicMaterial({ vertexColors: true, side: THREE.DoubleSide });
+  }
+  o.userData.__featureMaterial = mat;
+  return mat;
+}
 function applyMaterialMode(o: any, { mode, opacity, points, color, range, stop }: MaterialOpts) {
   if (o.isMesh && !o.isPoints) {
+    if (mode !== 'features' && o.userData.__origColor !== undefined) {
+      if (o.userData.__origColor) o.geometry.setAttribute('color', o.userData.__origColor); else o.geometry.deleteAttribute('color');
+      delete o.userData.__origColor;
+      o.userData.__featureMaterial?.dispose(); delete o.userData.__featureMaterial;
+    }
     if (mode === 'default') {
       if (o.userData.__origMaterial) { o.material = o.userData.__origMaterial; delete o.userData.__origMaterial; }
       return;
     }
     if (!o.userData.__origMaterial) o.userData.__origMaterial = o.material;
+    if (mode === 'features') { o.material = featureMaterial(o); return; }
     XRAY_MESH.opacity = opacity * 0.6;                          // shared: set on every apply, cheap
     o.material = mode === 'xray' ? XRAY_MESH : WIRE_MESH;
   } else if (o.isPoints && o.material) {
@@ -661,6 +692,8 @@ const Scene = forwardRef<ViewerHandle, { loadArgs: LoadArgs; tooltip: TooltipCha
   // `.target` at the default (0,0,0) — for georeferenced (ECEF-scale) content that's ~Earth's center,
   // not the tileset ("orbit pivot/target should be the tileset origin, not earth center").
   const lastSphereCenterRef = useRef<THREE.Vector3 | null>(null);
+  const lastSphereRadiusRef = useRef(0);
+  const framedAtRef = useRef(0);                              // performance.now() of the last frameToTileset
   // Where the user is looking now: the orbit target, or globe/env's last zoom/drag pivot, sampled
   // every frame. A control scheme mounting mid-session starts from HERE, not from the tileset's
   // centre (which, after navigating away, could be a continent off: the "huge jump" on switching).
@@ -722,6 +755,18 @@ const Scene = forwardRef<ViewerHandle, { loadArgs: LoadArgs; tooltip: TooltipCha
   // Whether the WGS84-radius wireframe globe is meaningful to show at all — see frameToTileset below.
   const [showGlobe, setShowGlobe] = useState(true);
   useEffect(() => { if (!loadArgs) setShowGlobe(true); }, [loadArgs]);
+  // The controls' closest approach to the pivot, from the framed content's size: 1 m on a globe or a building, a
+  // few mm on a scan smaller than a metre (the Stanford dragon, 0.12 m, framed 0.37 m away, was pushed to 1 m).
+  const [minDist, setMinDist] = useState(1);
+  // EnvironmentControls keeps a sphere of `cameraRadius` (5 m by default) around the camera clear of the scene,
+  // terrain included: framed 0.37 m from the dragon, the camera was pushed 7.9 m away once the terrain under it had
+  // loaded, and the dragon left the view. A quarter of the framed radius, 5 m at most.
+  const [camRadius, setCamRadius] = useState(5);
+  // The controls also lift the camera above whatever is under it (`adjustHeight`), terrain included, by raycasting
+  // down from above: a coarse terrain tile that for a moment stands 2.6 m above the camera framed on the dragon
+  // pushed it off the scene for good. Off for a scene under 20 m across, where a terrain tile's error is of the
+  // scene's own size; on for everything else, where it keeps the camera out of the ground.
+  const [adjustHeight, setAdjustHeight] = useState(true);
   useEffect(() => { setPickScene(null); store.getState().setPointHeightRange(null); }, [tilesUrl]);
 
   // GlobeControls/EnvironmentControls default to raycasting the WHOLE R3F scene (3d-tiles-renderer's
@@ -954,6 +999,11 @@ const Scene = forwardRef<ViewerHandle, { loadArgs: LoadArgs; tooltip: TooltipCha
     // unconditionally here is harmless for that mode.
     if (surfaceUp && controlsRef.current?.up) controlsRef.current.up.copy(surfaceUp);
     lastSphereCenterRef.current = sphere.center.clone();
+    lastSphereRadiusRef.current = sphere.radius;
+    framedAtRef.current = performance.now();
+    setMinDist(global ? 1 : THREE.MathUtils.clamp(sphere.radius / 20, 0.005, 1));
+    setCamRadius(global ? 5 : THREE.MathUtils.clamp(sphere.radius / 4, 0.01, 5));
+    setAdjustHeight(global || sphere.radius > 20);
     // resetZoomState=true: this just hard-teleported the camera (a fresh load, or "Auto-zoom to
     // tileset" after the user free-navigated far away) — see setControlsPivot's comment for why any
     // stale zoom/drag state from before the jump must not survive into the controls' next tick.
@@ -1073,6 +1123,21 @@ const Scene = forwardRef<ViewerHandle, { loadArgs: LoadArgs; tooltip: TooltipCha
   useFrame(() => {
     const controls = controlsRef.current;
     if (!controls) return;
+    // GlobeControls.adjustCamera() floors the near plane at 1 m (lerp(1, 1000) by altitude, for the globe), which
+    // clips away a scene smaller than a metre: the Stanford dragon (0.12 m), framed 0.37 m from the camera, was
+    // entirely inside the near plane and "nxs showed nothing". Wrapped once per controls: close to the content
+    // the near plane follows the distance (the depth buffer is logarithmic, so a near:far of 1e9 costs nothing).
+    if (controls.isGlobeControls && !controls.__nearWrapped) {
+      controls.__nearWrapped = true;
+      const orig = controls.adjustCamera.bind(controls);
+      controls.adjustCamera = (cam: any) => {
+        orig(cam);
+        const c = lastSphereCenterRef.current;
+        if (!cam.isPerspectiveCamera || !c) return;
+        const d = Math.min(cam.position.distanceTo(c), controls.pivotPoint ? cam.position.distanceTo(controls.pivotPoint) : Infinity);
+        if (d < 100 && cam.near > d * 0.01) { cam.near = Math.max(d * 0.01, 0.002); cam.updateProjectionMatrix(); }
+      };
+    }
     // Safety net for "the controls froze until I switched them": drei's TransformControls disables
     // the default controls for the length of a gizmo drag and re-enables them on release; a gizmo
     // unmounted (or remounted) mid-drag never re-enables them. No gizmo shown = controls enabled.
@@ -1704,7 +1769,25 @@ const Scene = forwardRef<ViewerHandle, { loadArgs: LoadArgs; tooltip: TooltipCha
         }
       }
       diffs.sort((a, b) => a - b);
-      if (diffs.length < SNAP_MIN_HITS) return `Snap to ground: only ${diffs.length} of ${SNAP_SAMPLES} samples hit both the dataset and the terrain — zoom in so more of both is loaded, then retry.`;
+      if (diffs.length < SNAP_MIN_HITS) {
+        // 3. Nothing of the content is drawn yet, and it is a local scene anchored at height 0: a scene smaller than
+        // the terrain's height above the ellipsoid (the metre-wide CesiumGS samples, under 16 m of San Francisco)
+        // sits buried, the camera is pushed up by the terrain and never sees it, so it never loads and nothing
+        // can be measured. Put the anchor on the terrain for now (the content's own ground is near z = 0 in such a
+        // scene); the retry on the next loaded model measures for real.
+        if (needsEnuAnchorRef.current && pass === 0 && store.getState().localFrame.zOffset === 0) {
+          const lf = store.getState().localFrame;
+          const h = await groundAt(lf.lon, lf.lat);
+          if (h != null && Number.isFinite(h) && Math.abs(h) > 0.5) {
+            const next = +(h + clearance).toFixed(2);
+            store.getState().setLocalFrame({ zOffset: next });
+            applyZOffsetInternal(tiles, next);
+            invalidate();
+            return `Z offset ${next} m from the terrain at the anchor, until the content is drawn and can be measured (${diffs.length} of ${SNAP_SAMPLES} samples hit it).`;
+          }
+        }
+        return `Snap to ground: only ${diffs.length} of ${SNAP_SAMPLES} samples hit both the dataset and the terrain — zoom in so more of both is loaded, then retry.`;
+      }
       const dz = diffs[Math.floor(0.8 * (diffs.length - 1))] + clearance;   // converges: the next pass measures -clearance
       total += dz;
       const next = +(store.getState().localFrame.zOffset + dz).toFixed(2);
@@ -1738,6 +1821,10 @@ const Scene = forwardRef<ViewerHandle, { loadArgs: LoadArgs; tooltip: TooltipCha
       const after = store.getState().localFrame.zOffset;
       measured = /^Snapped/.test(msg);
       if (Math.abs(after - before) > 0.05 || !measured) store.getState().setStatus(`Auto Z offset: ${msg}`);
+      // The snap moved the content by more than its own size right after it was framed (the 0.12 m dragon, lifted
+      // 26 m onto the terrain): the camera, still where the framing left it, looked at the ground. Frame it again;
+      // a later or a smaller snap leaves the camera where the user has it.
+      if (Math.abs(after - before) > lastSphereRadiusRef.current && performance.now() - framedAtRef.current < 20000 && tilesRef.current) frameToTileset(tilesRef.current);   // not a fresh load: the anchor stays
       if (again) { again = false; schedule(); }
     };
     const schedule = () => { if (timer) clearTimeout(timer); timer = setTimeout(run, 1000); };
@@ -2029,9 +2116,21 @@ const Scene = forwardRef<ViewerHandle, { loadArgs: LoadArgs; tooltip: TooltipCha
       ))}
       {loadArgs && (
         <TilesRendererR3F
-          ref={tilesRef as any}
+          // 3d-tiles-renderer's cache refuses a tile past 0.4 GB of decoded content (textures at their GPU size):
+          // the textured Unio shell's Nexus nodes decode to about 30 MB each (every node carries the JPEGs its
+          // patches name), so its 14th node was refused and the level never completed: nothing drawn. 1 GB, which
+          // a 2026 laptop GPU has, with the trim starting at 0.6 GB.
+          ref={(t: any) => {
+            (tilesRef as React.MutableRefObject<any>).current = t;
+            if (t?.lruCache && t.lruCache.maxBytesSize < 1e9) { t.lruCache.minBytesSize = 0.6e9; t.lruCache.maxBytesSize = 1e9; }
+          }}
           url={tilesUrl}
           errorTarget={errorTarget}
+          // 3d-tiles-renderer's default also loads every sibling of a used tile, in or out of view: a tree whose
+          // levels are a tile's children (a Nexus mesh: 187 nodes in 9 levels for the gargoyle) then loads ALL its
+          // levels before the first view (51 s on production), a city loads what is behind the camera. CesiumJS
+          // loads what the view needs: so does this. The ancestors still load, to stand in while the children do.
+          loadSiblings={false}
           // Skipped when the caller (a flyTo-tagged preset — e.g. Bing's per-city pills, which all
           // load the SAME global tileset URL) is about to issue its OWN flyToCity right after load()
           // — this async auto-frame (fires once the tileset.json fetch resolves) would otherwise land
@@ -2090,8 +2189,8 @@ const Scene = forwardRef<ViewerHandle, { loadArgs: LoadArgs; tooltip: TooltipCha
           {(debugMode === 'cells' || debugMode === 'cells-only') && <MosaicOutlines url={loadArgs.url} tilesRef={tilesRef} cellsOnly={debugMode === 'cells-only'} />}
           {/* enableDoubleTapZoom off: the controls' own double-click zoom raced our animated one
               (it starts on pointerup, ours on dblclick: a jump, then the tween) */}
-          {controlMode === 'globe' && <GlobeControls ref={controlsRef} scene={navScene ?? undefined} ellipsoid={WGS84_ELLIPSOID} ellipsoidFrame={WORLD_FRAME as any} enableDamping dampingFactor={0.05} minDistance={1} enableDoubleTapZoom={false} />}
-          {controlMode === 'env' && <EnvironmentControls ref={controlsRef} scene={navScene ?? undefined} enableDamping dampingFactor={0.05} minDistance={1} enableDoubleTapZoom={false} />}
+          {controlMode === 'globe' && <GlobeControls ref={controlsRef} scene={navScene ?? undefined} ellipsoid={WGS84_ELLIPSOID} ellipsoidFrame={WORLD_FRAME as any} enableDamping dampingFactor={0.05} minDistance={minDist} cameraRadius={camRadius} adjustHeight={adjustHeight} enableDoubleTapZoom={false} />}
+          {controlMode === 'env' && <EnvironmentControls ref={controlsRef} scene={navScene ?? undefined} enableDamping dampingFactor={0.05} minDistance={minDist} cameraRadius={camRadius} adjustHeight={adjustHeight} enableDoubleTapZoom={false} />}
         </TilesRendererR3F>
       )}
       {/* makeDefault registers this as R3F's `state.controls` — same thing GlobeControls/EnvironmentControls
