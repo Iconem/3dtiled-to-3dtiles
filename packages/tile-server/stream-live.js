@@ -36,6 +36,7 @@
  * The tileset's relative content URIs (`tile/<key>.glb?url=…`) get `&format=<fmt>` appended so the
  * follow-up `/stream/tile/...` requests carry the format and dispatch to the same adapter.
  */
+import { pathOfKey } from './path-key.js';
 import { copcTileset, copcTile, copcSubtree, copcTileRe, copcDrain } from './copc-live.js';
 import { potreeTileset, potreeTile, potreeSubtree, potreeTileRe, potreeDrain } from './potree-live.js';
 import { sogTileset, sogTile, sogTileRe } from './sog-live.js';
@@ -137,7 +138,7 @@ async function handleThreemxNode(u, res) {
   if (!n) return false;
   const url = u.searchParams.get('url');
   if (!url) { res.writeHead(400, CORS); res.end('missing ?url=<source url>'); return true; }
-  const frag = await threemxNode(url, decodeURIComponent(n[1]));
+  const frag = await threemxNode(url, pathOfKey(n[1]));
   if (!frag) { res.writeHead(404, CORS); res.end('no such node'); return true; }
   // threemx-live.js bakes absolute /stream/tile/…&format=threemx URIs itself (a relative "tile/…" here
   // would resolve against THIS fragment's own path, not /stream/) — no tagContentUris needed.
@@ -156,7 +157,7 @@ async function handleOsgbNode(u, res) {
   if (!url) { res.writeHead(400, CORS); res.end('missing ?url=<source url>'); return true; }
   const ge = u.searchParams.has('ge') ? Number(u.searchParams.get('ge')) : undefined;
   const bs = u.searchParams.has('bs') ? u.searchParams.get('bs').split(',').map(Number) : undefined;
-  const frag = await osgbNode(url, decodeURIComponent(n[1]), { ge, bs, from: u.searchParams.get('from') || undefined });
+  const frag = await osgbNode(url, pathOfKey(n[1]), { ge, bs, from: u.searchParams.get('from') || undefined });
   if (!frag) { res.writeHead(404, CORS); res.end('no such node'); return true; }
   res.writeHead(200, { 'Content-Type': 'application/json', ...CORS });
   res.end(JSON.stringify(frag));

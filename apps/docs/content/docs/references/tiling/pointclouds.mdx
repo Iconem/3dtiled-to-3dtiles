@@ -1,0 +1,213 @@
+---
+title: "Tiling point clouds"
+description: "How a LAS, LAZ, PLY or E57 cloud becomes a streamable tiled dataset: PotreeConverter, Entwine and EPT, PDAL's COPC writer and untwine, pdal_wrench, py3dtiles, gotiler, 3d-tiles-tools, Cesium ion, the global-shift trap of CloudCompare, and the live converters of this repository"
+---
+
+<InlineTOC items={toc} />
+
+> Status: a survey, not a converter of this repository. Facts come from each project's README, docs and source on
+> GitHub as read on 2026-11-13, from this repository's readers ([COPC](../pointclouds/copc),
+> [Potree](../pointclouds/potree), [VPC](../pointclouds/vpc)) and from years of running these tools on
+> photogrammetry and lidar clouds of 10<sup>8</sup> to 10<sup>9</sup> points. Where a project does not document a
+> behaviour the table says "not documented"; no number here was measured by us unless it says so.
+
+A point cloud is the easy case of tiling: there is no surface to keep closed and no texture to rebake. Every tool
+below does the same thing, an octree (or a kd-tree) whose nodes each hold a subsample of the points under them, so
+that a client draws the root from afar and descends where the camera is. What differs is the container the tree is
+written to, how the subsample of a node is chosen, whether the build fits in memory or streams through scratch
+files, and how the georeference survives the trip. Four containers matter today:
+
+- **Potree 2** (`metadata.json`, `hierarchy.bin`, `octree.bin`): three files, the octree of the Potree viewer; see
+  [Potree](../pointclouds/potree) for the layout and this repository's reader.
+- **EPT** (Entwine Point Tile): a folder of `ept.json`, `ept-hierarchy/` and `ept-data/`, one LAZ, binary or
+  Zstandard file per node, built by Entwine.
+- **COPC** (Cloud Optimized Point Cloud): one LAZ 1.4 file whose chunks are octree nodes and whose hierarchy sits
+  in a VLR, readable by range requests; see [COPC](../pointclouds/copc). Written by PDAL, untwine and pdal_wrench.
+  **VPC** indexes many LAS, LAZ or COPC files as one dataset; see [VPC](../pointclouds/vpc).
+- **3D Tiles** with point content: `pnts` tiles (1.0) or glTF `POINTS` primitives (1.1), written by py3dtiles,
+  gotiler, mago-3d-tiler and Cesium ion.
+
+This repository does not build an octree itself. It reads the first three live, by range requests, and serves
+them as 3D Tiles: COPC, Potree 2 and VPC through `/stream`, as the pages linked above describe.
+
+## The tools
+
+| Tool | Input | Output | Out-of-core | LOD scheme | Georeference | Licence |
+|---|---|---|---|---|---|---|
+| [PotreeConverter 2](https://github.com/potree/PotreeConverter) | LAS, LAZ (1.x also PTX, PLY, XYZ) | Potree 2 octree, three files | Yes: a chunking pass to temporary chunk files, then indexing (`--chunkdir`, `--compress-chunks`) | Octree; Poisson-disk (`-m poisson`, default) or random subsample per node | `--projection` string copied into `metadata.json`, nothing reprojected | BSD-2-Clause |
+| [Entwine](https://entwine.io/) | Anything PDAL reads | EPT | Yes: "trillions of points", lossless, local or S3 output | Octree of `span`³ voxels per node (256 by default); `maxNodeSize`, `minNodeSize` | `reprojection: {in, out, hammer}` | LGPL |
+| PDAL [`writers.copc`](https://pdal.io/en/latest/stages/writers.copc.html) | Any PDAL pipeline | COPC | Not documented | COPC octree (LAZ 1.4 chunks) | `a_srs`; `filters.reprojection` and `filters.transformation` upstream | BSD-3-Clause (PDAL) |
+| [untwine](https://github.com/hobuinc/untwine) | Anything PDAL reads, directories of files | COPC | Staging buffers spill to `--temp_dir` when full | COPC octree, `--level` sets the initial tiling level, `--cube` voxels | `--a_srs`, `--no_srs` | GPL-3.0, a commercial licence offered |
+| [pdal_wrench](https://github.com/PDAL/wrench) | LAS, LAZ, COPC, VPC | VPC, COPC, LAZ, LAS (`--vpc-output-format`) | Per-file jobs in parallel; a single LAS input is not parallelized | None of its own (COPC's) | `translate` reprojects, assigns a CRS or applies a 4 × 4 matrix | GPL-3.0 |
+| [py3dtiles](https://py3dtiles.org/) | LAS, LAZ, XYZ, CSV, PLY | 3D Tiles, `pnts` | Yes: multi-process, cached to disk | Octree | Reprojection on convert (the flags are in `py3dtiles convert --help`, not on the docs page read) | Apache-2.0 |
+| [gotiler](https://github.com/mfbonfigli/gotiler) (was gocesiumtiler) | LAS, LAZ (every version and point format), E57 (experimental), PLY | 3D Tiles 1.0 (`pnts`) or 1.1 (glTF, meshopt and quantization), optionally one `.3tz` | Yes: 313 M points (13 GB LAS) in 1 min 50 s at 605 MB peak on an `i4i.2xlarge`, per its README | Not documented | `-c EPSG:32633` input CRS | AGPL-3.0, a commercial licence offered |
+| [mago-3d-tiler](https://github.com/Gaia3D/mago-3d-tiler) | LAS, LAZ (and meshes, see [Tiling meshes](./meshes)) | `pnts` | Not documented; JVM heap | Not documented | `-c` EPSG, `-p` PROJ string, offsets | MPL-2.0 |
+| [Cesium ion](https://cesium.com/learn/3d-tiling/tiler-data-formats/) point cloud tiler | LAS, LAZ, PLY | 3D Tiles (content type not documented) | Hosted | Not documented | The location editor; Draco an upload option | Commercial; Self-Hosted lists point clouds among its tiling inputs |
+| [3d-tiles-tools](https://github.com/CesiumGS/3d-tiles-tools) | An existing 3D Tiles tileset | The same, upgraded | n/a | None: it does not tile | n/a | Apache-2.0 |
+
+Release and commit dates as GitHub showed them on 2026-11-13: PotreeConverter 2.1.5 (2026-09-23, last commit
+2026-11-02); Entwine 3.2.1 (2025-10-15); untwine 1.5.1 (2025-07-17, last commit 2026-11-12); gotiler v3.1.0
+(2026-11-09); pdal_wrench last commit 2026-07-01; py3dtiles 12.1.1 in its docs.
+
+## PotreeConverter 2
+
+`PotreeConverter.exe input.las -o out` writes the three-file Potree 2 octree in two passes, chunking then indexing,
+which is what makes it out of core (the paper behind it is "Fast Out-of-Core Octree Generation for Massive Point
+Clouds"; the README itself says nothing about memory). The flags of the `develop` branch, read from
+`Converter/src/main.cpp`:
+
+| Flag | Meaning |
+|---|---|
+| `-i`, `--source` | input file(s) |
+| `-o`, `--outdir` | output directory (default `<name>_converted` beside the input) |
+| `-p`, `--generate-page <name>`, `--title` | also write a ready-to-use Potree web page |
+| `--projection "<proj4>"` | the projection, written into `metadata.json` as it is given; the points are not reprojected |
+| `-m`, `--method poisson\|random` | the subsample of each node: Poisson-disk (default) keeps the spacing even, random is faster |
+| `--encoding BROTLI\|UNCOMPRESSED` | `octree.bin` encoding |
+| `--attributes` | the attributes written (the LAS attributes are read by default, with "arbitrary extra attributes" per the README) |
+| `--chunkdir`, `--keep-chunks`, `--compress-chunks`, `--no-chunking`, `--no-indexing`, `--stage` | the intermediate chunks and the passes to run |
+
+Three flags of the 1.x converter did not survive the rewrite and are worth knowing because old cheat sheets still
+carry them: `--scale` (the LAS coordinate scale, 0.001 m by default in LAS, raised to 0.0001 for a bas-relief
+scanned at a tenth of a millimetre), `-a`/`--output-attributes RGB INTENSITY CLASSIFICATION` with
+`--intensity-range min max`, and `--overwrite`. PotreeConverter 2 keeps what the LAS holds.
+
+```
+PotreeConverter.exe cloud.las -o cloud_potree -p index --projection "+proj=utm +zone=31 +datum=WGS84 +units=m +no_defs"
+PotreeConverter.exe cloud_with_normals.ply -o cloud_potree -p index
+```
+
+Two practical notes. **Intensity is a uint16**: LAS stores it in two bytes, so a scalar field (a cloud-to-cloud
+distance, a roughness) exported into the `Intensity` field has to be rescaled to 0 to 65 535 and named `Intensity`
+for the converter to keep it and Potree to colour by it. **Normals** have no standard home in LAS: the ASPRS
+discussion ([LAS#37](https://github.com/ASPRSorg/LAS/issues/37)) settled on extra bytes named `NormalX`, `NormalY`,
+`NormalZ`, which is what PDAL's `writers.las` writes with `extra_dims: "NormalX=float,NormalY=float,NormalZ=float"`;
+PLY carries them as `nx ny nz`, and CloudCompare reads the PLY names but not the LAS ones
+([CloudCompare#1848](https://github.com/CloudCompare/CloudCompare/issues/1848)). A cloud with normals is best handed
+to the converter as a binary PLY.
+
+## Entwine and EPT
+
+[Entwine](https://entwine.io/) (Hobu, LGPL) is the builder for the massive case: `entwine build -i cloud.laz -o out`
+indexes anything PDAL reads, from a file to a directory to a JSON list of S3 paths, losslessly, into an EPT folder,
+and its docs claim trillions of points. The options are a JSON configuration or flags of the same names: `tmp`,
+`threads` (a third for insertion, the rest for serialization, or `[2, 7]` explicitly), `reprojection` with `in`,
+`out` and `hammer: true` to override the file headers, `scale` (the offset is chosen automatically), `dataType`
+`laszip`, `binary` or `zstandard`, `span` (the voxels per node side, 256³ by default), `bounds`, `deep` (read every
+point rather than trust headers), `absolute` (doubles instead of scaled integers), `subset` with `id` and `of` (a
+power of 4) to split a build across machines, then `entwine merge` to join the subsets; `entwine info` reads the
+inputs beforehand. EPT is what Potree reads directly and what [ept-tools](https://github.com/connormanning/ept-tools)
+turns into 3D Tiles; it has been superseded in practice by COPC, which is the same octree in one file.
+
+## COPC: PDAL and untwine
+
+A COPC file is written by PDAL's `writers.copc` stage. It takes `filename`, `forward` (copy header fields, scale,
+offset and VLRs from the source LAS: `header`, `scale`, `offset`, `vlr` or `all`), `a_srs`, `scale_x/y/z` (0.01 by
+default, or `auto`) and `offset_x/y/z` (0, or `auto`), `extra_dims` (`all` to keep every non-standard dimension,
+normals included), `threads` (10), `pipeline` (write the running pipeline as a VLR) and `enhanced_srs_vlrs` (WKT2
+and PROJJSON). Whether the octree is built in memory is not documented. The one-liner, with PDAL choosing the
+writer from the `.copc.laz` suffix:
+
+```
+pdal translate cloud.las cloud.copc.laz
+pdal translate cloud.las cloud.copc.laz -f filters.reprojection --filters.reprojection.out_srs="EPSG:32631" --writers.copc.a_srs="EPSG:32631"
+```
+
+The same as a pipeline, which is how a global shift is applied without a precision loss (next section): a
+`filters.transformation` with a 4 × 4 matrix runs in double precision, so a PLY exported "shifted" by a
+photogrammetry suite becomes a georeferenced COPC in one pass, normals carried through `extra_dims`:
+
+```json
+[
+  { "type": "readers.ply", "filename": "cloud_shifted.ply" },
+  { "type": "filters.transformation",
+    "matrix": "1 0 0 452243.638 0 1 0 5411877.051 0 0 1 0.446 0 0 0 1" },
+  { "type": "writers.copc", "filename": "cloud.copc.laz", "a_srs": "EPSG:32631",
+    "extra_dims": "nx=float,ny=float,nz=float" }
+]
+```
+
+[untwine](https://github.com/hobuinc/untwine) (Hobu, GPL-3.0) is the dedicated builder for directories of files:
+`untwine -i tiles/ -o out.copc.laz`, with `--a_srs EPSG:2056`, `--dims` to load a subset of dimensions (X, Y, Z
+always), `--level` for the initial tiling level (chosen from the data when omitted), `--cube` (default) for cubic
+voxels, `--stats` to write summary statistics, `--no_srs` to skip the SRS VLRs, `--temp_dir`, `--threads`,
+`--buffer_size` and `--buffer_count`; its staging buffers go to temporary files when full, which is how it stays
+within memory. [pdal_wrench](https://github.com/PDAL/wrench) (Lutra, GPL-3.0) adds the batch layer: `build_vpc` to
+index a folder as a [VPC](../pointclouds/vpc), `translate` (format, CRS, matrix), `merge`, `tile`, `thin`, `clip`,
+`to_raster`, `density`, `boundary`, most of them multi-threaded per file, with `--vpc-output-format=copc` to have a
+derived VPC's files written as COPC (slower than LAZ, so LAZ for the intermediate steps).
+
+## 3D Tiles point tilers
+
+**py3dtiles** (Oslandia, Apache-2.0, 12.1.1): `py3dtiles convert cloud.las --out tiles` writes a `pnts` tileset
+from LAS, LAZ, XYZ, CSV or PLY, multi-process and out of core, with reprojection on the way; `py3dtiles merge`
+builds a meta-tileset over several, so a large site is converted in parts; `py3dtiles info` dumps a `pnts`. A
+Docker image is published. The flag list lives in `py3dtiles convert --help`, not on the docs page.
+
+**gotiler** (AGPL-3.0, v3.1.0), formerly gocesiumtiler: `gotiler -o out cloud.las` tiles LAS,
+LAZ, E57 (experimental) or PLY into 3D Tiles 1.0 `pnts` or 1.1 glTF with meshopt compression and quantization,
+`--join` merges a folder into one tileset, `--3tz` packs it, `-c EPSG:32633` names the input CRS, `--colorize
+z:viridis` colours by an attribute and `--preview` opens the result on a globe. Its README's benchmark (313 M
+points in 1 min 50 s at 605 MB peak, against 7 min 11 s and 2.56 GB for py3dtiles and 14 min 17 s and 16.81 GB for
+mago-3d-tiler) is the one published comparison of these tilers. How points are distributed across levels is not
+documented.
+
+**mago-3d-tiler** takes LAS and LAZ next to its mesh inputs and writes `pnts`; see [Tiling meshes](./meshes).
+**Cesium ion** accepts LAS, LAZ and PLY under its point cloud kind, with Draco as an upload option and the
+location editor for placement; the tiled archive can be downloaded, so ion can be used for conversion alone. Older
+routes, kept for reference only: [potree23dtiles](https://github.com/yeyan00/potree23dtiles) (a Potree octree to
+3D Tiles), [ept-tools](https://github.com/connormanning/ept-tools) (EPT to 3D Tiles),
+[entium](https://github.com/commaai/entium) and
+[cesium-point-cloud-generator](https://github.com/tum-gis/cesium-point-cloud-generator).
+
+**3d-tiles-tools** does not tile a cloud; it post-processes point tilesets: `upgrade --targetVersion 1.1` converts
+`pnts` content to glTF (a preview feature per its README), `convertPntsToGlb -i a.pnts -o a.glb` does one tile,
+`createTilesetJson` wraps a folder of `pnts` or GLB files into a tileset, `analyze` dumps one, and `mergeJson` /
+`merge` / `combine` join tilesets, see [Tiling meshes](./meshes#cesiumgs-3d-tiles-tools).
+
+## Where the georeference gets lost: the global shift
+
+Most georeferencing mistakes in a tiled cloud were made before the tiler ran, in CloudCompare. CloudCompare and
+OpenGL keep coordinates in 32-bit floats, which hold about seven significant digits: a UTM easting of 452 243.638 m
+has a centimetre left, a Lambert northing of 6 500 000 m less. So on import CloudCompare offers a **global shift**
+for coordinates above 10<sup>5</sup> (its docs: "It is strongly advised to shift/scale the entities in this case"),
+by default the first point's coordinates, and works in a local frame where `Plocal = (Pglobal + T) × S`. The shift
+is kept as metadata and restored on save "if the output file format allows for 64 bits values storage": a LAS
+export gets its double offsets back, a PLY written in float32 does not, and then the cloud is on its way to a tiler
+in the local frame with no trace of `T`. Edit > Edit global shift and scale shows and changes `T` for an entity.
+
+The same trap in the photogrammetry suites: RealityScan's "shifted project output" export subtracts a shift it
+writes only in a `.rcinfo` XML beside the file (`transformToModel`), Metashape's export shift is not saved
+anywhere. The safe recipes:
+
+- Export from the suite in its shifted frame (binary PLY, normals kept), then apply the shift as a double-precision
+  `filters.transformation` in PDAL on the way to COPC or LAS, as above. Everything stays in double until the LAS
+  offsets absorb it.
+- In CloudCompare, import the shifted PLY with the shift set to zero, then Edit > Edit global shift and scale and set
+  the shift to the **opposite** of the suite's offset without "Keep original positions fixed", and export to a
+  format with 64-bit storage (LAS, E57). The command line could not edit the shift until
+  [CloudCompare#1843](https://github.com/CloudCompare/CloudCompare/issues/1843) added `-SET_GLOBAL_SHIFT`; an
+  `-APPLY_TRANS` with the translation runs in float32 and leaves precision errors.
+- Old CloudCompare 2.12 builds wrote LAS 1.4 headers with a zero bounding box
+  ([CloudCompare#1845](https://github.com/CloudCompare/CloudCompare/issues/1845)); every tiler that trusts headers
+  (Entwine without `deep`, PotreeConverter) then tiles the cloud wrong. Use 2.13 or later.
+- Give the tiler the CRS by name (`--projection`, `a_srs`, `-c EPSG:`), and check the result on a globe over an
+  imagery layer before trusting it: this repository's viewer places a COPC by its VLR and a Potree octree by its
+  `metadata.json` projection, and a cloud a few hundred metres off is a shift that was applied twice or not at all.
+
+## Pointers
+
+- [PotreeConverter](https://github.com/potree/PotreeConverter), its `develop` `Converter/src/main.cpp` for the
+  flags; this repository's [Potree reader](../pointclouds/potree).
+- [Entwine](https://entwine.io/) and its [configuration](https://entwine.io/en/latest/configuration.html);
+  [EPT](https://entwine.io/en/latest/entwine-point-tile.html).
+- [COPC](https://copc.io/), PDAL [`writers.copc`](https://pdal.io/en/latest/stages/writers.copc.html) and
+  [`pdal translate`](https://pdal.io/en/latest/apps/translate.html), [untwine](https://github.com/hobuinc/untwine),
+  [pdal_wrench](https://github.com/PDAL/wrench); this repository's [COPC](../pointclouds/copc) and
+  [VPC](../pointclouds/vpc) readers.
+- [py3dtiles](https://py3dtiles.org/) and its [CLI](https://py3dtiles.org/v12.1.1/cli.html);
+  [gotiler](https://github.com/mfbonfigli/gotiler); [mago-3d-tiler](https://github.com/Gaia3D/mago-3d-tiler).
+- [CesiumGS/3d-tiles-tools](https://github.com/CesiumGS/3d-tiles-tools); [Cesium ion tiler data
+  formats](https://cesium.com/learn/3d-tiling/tiler-data-formats/).
+- [CloudCompare, Global Shift and Scale](https://www.cloudcompare.org/doc/wiki/index.php/Global_Shift_and_Scale);
+  [normals in LAS, ASPRS LAS#37](https://github.com/ASPRSorg/LAS/issues/37).

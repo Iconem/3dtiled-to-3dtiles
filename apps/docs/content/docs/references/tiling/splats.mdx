@@ -1,0 +1,166 @@
+---
+title: "Tiling Gaussian splats"
+description: "How a trained 3DGS scene (PLY, SPZ, SOG, LCC, LCC2, RAD, Splatter) becomes a streamable dataset with levels of detail: PlayCanvas splat-transform and streamed SOG, SuperSplat, XGRIDS LCC, Spark's RAD, the 3dgs-ply-3dtiles-converter npm package, Cesium ion, and this repository's converters to 3D Tiles with KHR_gaussian_splatting"
+---
+
+<InlineTOC items={toc} />
+
+> Status: a survey. Facts come from each project's README, docs and npm registry entry as read on 2026-11-13, and
+> from this repository's converters ([streamed SOG](../3dgs-splats/streamed-sog), [LCC2](../3dgs-splats/lcc2),
+> [RAD](../3dgs-splats/rad)). Where a project does not document a behaviour the table says "not documented".
+
+A trained Gaussian splat scene comes out of its optimizer as one PLY of 10<sup>6</sup> to 10<sup>8</sup> splats,
+62 floats each (position, scale, rotation, opacity, 48 spherical-harmonic coefficients), 250 bytes a splat: a city
+block of 50 M splats is 12 GB that no browser loads. Making it streamable is the same problem as for meshes and
+point clouds, with one twist. A coarse level is not a subsample: a splat that replaces ten has to grow to cover
+what they covered and take their blended colour, or the far view goes thin and dark. So each tool has a
+**simplification** (how a parent splat is made from its children), a **partition** (what a client culls and
+downloads), and a **container**. The containers in use:
+
+- **Streamed SOG** (PlayCanvas): `lod-meta.json` over a binary spatial tree whose leaves hold per-level runs into
+  chunk SOGs (WebP planes); see [streamed SOG](../3dgs-splats/streamed-sog) and [SOG](../3dgs-splats/sog).
+- **LCC2** (XGRIDS): a JSON manifest holding an N-ary tree of nodes with bounding boxes, over chunks in PLY, SPZ or
+  SOG; its predecessor **LCC** is a flat grid of units in `Index.bin` and `Data.bin`; see
+  [LCC2](../3dgs-splats/lcc2) and [LCC](../3dgs-splats/lcc).
+- **RAD** (Spark, World Labs): a per-splat LOD tree in 64K-splat chunks, optionally split into `.radc` files for
+  range requests; see [RAD](../3dgs-splats/rad).
+- **3D Tiles 1.1** with glTF tiles carrying [`KHR_gaussian_splatting`](../3dtiles-gltf/KHR_gaussian_splatting) and
+  the SPZ compression child extension: what CesiumJS, Cesium for Unreal and the 3D Tiles Renderer plugin for
+  three.js draw, and what this repository writes from every container above.
+- **Splatter** (Jakub Červený) is a hosted viewer with its own content-addressed chunks and a private library; it
+  is not a format a tool writes, see [Splatter](../3dgs-splats/splatter).
+
+## The tools
+
+| Tool | Input | Output | LOD method | Chunking | Compression | Licence |
+|---|---|---|---|---|---|---|
+| [splat-transform](https://github.com/playcanvas/splat-transform) `@playcanvas/splat-transform` 3.11.2 | PLY, compressed PLY, SOG, streamed SOG, SPZ, SPLAT, KSPLAT, LCC, LCC2, GLB (`KHR_gaussian_splatting`) | PLY, compressed PLY, SOG, streamed SOG, SPZ, GLB, CSV, HTML viewer | `--decimate-adaptive n%` merges neighbouring pairs by moment matching, allocated by local error; one PLY per level, tagged `-l <level>` and bundled | Binary spatial tree: `--lod-chunk-extent` (16 world units), `--lod-chunk-count` (512 K per leaf), `--lod-chunk-min`, `--lod-file-count` | SOG: quantized WebP planes, SH by k-means (`--sh-iterations`) | MIT |
+| [SuperSplat](https://github.com/playcanvas/supersplat) ([superspl.at/editor](https://superspl.at/editor)) | The formats splat-transform reads (its README lists none) | Per its README: "inspecting, editing, optimizing and publishing"; the export list is not in the README | Not documented in the README | n/a | SOG | MIT |
+| Spark [`build-lod`](https://sparkjs.dev/docs/lod-getting-started/) (`rust/build-lod` of [sparkjsdev/spark](https://github.com/sparkjsdev/spark)) | PLY (incl. compressed), SPZ, SPLAT, KSPLAT, SOG, ZIP of SOGs | `.rad`; with `--rad-chunked` a header `.rad` plus `.radc` chunks | `--quick` (tiny-lod) or `--quality` (bhatt-lod): a per-splat merge tree, each node one splat whose children refine it | Chunks of 64K splats ordered coarsest first; the spatial octree used to build them is not persisted | `--csplat` compact or `--gsplat` (default) encodings, `--max-sh` | MIT |
+| XGRIDS LCC Studio | XGRIDS's own captures (a PLY import is not documented) | LCC, LCC2, PLY, USD, 3D Tiles per the resellers' pages | LCC2: `lodSplats` per level, `totalLevels`, optional `virtualLoD` (`downsizeFactor`, `maxSplats`); the simplification is not documented | LCC2: an N-ary tree of nodes with `boundingBox`, adjacent same-level nodes merged into one file | Chunks in PLY, SPZ or SOG (`splatType`) | Proprietary software; the format under the XGRIDS White Paper License (attribution required) |
+| [`3dgs-ply-3dtiles-converter`](https://www.npmjs.com/package/3dgs-ply-3dtiles-converter) 0.6.5 (Yuzhi "William" Liu) | 3DGS PLY, GraphDECO or KHR convention (`--input-convention`) | 3D Tiles: `tileset.json`, `tiles/{level}/{x}.glb` with `KHR_gaussian_splatting` + `KHR_gaussian_splatting_compression_spz_2` through `3DTILES_content_gltf`, `build_summary.json` | Simplified parent tiles ("instead of only dropping points"; the method is in its `Splat-Simplify.md`), `--sampling-rate-per-level` 0.5, `--max-depth`, `--lod-multiplier`, `--geometric-error-layer-multiplier`, `--geometric-error-scale`; merged opacity above 1 carried by an experimental `EXT_splat_opacity` | An "adaptive tile tree", `--max-leaf-limit` 50 000 splats, `--min-leaf-limit`, `--obb` or `--aabb` | SPZ in the GLB; `--sh 3` keeps the bands; `--opacity-filter` 0.05 | Apache-2.0 |
+| [GaussForge](https://github.com/3dgscloud/GaussForge) (`@gaussforge/wasm`, `gaussforge` on PyPI) | PLY, compressed PLY, SPZ, SPLAT, KSPLAT, SOG | The same six formats | None: a lossless format converter (`gfconvert in.ply out.spz`) | None | Each format's own | Apache-2.0 |
+| [Cesium ion](https://community.cesium.com/t/clarification-of-3dgs-support-status/42019) | 3DGS PLY | 3D Tiles 1.1 with `KHR_gaussian_splatting` | Hierarchical LOD since April 2026 per trade press; the method is not documented; the whole path is "experimental" per Cesium | Not documented | SPZ | Commercial |
+| This repository (`sog-to-3dtiles`, `lcc-to-3dtiles`, `rad-to-3dtiles`) | Streamed SOG, LCC, LCC2, RAD | 3D Tiles 1.1, GLB tiles with `KHR_gaussian_splatting` + `_compression_spz_2`, live through `/stream` (SOG, LCC2) or `/convert` (RAD) | None of its own: the source's levels, collapsed per level under a splat budget (SOG) or the tree as it stands (LCC2) | The source's leaves and runs | SPZ v2 blob per tile; SH above degree 0 dropped | MIT |
+
+Release and commit dates as GitHub and npm showed them on 2026-11-13: splat-transform v3.11.2 (2026-11-12);
+SuperSplat last commit 2026-11-12; Spark last commit 2026-10-20, CDN build 2.4.0; `3dgs-ply-3dtiles-converter`
+0.6.5 published 2026-08-31 (first 0.6.1 on 2026-04-16); GaussForge last commit 2026-05-25; LCC2 white paper 0.0.3,
+last commit 2026-06-16.
+
+## splat-transform and streamed SOG
+
+[splat-transform](https://github.com/playcanvas/splat-transform) (PlayCanvas, MIT, `npm install -g
+@playcanvas/splat-transform`) is the CLI the rest of this page keeps coming back to: it reads every splat
+container in use, including LCC and LCC2 and a GLB with `KHR_gaussian_splatting`, and writes PLY, SOG, SPZ, GLB
+and the streamed SOG bundle. Its actions run in order on one invocation: `-t x,y,z` translate, `-r x,y,z` rotate
+(Euler degrees), `-s` scale, `-N` drop NaNs, `-V name,cmp,value` filter by a property, `-H n` drop the SH bands above
+`n`, `-d n|n%` decimate, `--decimate-adaptive n|n%`, `-m` Morton order, `-l n` tag the splats with an LOD level;
+`-g` picks the GPU (or `cpu`), `--scratch-dir` holds the decimation intermediates, `-w` overwrites.
+
+Three of them make a scene streamable. **`--decimate-adaptive`** is the simplification: rather than dropping every
+other splat it merges neighbouring pairs by moment matching, allocating the removals by local error, so a flat wall
+thins out first and a carved lintel keeps its detail, and a merged splat grows to cover what it replaced. **`-l`**
+tags a PLY as one level, and a list of tagged PLYs written to a `lod-meta.json` is the bundling step, where
+**`--lod-chunk-extent`**, **`--lod-chunk-count`**, **`--lod-chunk-min`** and **`--lod-file-count`** decide what a
+leaf is (what a viewer culls and picks one level of) and what a file is (what it downloads whole). The levels are
+built by chaining: each one is 50 % of the previous, not of the source. The full recipe, the numbers of a 174 M
+scene and the script that runs it end to end into 3D Tiles are on [Producing a streamed SOG](./streamed-sog-recipe).
+
+[SuperSplat](https://superspl.at/editor) (MIT) is the browser editor on top of the same library: crop, clean,
+transform and publish a scene; its README does not list the formats it imports or exports and says nothing of a
+LOD export, so a bundle is made on the command line.
+
+## This repository: the containers to 3D Tiles
+
+The converters here do not simplify; they take a container that already holds levels and write the tree 3D
+Tiles wants, with one GLB per tile carrying the splats as an SPZ v2 blob in
+[`KHR_gaussian_splatting_compression_spz_2`](../3dtiles-gltf/KHR_gaussian_splatting#compression-extension-khr_gaussian_splatting_compression_spz_2),
+the pair CesiumJS draws (the base extension is ratified, the compression child is still a pull request, see
+[the status of the family](../3dtiles-gltf/KHR_gaussian_splatting#status-of-the-family-checked-2026-11-12)).
+
+- **Streamed SOG** (`sog-to-3dtiles`, `/stream?format=sog`): by default the tree is collapsed per LOD level under
+  a splat budget, each level a set of tiles that replace the level above; when the coarsest level alone is over the
+  budget the root carries a preview of it, every stride-th splat enlarged by √stride. `--splat-budget 0` maps the
+  bundle's own tree 1:1 and honours its per-leaf errors. See [streamed SOG](../3dgs-splats/streamed-sog#mapping-to-3d-tiles-this-repos-sog-to-3dtiles).
+- **LCC2** (`lcc-to-3dtiles`, `/stream?format=lcc2`): the manifest's tree is a 3D Tiles tree as it stands, a node
+  a tile, a `data.3dgs` run its content, the geometric error 5 % of the scene diagonal at depth 1 and halved below;
+  a chunk is decoded once and every tile of it cut from the decoded table. LCC v1's grid of units is tiled the same
+  way per cell. See [LCC2](../3dgs-splats/lcc2#mapping-to-3d-tiles).
+- **RAD** (`rad-to-3dtiles`, `/convert`): RAD persists neither tile bounds nor the spatial partition its chunks
+  were built with, so the converter reconstructs an octree over the chunks, takes a chunk's leaf-most splats as a
+  tile and anchors one geometric error per depth; see [RAD](../3dgs-splats/rad), which also records why the
+  per-splat tree cannot be carried into 3D Tiles.
+
+Every path drops the SH bands above degree 0, which is what the viewers draw and what the compression carries
+well; a scene that needs view-dependent colour stays in its own container.
+
+## 3dgs-ply-3dtiles-converter
+
+The one npm package that builds a 3D Tiles tileset with levels of detail from a plain PLY is
+[`3dgs-ply-3dtiles-converter`](https://www.npmjs.com/package/3dgs-ply-3dtiles-converter) by Yuzhi Liu, who posts
+as William Liu (Apache-2.0, 0.6.5 on 2026-08-31, Node 18+): `npx 3dgs-ply-3dtiles-converter scene.ply out/`
+writes `tileset.json` and `tiles/{level}/{x}.glb`, SPZ-compressed, over an adaptive tile tree whose parents are
+**simplified** splats rather than subsamples (its `Splat-Simplify.md` describes the method; the Cesium forum
+announcement of 2026-05-07 calls the level selection "voxel-based"), with `--sampling-rate-per-level 0.5`,
+`--max-leaf-limit 50000`, `--max-depth auto`, a geometric-error curve (`--lod-multiplier high`,
+`--geometric-error-layer-multiplier 1.0`, `--geometric-error-scale 1.0`, `--min-geometric-error`), placement by
+`--coordinate [lat,long,height]` or a `--transform`, `--obb`/`--aabb` bounds, `--memory-budget 4` GB with a
+`--tmp-dir` workspace and `--continue` from its checkpoints, `--sh 3`, `--opacity-filter 0.05`, and
+`--input-convention graphdeco|khr`. A merged splat whose opacity exceeds 1 is written through an experimental
+`EXT_splat_opacity` (version 2 data, `--no-ext-splat-opacity` to disable); a `simplify` subcommand writes a reduced
+PLY instead of tiles. Its companions by the same author are
+[3D-Tiles-RendererJS-3DGS-Plugin](https://github.com/WilliamLiu-1997/3D-Tiles-RendererJS-3DGS-Plugin) (Apache-2.0,
+last commit 2026-11-12), which draws such tilesets in three.js through Spark, and `3dtiles-inspector`, a local tool
+to align, crop and tune a tileset's errors. The geometric-error model of this repository's RAD path, one error per
+depth so siblings refine together, was calibrated against its `tiling/geometric-error.js`
+([RAD](../3dgs-splats/rad)). The GitHub repository the package names,
+`github.com/WilliamLiu-1997/3DGS-PLY-3DTiles-Converter`, answered 404 on 2026-11-13; the npm package, its README on
+jsdelivr and the forum post are the sources here.
+
+## Spark build-lod and RAD
+
+Spark (World Labs, MIT) builds its [RAD](../3dgs-splats/rad) files with `build-lod`, a Rust program in the
+repository's `rust/build-lod` run as `npm run build-lod -- scene.ply more.spz --quality` from a clone (whether the
+npm package ships it is not stated); each input gets a `-lod.rad`. `--quick` is the fast tiny-lod method,
+`--quality` the slower bhatt-lod one "recommended for offline LoD tree building and streaming", `--csplat` or
+`--gsplat` (default) the encoding, `--max-sh` the SH bands, `--rad-chunked` the streaming layout of a header
+`.rad` and `.radc` chunks loaded with `paged: true`. The result is a per-splat merge tree, one node one splat,
+chunked by feature size rather than by space, which is why it reads well in Spark and maps poorly to tiles.
+
+## XGRIDS LCC and LCC2
+
+XGRIDS's scanners (Lixel L2 Pro, K1) produce LCC through LCC Studio, whose export list per its resellers' pages is
+LCC, LCC2, PLY, USD and 3D Tiles (the tiers that include PLY and 3D Tiles differ between pages). The
+[LCC2 white paper](https://github.com/xgrids/LCC2Whitepaper) (0.0.3) documents the container, an N-ary tree with
+`lodSplats` per level and chunks in PLY, SPZ or SOG, but not how a level is made; a public converter from a
+third-party PLY into LCC2 is not documented, and splat-transform reads LCC and LCC2 but does not write them. The
+white paper's licence requires the attribution "Data Organization Format originated from XGRIDS" in a visible
+interface and forbids training competing models on it.
+
+## Cesium ion
+
+Cesium ion accepts a 3DGS PLY and returns a 3D Tiles 1.1 tileset with `KHR_gaussian_splatting`; Cesium calls the
+path experimental ("certain aspects of that support may still change"), the trade press reports hierarchical LOD
+across ion, CesiumJS and Cesium for Unreal since April 2026, and neither the simplification nor the partition is
+documented. The tileset can be downloaded, so ion can be used for conversion alone, as for meshes and point
+clouds.
+
+## Pointers
+
+- [splat-transform](https://github.com/playcanvas/splat-transform), the [streamed SOG
+  format](https://developer.playcanvas.com/user-manual/gaussian-splatting/formats/streamed-sog/) and
+  [splat-transform#310](https://github.com/playcanvas/splat-transform/issues/310), where the chained recipe was
+  settled; [SuperSplat](https://github.com/playcanvas/supersplat).
+- [Spark](https://github.com/sparkjsdev/spark) and its [LOD getting started](https://sparkjs.dev/docs/lod-getting-started/).
+- [LCC2 white paper](https://github.com/xgrids/LCC2Whitepaper), [LCC white paper](https://github.com/xgrids/LCCWhitepaper).
+- [`3dgs-ply-3dtiles-converter`](https://www.npmjs.com/package/3dgs-ply-3dtiles-converter) on npm and the
+  [Cesium forum announcement](https://community.cesium.com/t/gaussian-splats-ply-to-3d-tiles-converter/46126);
+  [3D-Tiles-RendererJS-3DGS-Plugin](https://github.com/WilliamLiu-1997/3D-Tiles-RendererJS-3DGS-Plugin).
+- [GaussForge](https://github.com/3dgscloud/GaussForge).
+- [`KHR_gaussian_splatting`](../3dtiles-gltf/KHR_gaussian_splatting) and the
+  [extension lineage](../3dtiles-gltf/3dgs-extension-lineage); Cesium's
+  [clarification of 3DGS support status](https://community.cesium.com/t/clarification-of-3dgs-support-status/42019).
+- This repository's [streamed SOG](../3dgs-splats/streamed-sog), [SOG](../3dgs-splats/sog),
+  [LCC2](../3dgs-splats/lcc2), [LCC](../3dgs-splats/lcc), [RAD](../3dgs-splats/rad), [SPZ](../3dgs-splats/spz) and
+  [Splatter](../3dgs-splats/splatter) pages, and the recipe on [Producing a streamed SOG](./streamed-sog-recipe).

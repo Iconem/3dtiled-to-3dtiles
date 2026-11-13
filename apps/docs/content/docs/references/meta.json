@@ -2,6 +2,7 @@
   "pages": [
     "index",
     "3dtiles-gltf",
+    "tiling",
     "pointclouds",
     "mesh-generic",
     "3dgs-splats",

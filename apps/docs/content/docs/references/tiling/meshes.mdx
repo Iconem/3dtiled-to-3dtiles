@@ -6,8 +6,8 @@ description: "How a photogrammetry mesh of 0.1 to 10 billion triangles and gigab
 <InlineTOC items={toc} />
 
 > Status: a survey, not a converter of this repository. Facts come from each project's README, docs and source
-> on GitHub as read on 2026-11-13, and from the tilesets this repository reads (see [OSGB](./osgb) and
-> [Nexus](./nexus)). Where a project does not document a behaviour the table says "not documented"; no number
+> on GitHub as read on 2026-11-13, and from the tilesets this repository reads (see [OSGB](../mesh-generic/osgb) and
+> [Nexus](../mesh-generic/nexus)). Where a project does not document a behaviour the table says "not documented"; no number
 > here was measured by us unless it says so.
 
 A photogrammetry mesh out of Metashape, RealityScan or iTwin Capture is one surface of 10<sup>8</sup> to 10<sup>10</sup>
@@ -58,7 +58,7 @@ hundred million triangles has to be exported that way, or as OBJ or PLY, to be a
 | Tool | Structure | Leaf size | Configurable |
 |---|---|---|---|
 | rusty-tiles | Octree, written as a 3D Tiles 1.1 implicit forest | At most 8 192 triangles per leaf, exact source triangles | No: `mesh` has no `--leaf-triangles`, tile-size or error option by design; `--profile` is the only knob |
-| nxsbuild | Batched multi-triangulation: each level is one mesh of the whole model cut into patches (nodes) along boundaries the next level does not share, a DAG rather than a tree (see [Nexus](./nexus#the-tree)) | `-f` faces per patch, default 32 768 (1 000 to 65 535); `-t` triangles in the top node, default 4 096; `-a` adaptive split 0 to 1, default 0.333 | Yes |
+| nxsbuild | Batched multi-triangulation: each level is one mesh of the whole model cut into patches (nodes) along boundaries the next level does not share, a DAG rather than a tree (see [Nexus](../mesh-generic/nexus#the-tree)) | `-f` faces per patch, default 32 768 (1 000 to 65 535); `-t` triangles in the top node, default 4 096; `-a` adaptive split 0 to 1, default 0.333 | Yes |
 | mago-3d-tiler | Not documented (a tree with `-nl`/`-xl` minimum and maximum LOD; `-tm` explicit or implicit tiling, experimental) | `-mx` maximum triangles per node | Yes |
 | Obj2Tiles | Recursive binary splits along X and Y, and Z with `-z`; `-d`/`--divisions` is the depth, so 4<sup>d</sup> tiles (8<sup>d</sup> with Z); split plane by vertex barycentre, absolute centre, global bounding or vertex median | Follows from the division count | Yes |
 | py3dtiles | Octree (point clouds) | Point budget per node | Yes, for points |
@@ -97,7 +97,7 @@ instead, and its coarse levels tend to look worse than a rebaked pyramid.
 | Tool | Leaves | Coarse levels | Texel budget | Encoding |
 |---|---|---|---|---|
 | rusty-tiles | Cropped: a leaf keeps only the source regions its triangles need, as aligned crops with gutters and per-level mips; a leaf whose UVs span a whole repeat period keeps that axis whole | Rebaked: fresh planar charts on the decoded parent surface, packed by shape into one page; each texel samples the nearest captured source point in linear light; base colour, emissive, metallic-roughness and occlusion are resampled, normal maps re-expressed in the new tangent frame | A page is at most 1 024 texels a side; a tile's pages hold about 2<sup>20</sup> texels per slot, shared among its materials; texel spacing `max(1.25 × G / 16, source spacing)` | KTX2: UASTC for leaves and ETC1S for coarse pages in `balanced`, UASTC everywhere in `quality`, PNG in `lossless`; every lossy page is decoded and checked against PSNR floors, re-encoded a step stronger when it misses, PNG as a last resort |
-| nxsbuild | Cropped and repacked per node into one JPEG (`-q` quality, default 95; `-O` keeps the original textures, deprecated) | Same source parametrization, source regions downscaled with the level; nothing is re-projected. `-F` weighs texels into the node size (default 0.05), `-H` skips the abort predicted for a "fragmented parametrization", which is the case cropping handles worst | Per node, from `-f` and `-F` | JPEG inside the `.nxs`; textures are passed through unchanged by this repository's reader (see [Nexus](./nexus#the-tile)) |
+| nxsbuild | Cropped and repacked per node into one JPEG (`-q` quality, default 95; `-O` keeps the original textures, deprecated) | Same source parametrization, source regions downscaled with the level; nothing is re-projected. `-F` weighs texels into the node size (default 0.05), `-H` skips the abort predicted for a "fragmented parametrization", which is the case cropping handles worst | Per node, from `-f` and `-F` | JPEG inside the `.nxs`; textures are passed through unchanged by this repository's reader (see [Nexus](../mesh-generic/nexus#the-tile)) |
 | mago-3d-tiler | Not documented (a texture atlas per node is built; the method is not described) | Not documented | Not documented | `-tcp ktx2` or none |
 | Obj2Tiles | Repacked per split part with MaxRects bin packing of the used regions; `-k`/`--keeptextures` keeps the originals ("not recommended") | Same repacking on the decimated mesh, pages downscaled by `--lod-texture-scale` | Not documented | JPEG/PNG as the source |
 | py3dtiles | Not documented for meshes | n/a | n/a | n/a |
@@ -109,7 +109,7 @@ instead, and its coarse levels tend to look worse than a rebaked pyramid.
 | Tool | Content | 3D Tiles version | Tree | Archive | Compression | Georeference |
 |---|---|---|---|---|---|---|
 | rusty-tiles | glTF 2.0 (GLB) with `EXT_mesh_features` feature IDs per triangle (source primitive and triangle), `KHR_mesh_quantization`, octahedral normals | 1.1 | Implicit tiling (octree subtrees) | `.3tz` only; no folder output | `EXT_meshopt_compression` always, KTX2 as above | `--anchor lon lat h` with `--orientation-xyzw`, or `--source-crs EPSG:… --source-offset E N A` (WGS84, UTM, Web Mercator in the standard build; other CRSs in the GDAL/PROJ build). Local metres otherwise |
-| nxsbuild | `.nxs`, `.nxz` after `nxcompress` (Corto), not 3D Tiles; this repository's converter writes GLB per node and a tileset, see [Nexus](./nexus) | 1.1 (through the converter) | Explicit, DAG cut by level | Folder | Corto in `.nxz`; none in the GLBs | None in the format; `&lon=&lat=` placement in the converter |
+| nxsbuild | `.nxs`, `.nxz` after `nxcompress` (Corto), not 3D Tiles; this repository's converter writes GLB per node and a tileset, see [Nexus](../mesh-generic/nexus) | 1.1 (through the converter) | Explicit, DAG cut by level | Folder | Corto in `.nxz`; none in the GLBs | None in the format; `&lon=&lat=` placement in the converter |
 | mago-3d-tiler | b3dm, i3dm, pnts (`-ot`); GLB only through the deprecated `-glb` | `-tv 1.0` or `1.1`, default 1.1 | Explicit, implicit experimental (`-tm`) | Folder | `-mcp none/quantize/draco`, `-tcp ktx2` | `-c`/`--crs` (default 3857), `-p` PROJ string, `-xo -yo -zo` offsets, `-ge` geoid, `-te` terrain |
 | Obj2Tiles | b3dm, or GLB with `--glb` | 1.1 when `--glb` is set; the b3dm case is not documented | Explicit | Folder, or one `.3tz` with `--3tz` | None documented | `--lat --lon --alt`; `--local` for no placement; the default is a point in Milan |
 | py3dtiles | pnts (point clouds); b3dm for the geometries it handles | Not documented | Explicit | Folder | None | From the file's CRS |
@@ -123,7 +123,7 @@ Release and commit dates are what GitHub showed on 2026-11-13.
 | Tool | Largest input stated | Language | Licence | Platforms | Last release / activity |
 |---|---|---|---|---|---|
 | [rusty-tiles](https://github.com/BenDyson-Arch/rusty-tiles) | An 828 M-triangle untextured mesh in issue #344; a 24 M-triangle textured scene in the docs | Rust, Python wheel | MIT (vendored Basis Universal Apache-2.0, Zstandard BSD-3-Clause) | Linux x64/ARM64 (glibc 2.35+), macOS 15+, Windows x64; a Linux container for the GDAL/PROJ build | v0.4.0, 2026-11-12 |
-| [Nexus](https://github.com/cnr-isti-vclab/nexus) | Tens of millions of triangles in practice (the 52 M-triangle bust in [Nexus](./nexus#datasets)) | C++ (Qt, VCG) | GPL; the JavaScript parts MIT | Linux, Windows, macOS from source | No releases; last commit 2026-09-27 |
+| [Nexus](https://github.com/cnr-isti-vclab/nexus) | Tens of millions of triangles in practice (the 52 M-triangle bust in [Nexus](../mesh-generic/nexus#datasets)) | C++ (Qt, VCG) | GPL; the JavaScript parts MIT | Linux, Windows, macOS from source | No releases; last commit 2026-09-27 |
 | [mago-3d-tiler](https://github.com/Gaia3D/mago-3d-tiler) | Not documented | Java (JDK 25) | MPL-2.0, a commercial licence offered | JVM; Docker image `gaia3d/mago-3d-tiler` | v1.16.4, 2026-10-23 |
 | [Obj2Tiles](https://github.com/OpenDroneMap/Obj2Tiles) | Not documented | C# (.NET 10) | AGPL-3.0 | Windows, Linux, macOS binaries | v1.9.0, 2026-11-01 |
 | [py3dtiles](https://gitlab.com/py3dtiles/py3dtiles) | Point clouds of billions of points | Python | Apache-2.0 | pip, Docker | v12.1.1 (docs) |
@@ -158,7 +158,7 @@ one `.nxs`; `nxcompress` makes the `.nxz` (about 90 % smaller, Corto). Textures 
 JPEG (`-q 95`), never re-projected, and the build aborts on a "fragmented parametrization" unless `-H` is given,
 which is the cropping failure mode described above. Its strength is the DAG: every level is a complete, crack-free
 mesh, so a viewer can mix levels per node by distance. It is not 3D Tiles. This repository reads `.nxs`/`.nxz`
-directly and writes a tileset from the DAG, by level or by path, see [Nexus](./nexus). GPL (Qt and VCG), C++.
+directly and writes a tileset from the DAG, by level or by path, see [Nexus](../mesh-generic/nexus). GPL (Qt and VCG), C++.
 
 ## mago-3d-tiler
 
@@ -194,7 +194,7 @@ shipped. Version 12.1.1 in the docs.
 
 [fanvanzh/3dtiles](https://github.com/fanvanzh/3dtiles) does not build an HLOD; it converts one that exists.
 `_3dtile -f osgb -i Data/ -o out -c '{"x":120,"y":30,"offset":0,"max_lvl":20,"pbr":true}'` walks a ContextCapture,
-Smart3D or DJI Terra OSGB dataset (see [OSGB](./osgb)) and writes one b3dm per `.osgb` file, keeping the producer's
+Smart3D or DJI Terra OSGB dataset (see [OSGB](../mesh-generic/osgb)) and writes one b3dm per `.osgb` file, keeping the producer's
 `PagedLOD` tree, textures and ranges, with optional meshoptimizer simplification (`--enable-simplify`), Draco and
 KTX2 (`--enable-texture-compress`). Rust around the OpenSceneGraph C++ reader, Apache-2.0, binaries for Linux,
 Windows and macOS. The 3D Tiles version written is not documented (b3dm content). Last commit 2026-04-13.
@@ -261,7 +261,7 @@ project with a few aligned photos, then export it as 3D Tiles with the suite's s
   Tiles, b3dm. If large triangles come out untextured in the tiles, raise "Large Triangle Removal Threshold" or
   lower "Maximum node triangle count" from its default 10 000 to about 1 000.
 - **Bentley iTwin Capture Modeler** (ContextCapture): exports 3D Tiles, 3MX and OSGB from the same reconstruction;
-  the OSGB and 3MX trees are what [OSGB](./osgb) reads.
+  the OSGB and 3MX trees are what [OSGB](../mesh-generic/osgb) reads.
 - **Cesium ion**: upload a mesh (OBJ, FBX, glTF…), the 3D Photogrammetry Model Tiler returns a tileset that can be
   downloaded as an archive, so ion can be used for conversion alone; storage and streaming are the priced part.
   **Cesium ion Self-Hosted** ships the same tilers on Kubernetes or as plain container images for air-gapped sites,
@@ -275,7 +275,7 @@ Public, freely downloadable textured meshes large enough to exercise a tiler. Ea
 
 | Dataset | Formats | Size | Terms | Link |
 |---|---|---|---|---|
-| Hong Kong Planning Department, 3D Photo-realistic Model (Hong Kong Island and Kowloon, aerial photos 2017 and 2018) | OSGB, OBJ, Cesium 3D Tiles, each listed by a grid-index CSV of 2 150 tiles of 250 m | 467.2 GB of OSGB zips, measured here by `HEAD` on 2026-11-11, of the order of 10 G vertices (see [OSGB](./osgb#a-city-in-zips-hong-kong)) | DATA.GOV.HK terms, commercial reuse allowed | [data.gov.hk](https://data.gov.hk/en-data/dataset/hk-pland-pland1-3d-photo-realistic-model); the files are on `pdmap.pland.gov.hk`, whose host sends a header `fetch` refuses |
+| Hong Kong Planning Department, 3D Photo-realistic Model (Hong Kong Island and Kowloon, aerial photos 2017 and 2018) | OSGB, OBJ, Cesium 3D Tiles, each listed by a grid-index CSV of 2 150 tiles of 250 m | 467.2 GB of OSGB zips, measured here by `HEAD` on 2026-11-11, of the order of 10 G vertices (see [OSGB](../mesh-generic/osgb#a-city-in-zips-hong-kong)) | DATA.GOV.HK terms, commercial reuse allowed | [data.gov.hk](https://data.gov.hk/en-data/dataset/hk-pland-pland1-3d-photo-realistic-model); the files are on `pdmap.pland.gov.hk`, whose host sends a header `fetch` refuses |
 | Hong Kong Lands Department, 3D Visualisation Map (tile-based models): the territory-wide mesh from oblique images | OSGB (per the data.gov.hk resource listing) | Not documented | CSDI terms | [CSDI portal](https://portal.csdi.gov.hk/csdi-webpage/dataset/landsd_rcd_1671677054006_62261) |
 | Helsinki 3D mesh (City of Helsinki, aerial survey) | OBJ, 3MX | Not documented | CC BY 4.0 | [hel.fi](https://www.hel.fi/en/decision-making/information-on-helsinki/maps-and-geospatial-data/helsinki-3d) |
 | City of Melbourne 3D Textured Mesh (Photomesh) 2018, 7.5 cm GSD | OBJ + MTL + JPG, KML tile index | 9.7 GB zip | City of Melbourne data policy | [data.melbourne.vic.gov.au](https://data.melbourne.vic.gov.au/explore/dataset/city-of-melbourne-3d-textured-mesh-photomesh-2018/information/) |
@@ -284,7 +284,7 @@ Public, freely downloadable textured meshes large enough to exercise a tiler. Ea
 Not textured meshes, though often cited with them: swisstopo's 3D Tiles (`ch.swisstopo.swissbuildings3d.3d`,
 b3dm buildings, at [3d.geo.admin.ch](https://docs.geo.admin.ch/visualize-data/3d-tiles.html)) and New York City's
 3D building model are untextured building models. Nexus has four public `.nxz` scans of up to 52 M triangles, listed
-on the [Nexus](./nexus#datasets) page, small for a tiler but textured.
+on the [Nexus](../mesh-generic/nexus#datasets) page, small for a tiler but textured.
 
 ## Pointers
 
@@ -295,11 +295,11 @@ on the [Nexus](./nexus#datasets) page, small for a tiler but textured.
 - [zeux/meshoptimizer](https://github.com/zeux/meshoptimizer): the simplifier behind rusty-tiles, fanvanzh/3dtiles
   and glTF-Transform's `simplify`.
 - [Nexus](https://github.com/cnr-isti-vclab/nexus) and [3DHOP](https://3dhop.net/); this repository's
-  [Nexus reader](./nexus).
+  [Nexus reader](../mesh-generic/nexus).
 - [Gaia3D/mago-3d-tiler](https://github.com/Gaia3D/mago-3d-tiler).
 - [OpenDroneMap/Obj2Tiles](https://github.com/OpenDroneMap/Obj2Tiles).
 - [py3dtiles](https://py3dtiles.org/) and its [GitLab](https://gitlab.com/py3dtiles/py3dtiles).
-- [fanvanzh/3dtiles](https://github.com/fanvanzh/3dtiles); this repository's [OSGB reader](./osgb).
+- [fanvanzh/3dtiles](https://github.com/fanvanzh/3dtiles); this repository's [OSGB reader](../mesh-generic/osgb).
 - [Kitware, 3D Tiles generation using VTK](https://www.kitware.com/3d-tiles-generation-using-vtk/).
 - [CesiumGS/3d-tiles-tools](https://github.com/CesiumGS/3d-tiles-tools), the `mergeJson` discussion in
   [issue #119](https://github.com/CesiumGS/3d-tiles-tools/issues/119) and the processor pattern in

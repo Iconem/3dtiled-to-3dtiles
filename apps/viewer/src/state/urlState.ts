@@ -39,6 +39,13 @@ const urlStateParsers = {
   // The camera: `lon,lat,height,heading,pitch,roll` (lib/cameraPose.ts), kept up to date as it moves, so a link opens
   // on the same view and a switch between two globes (Bing 3D, Google 3D) lands on the same place.
   view: parseAsString.withDefault(''),
+  // The side panel's settings, so a link opens with the same controls, imagery, terrain, debug view and ground snap
+  // (lib/urlSettings.ts keeps them and the store in step). Empty = the store's default, and left out of the URL.
+  controls: parseAsString.withDefault(''),
+  imagery: parseAsString.withDefault(''),
+  terrain: parseAsString.withDefault(''),
+  debug: parseAsString.withDefault(''),
+  zauto: parseAsString.withDefault(''),
 };
 
 /** One hook, one URL sync — everything in the "shareable" slice. */

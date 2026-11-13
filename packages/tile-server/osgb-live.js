@@ -45,6 +45,7 @@
  * a mesh is written (x, z, −y) (mesh-tile.js). `metadata.xml` gives the root transform: `ENU:lat,lon` is an east-north-up
  * frame at that point, `EPSG:n` (or WKT) a projected CRS placed through core/geo.js, both offset by `SRSOrigin`.
  */
+import { pathKey, pathOfKey } from './path-key.js';
 import path from 'node:path';
 import fs from 'node:fs/promises';
 import proj4 from 'proj4';
@@ -338,12 +339,12 @@ async function fileTiles(ctx, relPath, masterUrl) {
     const tile = { boundingVolume: { sphere: bs }, geometricError: ge, refine: 'REPLACE' };
     // Absolute URIs: a fragment is served at /stream/tileset.json or nested under /stream/osgb/node/…, and a relative
     // "tile/…" would resolve against the fragment's own path (the same as threemx-live.js).
-    if (u.meshes.length) tile.content = { uri: `/stream/tile/${encodeURIComponent(relPath)}__${i}.glb?url=${enc}&format=osgb` };
+    if (u.meshes.length) tile.content = { uri: `/stream/tile/${pathKey(relPath)}__${i}.glb?url=${enc}&format=osgb` };
     // The finer file is another tileset. Its tile here has the bounding sphere and the error of this one, and the
     // fragment answers with a root that has them too (&ge, &bs), so that it is refined exactly when this tile is.
     if (u.files.length) tile.children = u.files.map((f) => ({
       boundingVolume: { sphere: bs }, geometricError: ge, refine: 'REPLACE',
-      content: { uri: `/stream/osgb/node/${encodeURIComponent(joinRel(relDir, f))}.json?url=${enc}&ge=${ge}&bs=${bs.join(',')}${u.meshes.length ? `&from=${encodeURIComponent(`${encodeURIComponent(relPath)}__${i}`)}` : ''}` },
+      content: { uri: `/stream/osgb/node/${pathKey(joinRel(relDir, f))}.json?url=${enc}&ge=${ge}&bs=${bs.join(',')}${u.meshes.length ? `&from=${encodeURIComponent(`${pathKey(relPath)}__${i}`)}` : ''}` },
     }));
     return tile;
   });
@@ -424,11 +425,11 @@ async function buildUnitGlb(ctx, relPath, unitIdx) {
 }
 
 // Pure builders for the /stream dispatcher.
-export const osgbTileRe = /^.+__\d+$/;                       // <encodeURIComponent(relPath)>__<unit>
+export const osgbTileRe = /^.+__\d+$/;                       // <pathKey(relPath)>__<unit> (path-key.js: a slash is `~`)
 export async function osgbTileset(url) { return isCollectionUrl(url) ? buildCollection(url) : buildRoot(await getCtx(url), url); }
 export async function osgbTile(url, key) {
   const us = key.lastIndexOf('__');
-  return buildUnitGlb(await getCtx(url), decodeURIComponent(key.slice(0, us)), Number(key.slice(us + 2)));
+  return buildUnitGlb(await getCtx(url), pathOfKey(key.slice(0, us)), Number(key.slice(us + 2)));
 }
 /** Lazy fragment continuation for a finer .osgb, called from stream-live.js's /stream/osgb/node/<path>.json. */
 export async function osgbNode(url, relPath, hint) { return buildFragment(await getCtx(url), relPath, url, hint); }

@@ -9,10 +9,12 @@ import ThreeDTRjsViewer from '@/components/Viewport/ThreeDTRjsViewer';
 import { useUrlState } from '@/state/urlState';
 import { useViewerStore } from '@/state/store';
 import { loadMosaic } from '@/lib/aggregate';
+import { useUrlSettings } from '@/lib/urlSettings';
 import type { ViewerHandle } from '@/lib/viewer-handle';
 
 export default function App() {
   const [url] = useUrlState();
+  useUrlSettings();
   const cesiumRef = useRef<ViewerHandle>(null);
   const threeRef = useRef<ViewerHandle>(null);
 

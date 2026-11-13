@@ -30,6 +30,7 @@
  * geometries of a file is one object in the reader and is counted once (across files nothing can be shared: each
  * `.osgb` is self-contained). Two PagedLODs naming the same finer file read it once.
  */
+import { pathOfKey } from '../packages/tile-server/path-key.js';
 import path from 'node:path';
 import fs from 'node:fs/promises';
 import { fileURLToPath, pathToFileURL } from 'node:url';
@@ -106,9 +107,9 @@ function rootsOfTileset(tileset) {
   const roots = new Set();
   const walk = (t) => {
     const m = /^\/stream\/tile\/(.+)__\d+\.glb\?/.exec(t.content?.uri || '');
-    if (m) roots.add(decodeURIComponent(m[1]));
+    if (m) roots.add(pathOfKey(m[1]));                                       // a slash in a key is `~` (path-key.js)
     const from = /[?&]from=([^&]+)/.exec(t.content?.uri || '');       // a fragment link carries its parent's key
-    if (from && /^\/stream\/osgb\/node\//.test(t.content.uri)) roots.add(decodeURIComponent(decodeURIComponent(from[1]).replace(/__\d+$/, '')));
+    if (from && /^\/stream\/osgb\/node\//.test(t.content.uri)) roots.add(pathOfKey(decodeURIComponent(from[1]).replace(/__\d+$/, '')));
     for (const c of t.children || []) if (!/^\/stream\/osgb\/node\//.test(c.content?.uri || '')) walk(c);
   };
   walk(tileset.root);

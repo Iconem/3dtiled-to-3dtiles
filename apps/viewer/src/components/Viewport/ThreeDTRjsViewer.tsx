@@ -75,6 +75,14 @@ import { isAggregateUrl, type DatasetMarker } from '@/lib/aggregate';
 import DatasetTooltip, { type TooltipChannel } from './DatasetTooltip';
 import ThreeDatasetMarkers, { datasetsInView3d, type LoadedDatasets } from './ThreeDatasetMarkers';
 
+// GlobeControls takes its ellipsoid frame from the TilesRenderer it sits in, i.e. the DATA tileset's group. For a
+// georeferenced tileset that group is the identity, but a local scene is anchored at the Local Frame (frameToTileset
+// moves and rotates its group), and the controls then orbited an Earth centred at the anchor: a stale, wrong pivot and
+// up after moving from one tileset to another ("globe controls stall on the previous camera up or pivot"). The frame
+// is the world itself, always.
+const WORLD_FRAME = new THREE.Group();
+WORLD_FRAME.updateMatrixWorld(true);
+
 // EnvironmentControls / GlobeControls `state` values (3d-tiles-renderer/src/three/renderer/controls/EnvironmentControls.js)
 
 // Fixes Clermont/Marseille-style crashes (see b3dmClientFix.ts) for tilesets loaded directly, with
@@ -1528,9 +1536,24 @@ const Scene = forwardRef<ViewerHandle, { loadArgs: LoadArgs; tooltip: TooltipCha
     };
     el.addEventListener('pointerdown', down); el.addEventListener('pointermove', move);
     el.addEventListener('pointerup', stop); el.addEventListener('pointercancel', stop);
+    // Keys by physical position (event.code), so W A S D is Z Q S D on an AZERTY keyboard; Q and E (A and E there)
+    // fly down and up like R and F, instead of FlyControls' roll, which levelFly undoes anyway. Registered after
+    // FlyControls' own window listeners, so this runs last and overrides its roll.
+    const vertical = (e: KeyboardEvent, on: number) => {
+      if (e.code !== 'KeyQ' && e.code !== 'KeyE') return;
+      if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement) return;
+      const ms = c._moveState;
+      if (!ms) return;
+      if (e.code === 'KeyQ') ms.down = on; else ms.up = on;
+      ms.rollLeft = 0; ms.rollRight = 0;
+      c._updateMovementVector?.(); c._updateRotationVector?.();
+    };
+    const keyDown = (e: KeyboardEvent) => vertical(e, 1), keyUp = (e: KeyboardEvent) => vertical(e, 0);
+    window.addEventListener('keydown', keyDown); window.addEventListener('keyup', keyUp);
     return () => {
       el.removeEventListener('pointerdown', down); el.removeEventListener('pointermove', move);
       el.removeEventListener('pointerup', stop); el.removeEventListener('pointercancel', stop);
+      window.removeEventListener('keydown', keyDown); window.removeEventListener('keyup', keyUp);
     };
   }, [controlMode, camera, fov, invalidate, levelFly, verticalAt]);
   useEffect(() => { if (controlSetting === 'auto') invalidate(); }, [controlSetting, invalidate]);
@@ -2067,7 +2090,7 @@ const Scene = forwardRef<ViewerHandle, { loadArgs: LoadArgs; tooltip: TooltipCha
           {(debugMode === 'cells' || debugMode === 'cells-only') && <MosaicOutlines url={loadArgs.url} tilesRef={tilesRef} cellsOnly={debugMode === 'cells-only'} />}
           {/* enableDoubleTapZoom off: the controls' own double-click zoom raced our animated one
               (it starts on pointerup, ours on dblclick: a jump, then the tween) */}
-          {controlMode === 'globe' && <GlobeControls ref={controlsRef} scene={navScene ?? undefined} enableDamping dampingFactor={0.05} minDistance={1} enableDoubleTapZoom={false} />}
+          {controlMode === 'globe' && <GlobeControls ref={controlsRef} scene={navScene ?? undefined} ellipsoid={WGS84_ELLIPSOID} ellipsoidFrame={WORLD_FRAME as any} enableDamping dampingFactor={0.05} minDistance={1} enableDoubleTapZoom={false} />}
           {controlMode === 'env' && <EnvironmentControls ref={controlsRef} scene={navScene ?? undefined} enableDamping dampingFactor={0.05} minDistance={1} enableDoubleTapZoom={false} />}
         </TilesRendererR3F>
       )}

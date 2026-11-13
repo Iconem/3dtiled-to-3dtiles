@@ -9,6 +9,20 @@ Format loosely follows [Keep a Changelog](https://keepachangelog.com/).
 ## [Unreleased]
 
 ### Fixed — 2026-11-13 (what the viewer showed for local scenes, splats, Google 3D and the fly camera)
+- **Every OSGB and 3MX tile failed on production only**: their tile keys are file paths, written with `%2F` for the
+  slash, and the reverse proxy in front of `3dtiled.iconem.com` answers a header-less 400 to any path holding one
+  (the browser showed it as a CORS error). `packages/tile-server/path-key.js` writes a slash in a key as `~` (a
+  literal `~` as `%7E`): `/stream/tile/Data~Tile_%2B000_%2B001~….osgb__0.glb`, `/stream/osgb/node/…`,
+  `/stream/threemx/node/…`; `scripts/osgb-stats.mjs` reads the same keys.
+- **Globe controls kept a stale frame after moving between tilesets**: the R3F `GlobeControls` takes its ellipsoid
+  frame from the TilesRenderer it sits in, the data tileset's group, which frameToTileset moves and rotates for a
+  local scene; the controls then orbited an Earth centred at the anchor. The frame is now the world (`ellipsoid` and
+  `ellipsoidFrame` props), whatever is loaded.
+- Fly: **Q and E move down and up along the vertical** (A and E on an AZERTY keyboard, by key position), instead of
+  the roll the level view undid anyway; W A S D and R F unchanged.
+- **The side panel's settings are in the address bar**: `controls=`, `imagery=`, `terrain=`, `debug=` and `zauto=`
+  (`apps/viewer/src/lib/urlSettings.ts`): a link opens with the same controls, imagery, terrain, debug view and
+  ground snap, and every change in the panel is written back; a value equal to the default is left out.
 - **A local scene's ground snap measured it 6 400 km off.** The ground sampler (`packages/core/dataset-ground.js`)
   read a tileset's coarse positions as Earth-centred metres; for a scene with no georeference (a Nexus statue, an
   LCC2 showroom, a streamed SOG) those are the scene's own metres, so the snap put the gargoyle 6 402 km up, out of
@@ -50,6 +64,13 @@ Format loosely follows [Keep a Changelog](https://keepachangelog.com/).
   tool, 3d-tiles-tools' `mergeJson` / `merge` / `combine`, the glTF-Transform-inside-3d-tiles-tools pattern, the
   commercial tilers, and public massive textured meshes with verified links.
 - The streamed-SOG page carries `scripts/make-streamed-sog.ps1` in full.
+- Docs regrouped under a new sidebar group **Tiling (producing tilesets)** (`references/tiling`): the mesh-tiler survey
+  moved there as `tiling/meshes` (out of `mesh-generic`), the chained 50 % recipe and its script moved out of the
+  streamed-SOG page into `tiling/streamed-sog-recipe` (a pointer stays under the old heading), and two new pages,
+  `tiling/pointclouds` (PotreeConverter, Entwine, PDAL `writers.copc` and untwine, pdal_wrench, py3dtiles, gotiler,
+  3d-tiles-tools, Cesium ion, CloudCompare's global shift, with a comparison table) and `tiling/splats`
+  (splat-transform, SuperSplat, Spark `build-lod`, XGRIDS LCC Studio, the `3dgs-ply-3dtiles-converter` npm package,
+  GaussForge, Cesium ion and this repository's converters, with a comparison table).
 
 ### Changed — 2026-11-12 (a VPC's overview carries the far view; a country no longer opens every tile within 190 km)
 - **The overview a VPC names is placed in the mosaic**, as a leaf as large as the set, beside the groups under

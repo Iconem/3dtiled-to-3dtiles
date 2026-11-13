@@ -315,8 +315,8 @@ test('stream: a file outside the dataset is not read, and a dataset with no root
   quiet(t);
   const h = await serve(t, DATASET), s = await streamServer(t);
   const q = `url=${encodeURIComponent(`${h.base}/Data/Tile_+000_+000/Tile_+000_+000.osgb`)}`;
-  assert.equal((await get(`${s}/stream/osgb/node/${encodeURIComponent('../../metadata.xml')}.json?${q}`)).status, 404);
-  assert.equal((await get(`${s}/stream/tile/${encodeURIComponent('../Tile_+001_+000/Tile_+001_+000.osgb')}__0.glb?format=osgb&${q}`)).status, 404);
+  assert.equal((await get(`${s}/stream/osgb/node/${encodeURIComponent('../../metadata.xml').replace(/%2F/g, '~')}.json?${q}`)).status, 404);
+  assert.equal((await get(`${s}/stream/tile/${encodeURIComponent('../Tile_+001_+000/Tile_+001_+000.osgb').replace(/%2F/g, '~')}__0.glb?format=osgb&${q}`)).status, 404);
   const empty = await serve(t, { 'metadata.xml': DATASET['metadata.xml'] });
   assert.equal((await get(`${s}/stream/tileset.json?format=osgb&url=${encodeURIComponent(`${empty.base}/metadata.xml`)}`)).status, 404);
 });
@@ -351,7 +351,7 @@ test('stream: a dataset in a zip is read member by member, its metadata.xml foun
   const zip = writeZip(ZIPPED);
   const h = await serveRanges(t, { 'tile.zip': zip }), s = await streamServer(t);
   const ts = await walk(s, `${h.base}/tile.zip`);
-  assert.ok(ts.root.children.every((c) => /tile%2FData%2FTile_/.test(c.content.uri)), 'tile keys are paths inside the archive');
+  assert.ok(ts.root.children.every((c) => /tile~Data~Tile_/.test(c.content.uri)), 'tile keys are paths inside the archive, a slash written as ~ (path-key.js)');
   assert.ok(h.hits['tile.zip'] >= 3 && h.hits['tile.zip'] <= 12, `${h.hits['tile.zip']} range reads: the tail, then members`);
   assert.deepEqual(osgbRootsFromListing(Object.keys(ZIPPED)), [`tile/${T0}.osgb`, `tile/${T1}.osgb`]);
 });

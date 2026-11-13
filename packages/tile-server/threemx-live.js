@@ -16,6 +16,7 @@
  * + concatenated payload buffers (sliced by resource size, in order). Child paths are relative to the
  * containing `.3mxb`'s directory → remote-friendly (we URL-join against the master's base).
  */
+import { pathKey, pathOfKey } from './path-key.js';
 import path from 'node:path';
 import { georefFromCrs, memoizeAsync, fetchSource as fetchBuf, tilePool, runTileTaskOr, ownBytes } from '../core/index.js';
 import { parse3mxb, threemxNodeGlb } from './mesh-tile.js';
@@ -64,14 +65,14 @@ async function buildFragment(ctx, relPath, masterUrl, isRoot) {
     // Absolute (not relative "tile/…"): this tree can be embedded at /stream/tileset.json OR nested
     // under /stream/threemx/node/<n>.json, where a relative ref would resolve against the FRAGMENT's
     // own path (…/threemx/node/tile/…) instead of /stream/tile/… — same fix RAD/I3S needed pre-simplification.
-    if ((node.resources || []).length) tile.content = { uri: `/stream/tile/${encodeURIComponent(relPath)}__${i}.glb?url=${enc}&format=threemx` };
+    if ((node.resources || []).length) tile.content = { uri: `/stream/tile/${pathKey(relPath)}__${i}.glb?url=${enc}&format=threemx` };
     const kids = [];
     for (const childRel of node.children || []) {
       const cr = joinRel(relDir, childRel);
       // Absolute: this fragment can be embedded at /stream/tileset.json OR nested under
       // /stream/threemx/node/<n>.json, where a relative ref would resolve wrong.
       kids.push({ boundingVolume: { box: boxOf(node.bbMin, node.bbMax) }, geometricError: geOf(node) * 0.5, refine: 'REPLACE',
-                  content: { uri: `/stream/threemx/node/${encodeURIComponent(cr)}.json?url=${enc}` } });
+                  content: { uri: `/stream/threemx/node/${pathKey(cr)}.json?url=${enc}` } });
     }
     if (kids.length) tile.children = kids;
     return tile;
@@ -105,7 +106,7 @@ export const threemxTileRe = /^.+__\d+$/;                    // <encodeURICompon
 export async function threemxTileset(url) { const ctx = await getCtx(url); return buildFragment(ctx, ctx.rootRel, url, true); }
 export async function threemxTile(url, key) {
   const us = key.lastIndexOf('__');
-  return buildNodeGlb(await getCtx(url), decodeURIComponent(key.slice(0, us)), Number(key.slice(us + 2)));
+  return buildNodeGlb(await getCtx(url), pathOfKey(key.slice(0, us)), Number(key.slice(us + 2)));
 }
 // Lazy fragment continuation for a child .3mxb — 3MX is an arbitrary DAG (no persisted spatial index
 // like RAD/I3S had), so unlike those two this genuinely can't collapse to "always eager": discovering
