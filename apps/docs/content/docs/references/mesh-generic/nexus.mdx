@@ -66,17 +66,21 @@ and a coarser node draws only the patches whose finer node is not drawn.
 node drawn once in Nexus whatever the number of its parents would, under each of them, be drawn several times. Two
 mappings are offered (`packages/nexus-to-3dtiles/src/nexus-tileset.js`, shared by the live adapter and the converter).
 
-**`dag=levels`, the default**, cuts the DAG by level. Every node of level *k* is a tile with content under a
-contentless level tile L*k*; the level tiles form a chain L0 → L1 → …; all the tiles that must switch together (the
-nodes of level *k* and L*k*+1) are given the **same** bounding sphere (the model's) and the **same** geometric
-error, so that a client decides them in the same frame, and a node tile refines through one empty child, which is
-how it disappears when its level does. The usual single root node is the root tile itself, with its content, and
-level 1 hangs straight under it: a client draws the coarsest mesh from its first request and keeps it while the
-level it refines into loads (through contentless L0 and L1 tiles, 3DTilesRendererJS had nothing to draw for the
-bust until its 72 level nodes were all in, 26 s). 3DTilesRendererJS also loads, by default, every sibling of a
-used tile (`loadSiblings`), which on this tree is every node of every level on the way down (the gargoyle: all 187
-nodes before a first view, 51 s on the public server); the 3D Tiled viewer turns it off on the data renderer, as
-CesiumJS only loads what the view needs. Each node tile keeps its own sphere as `content.boundingVolume`, what a
+**`dag=levels`, the default**, cuts the DAG by level. Every node of level *k* is a tile with content; the
+**first** node of level *k* carries the nodes of level *k*+1 as its children, and the others refine through one
+empty child, which is how they disappear when their level does. All the node tiles of a level are given the
+**same** bounding sphere (the model's) and the **same** geometric error, so that a client decides them in the same
+frame. The usual single root node is the root tile itself, so a client draws the coarsest mesh from its first
+request and keeps it while the level the view needs loads.
+
+No tile is contentless except the empty leaves, and that matters in 3DTilesRendererJS. Its placeholder rule
+(`loadAncestors`, on by default) keeps a REPLACE parent on screen until its children are ready, but it counts a
+contentless child as ready even when that child is refined further. The first form of this tree hung each level
+under a contentless level tile (L0 → L1 → …), so the root stopped standing in at once and nothing was drawn until
+the deepest level had loaded: the dragon after all 85 nodes (19 s on the public server), the gargoyle after 187
+(51 s), the bust after 72 (26 s). With the next level under a node that has content, the root node stays on screen
+until then. The same rule also downloads every used tile with content, so a close view fetches every level on the
+way down, about twice the finest level's bytes since each level halves the triangles. Each node tile keeps its own sphere as `content.boundingVolume`, what a
 client culls by, so a close view loads and draws only the nodes in front of the camera. What is lost against Nexus
 is the choice of a level per node by distance: the level is the same for the near and the far side of the model,
 as for any single-mesh LOD. For an object of a few million triangles that is what Nexus models are, this is the

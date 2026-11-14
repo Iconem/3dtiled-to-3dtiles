@@ -10,12 +10,16 @@
  *
  * `dag: 'levels'` (the default) cuts the DAG by level. Each level of a Nexus file is a complete mesh of the whole
  * model at one resolution, partitioned into nodes (nxsbuild simplifies level by level), so showing all the nodes of
- * one level and none of another has no crack and no overlap. The tree is a chain of contentless level tiles
- * L0 → L1 → …, and under Lk every node of level k as a tile with content. All the tiles that must switch together
- * (the nodes of level k, and L(k+1)) are given the SAME bounding volume (the model's sphere) and the SAME geometric
- * error (8 × the largest node error of level k, see geScale below), so a client decides them in the same frame. A
- * node tile disappears when refined through one empty child (no content, no children); the last level's nodes are
- * leaves. Each node tile carries its own sphere as `content.boundingVolume`, which is what a client culls by, so a
+ * one level and none of another has no crack and no overlap. Every node of level k is a tile with content, and the
+ * FIRST node of level k carries the nodes of level k + 1 as its children; the others disappear when refined, through
+ * one empty child (no content, no children); the last level's nodes are leaves. All the node tiles of a level are
+ * given the SAME bounding volume (the model's sphere) and the SAME geometric error (8 × the largest node error of
+ * the level, see geScale below), so a client decides them in the same frame. No tile is contentless but the empty
+ * leaves (and a root above several root nodes): 3DTilesRendererJS counts a contentless tile as ready to draw even
+ * when it is refined, so a chain of contentless level tiles (the earlier tree, L0 → L1 → …, the nodes under each)
+ * made a parent stop standing in for its children at once, and nothing was drawn until the deepest level the view
+ * needs had loaded (the dragon after its 85 nodes, the gargoyle after 187). With the next level under a node with
+ * content, the root node stays on screen until then. Each node tile carries its own sphere as `content.boundingVolume`, which is what a client culls by, so a
  * close view still loads and draws only the nodes in front of the camera. What is lost against Nexus is the
  * distance-dependent choice of level across one model: the level is the same for the near and the far side, as it is
  * for any single-mesh LOD, which is what Nexus models are (an object, a few million triangles).
@@ -95,28 +99,22 @@ export function nexusTileset(index, contentUri, { dag = 'levels', geScale = DEFA
     const levels = [];
     for (let i = 0; i < stats.nodes; i++) { const d = stats.depth[i]; (levels[d] = levels[d] || []).push(i); }
     const errorOf = (k) => num(Math.max(...levels[k].map((i) => index.nodes[i].error)) * geScale);
+    // the node tiles of level k; the first carries level k + 1, the others vanish through an empty child
     const build = (k) => {
       const last = k === levels.length - 1, ge = last ? 0 : errorOf(k);
-      const children = levels[k].map((i) => {
+      const next = last ? null : build(k + 1);
+      return levels[k].map((i, j) => {
         const t = nodeTile(i, ge, true);
         // the level's timing comes from the model sphere; the node's own sphere stays on the content, for culling
         t.content.boundingVolume = t.boundingVolume;
         t.boundingVolume = { sphere: modelSphere };
-        if (!last) t.children = [{ boundingVolume: { sphere: modelSphere }, geometricError: 0, refine: 'REPLACE' }];   // empty: the node vanishes when the level does
+        if (!last) t.children = j === 0 ? next : [{ boundingVolume: { sphere: modelSphere }, geometricError: 0, refine: 'REPLACE' }];
         return t;
       });
-      if (!last) children.push(build(k + 1));
-      return { boundingVolume: { sphere: modelSphere }, geometricError: k === 0 ? num(model[3] * 1e3 * geScale) : errorOf(k - 1), refine: 'REPLACE', children };
     };
-    root = build(0);
-    // One root node (the usual Nexus file): it IS the root tile, with the content, and level 1 hangs straight under it.
-    // Through the contentless L0 and L1 a client that refines into a deep level has nothing to draw until that whole
-    // level has loaded (3DTilesRendererJS showed the bust after 26 s, 72 nodes); with the content on the root it draws
-    // the coarsest mesh from the first request and keeps it while the level loads. Same tree otherwise.
-    if (levels[0].length === 1 && levels.length > 1) {
-      const [n0, L1] = root.children;
-      root = { ...n0, geometricError: L1.geometricError, children: L1.children };
-    }
+    // one root node (the usual Nexus file) is the root tile, drawn from the first request and kept while a deep level loads
+    const top = build(0);
+    root = top.length === 1 ? top[0] : { boundingVolume: { sphere: modelSphere }, geometricError: num(model[3] * 1e3 * geScale), refine: 'REPLACE', children: top };
   } else {
     const build = (i) => {
       const kids = nodeChildren(index, i);

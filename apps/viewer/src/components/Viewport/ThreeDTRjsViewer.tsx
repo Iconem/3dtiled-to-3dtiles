@@ -110,6 +110,10 @@ THREE.Mesh.prototype.raycast = acceleratedRaycast;
 // entirely, since 3d-tiles-renderer's GLTFExtensionsPlugin only wires Draco support when given a loader.
 const dracoLoader = new DRACOLoader();
 dracoLoader.setDecoderPath('https://www.gstatic.com/draco/versioned/decoders/1.5.6/');
+// Draco and KTX2 decode in workers, 4 each by default. A Bing 3D view is ~300 Draco + KTX2 tiles: measured on
+// 2026-11-14, the downloads were done in 10 s and the decoding took 50 more, so use half the cores (4 to 8).
+const DECODE_WORKERS = Math.max(4, Math.min(8, Math.floor((navigator.hardwareConcurrency || 8) / 2)));
+dracoLoader.setWorkerLimit(DECODE_WORKERS);
 
 // KTX2/BasisU-textured content (Bing 3D is the one that surfaced it: "THREE.GLTFLoader: setKTX2Loader
 // must be called before loading KTX2 textures") needs a KTX2Loader too — unlike dracoLoader, it can't be
@@ -668,6 +672,7 @@ const Scene = forwardRef<ViewerHandle, { loadArgs: LoadArgs; tooltip: TooltipCha
   const ktxLoader = useMemo(() => {
     const loader = new KTX2Loader();
     loader.setTranscoderPath(KTX2_TRANSCODER_PATH);
+    loader.setWorkerLimit(DECODE_WORKERS);
     loader.detectSupport(gl);
     return loader;
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -2120,9 +2125,14 @@ const Scene = forwardRef<ViewerHandle, { loadArgs: LoadArgs; tooltip: TooltipCha
           // the textured Unio shell's Nexus nodes decode to about 30 MB each (every node carries the JPEGs its
           // patches name), so its 14th node was refused and the level never completed: nothing drawn. 1 GB, which
           // a 2026 laptop GPU has, with the trim starting at 0.6 GB.
+          // The parse queue is 3d-tiles-renderer's shared one, 5 jobs. A mesh tile's parse mostly waits on the Draco
+          // and KTX2 workers, so 5 at a time left them idle: Bing 3D drew its view in 60 s, 50 of them a backlog of
+          // ~110 decoded tiles draining at 3 a second. 16 for meshes; points and splats parse on the main thread
+          // and keep 5.
           ref={(t: any) => {
             (tilesRef as React.MutableRefObject<any>).current = t;
             if (t?.lruCache && t.lruCache.maxBytesSize < 1e9) { t.lruCache.minBytesSize = 0.6e9; t.lruCache.maxBytesSize = 1e9; }
+            if (t?.parseQueue) t.parseQueue.maxJobs = loadArgs?.type === 'mesh' ? 16 : 5;
           }}
           url={tilesUrl}
           errorTarget={errorTarget}

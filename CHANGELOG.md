@@ -5,6 +5,22 @@ Format loosely follows [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+### Fixed — 2026-11-14 (a Nexus mesh drawn while it loads)
+- **A Nexus mesh drew nothing until its deepest level had loaded** in 3DTilesRendererJS (the dragon after its 85
+  nodes, the gargoyle after 187): each level hung under a contentless level tile, and 3DTilesRendererJS counts a
+  contentless child as ready even when it is refined further, so the root stopped standing in for the level still
+  loading. The first node of each level now carries the next level (`dag=levels`); no tile is contentless but the
+  empty leaves, and the root node stays on screen until the finer level is in.
+- **Bing 3D took about a minute to draw a view** (Roma at 2 000 m, ~300 Draco + KTX2 tiles), which read as "needs a
+  reload": the downloads were done in 10 s and the decoding took 50 more, five tiles at a time through
+  3d-tiles-renderer's shared parse queue, four Draco and four KTX2 workers. A mesh dataset now parses 16 at a time
+  with half the cores as decoder workers (4 to 8): 35 s for the whole view, the first 32 tiles at 11 s (locally,
+  from the Google pill to the Bing pill).
+
+### Removed — 2026-11-14
+- The eight CesiumGS metadata sample pills of 2026-11-13 (synthetic test tilesets, not data); Material *Features*
+  stays.
+
 ### Fixed — 2026-11-13 (what the viewer showed for local scenes, splats, Google 3D and the fly camera)
 - **A Nexus scene smaller than a metre showed nothing** (the Stanford dragon, 0.12 m; the Unio shell): GlobeControls
   floors the camera's near plane at 1 m and the viewer held the controls 1 m from the pivot, so a scene framed
@@ -79,11 +95,7 @@ Format loosely follows [Keep a Changelog](https://keepachangelog.com/).
 ### Changed — 2026-11-13 (a large streamed SOG opens on a preview; the mesh-tiler survey; the recipe in the page)
 - **Material "Features"** (3DTRjs): one colour per feature from the `EXT_mesh_features` ids a tile carries (a
   feature-ID attribute as vertex colours, one hashed hue per id; a feature-ID texture as the map; an implicit id per
-  vertex), one colour per tile mesh where there are none. Eight **CesiumGS metadata samples** on the 3D Tiles pill
-  (feature IDs by attribute and by texture, property table, property texture, property attributes on a point cloud,
-  several feature-ID sets, GPU instances with metadata, metadata per tileset / tile / group / content), the open
-  tilesets that carry metadata per vertex, feature, texel and tile. The last one has several `contents` per tile,
-  which the Cesium renderer draws and 3d-tiles-renderer 0.5 does not (it reads `content` only).
+  vertex), one colour per tile mesh where there are none.
 - **Every side-panel setting is in the address bar** (`lib/urlSettings.ts`): after controls, imagery, terrain, debug
   and the ground snap, now the clearance, globe, collision, terrain-behind, FOV, orthographic, SSE, show-asset,
   material and x-ray opacity, point colour mode and colour, point size, shape, adaptive size, EDL and its strength,

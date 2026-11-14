@@ -252,10 +252,6 @@ Already-3D-Tiles sources, loaded directly (no conversion/streaming adapter invol
 | **3DT · Lille** | `https://webimaging.lillemetropole.fr/externe/maillage/2016_mel_10cm/3dtiles/tileset.json` |
 | **3DT · Marseille (root.json)** | `https://d3h9zulrmcj1j6.cloudfront.net/Marseille_Cesium/root.json` |
 | **3DT · CesiumGS discrete-LOD** | `https://raw.githubusercontent.com/CesiumGS/3d-tiles-samples/main/1.0/TilesetWithDiscreteLOD/tileset.json` |
-| **3DT · CesiumGS feature IDs by attribute / by texture** | `…/3d-tiles-samples/main/glTF/EXT_mesh_features/FeatureIdAttribute/tileset.json`, `…/FeatureIdTexture/tileset.json` — per-vertex and per-texel feature ids (`EXT_mesh_features`), what the Material *Features* mode colours |
-| **3DT · CesiumGS property table / property texture / property attributes** | `…/glTF/EXT_structural_metadata/FeatureIdAttributeAndPropertyTable`, `…/SimplePropertyTexture`, `…/PropertyAttributesPointCloud` — per-feature, per-texel and per-point properties (`EXT_structural_metadata`) |
-| **3DT · CesiumGS several feature-ID sets, GPU instances with metadata** | `…/glTF/EXT_structural_metadata/MultipleFeatureIdsAndProperties`, `…/glTF/GpuInstancesMetadata` |
-| **3DT · CesiumGS metadata per tileset, tile, group and content** | `…/3d-tiles-samples/main/1.1/MetadataGranularities/tileset.json` (`3DTILES_metadata`, several `contents` per tile: the Cesium renderer draws it, 3d-tiles-renderer 0.5 reads `content` only) |
 | **3DT · Google Photorealistic** | `https://tile.googleapis.com/v1/3dtiles/root.json?key=…` (Google's public photorealistic 3D Tiles) |
 | **3DT · ESRI Portcoast (mesh)** | `https://tiles.arcgis.com/tiles/V6ZHFr6zdgNZuVG0/arcgis/rest/services/Portcoast_industrial/3DTilesServer/tileset.json` |
 | **3DT · ESRI Mantes-la-Jolie (splat)** | `https://tiles.arcgis.com/tiles/uujCiiEZAflDbdxE/arcgis/rest/services/Collégiale_Mantes_la_Jolie_Drone_3D_Gaussian_Splat/3DTilesServer/tileset.json` — ESRI's ArcGIS 3D Tiles Server publishing `KHR_gaussian_splatting`/SPZ splats directly, outside I3S |
@@ -558,8 +554,7 @@ of it), and with one point colour, density alone reads as brightness; *Wireframe
 *Features* gives one colour per feature: the `EXT_mesh_features` ids a tile carries (a feature-ID attribute becomes
 vertex colours, one hashed hue per id; a feature-ID texture is shown as the map, its channels being the ids; an
 implicit id is one per vertex), and one colour per tile mesh where there are none, so tile boundaries show. The
-CesiumGS metadata samples on the 3D Tiles pill are the datasets to try it on. The original mesh material is kept and
-restored by *Default*; applied to every loaded tile, native Potree leaves included.
+original mesh material is kept and restored by *Default*; applied to every loaded tile, native Potree leaves included.
 
 **Imagery None** (3DTRjs) draws the terrain unlit and black: a silhouette that hides what is behind
 it, with no hillshade competing with the data.
