@@ -39,6 +39,7 @@ import path from 'node:path';
 import crypto from 'node:crypto';
 import { buildExplicitFromUrl, transcodeToExplicit } from 'implicit-to-explicit';
 import { pipeB3dmAsGlb, pntsToGlb, b3dmToGlb2, upgradeTilesetReal } from '3dtiles-tools';
+import { pathKey, pathOfKey } from './path-key.js';
 
 const CORS_JSON = { 'Access-Control-Allow-Origin': '*', 'Access-Control-Allow-Headers': '*', 'Content-Type': 'application/json' };
 const CORS_GLB  = { 'Access-Control-Allow-Origin': '*', 'Access-Control-Allow-Headers': '*', 'Content-Type': 'model/gltf-binary' };
@@ -71,7 +72,11 @@ const needsConvert = (uri) => /\.(b3dm|pnts)$/i.test(uri.split('?')[0]);
 // b3dm/pnts straight to the glTF loader instead of our converted glb (exactly "tileset upgrade still
 // tries to load b3dm"). encodeURIComponent the whole original URI into one path segment instead — it
 // can never be reinterpreted as a query boundary — and decode it back in serveI2ETile/serveUpgradeTile.
-const wrapTileUri = (uri, toolParams) => `tile/${encodeURIComponent(uri)}?${toolParams}`;
+// one path segment, a slash written as ~ (path-key.js): prod's proxy refuses %2F, so every nested tile 400'd there
+const wrapTileUri = (uri, toolParams) => `tile/${pathKey(uri)}?${toolParams}`;
+// the same from a NESTED tileset.json, itself served at /3dtiles-tools/tile/<key>: a client resolves its content against
+// /3dtiles-tools/tile/, so a `tile/` prefix there asked for tile/tile/<key> (403, and nothing under it ever loaded)
+const wrapNestedTileUri = (uri, toolParams) => `${pathKey(uri)}?${toolParams}`;
 
 // ── implicit-to-explicit ──────────────────────────────────────────────────────
 
@@ -134,9 +139,9 @@ async function serveI2ETileset(u, res) {
 async function serveI2ETile(relPathRaw, u, res) {
   const dir = u.searchParams.get('dir');
   const url = u.searchParams.get('url');
-  // relPathRaw is the encodeURIComponent'd ORIGINAL content uri (see wrapTileUri) — decode it back to
+  // relPathRaw is the ORIGINAL content uri as a path key (see wrapTileUri) — decode it back to
   // the real relative path/query before resolving, instead of a raw uri that may carry its OWN `?`.
-  const relPath = decodeURIComponent(relPathRaw);
+  const relPath = pathOfKey(relPathRaw);
 
   const ext = path.extname(relPath.split('?')[0]).toLowerCase();
 
@@ -222,7 +227,7 @@ async function serveUpgradeTile(relPathRaw, u, res) {
   const dir = u.searchParams.get('dir');
   const url = u.searchParams.get('url');
   // See the matching comment in serveI2ETile — relPathRaw is encodeURIComponent'd (wrapTileUri).
-  const relPath = decodeURIComponent(relPathRaw);
+  const relPath = pathOfKey(relPathRaw);
   const ext = path.extname(relPath.split('?')[0]).toLowerCase();
 
   if (url) {
@@ -239,7 +244,7 @@ async function serveUpgradeTile(relPathRaw, u, res) {
       const obj = await r.json();
       if (obj.asset) obj.asset.version = '1.1';
       const newBaseParam = `url=${encodeURIComponent(tilesetUrl.replace(/\/[^/]+$/, '/'))}`;
-      rewriteContentUris(obj.root, (uri) => wrapTileUri(uri, `tool=upgrade&${newBaseParam}`));
+      rewriteContentUris(obj.root, (uri) => wrapNestedTileUri(uri, `tool=upgrade&${newBaseParam}`));
       res.writeHead(200, CORS_JSON); res.end(JSON.stringify(obj));
       return;
     }
@@ -262,7 +267,7 @@ async function serveUpgradeTile(relPathRaw, u, res) {
       const obj = JSON.parse(await fs.readFile(abs, 'utf8'));
       if (obj.asset) obj.asset.version = '1.1';
       const newBaseParam = `dir=${encodeURIComponent(path.dirname(abs))}`;
-      rewriteContentUris(obj.root, (uri) => wrapTileUri(uri, `tool=upgrade&${newBaseParam}`));
+      rewriteContentUris(obj.root, (uri) => wrapNestedTileUri(uri, `tool=upgrade&${newBaseParam}`));
       res.writeHead(200, CORS_JSON); res.end(JSON.stringify(obj));
       return;
     }
@@ -380,7 +385,7 @@ async function serveRealUpgradeTile(relPathRaw, u, res) {
   // anything else outright rather than letting a hand-crafted `../` in key itself escape CACHE_ROOT
   // before relPath is even considered.
   if (!key || !/^(url|dir)-[0-9a-f]{16}$/.test(key)) { res.writeHead(400, CORS_ERR); res.end(JSON.stringify({ error: 'missing or malformed ?key= (request the tileset.json first)' })); return; }
-  const relPath = decodeURIComponent(relPathRaw).split('?')[0];
+  const relPath = pathOfKey(relPathRaw).split('?')[0];
   let abs;
   try { abs = safeJoin(path.join(CACHE_ROOT, key), relPath); }
   catch { res.writeHead(400, CORS_ERR); res.end(JSON.stringify({ error: 'invalid tile path' })); return; }

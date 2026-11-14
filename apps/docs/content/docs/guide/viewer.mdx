@@ -251,6 +251,8 @@ Already-3D-Tiles sources, loaded directly (no conversion/streaming adapter invol
 | **3DT · Clermont** | `https://3d.craig.fr/datasets/Clermont/3dtiles/tileset.json` |
 | **3DT · Lille** | `https://webimaging.lillemetropole.fr/externe/maillage/2016_mel_10cm/3dtiles/tileset.json` |
 | **3DT · Marseille (root.json)** | `https://d3h9zulrmcj1j6.cloudfront.net/Marseille_Cesium/root.json` |
+| **3DT · swisstopo buildings (b3dm, batch table)** | `https://vectortiles0.geo.admin.ch/3d-tiles/ch.swisstopo.swisstlm3d.3d/20190313/tileset.json` — swissTLM3D, every building of Switzerland as 3D Tiles 1.0 b3dm, with a batch table of 17 attributes per building (use, year of construction, height…); its glTF is 1.0, so the pill loads it through the tile server's `/3dtiles-tools/tileset.json?tool=upgrade` route (b3dm to glTF 2.0 glb, batch ids kept) |
+| **3DT · Delaware buildings (1.1, feature ids)** | `https://bertt.github.io/cesium_3dtiles_samples/samples/1.1/delaware/tileset.json` — 3D Tiles 1.1 from pg2b3dm, `EXT_mesh_features` and `EXT_structural_metadata`, one feature id per building |
 | **3DT · CesiumGS discrete-LOD** | `https://raw.githubusercontent.com/CesiumGS/3d-tiles-samples/main/1.0/TilesetWithDiscreteLOD/tileset.json` |
 | **3DT · Google Photorealistic** | `https://tile.googleapis.com/v1/3dtiles/root.json?key=…` (Google's public photorealistic 3D Tiles) |
 | **3DT · ESRI Portcoast (mesh)** | `https://tiles.arcgis.com/tiles/V6ZHFr6zdgNZuVG0/arcgis/rest/services/Portcoast_industrial/3DTilesServer/tileset.json` |
@@ -553,8 +555,9 @@ overlapping datasets read through each other — with an **opacity** slider (poi
 of it), and with one point colour, density alone reads as brightness; *Wireframe* draws mesh edges only;
 *Features* gives one colour per feature: the `EXT_mesh_features` ids a tile carries (a feature-ID attribute becomes
 vertex colours, one hashed hue per id; a feature-ID texture is shown as the map, its channels being the ids; an
-implicit id is one per vertex), and one colour per tile mesh where there are none, so tile boundaries show. The
-original mesh material is kept and restored by *Default*; applied to every loaded tile, native Potree leaves included.
+implicit id is one per vertex; a 3D Tiles 1.0 b3dm's batch id is treated as a feature-ID attribute), and one colour
+per tile mesh where there are none, so tile boundaries show. The swisstopo and Delaware building pills on the 3D Tiles
+pill are real datasets to try it on. The original mesh material is kept and restored by *Default*; applied to every loaded tile, native Potree leaves included.
 
 **Imagery None** (3DTRjs) draws the terrain unlit and black: a silhouette that hides what is behind
 it, with no hillshade competing with the data.

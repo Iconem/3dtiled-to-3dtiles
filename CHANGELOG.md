@@ -17,6 +17,21 @@ Format loosely follows [Keep a Changelog](https://keepachangelog.com/).
   with half the cores as decoder workers (4 to 8): 35 s for the whole view, the first 32 tiles at 11 s (locally,
   from the Google pill to the Bing pill).
 
+### Features — 2026-11-14 (real buildings for Material *Features*)
+- **Two building datasets on the 3D Tiles pill**: swisstopo's swissTLM3D (every building of Switzerland, 3D Tiles 1.0
+  b3dm with a batch table of 17 attributes per building) and Delaware (3D Tiles 1.1, `EXT_mesh_features` and
+  `EXT_structural_metadata`, until now only in the Tools datasets). Material *Features* also reads a b3dm's batch id
+  (`_BATCHID`), so each Swiss building gets its own colour. The Swiss tiles hold glTF 1.0, which three.js cannot
+  read, so the pill goes through the tile server's upgrade route (b3dm to glTF 2.0).
+
+### Fixed — 2026-11-14 (the upgrade route on the public server)
+- **`/3dtiles-tools/…?tool=upgrade` (and `implicit-to-explicit`, `upgrade-real`) failed on every nested tile on the
+  public server**: the tile paths were written with `%2F`, which its proxy refuses with a bare 400 (the Lille pyramid
+  and any tileset with content in sub-folders). They now use the same path keys as the other routes (a slash as `~`).
+- **Nothing under a nested tileset loaded through `tool=upgrade`**, locally too: the nested tileset.json is served
+  under `/3dtiles-tools/tile/`, and its rewritten content kept the `tile/` prefix, so a client asked for
+  `tile/tile/…` (403). Seen on swisstopo, whose root points to 48 nested tilesets.
+
 ### Removed — 2026-11-14
 - The eight CesiumGS metadata sample pills of 2026-11-13 (synthetic test tilesets, not data); Material *Features*
   stays.

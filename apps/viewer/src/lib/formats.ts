@@ -290,6 +290,12 @@ export const DIRECT: DirectAsset[] = [
   { id: 'clermont', icon: '🏙', label: '3DT · Clermont', type: 'mesh', url: 'https://3d.craig.fr/datasets/Clermont/3dtiles/tileset.json' },
   { id: 'lille', icon: '🏙', label: '3DT · Lille', type: 'mesh', url: 'https://webimaging.lillemetropole.fr/externe/maillage/2016_mel_10cm/3dtiles/tileset.json' },
   { id: 'marseille', icon: '🏙', label: '3DT · Marseille (root.json)', type: 'mesh', url: 'https://d3h9zulrmcj1j6.cloudfront.net/Marseille_Cesium/root.json' },
+  // Real buildings with per-feature data, for Material "Features": swisstopo's swissTLM3D (all of Switzerland, 3D Tiles
+  // 1.0 b3dm, a batch table of 17 attributes per building, one _BATCHID per vertex; the glTF inside is 1.0, which three
+  // cannot read, so it goes through the tile server's upgrade route, b3dm to glTF 2.0 glb with _BATCHID kept) and Delaware (bertt's pg2b3dm,
+  // 3D Tiles 1.1, EXT_mesh_features + EXT_structural_metadata, one feature id per building)
+  { id: 'swisstopo-buildings', icon: '🏙', label: '3DT · swisstopo buildings (b3dm, batch table)', type: 'mesh', url: `${MW}/3dtiles-tools/tileset.json?tool=upgrade&url=${encodeURIComponent('https://vectortiles0.geo.admin.ch/3d-tiles/ch.swisstopo.swisstlm3d.3d/20190313/tileset.json')}` },
+  { id: 'delaware-buildings', icon: '🏙', label: '3DT · Delaware buildings (1.1, feature ids)', type: 'mesh', url: 'https://bertt.github.io/cesium_3dtiles_samples/samples/1.1/delaware/tileset.json' },
   { id: 'cgs-lod', icon: '◈', label: '3DT · CesiumGS discrete-LOD', type: 'mesh', url: 'https://raw.githubusercontent.com/CesiumGS/3d-tiles-samples/main/1.0/TilesetWithDiscreteLOD/tileset.json' },
   { id: 'google-3dtiles', icon: '🌍', label: '3DT · Google Photorealistic', type: 'mesh', url: `https://tile.googleapis.com/v1/3dtiles/root.json?key=${GOOGLE_MAPS_API_KEY}` },
   { id: 'esri-portcoast', icon: '🌍', label: '3DT · ESRI Portcoast (mesh)', type: 'mesh', url: 'https://tiles.arcgis.com/tiles/V6ZHFr6zdgNZuVG0/arcgis/rest/services/Portcoast_industrial/3DTilesServer/tileset.json' },

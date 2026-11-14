@@ -187,7 +187,8 @@ function makeClearDepthHook(): THREE.Mesh {
  *   features   one colour per feature: EXT_mesh_features ids (3d-tiles-renderer's GLTFMeshFeaturesExtension leaves a
  *              MeshFeatures on `userData.meshFeatures`), a `_feature_id_N` attribute as vertex colours (hashed hue
  *              per id), a feature-ID texture as the map (its channels are the ids), an implicit id per vertex; a
- *              primitive without the extension gets one colour per tile mesh, so tile boundaries show.
+ *              3D Tiles 1.0 b3dm's `_BATCHID` (`_batchid` once loaded) the same way as a feature-ID attribute; a
+ *              primitive with neither gets one colour per tile mesh, so tile boundaries show.
  * The original mesh material is kept on the object and restored by `default`. Points take their colour
  * independently, in every mode: their own (`rgb`), one colour, or by height (lib/pointColors.ts).
  */
@@ -205,7 +206,7 @@ function featureMaterial(o: any): THREE.Material {
   if (byTexture && !byAttribute) {
     mat = new THREE.MeshBasicMaterial({ map: mf.getTextures()[byTexture.texture.index], side: THREE.DoubleSide });
   } else {
-    const ids = byAttribute ? g.getAttribute(`_feature_id_${byAttribute.attribute}`) : null;
+    const ids = byAttribute ? g.getAttribute(`_feature_id_${byAttribute.attribute}`) : (g.getAttribute('_batchid') ?? null);
     const idOf = ids ? (i: number) => ids.getX(i) : info.length ? (i: number) => i : () => o.id;
     const n = g.getAttribute('position').count, c = new Float32Array(n * 3), col = new THREE.Color();
     for (let i = 0; i < n; i++) { featureColor(idOf(i), col); c[i * 3] = col.r; c[i * 3 + 1] = col.g; c[i * 3 + 2] = col.b; }
