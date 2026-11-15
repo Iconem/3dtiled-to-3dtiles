@@ -1,6 +1,6 @@
 /**
  * Potree lab — test point-cloud datasets one at a time, with the point-rendering controls that
- * 3DTilesRendererJS added in #1742 (merged 2026-09-10, not in any npm release yet; see ./vendor).
+ * 3DTilesRendererJS added in #1742 (released in 0.5.4), plus #1792's adaptive size for 3D Tiles (./vendor).
  *
  * Two ways to load the same Potree dataset, switchable, so they can be compared directly:
  *
@@ -10,9 +10,10 @@
  *   stream   This repo's /stream middleware turns the same cloud.js into 3D Tiles (POINTS GLB).
  *            PointCloudEffectsPlugin still converts the material, so shape + EDL apply — but a GLB
  *            carries no point spacing, so sizing is either fixed, or (toggle) derived per TILE from
- *            its geometric error. That toggle is the cheap approximation of "passing density down"
- *            from the octree into a plain 3D Tiles endpoint; per-POINT adaptive sizing would also
- *            need the active-node texture, keyed from each tile's implicit (level, x, y, z).
+ *            its geometric error, or (adaptive) per POINT from the deepest active tile containing it:
+ *            the active-node texture keyed from each tile's implicit (level, x, y, z), which
+ *            3DTilesRendererJS PR #1792 adds for implicit ADD octrees (vendored in ./vendor until it
+ *            is released).
  *
  *   tileset  Any 3D Tiles URL as is — typically an /aggregate mosaic of point clouds (filter it with
  *            &only= so it stays regional) — with the same effects and sizing as `stream`.
@@ -21,7 +22,7 @@
  * declare no CRS (flai's open LiDAR).
  *
  * State lives in the query string so any view is shareable:
- *   /potree-lab?url=<cloud.js|.copc.laz|tileset.json>&mode=potree|stream|tileset&shape=round&edl=0.4&scale=1&geSize=1
+ *   /potree-lab?url=<cloud.js|.copc.laz|tileset.json>&mode=potree|stream|tileset&shape=round&edl=0.4&scale=1&sizing=adaptive|tile|fixed
  *
  * Dataset list = built-in public samples + (dev server only) the Iconem share-link manifest at
  * .local/aggregate-sets/iconem.json, served loopback-only by vite.config.ts.
@@ -34,7 +35,7 @@ import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { DebugTilesPlugin, ImplicitTilingPlugin, ReorientationPlugin } from '3d-tiles-renderer/plugins';
 import { GUI } from 'three/addons/libs/lil-gui.module.min.js';
 import { PotreePlugin } from '@/lib/potreePlugin';
-import { PointCloudEffectsPlugin } from '3d-tiles-renderer/plugins';
+import { PointCloudEffectsPlugin } from './vendor/PointCloudEffectsPlugin.js';
 import { MW } from '@/lib/formats';
 
 const POTREE_REPO = 'https://raw.githubusercontent.com/potree/potree/refs/heads/develop/pointclouds/';
@@ -70,7 +71,9 @@ const params = {
   cacheMB: Number(q.get('cache') ?? 400),
   debugColorMode: q.get('debug') || 'none',
   displayBoxBounds: q.get('boxes') === '1',
-  geSize: q.get('geSize') !== '0',        // stream mode: size points from each tile's geometric error
+  // stream mode sizing: adaptive = per point from the deepest active tile (implicit ADD octrees, #1792),
+  // tile = each tile's points from its own geometric error, fixed = one world size (m) for every point
+  sizing: ['adaptive', 'tile', 'fixed'].includes(q.get('sizing')) ? q.get('sizing') : (q.get('geSize') === '0' ? 'fixed' : 'tile'),
   geFactor: Number(q.get('geFactor') ?? 1.7),
   fixedSize: Number(q.get('fixed') ?? 0.05),
 };
@@ -234,11 +237,14 @@ function streamUrl(src) {
 
 /** Point size for a /stream tile. GE of a Potree-derived tile is its point spacing, so reuse it. */
 function sizeFor(tile) {
-  return params.geSize ? tile.geometricError * params.geFactor * params.pointScale : params.fixedSize * params.pointScale;
+  return params.sizing === 'tile' ? tile.geometricError * params.geFactor * params.pointScale : params.fixedSize * params.pointScale;
 }
 
 function applyStreamSizes() {
   if (!tiles || params.mode === 'potree') return;
+  effects.adaptivePointSize = params.sizing === 'adaptive';
+  effects.pointScale = params.pointScale;
+  if (params.sizing === 'adaptive') return;        // the plugin sizes the points itself
   tiles.forEachLoadedModel((model, tile) => {
     model.traverse((o) => { if (o.isPoints && o.material?.isPointCloudMaterial) o.material.size = sizeFor(tile); });
   });
@@ -266,9 +272,10 @@ function initTiles() {
     tiles.registerPlugin(new ImplicitTilingPlugin());
     // /stream may emit a georeferenced (ECEF) root; recentre + orient so both modes frame the same way.
     tiles.registerPlugin(new ReorientationPlugin({ recenter: true }));
-    effects = new PointCloudEffectsPlugin(effectOpts);
+    effects = new PointCloudEffectsPlugin({ ...effectOpts, adaptivePointSize: params.sizing === 'adaptive', pointScale: params.pointScale });
     tiles.registerPlugin(effects);
     tiles.addEventListener('load-model', ({ scene: model, tile }) => {
+      if (params.sizing === 'adaptive') return;
       model.traverse((o) => { if (o.isPoints && o.material?.isPointCloudMaterial) o.material.size = sizeFor(tile); });
     });
   }
@@ -327,7 +334,7 @@ function applyLoading() {
 function syncUrl() {
   const s = new URLSearchParams({ url: params.url, mode: params.mode, shape: params.pointShape,
     edl: params.edl ? String(params.edlStrength) : '0', scale: String(params.pointScale), error: String(params.errorTarget) });
-  if (params.mode !== 'potree') { s.set('geSize', params.geSize ? '1' : '0'); if (!params.geSize) s.set('fixed', String(params.fixedSize)); }
+  if (params.mode !== 'potree') { s.set('sizing', params.sizing); if (params.sizing === 'fixed') s.set('fixed', String(params.fixedSize)); }
   if (params.debugColorMode !== 'none') s.set('debug', params.debugColorMode);
   if (params.displayBoxBounds) s.set('boxes', '1');
   if (params.controls !== 'env') s.set('controls', params.controls);
@@ -393,9 +400,15 @@ points.add(params, 'edlStrength', 0.05, 2, 0.01).name('edl strength').onChange((
 points.add(params, 'edlRadius', 1, 4, 0.01).name('edl radius').onChange((v) => { effects.edlRadius = v; });
 
 const streamFolder = gui.addFolder('stream mode sizing');
-streamFolder.add(params, 'geSize').name('size from tile GE').onChange(() => { applyStreamSizes(); syncUrl(); });
-streamFolder.add(params, 'geFactor', 0.25, 4, 0.05).name('GE → size factor').onChange(applyStreamSizes);
-streamFolder.add(params, 'fixedSize', 0.001, 1, 0.001).name('fixed size (m)').onChange(applyStreamSizes);
+streamFolder.add(params, 'sizing', { 'adaptive, per point (#1792)': 'adaptive', 'per tile, from its GE': 'tile', 'fixed world size': 'fixed' })
+  .name('point size').onChange(() => { showSizingCtls(); applyStreamSizes(); syncUrl(); });
+const geFactorCtl = streamFolder.add(params, 'geFactor', 0.25, 4, 0.05).name('GE → size factor').onChange(applyStreamSizes);
+const fixedSizeCtl = streamFolder.add(params, 'fixedSize', 0.001, 1, 0.001).name('fixed size (m)').onChange(applyStreamSizes);
+function showSizingCtls() {
+  geFactorCtl.show(params.sizing === 'tile');
+  fixedSizeCtl.show(params.sizing === 'fixed');
+}
+showSizingCtls();
 streamFolder.show(params.mode !== 'potree');
 
 const debug = gui.addFolder('debug');
@@ -429,7 +442,7 @@ function updateHud() {
   });
   LAB.visibleTiles = vis;
   LAB.visiblePoints = pts;
-  hud.textContent = `${params.mode === 'potree' ? 'PotreePlugin · adaptive size' : `${params.mode === 'tileset' ? '3D Tiles url' : '/stream 3D Tiles'} · ${params.geSize ? 'size from tile GE' : 'fixed size'}`}`
+  hud.textContent = `${params.mode === 'potree' ? 'PotreePlugin · adaptive size' : `${params.mode === 'tileset' ? '3D Tiles url' : '/stream 3D Tiles'} · ${{ adaptive: 'adaptive size', tile: 'size from tile GE', fixed: 'fixed size' }[params.sizing]}`}`
     + ` · ${vis} tiles · ${pts.toLocaleString('en-US')} points · ${tiles.downloadQueue.currJobs ?? 0}↓ ${tiles.parseQueue.currJobs ?? 0}⚙ · cache ${(tiles.lruCache.cachedBytes / 1048576).toFixed(0)} MB`
     + (hud.dataset.iconem ? ` · ${hud.dataset.iconem} Iconem datasets listed` : '')
     + (LAB.errors.length ? ` · ${LAB.errors.length} error(s)` : '');

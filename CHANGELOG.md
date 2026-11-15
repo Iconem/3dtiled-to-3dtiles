@@ -5,6 +5,12 @@ Format loosely follows [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+### Added — 2026-11-15 (Potree lab: adaptive point size on 3D Tiles)
+- **The Potree lab sizes `/stream` and 3D Tiles point clouds per point**, like Potree: a new *point size* select
+  (`sizing=adaptive|tile|fixed`, replacing the `geSize` toggle, still read) adds *adaptive*, where each point takes
+  the size of the deepest loaded tile at its position, for implicit `ADD` octrees. It runs on a copy of
+  3DTilesRendererJS#1792's files in `src/potree-lab/vendor` until that PR is released; the main viewer is unchanged.
+
 ### Fixed — 2026-11-14 (a Nexus mesh drawn while it loads)
 - **A Nexus mesh drew nothing until its deepest level had loaded** in 3DTilesRendererJS (the dragon after its 85
   nodes, the gargoyle after 187): each level hung under a contentless level tile, and 3DTilesRendererJS counts a

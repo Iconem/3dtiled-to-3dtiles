@@ -79,7 +79,7 @@ budget rather than a screen-space error).
 | `mode=` | How the dataset is read | Point sizing |
 |---|---|---|
 | `potree` | `PotreePlugin` reads `cloud.js` directly in the browser | **Adaptive, per point**: each point is sized by the deepest *active* octree node containing it, resolved in the vertex shader from a texture of the active node hierarchy |
-| `stream` | This repo's `/stream` turns the same `cloud.js`, or a `.copc.laz`, into 3D Tiles (POINTS GLB), rendered through `PointCloudEffectsPlugin` | Per **tile**: fixed, or derived from the tile's geometric error (toggle) |
+| `stream` | This repo's `/stream` turns the same `cloud.js`, or a `.copc.laz`, into 3D Tiles (POINTS GLB), rendered through `PointCloudEffectsPlugin` | `sizing=` **adaptive**, per point like `potree`, for implicit `ADD` octrees ([3DTilesRendererJS#1792](https://github.com/NASA-AMMOS/3DTilesRendererJS/pull/1792), vendored until released); **tile**, each tile's points from its own geometric error; or **fixed**, one world size |
 | `tileset` | **Any** 3D Tiles URL as is: typically an `/aggregate` mosaic of point clouds, kept regional with `&only=` | same as `stream` |
 
 A COPC that declares no CRS takes one in the URL fragment: `…/overview.copc.laz#crs=EPSG:3812`, which
@@ -181,9 +181,10 @@ it has to be the per-point scheme**, not a per-tile size:
 - For implicit-octree tilesets (our `/stream` COPC and Potree), a tile's `(level, x, y, z)` is exactly
   a Potree octree key, and its geometric error is the point spacing — so the same active-node texture
   can be built without any Potree metadata.
-- That needs a small plugin of our own (active tiles → node texture → `PointCloudMaterial`'s
-  `uActiveNodes` / `uNodeSize` / `uNodeMinOffset`); `PointCloudMaterial` already supports it, it just
-  has no generic driver yet. Not built.
+- [3DTilesRendererJS#1792](https://github.com/NASA-AMMOS/3DTilesRendererJS/pull/1792) adds it to
+  `PointCloudEffectsPlugin` as `adaptivePointSize`. Until it is released, the lab uses a copy of the
+  PR's three files (`src/potree-lab/vendor`), for `stream` and `tileset` with `sizing=adaptive`; the
+  main viewer stays on the 0.5.4 build and its own per-tile child-box sizing (`addRefinePointSize.ts`).
 
 ## Limits
 
