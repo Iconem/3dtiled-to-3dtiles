@@ -13,6 +13,10 @@
  *     (converted once on first request, then cached). --lon/--lat append the tileset-level globe
  *     placement params (see tile-server docs).
  *
+ *   3dtiled tile list | detect | install <tool> | run <tool> <input> <outDir> [--<option> <value>]…
+ *     The one-stop tiler: run a third-party tiler (PotreeConverter, PDAL, untwine, splat-transform) on RAW input (a LAS,
+ *     an E57, a splat PLY) to get something this CLI then serves. See packages/tilers/cli.js.
+ *
  *   3dtiled export <tileset-url> <outDir> [--max-depth N] [--keep-implicit] [--pack 3tz,3dtiles] [--overwrite] [--verify off|counts|sample|full] [--hierarchy-errors error|warn]
  *     Materialise any 3D Tiles tileset (a remote one, or a /stream, /convert or /aggregate URL of a
  *     running server) into a self-contained folder: every tileset JSON and tile file, uris made
@@ -29,6 +33,9 @@
  * · LCC (meta.lcc/index.bin/data.bin) · LCC2 (*.lcc2 + data/3dgs/*.sog) · Potree 2.0 (metadata.json+octree.bin) / 1.x (cloud.js)
  * · I3S (.slpk / 3dSceneLayer.json) · Nexus (.nxs / .nxz).
  */
+// ── `3dtiled tile` — the one-stop tiler: a third-party tiler on raw input (packages/tilers/cli.js has the commands) ──
+if (process.argv[2] === 'tile') { process.argv.splice(2, 1); await import('../tilers/cli.js'); process.exit(process.exitCode ?? 0); }
+
 import { convert, detectFormat, supportedFormats } from './index.js';
 import { detectFormatByName } from '3dtiles-convert-core';
 import { isRemote } from './fetch-source.js';

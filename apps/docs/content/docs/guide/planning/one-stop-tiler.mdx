@@ -1,10 +1,66 @@
 ---
-title: "One-stop tiler (draft)"
-description: "Draft plan for the desktop app's third flow: give it raw, untiled input and it runs the right third-party tiler, then streams or exports the result."
+title: "One-stop tiler"
+description: "The desktop app's third flow: give it raw, untiled input and it runs the right third-party tiler, then streams the result. Phase 1 is built (four tools, Windows); the plan for the rest."
 ---
 
-Draft, 2026-11-16. Not started. The roadmap item is on the [future work](/docs/guide/todo-future-work) page; the
-tools are surveyed on [existing tilers](/docs/guide/existing-tilers).
+Plan of 2026-11-16. **Phase 1 was built the same day** (see *Result*); phases 2 to 4 are not started. The roadmap
+item is on the [future work](/docs/guide/todo-future-work) page; the tools are surveyed on
+[existing tilers](/docs/guide/existing-tilers).
+
+## Result: phase 1 (2026-11-16)
+
+A new package, `packages/tilers`, finds a tool, fetches it when its authors publish a binary, builds its command
+line from checked options and runs it. The desktop app has a third flow, **Tile raw input**, on top of it, and the
+CLI has `3dtiled tile`.
+
+| Tool | Input | Output, then streamed as | How it gets on the machine |
+|---|---|---|---|
+| **splat-transform** | `.ply`, `.spz`, `.sog`, `.splat`, `.ksplat` | streamed SOG with levels of detail | ships with the app |
+| **PotreeConverter 2.1.5** | `.las`, `.laz` | Potree 2 folder | downloaded from its GitHub release (14 MB), checked against a pinned SHA-256 |
+| **PDAL** `writers.copc` | `.las`, `.laz`, `.e57` | COPC | found: `PDAL_BIN`, `PATH`, a QGIS or OSGeo4W install, pixi |
+| **untwine** | `.las`, `.laz` | COPC | found: `UNTWINE_BIN`, `PATH`, a QGIS install, pixi |
+
+**Tried on real files, on Windows**, each tool run through the package and its output then served by the tile
+server (tileset and tiles):
+
+| Run | Result |
+|---|---|
+| PotreeConverter on a 63 183-point LAS (downloaded, hash matched, 408 files unpacked) | Potree 2 folder, served: 4 levels |
+| the same with `--encoding BROTLI --method random` | served as well |
+| PDAL (found in pixi) on the same LAS | COPC, served: 2 levels |
+| untwine (found in QGIS 4.2.0, run with that install's DLLs on `PATH`) | COPC, served |
+| splat-transform on an 83 585-splat PLY, 3 levels | streamed SOG, served: 146 275 splats over the 3 levels |
+
+These files are small: the runs prove the path from raw file to streamed tiles, not speed.
+
+**What the package guarantees** (its tests):
+
+- **Options are checked before they reach a command line**: only the options a tool declares, within their ranges;
+  free text may not look like a flag. The app can name a tool and its options, never an executable or a raw flag.
+- **A download that does not match its pinned hash installs nothing**, and an archive that would write outside its
+  folder is refused. An interrupted install leaves nothing that looks installed.
+- **A tool already on the machine is used first**: nothing is downloaded unless the user picks a tool that needs it,
+  and the button then reads *Download and run*.
+
+**In the app**: the form is made from the tool's own options, with the tool's defaults; the output and Cancel are
+the export card's; when a run ends, **Stream it** puts what was written in the dataset field and opens *Stream
+live*. The same run from a terminal:
+
+```sh
+node packages/convert/cli.js tile detect                       # which tools are here, and where
+node packages/convert/cli.js tile run pdal scan.laz C:\tiled\scan
+node packages/convert/cli.js tile run potreeconverter scan.laz C:\tiled\scan --encoding BROTLI --install
+node packages/convert/cli.js tile run splat-transform scene.ply C:\tiled\scene --levels 4
+```
+
+**Not verified:**
+
+- **The flow inside the built desktop app.** The package, the app's subprocess runner (under Node) and the form
+  (rendered in a browser with the server's live tool list) were each run; the three together in the Electrobun
+  window were not, as that needs a new build.
+- E57 input, PDAL from a QGIS install (pixi's was found first here), macOS and Linux.
+- A large input: disk use of the tools' temporary folders, and Cancel midway.
+- Whether Defender blocks the downloaded `PotreeConverter.exe` on a machine without an exclusion.
 
 ## The idea
 
@@ -55,7 +111,7 @@ table says how, not that every asset exists.
 
 ## How the app manages tools
 
-- A **manifest** per tool, in the repo: name, version, download URL per platform, SHA-256, licence, the command
+- A **manifest** per tool, in the repo (`packages/tilers/tools.js`): name, version, download URL per platform, SHA-256, licence, the command
   line, and the form fields (each the tool's own flag, with its default and help text).
 - **Detect before downloading**: the tool on `PATH`, a QGIS install for PDAL and untwine, or a path the user points
   to. A downloaded tool lives in the app's data folder, per version, so an update never breaks a running job.
@@ -73,8 +129,8 @@ to allow it. macOS and Linux come after, with the same manifests.
 
 ## Phases
 
-1. **Windows, three tools**: splat-transform (no download), PotreeConverter (one binary), PDAL/untwine found in a
-   QGIS install. Proves detect, download, run, chain.
+1. **Windows, three tools** (**done**, as four: PDAL and untwine are separate entries): splat-transform (no
+   download), PotreeConverter (one binary), PDAL/untwine found in a QGIS install. Proves detect, download, run, chain.
 2. **More single binaries**: gocesiumtiler, Obj2Tiles, fanvanzh/3dtiles.
 3. **Runtimes**: py3dtiles in a private `uv` environment, mago-3d-tiler with a portable JRE.
 4. **macOS and Linux**, then the server variant (the same manifests, Docker images where they exist).

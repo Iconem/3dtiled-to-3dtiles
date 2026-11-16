@@ -125,6 +125,8 @@ If a 3dtiled server is already listening on a candidate port (e.g. you have `pnp
 
 ## The three tabs
 
+The Build tab holds a dataset and three flows: *Stream live*, *Export to a folder* and *Tile raw input*.
+
 ### Build
 
 - **File… / Folder…** open the **native OS picker** over RPC to the main process. It has to be the
@@ -277,6 +279,35 @@ renders through `/3dtiles-self-contained` (48 tiles).
 The exported Geghard and Brooklyn folders were then served by a plain static server and rendered in the
 viewer (48 and 42 tiles). The same exporter is on the CLI as
 [`3dtiled export`](/docs/guide/cli-usage#export-a-tileset-to-a-folder).
+
+### Tile raw input
+
+The third flow of the Build tab, for a file that is **not tiled yet**: a LAS, LAZ or E57 point cloud, a splat PLY.
+It runs a third-party tiler on it, then hands the result to *Stream live*. The app writes no tiler: it finds, fetches
+and calls the official ones ([plan and results](/docs/guide/planning/one-stop-tiler)).
+
+| Input | Tools offered | Result |
+|---|---|---|
+| `.las`, `.laz` | PDAL (`writers.copc`), untwine, PotreeConverter 2 | a COPC file, or a Potree 2 folder |
+| `.e57` | PDAL | a COPC file |
+| `.ply`, `.spz`, `.sog`, `.splat`, `.ksplat` | PlayCanvas splat-transform | a streamed SOG with levels of detail |
+
+- **Where a tool comes from** is written under the tool's name. splat-transform ships with the app. PDAL and
+  untwine are looked for on the machine: `PATH`, a QGIS or OSGeo4W install (QGIS ships both), pixi, or the
+  `PDAL_BIN` and `UNTWINE_BIN` environment variables. PotreeConverter is **downloaded** from its authors' GitHub
+  release the first time (14 MB), checked against a SHA-256 pinned in this repo, and kept in
+  `%LOCALAPPDATA%\3D Tiled\tools`. The button reads *Download and run* when that will happen.
+- **A tool already on the machine is offered first**, so nothing is downloaded unless you pick a tool that needs it.
+- **The options are the tool's own**, with its defaults; the rarer ones are under *Advanced*, next to the equivalent
+  command line.
+- **Run** starts the tool in a subprocess, as *Run in: CLI subprocess* does for an export: its output is shown as
+  it comes, and **Cancel** stops it and what it started.
+- **Stream it**, when the run ends, puts what was written in the dataset field (with `cache=full`: a file on disk
+  is converted once to the local cache) and opens *Stream live*.
+
+The same from a terminal: `node packages/convert/cli.js tile run <tool> <input> <outDir>`
+([CLI usage](/docs/guide/cli-usage#tile-raw-input-with-a-third-party-tiler)). Windows first: the download and the
+QGIS lookup are Windows'; on macOS and Linux a tool on `PATH` is found.
 
 ### Library
 

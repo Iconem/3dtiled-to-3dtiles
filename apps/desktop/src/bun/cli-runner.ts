@@ -9,10 +9,14 @@
  * SECURITY. The view decides the arguments, so the main process must not let it run anything else:
  * args[0] has to be one of ALLOWED_SCRIPTS (repo-relative), the executable is always `node`, no shell
  * is involved (an argv array, never a command string), and cli.js's `serve` sub-command and its `--`
- * passthrough to converter binaries are refused.
+ * passthrough to converter binaries are refused. The tilers CLI runs third-party tools, but only the ones its own
+ * manifest names, found on this machine or downloaded against a pinned hash, with options it validates: the view can
+ * name a tool and its declared options, never an executable or a raw flag.
  */
 
-export const ALLOWED_SCRIPTS = ['packages/convert/cli.js', 'scripts/pack-3dtiles.mjs'] as const;
+export const ALLOWED_SCRIPTS = ['packages/convert/cli.js', 'scripts/pack-3dtiles.mjs', 'packages/tilers/cli.js'] as const;
+/** What the view may ask of the tilers CLI: the tools are named by id and their options checked there (packages/tilers). */
+const TILER_COMMANDS = ['list', 'detect', 'for', 'install', 'run'];
 export const TAIL_LINES = 200;
 
 export type CliState = 'running' | 'done' | 'failed' | 'cancelled';
@@ -45,6 +49,9 @@ export function validateArgs(args: unknown): string[] {
   if (script === 'packages/convert/cli.js') {
     if (args[1] === 'serve') throw new Error('the serve sub-command is not allowed here');
     if (args.includes('--')) throw new Error('the -- converter passthrough is not allowed here');
+  }
+  if (script === 'packages/tilers/cli.js' && !TILER_COMMANDS.includes(String(args[1]))) {
+    throw new Error(`not a tilers command: ${args[1]} (allowed: ${TILER_COMMANDS.join(', ')})`);
   }
   return [script, ...args.slice(1)];
 }

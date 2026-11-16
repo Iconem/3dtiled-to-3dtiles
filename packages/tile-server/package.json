@@ -10,6 +10,7 @@
   "dependencies": {
     "3dtiles-convert-core": "workspace:*",
     "3dtiles-tools": "workspace:*",
+    "3dtiled-tilers": "workspace:*",
     "@loaders.gl/i3s": "^4.4.3",
     "@loaders.gl/zip": "^4.4.3",
     "@playcanvas/splat-transform": "^3.11.1",

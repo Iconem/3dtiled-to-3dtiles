@@ -54,7 +54,7 @@ const MODULES = {
   stream: () => import('./stream-live.js'), convert: () => import('./convert-live.js'), selfContained: () => import('./3dtiles-self-contained.js'),
   tools: () => import('./3dtiles-tools-live.js'), gltf: () => import('./gltf-live.js'), bing: () => import('./bing-live.js'),
   extract: () => import('./extract-live.js'), proxy: () => import('./proxy-live.js'), exportLive: () => import('./export-live.js'),
-  aggregate: () => import('./aggregate-live.js'), stats: () => import('./stats-live.js'),
+  aggregate: () => import('./aggregate-live.js'), stats: () => import('./stats-live.js'), tilers: () => import('./tilers-live.js'),
 };
 const handleStream = lazy(MODULES.stream, 'handleStream');
 const handleConvert = lazy(MODULES.convert, 'handleConvert');
@@ -67,6 +67,7 @@ const handleProxy = lazy(MODULES.proxy, 'handleProxy');
 const handleExport = lazy(MODULES.exportLive, 'handleExport');
 const handleAggregate = lazy(MODULES.aggregate, 'handleAggregate');
 const handleStats = lazy(MODULES.stats, 'handleStats');
+const handleTilers = lazy(MODULES.tilers, 'handleTilers');
 
 // Port resolution order: --port <n> (CLI, wins) → TILE_PORT → PORT → 3001. The CLI/TILE_PORT escape
 // hatches matter under dev harnesses that inject PORT=<vite port> into the whole `pnpm run dev` process
@@ -159,6 +160,7 @@ http.createServer(async (req, res) => {
     if (await handleProxy(req, res, u)) return;            // /proxy?url= — generic CORS-open passthrough for public sources
     if (await handleAggregate(req, res, u)) return;
     if (await handleExport(req, res, u)) return;           // /export — materialise a tileset to a local folder (opt-in, loopback)        // /aggregate?urls= — meta-tileset over N child tilesets
+    if (await handleTilers(req, res, u)) return;           // /tilers — the one-stop tiler's tools and where they are (opt-in, loopback)
     if (await handleStats(req, res, u)) return;            // /stats + /hierarchy — depth/breadth stats & graph page
     res.writeHead(404, CORS); res.end('not found — see / for a full list of endpoints, or /playground to try them interactively');
   } catch (e) {

@@ -58,6 +58,31 @@ into the folder. The HTTP form is `POST /export {url, outDir, maxDepth, keepImpl
 `{method: "convert", src, format, options, pack}` for the offline converter) on a server started
 with `TILED_ALLOW_EXPORT=1`.
 
+### Tile raw input with a third-party tiler
+
+For a file that is not tiled yet, `3dtiled tile` runs the right third-party tiler and says what to serve afterwards.
+It is the command behind the desktop app's *Tile raw input* flow ([tools, results](/docs/guide/planning/one-stop-tiler)).
+
+```sh
+node packages/convert/cli.js tile list                 # the tools, what they take and write, their options
+node packages/convert/cli.js tile detect               # which are on this machine, and where
+node packages/convert/cli.js tile for scan.laz         # the tools that take this file
+node packages/convert/cli.js tile install potreeconverter   # download a tool that publishes a binary (hash-checked)
+node packages/convert/cli.js tile run <tool> <input> <outDir> [--<option> <value>]… [--install] [--overwrite] [--dry-run]
+```
+
+| Tool | Input | Writes |
+|---|---|---|
+| `pdal` | `.las`, `.laz`, `.e57` | `<outDir>/<name>.copc.laz` |
+| `untwine` | `.las`, `.laz` | `<outDir>/<name>.copc.laz` |
+| `potreeconverter` | `.las`, `.laz` | a Potree 2 folder |
+| `splat-transform` | `.ply`, `.spz`, `.sog`, `.splat`, `.ksplat` | `<outDir>/lod-meta.json` (streamed SOG) |
+
+- `run` ends with one line, `TILER_RESULT {"format":…,"output":…}`: the path and format to give to `3dtiled serve`.
+- `--dry-run` prints the commands without running them; `--install` fetches a missing tool first.
+- Options are the tool's own (`tile list` shows them with their defaults), and are checked before the tool is called.
+- Downloaded tools live in `%LOCALAPPDATA%\3D Tiled\tools` (`~/.cache/3dtiled/tools` elsewhere), or `TILED_TOOLS_DIR`.
+
 ### Tile workers (experimental)
 
 Tiles are decoded and encoded on the process's one thread by default. Set `TILED_WORKERS=auto` (one worker

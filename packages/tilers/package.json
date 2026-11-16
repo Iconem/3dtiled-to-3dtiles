@@ -1,0 +1,14 @@
+{
+  "name": "3dtiled-tilers",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "One-stop tiler: finds, fetches and runs third-party tilers (PotreeConverter, PDAL, untwine, splat-transform) on raw input, for output this repo streams",
+  "main": "index.js",
+  "bin": {
+    "3dtiled-tile": "cli.js"
+  },
+  "dependencies": {
+    "@playcanvas/splat-transform": "^3.11.1"
+  }
+}

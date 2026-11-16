@@ -1401,6 +1401,60 @@
         }
       }
     },
+    "/tilers": {
+      "get": {
+        "summary": "Third-party tilers for raw input, and where they are on this machine",
+        "description": "The tools the one-stop tiler can run on raw, untiled input (a LAS, an E57, a splat PLY): what each takes and writes, its options with their defaults, and whether it is on this machine (bundled, on PATH, in a QGIS install, downloaded) or can be downloaded. Read-only: a tool is run with `3dtiled tile run`, which the desktop app does in a subprocess (see `packages/tilers`). Loopback clients only, on a server started with TILED_ALLOW_EXPORT=1: the answer names paths of this machine.",
+        "tags": [
+          "misc"
+        ],
+        "parameters": [
+          {
+            "name": "input",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            },
+            "description": "A file path or name: the answer then lists, in `for`, the tools that take it (by its extension)."
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The tools, the folder downloaded tools live in, and this platform",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "tools": {
+                      "type": "array",
+                      "items": {
+                        "type": "object"
+                      }
+                    },
+                    "toolsDir": {
+                      "type": "string"
+                    },
+                    "platform": {
+                      "type": "string"
+                    },
+                    "for": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Not enabled, or not a loopback client"
+          }
+        }
+      }
+    },
     "/workers": {
       "get": {
         "summary": "Tile worker threads in use",

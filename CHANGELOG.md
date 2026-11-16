@@ -5,6 +5,17 @@ Format loosely follows [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+### Added — 2026-11-16 (one-stop tiler, phase 1)
+- **Desktop app: a third flow, *Tile raw input*.** Give it a raw LAS, LAZ, E57 or splat PLY: it offers the
+  third-party tilers that take it, shows each tool's own options, runs it in a subprocess with its output and
+  Cancel, then *Stream it* hands the result to the stream flow.
+- **Four tools**: PDAL `writers.copc` and untwine (found on the machine: `PATH`, a QGIS or OSGeo4W install, pixi),
+  PotreeConverter 2.1.5 (downloaded from its GitHub release, checked against a pinned SHA-256), PlayCanvas
+  splat-transform (ships with the app; builds a streamed SOG with levels of detail). Windows first.
+- **`packages/tilers`** holds the tools' manifest and the logic, with `3dtiled tile list | detect | for | install |
+  run` on the CLI and a read-only `GET /tilers` on a server started with `TILED_ALLOW_EXPORT=1`.
+- Each tool was run on a real file and its output served by the tile server. Not run yet inside a built app.
+
 ### Added — 2026-11-16 (crop and extract in the browser)
 - **Crop & Extract runs in the browser**: a *Tile server / In the browser* switch in the section. In the browser
   the page fetches the tiles and writes the file itself, in a Web Worker, with progress and Cancel: LAS, merged

@@ -1,5 +1,6 @@
 /**
- * Build — a dataset, then two flows, each in its own tab: live-stream (a paste-ready URL) or export to disk.
+ * Build — a dataset, then three flows, each in its own tab: live-stream (a paste-ready URL), export to disk, or,
+ * for a raw file that is not tiled yet, run a third-party tiler on it first.
  */
 import { useState } from 'react';
 import { Button } from '@/components/ui/button';
@@ -8,6 +9,7 @@ import type { AppModel } from './App';
 import { Card } from './components/Card';
 import { Actions, Advanced, Choice, Code, Field, FieldLabel, Hint, Result, TextInput, UrlBar, type Message } from './components/bits';
 import { ExportCard } from './ExportCard';
+import { TilerCard } from './TilerCard';
 import { base, pickDataset, pickerAvailable, viewerUrl } from './host';
 import { newId } from './library';
 import { nameFor, PLACEMENT, typeOfFormat } from './urls';
@@ -15,6 +17,7 @@ import { nameFor, PLACEMENT, typeOfFormat } from './urls';
 const FLOWS = [
   ['stream', 'Stream live', 'A tileset URL converted on demand while this app runs: nothing is written to disk'],
   ['export', 'Export to a folder', 'Files on disk: crawl the stream, or run the offline converter'],
+  ['tile', 'Tile raw input', 'A raw LAS, LAZ, E57 or splat PLY: run a third-party tiler on it, then stream the result'],
 ] as const;
 /** How many threads the app's server builds tiles on: one setting, for the tiles it streams and the exports it runs. */
 export const WORKERS = [
@@ -47,7 +50,7 @@ const PLACEMENT_FIELDS: Record<(typeof PLACEMENT)[number], { label: React.ReactN
 // Tree formats are a FOLDER (Potree's cloud.js directory, a streamed-SOG LOD folder, an unpacked
 // 3D Tiles tree); single-file formats are a FILE (.copc.laz, .rad, .lcc, .3tz). Hence two buttons
 // rather than one dialog that has to guess — on Windows a single dialog cannot offer both.
-const DATASET_FILE_TYPES = 'laz,las,copc,rad,lcc,json,js,zip,3tz,slpk,glb,b3dm';
+const DATASET_FILE_TYPES = 'laz,las,copc,rad,lcc,json,js,zip,3tz,slpk,glb,b3dm,e57,ply,spz,sog,splat,ksplat';
 
 export function BuildTab({ app, message }: { app: AppModel; message: Message | null }) {
   const { form, patchForm, url, say } = app;
@@ -128,7 +131,7 @@ export function BuildTab({ app, message }: { app: AppModel; message: Message | n
             {/* Outside the Electrobun host (e.g. the bundle rendered in a plain browser for verification) the
                 native dialog cannot exist — hide the buttons rather than offering an action that always fails. */}
             {pickerAvailable() && <>
-              <Button id="browse-file" title="Pick a single-file dataset (.copc.laz, .rad, .lcc, .3tz…)" onClick={() => browse(false)}>File…</Button>
+              <Button id="browse-file" title="Pick a single-file dataset (.copc.laz, .rad, .lcc, .3tz…), or a raw file to tile (.las, .laz, .e57, .ply)" onClick={() => browse(false)}>File…</Button>
               <Button id="browse-dir" title="Pick a dataset folder (Potree cloud.js dir, streamed-SOG LOD dir, unpacked 3D Tiles)" onClick={() => browse(true)}>Folder…</Button>
             </>}
           </UrlBar>
@@ -200,6 +203,7 @@ export function BuildTab({ app, message }: { app: AppModel; message: Message | n
         </Card>
         </TabsContent>
         <TabsContent value="export" id="flow-export" keepMounted><ExportCard app={app} /></TabsContent>
+        <TabsContent value="tile" id="flow-tile" keepMounted><TilerCard app={app} onStream={() => setFlow('stream')} /></TabsContent>
       </Tabs>
     </section>
   );

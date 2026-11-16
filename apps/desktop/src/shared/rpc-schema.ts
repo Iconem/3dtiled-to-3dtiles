@@ -42,8 +42,8 @@ export interface DesktopRPC {
       };
       /**
        * Export → "Run in: CLI subprocess": run `node <args…>` from the repo root (no shell). args[0]
-       * must be `packages/convert/cli.js` or `scripts/pack-3dtiles.mjs` — the main process rejects
-       * anything else. `then` is an optional second step run only if the first exits 0 (convert →
+       * must be `packages/convert/cli.js`, `scripts/pack-3dtiles.mjs` or `packages/tilers/cli.js` (the one-stop
+       * tiler: Build → Tile raw input) — the main process rejects anything else. `then` is an optional second step run only if the first exits 0 (convert →
        * pack). Rejects (throws) on a disallowed command.
        */
       runCli: {
