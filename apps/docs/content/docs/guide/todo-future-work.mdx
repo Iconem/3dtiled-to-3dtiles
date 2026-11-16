@@ -472,9 +472,10 @@ flowchart LR
   and `offset` place a scene as LCC's do while the whitepaper calls `offset` reserved; the collision meshes
   (`data/mesh/*.ply`), which could be a second, mesh tileset of the same tree.
 
-- [ ] **Spherical harmonics (view-dependent color) for Gaussian splats.** Started 2026-11-16: the tile writer and
-  RAD carry them (`&sh=1..3`, off by default; +12 % on a Coit Tower tile at degree 1), and the viewer draws them.
-  Streamed SOG and LCC are next. Plan, phases and tests:
+- [ ] **Spherical harmonics (view-dependent color) for Gaussian splats.** Started 2026-11-16: the tile writer,
+  RAD, streamed SOG and LCC2 carry them (`&sh=1..3`, off by default; +10 to +37 % sent, by degree), the viewer
+  draws them and extract passes them through. Left: LCC (needs a *Quality* scene), checks by eye and in Cesium.
+  Plan, phases and tests:
   [Splats: spherical harmonics and Spark's RAD reader (draft)](/docs/guide/planning/splat-sh-and-rad); the earlier
   design notes follow. Every splat converter
   (RAD/LCC/SOG/GeoSplats) currently emits **DC-only** color — the source formats' higher-order SH bands

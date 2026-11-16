@@ -5,7 +5,8 @@
  * Converts a PlayCanvas **Streamed SOG** dataset (lod-meta.json + per-chunk unbundled
  * SOG dirs) to OGC 3D Tiles 1.1 with KHR_gaussian_splatting_compression_spz_2 GLB tiles.
  *
- *   node src/index.js <scene-dir-or-lod-meta.json> <outDir> [--splat-budget N]   (0: one tile per leaf run)
+ *   node src/index.js <scene-dir-or-lod-meta.json> <outDir> [--splat-budget N] [--sh N]
+ *   (--splat-budget 0: one tile per leaf run; --sh 1..3: keep spherical harmonics up to that degree)
  *
  * The streamed-SOG spatial tree is a binary k-d tree whose leaves hold one run of every LOD
  * level: a big scene (Shramko's 103 M-splat Lublin) has 31,668 leaves 15 levels deep, so the
@@ -31,14 +32,14 @@ import fs   from 'fs/promises';
 import path from 'path';
 import { fileURLToPath } from 'node:url';
 import { decodeChunk, extractRange } from './sogChunk.js';
-import { lodGeometricErrors, collapseLodTree, thinSplats, DEFAULT_SPLAT_BUDGET, upTransform, upParam } from './lodMeta.js';
+import { lodGeometricErrors, collapseLodTree, thinSplats, concatSh, DEFAULT_SPLAT_BUDGET, upTransform, upParam } from './lodMeta.js';
 import { sogChunkToFiles } from './tile-task.js';
 
 const TILE_TASK = new URL('./tile-task.js', import.meta.url).href;
 // Shared, parallel-friendly encoder from core (async gzip on the libuv threadpool) +
 // bounded-concurrency map — same import lcc uses. (Replaced the former local synchronous
 // ./spzGlb.js, which was byte-identical and is now deleted.)
-import { buildSplatTileGlb, computeBounds, defaultConcurrency, convertTiles, parallelMap } from '../../core/index.js';
+import { buildSplatTileGlb, computeBounds, defaultConcurrency, convertTiles, parallelMap, shParam } from '../../core/index.js';
 
 // Geometric error: anchored to the ROOT bound diagonal and halved at every step down
 // the tree (interior level AND each LOD-chain step), matching the reference
@@ -75,6 +76,7 @@ export async function convert(input, outDir, opts = {}) {
   if (lod.version != null && lod.version > 1)
     throw new Error(`Unsupported Streamed SOG version ${lod.version} (this tool targets v1).`);
 
+  const sh = opts.centroidsOnly ? 0 : shParam(opts.sh);   // spherical-harmonic degree kept in the tiles
   const lodLevels = lod.lodLevels ?? (lod.counts?.length ?? 1);
   console.log(`Streamed SOG: ${((lod.count ?? 0)/1e6).toFixed(2)}M gaussians, ${lodLevels} LOD levels, ${lod.filenames.length} chunks`);
   // Rough estimate from past runs: ~2s per chunk decode (WebP) + ~3ms per tile write.
@@ -143,7 +145,7 @@ export async function convert(input, outDir, opts = {}) {
     const cache = new Map();                        // fileIdx → Promise<DataTable>, insertion-ordered for eviction
     const tableOf = (fileIdx) => {
       if (!cache.has(fileIdx)) {
-        cache.set(fileIdx, decodeChunk(path.join(sceneDir, lod.filenames[fileIdx])));
+        cache.set(fileIdx, decodeChunk(path.join(sceneDir, lod.filenames[fileIdx]), sh));
         while (cache.size > TABLE_CACHE) cache.delete(cache.keys().next().value);
       }
       return cache.get(fileIdx);
@@ -156,9 +158,9 @@ export async function convert(input, outDir, opts = {}) {
     };
     await parallelMap(merged, async ({ uri, runs, stride = 1 }) => {
       const parts = [];
-      for (const r of runs) parts.push(extractRange(await tableOf(r.file), r.offset, r.count));   // sequential: chunk order
+      for (const r of runs) parts.push(extractRange(await tableOf(r.file), r.offset, r.count, sh));   // sequential: chunk order
       const [arrays, count] = thinSplats({ positions: concat(parts, 'positions'), alphas: concat(parts, 'alphas'), rgb: concat(parts, 'rgb'),
-                                           scales: concat(parts, 'scales'), rotations: concat(parts, 'rotations') },
+                                           scales: concat(parts, 'scales'), rotations: concat(parts, 'rotations'), sh: concatSh(parts) },
                                          runs.reduce((s, r) => s + r.count, 0), stride);
       const glb = await buildSplatTileGlb(arrays, count, computeBounds(arrays.positions, count), !!opts.centroidsOnly);
       await fs.writeFile(path.join(outDir, uri), glb);
@@ -183,7 +185,7 @@ export async function convert(input, outDir, opts = {}) {
   // Biggest chunks first (by splat count): a chunk is one worker's unit of work, and a 4 000-tile chunk handed out last
   // would run alone at the end while the other workers sit idle.
   const chunks = [...byFile].map(([fileIdx, tasks]) => ({
-    metaPath: path.join(sceneDir, lod.filenames[fileIdx]), outDir, centroids: !!opts.centroidsOnly,
+    metaPath: path.join(sceneDir, lod.filenames[fileIdx]), outDir, centroids: !!opts.centroidsOnly, sh,
     tiles: tasks.map(({ uri, run }) => ({ uri, offset: run.offset, count: run.count })),
   })).sort((a, b) => b.tiles.reduce((n, t) => n + t.count, 0) - a.tiles.reduce((n, t) => n + t.count, 0));
   if (chunks.length) await convertTiles(chunks, {
@@ -198,11 +200,11 @@ export async function convert(input, outDir, opts = {}) {
   if (lod.environment) {
     try {
       const envMeta = path.join(sceneDir, lod.environment);
-      const table = await decodeChunk(envMeta);
+      const table = await decodeChunk(envMeta, sh);
       const n = table.numRows;
-      const { positions, alphas, rgb, scales, rotations } = extractRange(table, 0, n);
-      const bounds = computeBounds(positions, n);
-      const glb = await buildSplatTileGlb({ positions, alphas, rgb, scales, rotations }, n, bounds, opts.centroidsOnly);
+      const arrays = extractRange(table, 0, n, sh);
+      const bounds = computeBounds(arrays.positions, n);
+      const glb = await buildSplatTileGlb(arrays, n, bounds, opts.centroidsOnly);
       const uri = `tiles/env.glb`;
       await fs.writeFile(path.join(outDir, uri), glb);
       const envBox = [bounds.cx, -bounds.cz, bounds.cy, bounds.hx,0,0, 0,bounds.hz,0, 0,0,bounds.hy];
@@ -245,10 +247,12 @@ export async function convert(input, outDir, opts = {}) {
 // ── CLI shim: run only when invoked directly (not when imported by the meta-converter) ──
 if (process.argv[1] && fileURLToPath(import.meta.url) === path.resolve(process.argv[1])) {
   const argv = process.argv.slice(2), a = [];
-  let splatBudget;
+  let splatBudget, sh;
   for (let i = 0; i < argv.length; i++) {
     if (argv[i] === '--splat-budget') splatBudget = Number(argv[++i]);
+    else if (argv[i] === '--sh') sh = Number(argv[++i]);
+    else if (argv[i].startsWith('--sh=')) sh = Number(argv[i].slice(5));
     else if (!argv[i].startsWith('--')) a.push(argv[i]);
   }
-  convert(a[0], a[1], { splatBudget }).then(() => process.exit(0)).catch(e => { console.error(e); process.exit(1); });
+  convert(a[0], a[1], { splatBudget, sh, centroidsOnly: argv.includes('--centroids-only') }).then(() => process.exit(0)).catch(e => { console.error(e); process.exit(1); });
 }

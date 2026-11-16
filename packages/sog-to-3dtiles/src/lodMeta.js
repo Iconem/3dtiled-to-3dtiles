@@ -140,6 +140,21 @@ export function collapseLodTree(tree, lodLevels, budget, { box, content }) {
   return root;
 }
 
+/** Several runs' spherical-harmonic bands end to end (`extractRange`'s `sh`); null when any run has none, a band any run lacks is dropped with those above it. */
+export function concatSh(parts) {
+  if (parts.some((p) => !p.sh)) return null;
+  if (parts.length === 1) return parts[0].sh;
+  const out = {};
+  for (const key of ['sh1', 'sh2', 'sh3']) {
+    if (parts.some((p) => !p.sh[key])) break;
+    const col = new Float32Array(parts.reduce((n, p) => n + p.sh[key].length, 0));
+    let o = 0;
+    for (const p of parts) { col.set(p.sh[key], o); o += p.sh[key].length; }
+    out[key] = col;
+  }
+  return out.sh1 ? out : null;
+}
+
 /**
  * Every `stride`-th splat of decoded arrays (`extractRange`'s shape: positions ×3, alphas ×1, rgb ×3, scales ×3 linear,
  * rotations ×4), scales × √stride so the thinned set still covers the surface. Returns [arrays, count].
@@ -153,6 +168,14 @@ export function thinSplats(a, count, stride) {
     for (let i = 0, j = 0; j < n; i += stride, j++) for (let k = 0; k < w; k++) col[j * w + k] = src[i * w + k];
     if (key === 'scales') for (let k = 0; k < col.length; k++) col[k] *= grow;
     out[key] = col;
+  }
+  if (a.sh) {                                   // the bands of the splats kept, as they are
+    out.sh = {};
+    for (const [key, src] of Object.entries(a.sh)) {
+      const w = src.length / count, col = new Float32Array(n * w);
+      for (let i = 0, j = 0; j < n; i += stride, j++) col.set(src.subarray(i * w, i * w + w), j * w);
+      out.sh[key] = col;
+    }
   }
   return [out, n];
 }

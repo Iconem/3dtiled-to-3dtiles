@@ -251,7 +251,7 @@ export async function handleStream(req, res, u) {
     // transform: per-tile glTF-Transform op; rides along on child tile URIs so /stream/tile carries it.
     const transform = TRANSFORMS.has(u.searchParams.get('transform')) ? u.searchParams.get('transform') : null;
     const tex = TEX.has(u.searchParams.get('tex')) ? u.searchParams.get('tex') : 'jpg';
-    // sh: spherical-harmonic degree to keep in splat tiles (1..3; RAD today), 0 or absent = base colour only
+    // sh: spherical-harmonic degree to keep in splat tiles (1..3; RAD, streamed SOG, LCC2), 0 or absent = base colour only
     const sh = Math.max(0, Math.min(3, Math.floor(Number(u.searchParams.get('sh'))) || 0));
     // geosplats-only tuning knobs (ignored by every other adapter, same pattern as tiling/centroids above).
     const geosplatsOpts = fmt === 'geosplats' ? {

@@ -37,6 +37,9 @@ function encodeQuat(buf, o, qx, qy, qz, qw) {
 export const SH_BAND_VALUES = [9, 15, 21];
 export const SH_VALUES = [0, 9, 24, 45];
 
+/** The `sh` option as given (a query value, a CLI flag, a number) → a degree 0..3; anything else is 0. */
+export const shParam = (v) => Math.max(0, Math.min(3, Math.floor(Number(v)) || 0));
+
 /**
  * The degree a set of bands can be written at: the highest of `want` and of the bands present without a gap.
  * @param {{sh1?:Float32Array|null, sh2?:Float32Array|null, sh3?:Float32Array|null}|null|undefined} sh

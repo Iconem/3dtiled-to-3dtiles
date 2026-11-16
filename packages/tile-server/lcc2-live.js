@@ -14,17 +14,18 @@
  * share is used as it is: LCC's georeferencing and upright transform (core), and streamed SOG's chunk decode, chunk
  * cache and range → GLB (sog-live.js), a chunk being a SOG either way.
  *
- * A chunk is a bundled `.sog` (a ZIP). Its `shN_*` planes are not in the tiles, so they are not downloaded: the ZIP's
+ * A chunk is a bundled `.sog` (a ZIP). Unless `&sh=` asks for harmonics, its `shN_*` planes are not in the tiles, so
+ * they are not downloaded: the ZIP's
  * directory is read from the file's last bytes, then the span of the planes that are needed (sogBundle.js). A `.spz` or
  * `.ply` chunk (the whitepaper's other two types; LCC Studio writes SPZ too) is downloaded whole and decoded by
  * splat-transform's reader into the same table (sogChunk.js), so the tiles are cut the same way.
  */
-import { memoizeAsync, fetchSource as fetchBuf, requestSource } from '../core/index.js';
+import { memoizeAsync, fetchSource as fetchBuf, requestSource, shParam } from '../core/index.js';
 import { readRange } from './range-getter.js';
 import { parseLcc2, lcc2Tileset as buildTileset } from '../lcc-to-3dtiles/src/lcc2Manifest.js';
-import { bundledSogFiles } from '../sog-to-3dtiles/src/sogBundle.js';
+import { bundledSogFiles, withShN, withoutShN } from '../sog-to-3dtiles/src/sogBundle.js';
 import { decodeSplatFile } from '../sog-to-3dtiles/src/sogChunk.js';
-import { cachedChunk, decodeSogFiles, sogRangeGlb } from './sog-live.js';
+import { cachedChunk, decodeSogFiles, sogRangeGlb, shChunkKey, shChunkLimit } from './sog-live.js';
 
 // What is asked of a chunk first: its end, where the ZIP directory is and, in the bundles seen, meta.json too.
 const TAIL_BYTES = 64 * 1024;
@@ -36,26 +37,27 @@ const getCtx = memoizeAsync(async (url) => {
   return { url, manifest, chunks: new Map() };           // chunks: file index → promise of the decoded table (LRU)
 });
 
-/** The files of one bundled chunk, by name, without its shN planes: the tail, then the spans still missing. */
-async function fetchBundle(url) {
+/** The files of one bundled chunk, by name, without its shN planes unless `sh`: the tail, then the spans still missing. */
+async function fetchBundle(url, sh = 0) {
+  const keep = sh > 0 ? withShN : withoutShN;
   const { status, headers, body } = await requestSource(url, { headers: { Range: `bytes=-${TAIL_BYTES}` }, ok: (s) => (s >= 200 && s < 300) || s === 416 });
   // A host that ignores Range answers with the whole bundle, which is then all there is to read. One that refuses a
   // suffix range (416), or does not say how long the file is, is asked for the whole bundle.
   const total = status === 206 ? Number(headers.get('content-range')?.match(/\/(\d+)\s*$/)?.[1]) : status === 416 ? NaN : body.length;
-  if (!Number.isFinite(total)) { const whole = await fetchBuf(url); return bundledSogFiles(whole, whole.length); }
+  if (!Number.isFinite(total)) { const whole = await fetchBuf(url); return bundledSogFiles(whole, whole.length, undefined, keep); }
   // The spans missing from the tail are asked for together, through the bundle's shared getter (range-getter.js): the
   // planes that are kept are merged into one read where the shN planes between them are small, left out where they are not.
-  return bundledSogFiles(body, total, (begin, length) => readRange(url, begin, length));
+  return bundledSogFiles(body, total, (begin, length) => readRange(url, begin, length), keep);
 }
 
 // A chunk backs many tiles (Tunis: 570 tiles in 140 chunks), so its decode is cached as an in-flight promise, like sog-live's.
 // A bundled SOG is read in part and decoded as streamed SOG's chunks are (on a tile worker when there are any); an SPZ or
 // PLY chunk is read whole and decoded on this thread.
-const getChunkTable = (ctx, file) => cachedChunk(ctx.chunks, file, async () => {
+const getChunkTable = (ctx, file, sh = 0) => cachedChunk(ctx.chunks, shChunkKey(file, sh), async () => {
   const url = chunkUrl(ctx, file), name = ctx.manifest.files[file].split('/').pop();
   if (/\.(spz|ply)$/i.test(name)) return decodeSplatFile(await fetchBuf(url), name);
-  return decodeSogFiles(new Map(Object.entries(await fetchBundle(url))));
-});
+  return decodeSogFiles(new Map(Object.entries(await fetchBundle(url, sh))), sh);
+}, shChunkLimit(sh));
 // Chunk paths are relative to the manifest; its query string (a signed URL's token) is carried over to them.
 function chunkUrl(ctx, file) {
   const u = new URL(ctx.manifest.files[file], ctx.url);
@@ -76,5 +78,6 @@ export async function lcc2Tile(url, key, opts = {}) {
   const [file, start, count] = key.split('_').map(Number);
   const ctx = await getCtx(url);
   if (!ctx.manifest.files[file] || file === ctx.manifest.envFile) return null;
-  return sogRangeGlb(await getChunkTable(ctx, file), start, count, opts.centroids);
+  const sh = opts.centroids ? 0 : shParam(opts.sh);
+  return sogRangeGlb(await getChunkTable(ctx, file, sh), start, count, opts.centroids, sh);
 }

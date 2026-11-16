@@ -45,7 +45,7 @@ import { inflateRawSync } from 'node:zlib';
 import { chunkBoundsAndTopology, topologyFromProps } from '../rad-to-3dtiles/src/index.js';
 import { parseRadcChunkHeader } from '../rad-to-3dtiles/src/radHeader.js';
 import { buildTileset } from '../rad-to-3dtiles/src/tilesetBuilder.js';
-import { parallelMap, defaultConcurrency, Source, memoizeAsync, tilePool, runTileTaskOr, ownBytes } from '../core/index.js';
+import { parallelMap, defaultConcurrency, Source, memoizeAsync, tilePool, runTileTaskOr, ownBytes, shParam } from '../core/index.js';
 import { radChunkGlb } from './splat-tile.js';
 
 const SPLAT_TASKS = new URL('./tile-tasks-splats.js', import.meta.url).href;   // what a tile worker runs (TILED_WORKERS)
@@ -199,7 +199,7 @@ const GAUSSIAN_EXT = {
 };
 
 // `sh`: the spherical-harmonic degree asked for (0 = base colour only), carried by every tile URL like `centroids`.
-const shDegree = (v) => Math.max(0, Math.min(3, Math.floor(Number(v)) || 0));
+const shDegree = shParam;
 
 function makeTileset(ctx, urlParam, centroids = false, sh = 0) {
   const enc = encodeURIComponent(urlParam);

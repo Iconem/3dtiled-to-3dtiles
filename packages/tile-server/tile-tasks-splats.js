@@ -9,6 +9,6 @@ const asBuffer = (u8) => Buffer.from(u8.buffer, u8.byteOffset, u8.byteLength);
 
 export const lccTileTask = ({ buf, pts, scaleMin, scaleMax, centroids }) => lccSplatGlb(asBuffer(buf), pts, scaleMin, scaleMax, centroids);
 export const radTileTask = ({ cbuf, local, base, centroids, sh }) => radChunkGlb(asBuffer(cbuf), local, base, centroids, sh);
-export const sogChunkTask = ({ files }) => sogChunkColumns(files);
+export const sogChunkTask = ({ files, sh }) => sogChunkColumns(files, sh);
 export const splatArraysTask = ({ arrays, count, centroids }) => splatArraysGlb(arrays, count, centroids);
 export const geosplatsTileTask = ({ buf, files }) => geosplatsBundleGlb(buf, files);

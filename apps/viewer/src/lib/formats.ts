@@ -353,8 +353,8 @@ export const fmtMeta = (fmt: string) => FORMATS.find((f) => f.fmt === fmt);
 /** Formats with a live /stream adapter and no offline converter: cache=all (/convert) has nothing to offer them. */
 export const STREAM_ONLY_FORMATS = new Set(['osgb']);
 export const canCentroids = (fmt: string) => SPLAT_FORMATS.has(fmt);
-/** Formats whose tiles can carry spherical harmonics (the server's `&sh=`): RAD today. */
-export const canSh = (fmt: string) => fmt === 'rad';
+/** Formats whose tiles can carry spherical harmonics (the server's `&sh=`): RAD, streamed SOG, LCC2. */
+export const canSh = (fmt: string) => fmt === 'rad' || fmt === 'sog' || fmt === 'lcc2';
 
 export const SNIPPETS: Record<string, { title: string; code: string; note: string }> = {
   pointcloud: {

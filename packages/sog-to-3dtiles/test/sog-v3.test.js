@@ -46,7 +46,7 @@ function maxAngle(a, b) {
 }
 
 test('SOG v2 and v3 of one scene decode to the same positions, colours, scales, alphas and rotations', async () => {
-  const v2 = await decodeChunk(fixture('v2', 'meta.json')), v3 = await decodeChunk(fixture('v3', 'meta.json'));
+  const v2 = await decodeChunk(fixture('v2', 'meta.json'), 1), v3 = await decodeChunk(fixture('v3', 'meta.json'), 1);   // 1: with the harmonics planes
   assert.equal(JSON.parse(await readFile(fixture('v3', 'meta.json'), 'utf8')).version, 3);
   assert.equal(v2.numRows, SCENE_COUNT); assert.equal(v3.numRows, SCENE_COUNT);
   for (const name of ['x', 'y', 'z', 'rot_0', 'rot_1', 'rot_2', 'rot_3', 'scale_0', 'scale_1', 'scale_2', 'opacity', 'f_dc_0', 'f_dc_1', 'f_dc_2', 'f_rest_0', 'f_rest_8']) {

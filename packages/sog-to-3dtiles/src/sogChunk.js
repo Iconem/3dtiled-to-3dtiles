@@ -26,7 +26,7 @@
 import fs   from 'fs/promises';
 import path from 'path';
 import { readSog, readSpz, readPly, materializeToDataTable, createChunkDataPool, MemoryReadFileSystem } from '@playcanvas/splat-transform';
-import { bundledSogFiles } from './sogBundle.js';
+import { bundledSogFiles, withShN, withoutShN, sogMetaFiles } from './sogBundle.js';
 
 const SH_C0 = 0.28209479177387814;
 
@@ -55,18 +55,20 @@ export async function decodeSplatFile(bytes, name) {
  * scene stores its chunks), of which the higher-order SH planes are left unread (see sogBundle.js), or an LCC2
  * scene's `.spz` or `.ply` chunk.
  * @param {string} metaJsonPath  absolute path to the chunk's meta.json, or to a bundled `.sog`, `.spz` or `.ply`
+ * @param {number} [sh=0]  above 0, the higher-order harmonics planes are read too (the table then has `f_rest_*`)
  * @returns {Promise<import('@playcanvas/splat-transform').DataTable>}
  */
-export async function decodeChunk(metaJsonPath) {
+export async function decodeChunk(metaJsonPath, sh = 0) {
   if (/\.(spz|ply)$/i.test(metaJsonPath)) return decodeSplatFile(await fs.readFile(metaJsonPath), path.basename(metaJsonPath));
   if (/\.sog$/i.test(metaJsonPath)) {
     const bundle = await fs.readFile(metaJsonPath);
     const bundled = new MemoryReadFileSystem();
-    for (const [name, bytes] of Object.entries(await bundledSogFiles(bundle, bundle.length))) { bundled.set(name, bytes); bundled.set('./' + name, bytes); }
+    for (const [name, bytes] of Object.entries(await bundledSogFiles(bundle, bundle.length, undefined, sh > 0 ? withShN : withoutShN))) { bundled.set(name, bytes); bundled.set('./' + name, bytes); }
     return readSog(bundled, 'meta.json', { logging: 'silent' });
   }
   const dir  = path.dirname(metaJsonPath);
-  const meta = JSON.parse(await fs.readFile(metaJsonPath, 'utf8'));
+  // Without `sh` the shN planes are neither read nor decoded: the tiles do not use them.
+  const { meta, names } = sogMetaFiles(await fs.readFile(metaJsonPath), sh > 0);
 
   // Gather every file the meta references (means/scales/quats/sh0/shN…) and preload
   // them into an in-memory file system keyed by basename, matching how meta.json
@@ -76,12 +78,7 @@ export async function decodeChunk(metaJsonPath) {
   // variants too, in case its path-join keeps the leading './'.
   const fileSystem = new MemoryReadFileSystem();
   const put = (name, bytes) => { fileSystem.set(name, bytes); fileSystem.set('./' + name, bytes); };
-  put('meta.json', new Uint8Array(await fs.readFile(metaJsonPath)));
-  const names = new Set();
-  for (const key of Object.keys(meta)) {
-    const f = meta[key]?.files;
-    if (Array.isArray(f)) for (const n of f) names.add(n);
-  }
+  put('meta.json', meta);
   for (const n of names) {
     put(n, new Uint8Array(await fs.readFile(path.join(dir, n))));
   }
@@ -92,12 +89,40 @@ export async function decodeChunk(metaJsonPath) {
 
 const sigmoid = x => 1 / (1 + Math.exp(-x));
 
+/** How many `f_rest_*` columns a table has: 3 × the coefficients per colour channel (9, 24, 45 for degrees 1, 2, 3). */
+export function restColumns(table) { let n = 0; while (table.getColumnByName(`f_rest_${n}`)) n++; return n; }
+
+/**
+ * The spherical-harmonic bands of rows [offset, offset+count), up to degree `want`, in the layout the tile writer
+ * takes (core/spz-glb.js): per splat, per coefficient, RGB together. The table's `f_rest_*` columns are the PLY
+ * layout: every coefficient of red, then green, then blue. Same basis and signs (SPZ and SOG both keep 3DGS's), and
+ * no reader here turns the splats (a tileset's root transform does), so the values go through as they are.
+ * @returns {{sh1:Float32Array, sh2?:Float32Array, sh3?:Float32Array}|null}  null when none is asked or held
+ */
+export function shBands(table, offset, count, want) {
+  if (!(want > 0)) return null;
+  const K = Math.floor(restColumns(table) / 3);                 // coefficients per channel
+  const degree = Math.min(want, K >= 15 ? 3 : K >= 8 ? 2 : K >= 3 ? 1 : 0);
+  if (!degree) return null;
+  const out = {};
+  for (let b = 0; b < degree; b++) {
+    const first = [0, 3, 8][b], n = [3, 5, 7][b], band = new Float32Array(count * n * 3);
+    for (let k = 0; k < n; k++) for (let ch = 0; ch < 3; ch++) {
+      const col = table.getColumnByName(`f_rest_${ch * K + first + k}`).data;
+      for (let j = 0, o = k * 3 + ch; j < count; j++, o += n * 3) band[o] = col[offset + j];
+    }
+    out[`sh${b + 1}`] = band;
+  }
+  return out;
+}
+
 /**
  * Extract renderer-ready arrays for rows [offset, offset+count) of a decoded chunk.
  * Returns the exact inputs buildSpzBuffer expects.
- * @returns {{positions:Float32Array, alphas:Float32Array, rgb:Float32Array, scales:Float32Array, rotations:Float32Array}}
+ * @param {number} [sh=0]  spherical-harmonic degree to return as well (`sh`), when the table holds it
+ * @returns {{positions:Float32Array, alphas:Float32Array, rgb:Float32Array, scales:Float32Array, rotations:Float32Array, sh:object|null}}
  */
-export function extractRange(table, offset, count) {
+export function extractRange(table, offset, count, sh = 0) {
   const col = name => table.getColumnByName(name)?.data ?? null;
   const x = col('x'), y = col('y'), z = col('z');
   const s0 = col('scale_0'), s1 = col('scale_1'), s2 = col('scale_2');
@@ -137,5 +162,5 @@ export function extractRange(table, offset, count) {
       rotations[j*4+2] = r3[i]; rotations[j*4+3] = r0[i];
     }
   }
-  return { positions, alphas, rgb, scales, rotations };
+  return { positions, alphas, rgb, scales, rotations, sh: shBands(table, offset, count, sh) };
 }

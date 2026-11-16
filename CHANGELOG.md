@@ -5,6 +5,15 @@ Format loosely follows [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+### Added — 2026-11-16 (spherical harmonics from streamed SOG and LCC2)
+- **`sh=1|2|3` now works for streamed SOG and LCC2** as for RAD (`/stream`, `/convert`, `--sh N` offline, the
+  *harmonics* pill in the viewer). The coefficients are looked up in each chunk's palette by PlayCanvas's reader.
+- **Cost, as sent:** +10 % at degree 1, +19 % at 2, +31 % at 3 on Skatepark (streamed SOG); +11, +23 and +37 % on
+  Tunis (LCC2). `scripts/measure-splat-sh.mjs` reproduces it.
+- **`/extract/splat` passes them through** when the tileset was asked with `sh`.
+- **Without `sh`, a streamed SOG chunk's harmonics planes are no longer fetched or decoded** (the server and the
+  offline converter read them for nothing before): less to download and to decode per chunk, same tiles.
+
 ### Added — 2026-11-16 (spherical harmonics in splat tiles, RAD first)
 - **`sh=1|2|3`** on `/stream` and `/convert` (`--sh N` offline, a *harmonics* pill in the viewer for RAD): splat
   tiles keep the source's spherical harmonics up to that degree, so colour changes with the viewing direction.

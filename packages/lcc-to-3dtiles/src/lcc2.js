@@ -8,7 +8,7 @@
  */
 import fs from 'fs/promises';
 import path from 'path';
-import { defaultConcurrency, convertTiles } from '../../core/index.js';
+import { defaultConcurrency, convertTiles, shParam } from '../../core/index.js';
 import { sogChunkToFiles } from '../../sog-to-3dtiles/src/tile-task.js';
 import { parseLcc2, lcc2Tileset } from './lcc2Manifest.js';
 
@@ -39,7 +39,7 @@ export async function convertLcc2(input, outDir, opts = {}) {
   const byFile = new Map();
   for (const run of runs) { if (!byFile.has(run.file)) byFile.set(run.file, []); byFile.get(run.file).push(run); }
   const chunks = [...byFile].map(([file, list]) => ({
-    metaPath: path.join(dir, manifest.files[file]), outDir, centroids,
+    metaPath: path.join(dir, manifest.files[file]), outDir, centroids, sh: centroids ? 0 : shParam(opts.sh),
     tiles: list.map(({ uri, start, count }) => ({ uri, offset: start, count })),
   })).sort((a, b) => b.tiles.reduce((n, t) => n + t.count, 0) - a.tiles.reduce((n, t) => n + t.count, 0));
   const lanes = defaultConcurrency();

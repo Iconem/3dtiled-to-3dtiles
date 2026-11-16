@@ -3,7 +3,7 @@ title: "Splats: spherical harmonics and Spark's RAD reader (draft)"
 description: "Draft plan to carry view-dependent colour (spherical harmonics above degree 0) through every tiled splat format, and to read RAD with Spark's own Rust code compiled to WebAssembly."
 ---
 
-Draft, 2026-11-16. **Part 2 is done**, and of part 1 the tile writer and RAD are (same day, see each *Result*); streamed SOG and LCC are not started. Two plans that meet: the second gives the first its RAD part. The roadmap items are
+Draft, 2026-11-16. **Part 2 is done**, and of part 1 the tile writer, RAD, streamed SOG and LCC2 are (same day, see each *Result*); LCC waits for a scene to check against. Two plans that meet: the second gives the first its RAD part. The roadmap items are
 on the [future work](/docs/guide/todo-future-work) page, which also holds the earlier design notes.
 
 ## Part 1: spherical harmonics above degree 0
@@ -16,27 +16,50 @@ on the [future work](/docs/guide/todo-future-work) page, which also holds the ea
 - **The writer** (`core/spz-glb.js`) stores degrees 1 to 3 in the SPZ payload and declares them in the GLB. Read
   back by another SPZ reader (PlayCanvas splat-transform), the coefficients match within the format's rounding
   (5 bits for degree 1, 4 bits above). Without harmonics a tile is today's, byte for byte.
-- **RAD** carries them: `&sh=1|2|3` on `/stream` and `/convert`, `--sh N` offline, and a *harmonics* pill in the
-  viewer's top bar for RAD. The bands come from Spark's decoder (part 2). Capped by the file's own degree.
-- **What it costs, measured on Coit Tower** (degree 1, a 65 536-splat tile): 19 to 28 bytes per splat before gzip,
-  but the tile sent grows only from 1 051 to 1 180 KB, **+12 %**: the coefficients compress well. Building the tile
-  takes about 1.6 times as long, since the chunk is decoded a second time for the bands.
-- **Left:** streamed SOG (and LCC2, GeoSplats), LCC, the rotation test for the formats that bake one (RAD bakes
-  none), `/extract/splat` pass-through, sizes at degrees 2 and 3, and the look against Spark's own viewer by eye.
-  The offline `--sh` flag is wired but was not run on a whole file.
+- **RAD, streamed SOG and LCC2** carry them: `&sh=1|2|3` on `/stream` and `/convert`, `--sh N` offline, and a
+  *harmonics* pill in the viewer's top bar for these formats. Capped by the source's own degree. RAD's bands come
+  from Spark's decoder (part 2); SOG's from PlayCanvas's reader, which looks each splat's coefficients up in the
+  chunk's palette. Without the option the harmonics planes of a SOG chunk are no longer fetched or decoded at all
+  (a quarter to a third of a chunk's bytes).
+- **Extract** passes them through: `/extract/splat` on a tileset asked with `sh=2` gives a PLY with the 24
+  coefficient columns (Skatepark, 83 585 splats: 4.7 MB without, 12.7 MB with).
+- **No rotation to apply.** None of the readers turns the splats: every format's rotation is in the tileset's root
+  transform, which the renderer applies to the coefficients too. So the rotation test of the plan has no case
+  today; it becomes needed the day a reader bakes one.
+- **GeoSplats has none to carry**: its octants hold the base colour only (means, rotations, scales, `sh0`).
+
+**What it costs**, the same tiles asked at each degree, sizes as sent (the payload is gzip):
+
+| Scene | Degree 0 | 1 | 2 | 3 |
+|---|---|---|---|---|
+| Coit Tower, RAD (holds degree 1), one 65 536-splat tile | 1 051 KB | +12 % | – | – |
+| Skatepark, streamed SOG (degree 3), 6 tiles, 389 257 splats | 15.0 bytes per splat | +10 % | +19 % | +31 % |
+| Tunis, LCC2 (degree 3), 4 tiles, 302 022 splats | 14.3 bytes per splat | +11 % | +23 % | +37 % |
+
+- Far below the raw sizes of the table further down (1.5× to 3.4×): SOG stores a palette of coefficient sets, so
+  many splats share the same values and gzip finds them.
+- **Server time.** RAD: about 1.6 times per tile, the chunk being decoded a second time for the bands. SOG and
+  LCC2: the first tiles of a chunk take about 1.3 to 1.4 times as long (its harmonics planes are downloaded and
+  decoded too), once per chunk; cutting further tiles from a decoded chunk costs about the same as without. A decoded chunk with harmonics holds up to 45 more columns,
+  so the server keeps a quarter as many of them (6 by default).
+- Reproduce with `node scripts/measure-splat-sh.mjs <format> <url>` against a running tile server.
+- **Left:** LCC (no *Quality* scene at hand to check the unpacking against: the public sample is *Portable*), the
+  look against each format's own viewer by eye, frame time in the viewer, CesiumJS and Cesium for Unreal. The
+  offline `--sh` flag was run on the small streamed-SOG test scene only (its tiles declare the coefficients); for
+  RAD and LCC2 it is wired and not run.
 
 ### Where we are
 
 A Gaussian splat's colour changes with the viewing direction: a base colour (degree 0) plus up to three bands of
 spherical-harmonic coefficients (degrees 1 to 3: 3, 8 and 15 coefficients per colour channel). Every splat path
-here keeps the base colour only:
+here kept the base colour only when this plan was written:
 
 | Source | What it stores | What we do today |
 |---|---|---|
-| **Streamed SOG, LCC2** | `shN_centroids.webp` + `shN_labels.webp`: a palette of coefficient sets, one label per splat, 1 to 3 bands | the `shN_*` planes are not even downloaded (`sogBundle.js`) |
+| **Streamed SOG, LCC2** | `shN_centroids.webp` + `shN_labels.webp`: a palette of coefficient sets, one label per splat, 1 to 3 bands | **written to tiles on request** (`sh=`), since 2026-11-16; not downloaded otherwise |
 | **LCC** | `Shcoef.bin` in *Quality* scenes: 64 bytes per splat, 15 coefficients packed on 11 bits, degree 3 | not read |
 | **RAD** | `sh1`, `sh2`, `sh3` in Spark's packed form | **written to tiles on request** (`sh=`), since 2026-11-16 |
-| **GeoSplats** | built on SOG chunks, so presumably the same planes | **to confirm** |
+| **GeoSplats** | base colour only in its octants | nothing to carry |
 | **SPZ, PLY** (extract, future inputs) | SPZ: quantised coefficients; PLY: `f_rest_*` columns | PLY's are decoded and dropped |
 
 So shiny and view-dependent surfaces look flat. It is the largest remaining gap in splat quality.

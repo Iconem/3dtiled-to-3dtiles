@@ -27,7 +27,7 @@ const urlStateParsers = {
   // which /3dtiles-tools whole-tileset rewrite (if any) wraps the selected DIRECT preset's URL.
   tilesetOp: parseAsString.withDefault(''),
   centroids: parseAsBoolean.withDefault(false),
-  // splats: spherical-harmonic degree asked of the server (`&sh=`), 0 = base colour only. RAD today.
+  // splats: spherical-harmonic degree asked of the server (`&sh=`), 0 = base colour only. RAD, streamed SOG, LCC2.
   sh: parseAsInteger.withDefault(0),
   tiling: parseAsStringEnum<TilingMode>(['implicit', 'explicit']).withDefault('implicit'),
   renderer: parseAsStringEnum<ActiveRenderer>(['cesium', '3dtrjs']).withDefault('3dtrjs'),

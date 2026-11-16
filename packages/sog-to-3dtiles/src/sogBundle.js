@@ -2,8 +2,8 @@
  * sogBundle.js (sog-to-3dtiles) — a **bundled SOG** (one `.sog` file: a ZIP of meta.json and its WebP planes) → the
  * files a tile needs, by name, reading as little of the bundle as it can.
  *
- * The tiles written here carry no spherical harmonics beyond the base colour, and the `shN_*` planes are a quarter to
- * a third of a bundle (2.27 of 6.24 MB in the coarsest chunk of the XGRIDS Tunis LCC2 sample). So the reader takes the
+ * Unless asked (`sh`), the tiles written here carry no spherical harmonics beyond the base colour, and the `shN_*`
+ * planes are a quarter to a third of a bundle (2.27 of 6.24 MB in the coarsest chunk of the XGRIDS Tunis LCC2 sample). So the reader takes the
  * ZIP's central directory from the end of the file, then only the byte spans of the entries it keeps, and hands back a
  * meta.json that no longer names the planes it left behind. Over HTTP that is two requests in the usual case: the tail,
  * then one span, since the kept planes sit next to each other at the start of the bundle.
@@ -14,8 +14,28 @@ import zlib from 'node:zlib';
 
 const EOCD = 0x06054b50, CDIR = 0x02014b50, LOCAL = 0x04034b50;
 
-/** The planes a splat tile of this repo does not use: higher-order spherical harmonics. */
+/** The planes a splat tile of this repo does not use unless harmonics are asked for: higher-order spherical harmonics. */
 export const withoutShN = (name) => !/^shN/i.test(name.split('/').pop());
+/** Every entry: what a tile with harmonics reads. */
+export const withShN = () => true;
+
+/**
+ * An unbundled chunk's meta.json without its higher-order harmonics section, and the names of the files still needed.
+ * @param {Uint8Array|Buffer} bytes  meta.json
+ * @param {boolean} [keepSh=false]  leave the `shN_*` planes in
+ * @returns {{meta:Uint8Array, names:string[]}}
+ */
+export function sogMetaFiles(bytes, keepSh = false) {
+  const meta = JSON.parse(Buffer.from(bytes).toString('utf8'));
+  let changed = false;
+  const names = new Set();
+  for (const [key, section] of Object.entries(meta)) {
+    if (!Array.isArray(section?.files)) continue;
+    if (!keepSh && section.files.length && section.files.every((f) => !withoutShN(f))) { delete meta[key]; changed = true; continue; }
+    for (const f of section.files) names.add(f);
+  }
+  return { meta: changed ? new TextEncoder().encode(JSON.stringify(meta)) : new Uint8Array(bytes), names: [...names] };
+}
 
 /** Where the central directory of a ZIP is, from the file's last bytes `tail` (the file is `total` bytes long) → { count, dirOffset, dirSize, inTail }. */
 export function zipDirectory(tail, total) {

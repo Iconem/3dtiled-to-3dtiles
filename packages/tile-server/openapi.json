@@ -348,7 +348,7 @@
               "enum": [0, 1, 2, 3],
               "default": 0
             },
-            "description": "Splat formats — keep spherical harmonics (view-dependent colour) up to this degree, capped by what the source holds. RAD today. 0 sends the base colour only; each degree makes tiles larger."
+            "description": "Splat formats — keep spherical harmonics (view-dependent colour) up to this degree, capped by what the source holds. RAD, streamed SOG and LCC2. 0 sends the base colour only; each degree makes tiles larger."
           },
           {
             "name": "splatBudget",

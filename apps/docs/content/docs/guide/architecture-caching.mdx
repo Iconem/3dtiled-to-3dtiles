@@ -105,7 +105,7 @@ harmonization below targets the *live* path.
 Several one-shot transforms are natural **`/3dtiles-tools` commands** that chain together rather than
 being baked into each converter:
 - `implicit-to-explicit` (exists), `upgrade` (b3dm/pnts→glb, glTF 1.0→2.0, `CESIUM_RTC` bake — exists),
-- **`sh`** — a streaming option for splats (`&sh=1|2|3`, RAD today): tiles keep the source's spherical harmonics up
+- **`sh`** — a streaming option for splats (`&sh=1|2|3`; RAD, streamed SOG and LCC2): tiles keep the source's spherical harmonics up
   to that degree, so colour changes with the viewing direction. Off by default; `--sh N` on the offline CLI and
   `/convert`. Plan and results: [Splats: spherical harmonics](/docs/guide/planning/splat-sh-and-rad).
 - **`centroids`** — **now a streaming option** (`&centroids=1`): for tiled-splat formats (SOG, LCC, RAD)

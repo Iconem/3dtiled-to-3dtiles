@@ -21,8 +21,9 @@
 import path from 'node:path';
 import { readSog, MemoryReadFileSystem } from '@playcanvas/splat-transform';
 import { extractRange } from '../sog-to-3dtiles/src/sogChunk.js';
-import { lodGeometricErrors, collapseLodTree, lodNodeAt, lodRunsUnder, thinSplats, DEFAULT_SPLAT_BUDGET, upTransform, upParam } from '../sog-to-3dtiles/src/lodMeta.js';
-import { memoizeAsync, fetchSource as fetchBuf, tilePool, runTileTaskOr, ownBytes } from '../core/index.js';
+import { sogMetaFiles } from '../sog-to-3dtiles/src/sogBundle.js';
+import { lodGeometricErrors, collapseLodTree, lodNodeAt, lodRunsUnder, thinSplats, concatSh, DEFAULT_SPLAT_BUDGET, upTransform, upParam } from '../sog-to-3dtiles/src/lodMeta.js';
+import { memoizeAsync, fetchSource as fetchBuf, tilePool, runTileTaskOr, ownBytes, shParam } from '../core/index.js';
 import { splatArraysGlb } from './splat-tile.js';
 
 const SPLAT_TASKS = new URL('./tile-tasks-splats.js', import.meta.url).href;   // what a tile worker runs (TILED_WORKERS)
@@ -59,18 +60,23 @@ const getCtx = memoizeAsync(async (url) => {
 // float columns, 30 to 45 MB for the usual half-million splats, so 24 is already up to a gigabyte for one scene: a
 // chunk evicted and asked for again costs a third of a second, which is cheaper than holding many more of them.
 const CHUNK_CACHE = Math.max(1, Math.floor(Number(process.env.TILED_SOG_CHUNK_CACHE)) || 24);
+/** The cache key and size for a chunk decoded with harmonics of degree `sh`: its own entry (it has up to 45 more
+ *  columns, three times the memory), and a quarter as many kept. Shared with lcc2-live.js. */
+export const shChunkKey = (key, sh) => (sh > 0 ? `${key}|sh` : key);
+export const shChunkLimit = (sh) => (sh > 0 ? Math.max(2, CHUNK_CACHE >> 2) : CHUNK_CACHE);
+
 /** The decoded chunk `key` of a scene's LRU `chunks` (key → promise of a table), loaded with `load` when it is not there. Shared with lcc2-live.js. */
-export function cachedChunk(chunks, key, load) {
+export function cachedChunk(chunks, key, load, limit = CHUNK_CACHE) {
   if (chunks.has(key)) { const p = chunks.get(key); chunks.delete(key); chunks.set(key, p); return p; }
   const promise = load();
   promise.catch(() => chunks.delete(key));   // don't poison the cache with a failed decode
   chunks.set(key, promise);
-  if (chunks.size > CHUNK_CACHE) chunks.delete(chunks.keys().next().value);   // evict oldest
+  while (chunks.size > limit) chunks.delete(chunks.keys().next().value);   // evict oldest
   return promise;
 }
 
-/** One SOG chunk's files (`raw`: Map of name → bytes, meta.json and its WebP planes) → its decoded table. Shared with lcc2-live.js. */
-export async function decodeSogFiles(raw) {
+/** One SOG chunk's files (`raw`: Map of name → bytes, meta.json and its WebP planes) → its decoded table; `sh` > 0: with its harmonics (`f_rest_*`). Shared with lcc2-live.js. */
+export async function decodeSogFiles(raw, sh = 0) {
   const here = () => {
     const fileSystem = new MemoryReadFileSystem();
     for (const [name, bytes] of raw) { fileSystem.set(name, bytes); fileSystem.set('./' + name, bytes); }
@@ -81,22 +87,21 @@ export async function decodeSogFiles(raw) {
   // TILED_WORKERS: the chunk's WebP decode (about a second) runs on a worker, which hands its columns back; the
   // table stays cached on this thread as before, since many leaf tiles read ranges of the same chunk.
   const files = Object.fromEntries([...raw].map(([n, bytes]) => [n, ownBytes(bytes)]));
-  const cols = await runTileTaskOr(pool, SPLAT_TASKS, 'sogChunkTask', { files }, Object.values(files).map((b) => b.buffer), async () => null);
+  const cols = await runTileTaskOr(pool, SPLAT_TASKS, 'sogChunkTask', { files, sh }, Object.values(files).map((b) => b.buffer), async () => null);
   return cols ? { numRows: cols.numRows, getColumnByName: (name) => (cols[name] ? { data: cols[name] } : undefined) } : here();
 }
 
-function getChunkTable(ctx, fileIdx) {
-  return cachedChunk(ctx.chunks, fileIdx, async () => {
+// `sh` > 0: the chunk with its harmonics planes. Without, they are neither fetched nor decoded (a quarter to a third
+// of a chunk's bytes), the tiles not using them.
+function getChunkTable(ctx, fileIdx, sh = 0) {
+  return cachedChunk(ctx.chunks, shChunkKey(fileIdx, sh), async () => {
     const rel = ctx.lod.filenames[fileIdx];                 // e.g. "1_0/meta.json"
     const chunkDir = path.posix.dirname(rel);
-    const metaBuf = await fetchBuf(ctx.base + rel);
-    const meta = JSON.parse(metaBuf.toString('utf8'));
-    const raw = new Map([['meta.json', new Uint8Array(metaBuf)]]);   // name → bytes, as fetched (what a tile worker is handed)
-    const names = new Set();
-    for (const k of Object.keys(meta)) { const f = meta[k]?.files; if (Array.isArray(f)) for (const n of f) names.add(n); }
-    await Promise.all([...names].map(async n => raw.set(n, new Uint8Array(await fetchBuf(ctx.base + path.posix.join(chunkDir, n))))));
-    return decodeSogFiles(raw);
-  });
+    const { meta, names } = sogMetaFiles(await fetchBuf(ctx.base + rel), sh > 0);
+    const raw = new Map([['meta.json', meta]]);             // name → bytes, as fetched (what a tile worker is handed)
+    await Promise.all(names.map(async n => raw.set(n, new Uint8Array(await fetchBuf(ctx.base + path.posix.join(chunkDir, n))))));
+    return decodeSogFiles(raw, sh);
+  }, shChunkLimit(sh));
 }
 
 // Build the 3D Tiles tree from lod.tree (bounds persisted → no decode). Each leaf LOD run becomes a
@@ -145,9 +150,9 @@ function buildTileset(ctx, urlParam, centroids = false, budget = SPLAT_BUDGET, u
 }
 
 /** Rows [offset, offset+count) of a decoded chunk → the tile's GLB, null when the chunk has no such rows. Shared with lcc2-live.js. */
-export async function sogRangeGlb(table, offset, count, centroids = false) {
+export async function sogRangeGlb(table, offset, count, centroids = false, sh = 0) {
   if (!(count > 0 && offset + count <= table.numRows)) return null;
-  return sogArraysGlb(extractRange(table, offset, count), count, centroids);
+  return sogArraysGlb(extractRange(table, offset, count, centroids ? 0 : sh), count, centroids);
 }
 
 /** Several runs' columns end to end; a column any run lacks is dropped. */
@@ -161,17 +166,20 @@ function concatSplats(parts) {
     for (const p of parts) { col.set(p[key], o); o += p[key].length; }
     out[key] = col;
   }
+  out.sh = concatSh(parts);
   return out;
 }
 
-async function sogArraysGlb({ positions, alphas, rgb, scales, rotations }, count, centroids = false) {
-  const here = async () => Buffer.from(await splatArraysGlb({ positions, alphas, rgb, scales, rotations }, count, centroids));
+async function sogArraysGlb({ positions, alphas, rgb, scales, rotations, sh = null }, count, centroids = false) {
+  const here = async () => Buffer.from(await splatArraysGlb({ positions, alphas, rgb, scales, rotations, sh }, count, centroids));
   const pool = tilePool();
   if (!pool) return here();
   // TILED_WORKERS: the range is cut out here (the chunk's table lives on this thread), a worker encodes it.
   const copy = (a) => (a ? a.slice() : a);   // the worker takes its own copies: `here` may still need these
   const arrays = { positions: copy(positions), alphas: copy(alphas), rgb: copy(rgb), scales: copy(scales), rotations: copy(rotations) };
-  const glb = await runTileTaskOr(pool, SPLAT_TASKS, 'splatArraysTask', { arrays, count, centroids }, Object.values(arrays).filter(Boolean).map((a) => a.buffer), here);
+  const moved = Object.values(arrays).filter(Boolean).map((a) => a.buffer);
+  if (sh) { arrays.sh = Object.fromEntries(Object.entries(sh).map(([k, a]) => [k, a.slice()])); for (const a of Object.values(arrays.sh)) moved.push(a.buffer); }
+  const glb = await runTileTaskOr(pool, SPLAT_TASKS, 'splatArraysTask', { arrays, count, centroids }, moved, here);
   return Buffer.isBuffer(glb) ? glb : Buffer.from(glb.buffer, glb.byteOffset, glb.byteLength);
 }
 
@@ -185,6 +193,7 @@ export async function sogTileset(url, opts = {}) {
 }
 export async function sogTile(url, key, opts = {}) {
   const ctx = await getCtx(url);
+  const sh = opts.centroids ? 0 : shParam(opts.sh);            // spherical-harmonic degree kept (`&sh=`)
   if (key[0] === 'm') {                               // a merged tile: the runs of one LOD level under a node (`s<k>`: every k-th splat)
     const m = /^(\d*)_(\d+)(?:s(\d+))?$/.exec(key.slice(1));
     if (!m) return null;
@@ -193,13 +202,13 @@ export async function sogTile(url, key, opts = {}) {
     const runs = node ? lodRunsUnder(node, Number(level)) : [];
     if (!runs.length || runs.some((r) => !ctx.lod.filenames[r.file])) return null;
     const parts = [];
-    for (const r of runs) parts.push(extractRange(await getChunkTable(ctx, r.file), r.offset, r.count));   // in run order
+    for (const r of runs) parts.push(extractRange(await getChunkTable(ctx, r.file, sh), r.offset, r.count, sh));   // in run order
     const [arrays, count] = thinSplats(concatSplats(parts), runs.reduce((n, r) => n + r.count, 0), Number(strideStr || 1));
     return sogArraysGlb(arrays, count, opts.centroids);
   }
   const [f, o, c] = key.split('_').map(Number);
   if (!ctx.lod.filenames[f]) return null;
-  return sogRangeGlb(await getChunkTable(ctx, f), o, c, opts.centroids);
+  return sogRangeGlb(await getChunkTable(ctx, f, sh), o, c, opts.centroids, sh);
 }
 
 // Direct /sog/* HTTP routes were removed 2026-07-02 — /stream/tileset.json?format=sog&url=<…> (+

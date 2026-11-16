@@ -7,9 +7,9 @@ import { readSog, MemoryReadFileSystem } from '@playcanvas/splat-transform';
 import { decodeSplats } from '../lcc-to-3dtiles/src/lccDecode.js';
 import { encodeChunkGlb } from '../rad-to-3dtiles/src/index.js';
 import { buildSplatTileGlb, computeBounds } from '../core/index.js';
-import { extractRange } from '../sog-to-3dtiles/src/sogChunk.js';
+import { extractRange, restColumns } from '../sog-to-3dtiles/src/sogChunk.js';
 
-/** Renderer-ready splat arrays ({ positions, alphas, rgb, scales, rotations }) → the _spz_2 GLB every splat tile here is. */
+/** Renderer-ready splat arrays ({ positions, alphas, rgb, scales, rotations, sh? }) → the _spz_2 GLB every splat tile here is. */
 export const splatArraysGlb = (arrays, count, centroids = false) => buildSplatTileGlb(arrays, count, computeBounds(arrays.positions, count), centroids);
 
 /** One LCC data range (`pts` splats) → GLB. */
@@ -23,13 +23,17 @@ export async function radChunkGlb(cbuf, local, base, centroids = false, sh = 0) 
   return (await encodeChunkGlb(cbuf, local, base, { centroidsOnly: centroids, sh })).glb;
 }
 
-/** One streamed-SOG chunk (its meta.json and WebP files, by name) → the decoded table's columns, as plain typed arrays. */
-export async function sogChunkColumns(files) {
+/**
+ * One streamed-SOG chunk (its meta.json and WebP files, by name) → the decoded table's columns, as plain typed arrays.
+ * `sh` > 0: with the `f_rest_*` columns too, when the files hold the harmonics planes.
+ */
+export async function sogChunkColumns(files, sh = 0) {
   const fileSystem = new MemoryReadFileSystem();
   for (const [name, bytes] of Object.entries(files)) { fileSystem.set(name, bytes); fileSystem.set('./' + name, bytes); }
   const table = await readSog(fileSystem, 'meta.json', { logging: 'silent' });
   const out = { numRows: table.numRows };
   for (const name of SOG_COLUMNS) { const d = table.getColumnByName(name)?.data; if (d) out[name] = d; }
+  if (sh > 0) for (let i = 0, n = restColumns(table); i < n; i++) out[`f_rest_${i}`] = table.getColumnByName(`f_rest_${i}`).data;
   return out;
 }
 // `opacity_linear` is there when a SOG v3 chunk holds opacity above 1 (see sogChunk.js).
