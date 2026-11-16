@@ -5,6 +5,23 @@ Format loosely follows [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+### Upstream — 2026-11-04 to 2026-11-16 (what we sent to other projects)
+- **3DTilesRendererJS [#1792](https://github.com/NASA-AMMOS/3DTilesRendererJS/pull/1792)** (open): adaptive point size
+  for implicit `ADD` octrees in `PointCloudEffectsPlugin`, fixing our issue
+  [#1783](https://github.com/NASA-AMMOS/3DTilesRendererJS/issues/1783). Live preview on
+  [3dtiles-samples](https://jo-chemla.github.io/3dtiles-samples/3dtrjs-pr1792/three/potree.html?dataset=lion%203d%20tiles%20implicit);
+  vendored in the Potree lab meanwhile. Also a note on
+  [#912](https://github.com/NASA-AMMOS/3DTilesRendererJS/issues/912#issuecomment-6901134824): Potree colours could be
+  stored as integers, not Float32 (half the memory).
+- **Cesium for Unreal [#1914](https://github.com/CesiumGS/cesium-unreal/issues/1914)**: the same per-point adaptive size
+  for additively refined point clouds, with the Lion octree rendered three ways.
+- **cesium-native [#1486](https://github.com/CesiumGS/cesium-native/issues/1486)**: geometry clipping by box or polygon
+  (a clipping `GltfModifier`).
+- **Electrobun**: the root cause of the 2.0.6 updater hang added to
+  [#605](https://github.com/blackboardsh/electrobun/issues/605#issuecomment-6875378103), and
+  [#600](https://github.com/blackboardsh/electrobun/issues/600), an unattended install mode for winget.
+- **glTF-Transform**: the writer speed-up we patch in (`patches/`) is drafted as a PR, not opened yet.
+
 ### Added — 2026-11-15 (Potree lab: adaptive point size on 3D Tiles)
 - **The Potree lab sizes `/stream` and 3D Tiles point clouds per point**, like Potree: a new *point size* select
   (`sizing=adaptive|tile|fixed`, replacing the `geSize` toggle, still read) adds *adaptive*, where each point takes
