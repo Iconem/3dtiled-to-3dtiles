@@ -3,10 +3,27 @@ title: "Splats: spherical harmonics and Spark's RAD reader (draft)"
 description: "Draft plan to carry view-dependent colour (spherical harmonics above degree 0) through every tiled splat format, and to read RAD with Spark's own Rust code compiled to WebAssembly."
 ---
 
-Draft, 2026-11-16. **Part 2 is done** (same day, see its *Result*); part 1 is not started. Two plans that meet: the second gives the first its RAD part. The roadmap items are
+Draft, 2026-11-16. **Part 2 is done**, and of part 1 the tile writer and RAD are (same day, see each *Result*); streamed SOG and LCC are not started. Two plans that meet: the second gives the first its RAD part. The roadmap items are
 on the [future work](/docs/guide/todo-future-work) page, which also holds the earlier design notes.
 
 ## Part 1: spherical harmonics above degree 0
+
+### Result so far (2026-11-16)
+
+- **The viewer draws them.** Gaussian Splat Lite reads the harmonics of an SPZ tile: with `sh=1` each tile's mesh
+  gets a harmonics texture, with `sh=0` none (checked in headless Chrome on Coit Tower). CesiumJS and Cesium for
+  Unreal are still to check.
+- **The writer** (`core/spz-glb.js`) stores degrees 1 to 3 in the SPZ payload and declares them in the GLB. Read
+  back by another SPZ reader (PlayCanvas splat-transform), the coefficients match within the format's rounding
+  (5 bits for degree 1, 4 bits above). Without harmonics a tile is today's, byte for byte.
+- **RAD** carries them: `&sh=1|2|3` on `/stream` and `/convert`, `--sh N` offline, and a *harmonics* pill in the
+  viewer's top bar for RAD. The bands come from Spark's decoder (part 2). Capped by the file's own degree.
+- **What it costs, measured on Coit Tower** (degree 1, a 65 536-splat tile): 19 to 28 bytes per splat before gzip,
+  but the tile sent grows only from 1 051 to 1 180 KB, **+12 %**: the coefficients compress well. Building the tile
+  takes about 1.6 times as long, since the chunk is decoded a second time for the bands.
+- **Left:** streamed SOG (and LCC2, GeoSplats), LCC, the rotation test for the formats that bake one (RAD bakes
+  none), `/extract/splat` pass-through, sizes at degrees 2 and 3, and the look against Spark's own viewer by eye.
+  The offline `--sh` flag is wired but was not run on a whole file.
 
 ### Where we are
 
@@ -18,7 +35,7 @@ here keeps the base colour only:
 |---|---|---|
 | **Streamed SOG, LCC2** | `shN_centroids.webp` + `shN_labels.webp`: a palette of coefficient sets, one label per splat, 1 to 3 bands | the `shN_*` planes are not even downloaded (`sogBundle.js`) |
 | **LCC** | `Shcoef.bin` in *Quality* scenes: 64 bytes per splat, 15 coefficients packed on 11 bits, degree 3 | not read |
-| **RAD** | `sh1`, `sh2`, `sh3` in Spark's packed form | read by the Spark path, not written to tiles |
+| **RAD** | `sh1`, `sh2`, `sh3` in Spark's packed form | **written to tiles on request** (`sh=`), since 2026-11-16 |
 | **GeoSplats** | built on SOG chunks, so presumably the same planes | **to confirm** |
 | **SPZ, PLY** (extract, future inputs) | SPZ: quantised coefficients; PLY: `f_rest_*` columns | PLY's are decoded and dropped |
 

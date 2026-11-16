@@ -5,6 +5,17 @@ Format loosely follows [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+### Added — 2026-11-16 (spherical harmonics in splat tiles, RAD first)
+- **`sh=1|2|3`** on `/stream` and `/convert` (`--sh N` offline, a *harmonics* pill in the viewer for RAD): splat
+  tiles keep the source's spherical harmonics up to that degree, so colour changes with the viewing direction.
+  Off by default, capped by the file's degree. RAD today, with the bands read by Spark's own decoder; streamed SOG
+  and LCC are next.
+- **The SPZ tile writer** (`core/spz-glb.js`) stores degrees 1 to 3 and declares them as the extension's
+  `SH_DEGREE_l_COEF_n` attributes. Another SPZ reader gets the coefficients back within the format's rounding;
+  without harmonics the tile is unchanged, byte for byte.
+- **Checked on Coit Tower** (degree 1): the viewer's renderer builds a harmonics texture for the tiles; a
+  65 536-splat tile grows from 1 051 to 1 180 KB sent (+12 %).
+
 ### Added — 2026-11-16 (Spark's own RAD decoder, as a reference)
 - **`packages/rad-to-3dtiles/src/sparkRad.js`**: Spark's Rust RAD decoder (`spark-lib`, pinned at Spark 2.4.0)
   compiled to WebAssembly (`vendor/spark-rad-wasm`, 250 KB, built from `rust/spark-rad-wasm`). It decodes one chunk

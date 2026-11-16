@@ -19,6 +19,9 @@
  *     relative, implicit tilings expanded. For a raw dataset (a .copc.laz, a Potree folder…), either
  *     use the default convert command below or `3dtiled serve` it and export the printed URL.
  *
+ * --sh N: keep the splats' spherical harmonics (view-dependent colour) up to degree N, 1..3, capped by what the
+ *   source holds. RAD today. Off by default: 9, 24 or 45 more bytes per splat before gzip.
+ *
  * --centroids-only: for splat formats (rad/sog/lcc/lcc2), emit a glTF POINTS tileset of splat centroids
  *   instead of KHR_gaussian_splatting tiles — renderable by point-cloud-only 3D Tiles viewers.
  *
@@ -129,6 +132,7 @@ if (!input || !outDir) {
     geScale: flag('ge-scale')!= null ? Number(flag('ge-scale')): undefined,
     geLayer: flag('ge-layer')!= null ? Number(flag('ge-layer')): undefined,
     centroidsOnly: argv.includes('--centroids-only'),   // splat fmts → POINTS centroid tileset
+    sh: flag('sh') != null ? Number(flag('sh')) : undefined,   // splats: spherical-harmonic degree to keep, 1..3 (rad today)
     tiling: flag('tiling'),                             // 'implicit' | 'explicit' (copc, potree)
     dag: flag('dag'),                                   // 'levels' | 'paths' (nexus: how the DAG becomes a tree)
     splatBudget: flag('splat-budget') != null ? Number(flag('splat-budget')) : undefined,   // sog: splats per merged tile (0 = one tile per leaf run)

@@ -18,7 +18,8 @@ import { buildTileset } from './tilesetBuilder.js';
 // Shared, parallel-friendly encoder from core (async gzip on the libuv threadpool) +
 // bounded-concurrency map — same import lcc uses. Replaces rad's inline synchronous
 // SPZ-v2/GLB encoder (verified byte-identical to the prior gzipSync output).
-import { buildSplatTileGlb, computeBounds, defaultConcurrency, convertTiles } from '../../core/index.js';
+import { buildSplatTileGlb, computeBounds, defaultConcurrency, convertTiles, SH_BAND_VALUES } from '../../core/index.js';
+import { sparkDecodeChunk } from './sparkRad.js';
 import { isMainThread } from 'node:worker_threads';
 
 const TILE_TASK = new URL('./tile-task.js', import.meta.url).href;
@@ -31,7 +32,9 @@ const TILE_TASK = new URL('./tile-task.js', import.meta.url).href;
 //  geBasis          --ge-basis=…        'spatial' (default; bboxDiag/∛count) | 'featuresize' (legacy)
 //  opacityMin       --opacity-filter=N  OPT-IN: drop splats with alpha < N (default 0 = off, matches SparkJS)
 //  scaleOutlierMult --max-scale-mult=N  OPT-IN: drop splats with maxScale > median×N (default 0 = off)
-const OPTS = { scaleMult: 1, alphaScale: 1, geScale: 1, geLayer: 1, geBasis: 'spatial', opacityMin: 0, scaleOutlierMult: 0, centroidsOnly: false };
+//  sh               --sh=N              OPT-IN: keep spherical harmonics up to degree N (1..3, capped by the file's;
+//                                       default 0 = base colour only). 9, 24 or 45 more bytes per splat.
+const OPTS = { scaleMult: 1, alphaScale: 1, geScale: 1, geLayer: 1, geBasis: 'spatial', opacityMin: 0, scaleOutlierMult: 0, centroidsOnly: false, sh: 0 };
 const OPT_KEYS = Object.keys(OPTS);   // what a tile worker is handed: these, not whatever else a caller's opts carry
 
 /** Parse `--flag=value` argv into an opts object (for the CLI shim). */
@@ -47,6 +50,7 @@ function parseArgvOpts(argv) {
     opacityMin:       num('opacity-filter', 0, true),
     scaleOutlierMult: num('max-scale-mult', 0, true),
     centroidsOnly:    argv.includes('--centroids-only'),
+    sh:               Math.max(0, Math.min(3, Math.floor(num('sh', 0, true)))),
   };
 }
 
@@ -265,10 +269,14 @@ async function writeChunkGlb(buf, chunk, payloadBase, outputPath) {
 /**
  * One chunk's splats as columns, as our own reader decodes them (no filtering, no scaling): what the tiles are made
  * from, and what `sparkRad.js` is compared with. `alphaRaw` is the stored opacity; a `lodOpacity` file stores half.
+ * `sh` > 0 adds the spherical-harmonic bands up to that degree, when the chunk has them. They come from Spark's own
+ * decoder (sparkRad.js), which unpacks every encoding the format allows; RAD bakes no rotation into its splats (the
+ * tileset's root transform carries it), so the coefficients go to the tile as stored.
  * @returns {{count:number, lodOpacity:boolean, positions:Float32Array, alphaRaw:Float32Array|null,
- *            rgb:Float32Array|null, scales:Float32Array|null, rotations:Float32Array|null}}
+ *            rgb:Float32Array|null, scales:Float32Array|null, rotations:Float32Array|null,
+ *            sh:{sh1:Float32Array, sh2?:Float32Array, sh3?:Float32Array}|null}}
  */
-export function decodeChunkColumns(buf, chunk, payloadBase) {
+export function decodeChunkColumns(buf, chunk, payloadBase, sh = 0) {
   const { meta, count, props } = parseRadcChunk(buf, chunk, payloadBase,
     ['center', 'alpha', 'rgb', 'scales', 'orientation']);
 
@@ -286,7 +294,20 @@ export function decodeChunkColumns(buf, chunk, payloadBase) {
   const lnMin  = enc.lnScaleMin  ?? LN_SCALE_MIN;
   const lnMax  = enc.lnScaleMax  ?? LN_SCALE_MAX;
   const rgbProp = (meta.properties ?? []).find(p => p.property === 'rgb');
+  let bands = null;
+  if (sh > 0 && (meta.maxSh ?? 0) > 0) {
+    const start = payloadBase + chunk.offset;
+    const d = sparkDecodeChunk(buf.subarray(start, start + chunk.bytes));
+    const want = Math.min(sh, meta.maxSh, 3), full = (a, n) => (a && a.length === count * n ? a : null);
+    const sh1 = full(d.sh1, SH_BAND_VALUES[0]);
+    if (sh1) {
+      bands = { sh1 };
+      const sh2 = want >= 2 ? full(d.sh2, SH_BAND_VALUES[1]) : null;
+      if (sh2) { bands.sh2 = sh2; const sh3 = want >= 3 ? full(d.sh3, SH_BAND_VALUES[2]) : null; if (sh3) bands.sh3 = sh3; }
+    }
+  }
   return {
+    sh: bands,
     count, lodOpacity: enc.lodOpacity ?? false,
     // Raw RAD coordinates — NO global-centroid subtraction. Subtracting a float
     // offset before int24 quantisation buys nothing (RAD scenes already sit near
@@ -301,10 +322,10 @@ export function decodeChunkColumns(buf, chunk, payloadBase) {
 }
 
 async function _encodeChunkGlb(buf, chunk, payloadBase) {
-  const cols = decodeChunkColumns(buf, chunk, payloadBase);
+  const cols = decodeChunkColumns(buf, chunk, payloadBase, OPTS.centroidsOnly ? 0 : OPTS.sh);
   const { count, positions } = cols;
   const lodOp = cols.lodOpacity;
-  let { rgb, scales, rotations } = cols;
+  let { rgb, scales, rotations, sh } = cols;
 
   const alphas = new Float32Array(count);
   if (cols.alphaRaw) {
@@ -347,6 +368,7 @@ async function _encodeChunkGlb(buf, chunk, payloadBase) {
       const nr = rgb ? new Float32Array(kept*3) : null;
       const ns = scales ? new Float32Array(kept*3) : null;
       const nq = rotations ? new Float32Array(kept*4) : null;
+      const nsh = sh ? Object.fromEntries(Object.entries(sh).map(([k, a]) => [k, new Float32Array(kept * (a.length / count))])) : null;
       let j = 0;
       for (let i = 0; i < count; i++) {
         if (!keep[i]) continue;
@@ -355,9 +377,10 @@ async function _encodeChunkGlb(buf, chunk, payloadBase) {
         if (nr){nr[j*3]=rgb[i*3];nr[j*3+1]=rgb[i*3+1];nr[j*3+2]=rgb[i*3+2];}
         if (ns){ns[j*3]=scales[i*3];ns[j*3+1]=scales[i*3+1];ns[j*3+2]=scales[i*3+2];}
         if (nq){nq[j*4]=rotations[i*4];nq[j*4+1]=rotations[i*4+1];nq[j*4+2]=rotations[i*4+2];nq[j*4+3]=rotations[i*4+3];}
+        if (nsh) for (const k in nsh) { const n = nsh[k].length / kept; nsh[k].set(sh[k].subarray(i * n, i * n + n), j * n); }
         j++;
       }
-      posArr = np; alphaArr = na; rgb = nr; scales = ns; rotations = nq; count2 = kept;
+      posArr = np; alphaArr = na; rgb = nr; scales = ns; rotations = nq; sh = nsh; count2 = kept;
     }
   }
 
@@ -382,7 +405,7 @@ async function _encodeChunkGlb(buf, chunk, payloadBase) {
   // Bounds computed on the FILTERED set — dropping the giant noise splats shrinks
   // the bounding volume to the real geometry (no more inflated 15000m boxes).
   const bounds = computeBounds(posArr, count2);
-  const glb    = await buildSplatTileGlb({ positions: posArr, alphas: alphaArr, rgb, scales, rotations }, count2, bounds, OPTS.centroidsOnly);
+  const glb    = await buildSplatTileGlb({ positions: posArr, alphas: alphaArr, rgb, scales, rotations, sh }, count2, bounds, OPTS.centroidsOnly);
 
   return { glb, bounds, featureSize, count, kept: count2 };
 }

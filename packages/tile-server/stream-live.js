@@ -176,7 +176,7 @@ async function handleRadSubtree(u, res) {
   const url = u.searchParams.get('url');
   if (!url) { res.writeHead(400, CORS); res.end('missing ?url=<source url>'); return true; }
   const centroids = u.searchParams.get('centroids') === '1' || u.searchParams.get('centroids') === 'true';
-  const ts = await radSubtree(url, n[1], { centroids });
+  const ts = await radSubtree(url, n[1], { centroids, sh: u.searchParams.get('sh') || undefined });
   res.writeHead(200, { 'Content-Type': 'application/json', ...CORS });
   res.end(JSON.stringify(ts));
   return true;
@@ -251,6 +251,8 @@ export async function handleStream(req, res, u) {
     // transform: per-tile glTF-Transform op; rides along on child tile URIs so /stream/tile carries it.
     const transform = TRANSFORMS.has(u.searchParams.get('transform')) ? u.searchParams.get('transform') : null;
     const tex = TEX.has(u.searchParams.get('tex')) ? u.searchParams.get('tex') : 'jpg';
+    // sh: spherical-harmonic degree to keep in splat tiles (1..3; RAD today), 0 or absent = base colour only
+    const sh = Math.max(0, Math.min(3, Math.floor(Number(u.searchParams.get('sh'))) || 0));
     // geosplats-only tuning knobs (ignored by every other adapter, same pattern as tiling/centroids above).
     const geosplatsOpts = fmt === 'geosplats' ? {
       lod: u.searchParams.has('lod') ? Number(u.searchParams.get('lod')) : undefined,
@@ -270,7 +272,7 @@ export async function handleStream(req, res, u) {
     // depth=0: the root tile only (no children, no hierarchy drain) — what /aggregate needs to place a
     // child; honoured by copc-live's curved explicit tree, ignored where the root is already cheap.
     const depth = u.searchParams.has('depth') ? Math.max(0, Math.trunc(Number(u.searchParams.get('depth')))) : undefined;
-    const ts = await adapter.tileset(url, { tiling: u.searchParams.get('tiling'), lazy, hierarchy, prefetch, centroids, crs, curved, depth, ...geosplatsOpts, ...nexusOpts, splatBudget: u.searchParams.get('splatBudget'), up: u.searchParams.get('up') || undefined });
+    const ts = await adapter.tileset(url, { tiling: u.searchParams.get('tiling'), lazy, hierarchy, prefetch, centroids, sh, crs, curved, depth, ...geosplatsOpts, ...nexusOpts, splatBudget: u.searchParams.get('splatBudget'), up: u.searchParams.get('up') || undefined });
     // User-directed globe placement (&lon=&lat=[&alt=][&heading=][&scale=]): attach a LOCAL dataset to
     // a real location so ANY 3D Tiles client (Cesium for Unreal/Unity, QGIS, native CesiumJS) streams
     // it in place — no viewer-side reorientation needed. Composes ON TOP of the adapter's own
@@ -282,7 +284,7 @@ export async function handleStream(req, res, u) {
     const colorsQ = /^(u16|u8|f32)$/.test(u.searchParams.get('colors') || '') ? `&colors=${u.searchParams.get('colors')}` : '';
     // attributes: the scalar attributes point tiles carry besides COLOR_0 (PDAL names: `Intensity,Classification`, …, or `all`); none by default
     const attrsQ = attributesParam(u.searchParams.get('attributes'));
-    tagContentUris(ts.root, `&format=${fmt}` + colorsQ + (attrsQ ? `&attributes=${attrsQ}` : '') + (centroids ? '&centroids=1' : '') + (crs ? `&crs=${encodeURIComponent(crs)}` : '') + (curved ? `&curved=${curved}` : '')
+    tagContentUris(ts.root, `&format=${fmt}` + colorsQ + (attrsQ ? `&attributes=${attrsQ}` : '') + (centroids ? '&centroids=1' : '') + (sh ? `&sh=${sh}` : '') + (crs ? `&crs=${encodeURIComponent(crs)}` : '') + (curved ? `&curved=${curved}` : '')
       + (transform ? `&transform=${transform}` + (transform === 'decompress' && tex !== 'jpg' ? `&tex=${tex}` : '') : ''));
     res.writeHead(200, { 'Content-Type': 'application/json', ...CORS });
     res.end(JSON.stringify(ts));
@@ -297,7 +299,7 @@ export async function handleStream(req, res, u) {
       drain(url).catch((e) => { drainOnRefine.delete(`done:${url}`); console.warn(`[stream] cache=refine drain failed for ${url.split('?')[0].slice(-80)}: ${e.message}`); });
     }
     const centroids = u.searchParams.get('centroids') === '1' || u.searchParams.get('centroids') === 'true';
-    let glb = await adapter.tile(url, m[1], { centroids, crs: u.searchParams.get('crs') || undefined, curved: curvedParam(u.searchParams.get('curved')),
+    let glb = await adapter.tile(url, m[1], { centroids, sh: u.searchParams.get('sh') || undefined, crs: u.searchParams.get('crs') || undefined, curved: curvedParam(u.searchParams.get('curved')),
       colors: u.searchParams.get('colors') || undefined, attributes: attributesParam(u.searchParams.get('attributes')) || undefined });
     if (!glb) { res.writeHead(404, CORS); res.end('no such node'); return true; }
     const transform = TRANSFORMS.has(u.searchParams.get('transform')) ? u.searchParams.get('transform') : null;

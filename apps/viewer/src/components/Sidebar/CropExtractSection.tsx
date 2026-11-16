@@ -27,7 +27,7 @@ export default function CropExtractSection({ activeHandleRef }: { activeHandleRe
 
   const params: MiddlewareParams = {
     selectedFormat: url.format, viewerMode: url.mode, cacheScope: url.cache,
-    prefetchN: url.prefetch, transformOp: url.transform, centroidsOnly: url.centroids, tilingMode: url.tiling,
+    prefetchN: url.prefetch, transformOp: url.transform, centroidsOnly: url.centroids, tilingMode: url.tiling, shDegree: url.sh,
   };
 
   function resolvedTilesetUrl(): string | null {

@@ -70,6 +70,7 @@ function optsToFlags(fmt, opts = {}) {
   if (opts.geScale != null) f.push(`--ge-scale=${opts.geScale}`);
   if (opts.geLayer != null) f.push(`--ge-layer=${opts.geLayer}`);
   if (opts.centroidsOnly)   f.push('--centroids-only');
+  if (opts.sh)              f.push(`--sh=${opts.sh}`);   // splats: spherical-harmonic degree to keep (rad today)
   if (Array.isArray(opts.extraArgs)) f.push(...opts.extraArgs);
   return f;
 }

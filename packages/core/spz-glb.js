@@ -33,11 +33,54 @@ function encodeQuat(buf, o, qx, qy, qz, qw) {
   buf[o]=clamp255(x*127.5+127.5); buf[o+1]=clamp255(y*127.5+127.5); buf[o+2]=clamp255(z*127.5+127.5);
 }
 
-/** Build the gzip-compressed SPZ v2 payload (19 bytes/splat). Async (parallel-friendly gzip). */
-export async function buildSpzBuffer(positions, alphas, rgb, scales, rotations, count) {
-  const raw = Buffer.alloc(16 + count * 19);
+/** Values per splat of each spherical-harmonic band (3, 5 and 7 coefficients, RGB each), and of degrees 0..3 together. */
+export const SH_BAND_VALUES = [9, 15, 21];
+export const SH_VALUES = [0, 9, 24, 45];
+
+/**
+ * The degree a set of bands can be written at: the highest of `want` and of the bands present without a gap.
+ * @param {{sh1?:Float32Array|null, sh2?:Float32Array|null, sh3?:Float32Array|null}|null|undefined} sh
+ * @param {number} [want=3]
+ */
+export function shDegreeOf(sh, want = 3) {
+  if (!sh) return 0;
+  let d = 0;
+  for (const band of [sh.sh1, sh.sh2, sh.sh3]) { if (!band || !band.length) break; d++; }
+  return Math.max(0, Math.min(d, want | 0));
+}
+
+// SPZ's rounding of a coefficient: a byte around 128, kept on 5 bits for degree 1 and 4 bits above (the format's own
+// choice; Spark's and Niantic's writers do the same).
+function quantizeSh(v, bits) {
+  const bucket = 1 << (8 - bits);
+  const q = Math.floor((Math.round(v * 128) + 128 + bucket / 2) / bucket) * bucket;
+  return q < 0 ? 0 : q > 255 ? 255 : q;
+}
+
+/**
+ * Build the gzip-compressed SPZ v2 payload: 19 bytes per splat, plus 9, 24 or 45 for spherical harmonics of degree
+ * 1, 2 or 3. Async (parallel-friendly gzip).
+ * @param {{sh1?:Float32Array|null, sh2?:Float32Array|null, sh3?:Float32Array|null}|null} [sh] the bands, each per
+ *   splat and per coefficient with RGB together (9, 15 and 21 values a splat): the order SPZ stores. Written up to
+ *   the highest band present without a gap; none, and the payload is the degree-0 one, byte for byte.
+ */
+export async function buildSpzBuffer(positions, alphas, rgb, scales, rotations, count, sh = null) {
+  const degree = shDegreeOf(sh);
+  const raw = Buffer.alloc(16 + count * (19 + SH_VALUES[degree]));
   raw.writeUInt32LE(SPZ_MAGIC, 0); raw.writeUInt32LE(SPZ_VERSION, 4); raw.writeUInt32LE(count, 8);
-  raw.writeUInt8(0, 12); raw.writeUInt8(SPZ_FRAC_BITS, 13); raw.writeUInt8(0, 14); raw.writeUInt8(0, 15);
+  raw.writeUInt8(degree, 12); raw.writeUInt8(SPZ_FRAC_BITS, 13); raw.writeUInt8(0, 14); raw.writeUInt8(0, 15);
+  if (degree) {
+    const per = SH_VALUES[degree], bands = [sh.sh1, sh.sh2, sh.sh3];
+    let o = 16 + count * 19;
+    for (let i = 0; i < count; i++) {
+      for (let b = 0; b < degree; b++) {
+        const n = SH_BAND_VALUES[b], band = bands[b], bits = b === 0 ? 5 : 4;
+        for (let k = 0; k < n; k++) raw[o + k] = quantizeSh(band[i * n + k], bits);
+        o += n;
+      }
+    }
+    if (o !== 16 + count * (19 + per)) throw new Error('SPZ spherical harmonics: size mismatch');
+  }
   const posB=16, aB=16+count*9, gB=16+count*10, sB=16+count*13, rB=16+count*16, MAX=8388607;
   for (let i = 0; i < count; i++) {
     writeInt24LE(raw, posB+i*9,   Math.max(-MAX, Math.min(MAX, Math.round(positions[i*3]   * SPZ_FRACTION))));
@@ -65,14 +108,16 @@ export function computeBounds(positions, count) {
  * centroid tile occupies the exact same frame as the SPZ tile — the converter's existing box
  * transform applies unchanged. Lets point-cloud-only 3D Tiles renderers display splat scenes.
  *
- * @param {{positions:Float32Array, alphas:?Float32Array, rgb:?Float32Array, scales:?Float32Array, rotations:?Float32Array}} arrays
+ * @param {{positions:Float32Array, alphas:?Float32Array, rgb:?Float32Array, scales:?Float32Array, rotations:?Float32Array,
+ *          sh?:{sh1?:Float32Array|null, sh2?:Float32Array|null, sh3?:Float32Array|null}|null}} arrays
+ *        `sh`: spherical-harmonic bands (see buildSpzBuffer); ignored by `centroidsOnly`
  * @param {number} count
  * @param {object} bounds  result of computeBounds(positions, count)
  * @param {boolean} [centroidsOnly=false]
  * @returns {Promise<Uint8Array|Buffer>} GLB bytes
  */
 export async function buildSplatTileGlb(arrays, count, bounds, centroidsOnly = false) {
-  const { positions, alphas, rgb, scales, rotations } = arrays;
+  const { positions, alphas, rgb, scales, rotations, sh = null } = arrays;
   if (centroidsOnly) {
     const colors = new Float32Array(count * 4);
     for (let i = 0; i < count; i++) {
@@ -83,20 +128,29 @@ export async function buildSplatTileGlb(arrays, count, bounds, centroidsOnly = f
     }
     return buildPointsGlb(positions, colors, count, { swizzle: false, srgb: false });   // inputs are already linear
   }
-  return buildSpzGlb(await buildSpzBuffer(positions, alphas, rgb, scales, rotations, count), count, bounds);
+  return buildSpzGlb(await buildSpzBuffer(positions, alphas, rgb, scales, rotations, count, sh), count, bounds, shDegreeOf(sh));
 }
 
-/** Assemble a KHR_gaussian_splatting_compression_spz_2 GLB from a gzipped SPZ payload. */
-export function buildSpzGlb(spzBuf, count, bounds) {
+/**
+ * Assemble a KHR_gaussian_splatting_compression_spz_2 GLB from a gzipped SPZ payload.
+ * @param {number} [shDegree=0] the payload's spherical-harmonic degree: its coefficients are declared as the
+ *   extension's `SH_DEGREE_l_COEF_n` attributes (accessors without data, like the others: the SPZ holds it)
+ */
+export function buildSpzGlb(spzBuf, count, bounds, shDegree = 0) {
+  const shAttrs = {}, shAccessors = [];
+  for (let l = 1; l <= shDegree; l++) for (let n = 0; n < 2 * l + 1; n++) {
+    shAttrs[`KHR_gaussian_splatting:SH_DEGREE_${l}_COEF_${n}`] = 4 + shAccessors.length;
+    shAccessors.push({ componentType: 5126, count, type: 'VEC3' });
+  }
   const gltf = {
     asset:{version:'2.0'},
     extensionsUsed:['KHR_materials_unlit','KHR_gaussian_splatting','KHR_gaussian_splatting_compression_spz_2'],
     extensionsRequired:['KHR_gaussian_splatting','KHR_gaussian_splatting_compression_spz_2'],
     buffers:[{byteLength:spzBuf.byteLength}], bufferViews:[{buffer:0,byteOffset:0,byteLength:spzBuf.byteLength}],
     accessors:[{componentType:5126,count,type:'VEC3',min:[bounds.minX,bounds.minY,bounds.minZ],max:[bounds.maxX,bounds.maxY,bounds.maxZ]},
-      {componentType:5121,normalized:true,count,type:'VEC4'},{componentType:5126,count,type:'VEC3'},{componentType:5126,count,type:'VEC4'}],
+      {componentType:5121,normalized:true,count,type:'VEC4'},{componentType:5126,count,type:'VEC3'},{componentType:5126,count,type:'VEC4'},...shAccessors],
     materials:[{extensions:{KHR_materials_unlit:{}}}],
-    meshes:[{primitives:[{attributes:{POSITION:0,COLOR_0:1,'KHR_gaussian_splatting:SCALE':2,'KHR_gaussian_splatting:ROTATION':3},material:0,mode:0,
+    meshes:[{primitives:[{attributes:{POSITION:0,COLOR_0:1,'KHR_gaussian_splatting:SCALE':2,'KHR_gaussian_splatting:ROTATION':3,...shAttrs},material:0,mode:0,
       extensions:{KHR_gaussian_splatting:{extensions:{KHR_gaussian_splatting_compression_spz_2:{bufferView:0}}}}}]}],
     nodes:[{mesh:0}], scenes:[{nodes:[0]}], scene:0,
   };

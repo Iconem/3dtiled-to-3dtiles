@@ -341,6 +341,16 @@
             "description": "Splat formats only — centroids-only (points, no covariance) preview instead of full Gaussian splats."
           },
           {
+            "name": "sh",
+            "in": "query",
+            "schema": {
+              "type": "integer",
+              "enum": [0, 1, 2, 3],
+              "default": 0
+            },
+            "description": "Splat formats — keep spherical harmonics (view-dependent colour) up to this degree, capped by what the source holds. RAD today. 0 sends the base colour only; each degree makes tiles larger."
+          },
+          {
             "name": "splatBudget",
             "in": "query",
             "schema": {

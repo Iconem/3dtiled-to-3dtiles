@@ -3,7 +3,7 @@
  *   SPZ-v2 + GLB splat encoder (async/parallel gzip), POINTS GLB, parallelism, format detection.
  * See ARCHITECTURE.md.
  */
-export { buildSpzBuffer, buildSpzGlb, buildSplatTileGlb, computeBounds } from './spz-glb.js';
+export { buildSpzBuffer, shDegreeOf, SH_VALUES, SH_BAND_VALUES, buildSpzGlb, buildSplatTileGlb, computeBounds } from './spz-glb.js';
 export { buildPointsGlb, srgbToLinear, pickAttributes, wantedAttributes, attributesSpec, POINT_ATTRIBUTES } from './points-glb.js';
 export { parallelMap, WorkerPool, defaultConcurrency, tileWorkerCount, setTileWorkers, tilePool, runTileTask, runTileTaskOr, convertTiles, isMemoryFailure, tileFallbacks, ownBytes } from './parallel.js';
 export { detectFormat, detectFormatByName } from './detect.js';

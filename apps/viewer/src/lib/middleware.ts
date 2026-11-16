@@ -1,6 +1,6 @@
 // Ported as pure functions from viewer.html's buildMiddlewareUrl/streamParams/assetUrl/srcUrl
 // (lines ~694-797) — same algorithms, but read an explicit params object instead of globals.
-import { MW, SDATA, FORMATS, DIRECT, TOOLS_DATASETS, PSEUDO_FORMATS, STREAM_ONLY_FORMATS, fmtMeta, canCentroids, type Asset, type AssetType, type FormatMeta } from './formats';
+import { MW, SDATA, FORMATS, DIRECT, TOOLS_DATASETS, PSEUDO_FORMATS, STREAM_ONLY_FORMATS, fmtMeta, canCentroids, canSh, type Asset, type AssetType, type FormatMeta } from './formats';
 import { GOOGLE_MAPS_API_KEY } from './google';
 
 export type TilesetOp = 'implicit-to-explicit' | 'upgrade' | '';
@@ -21,11 +21,14 @@ export interface MiddlewareParams {
   transformOp: string;
   centroidsOnly: boolean;
   tilingMode: TilingMode;
+  /** splats: spherical-harmonic degree to ask for, 0 or absent = base colour only */
+  shDegree?: number;
 }
 
-export function streamParams(f: FormatMeta | undefined, p: Pick<MiddlewareParams, 'tilingMode' | 'centroidsOnly' | 'selectedFormat'>) {
+export function streamParams(f: FormatMeta | undefined, p: Pick<MiddlewareParams, 'tilingMode' | 'centroidsOnly' | 'selectedFormat' | 'shDegree'>) {
   let q = f?.octree ? `&tiling=${p.tilingMode}` : '';
   if (canCentroids(p.selectedFormat) && p.centroidsOnly) q += '&centroids=1';
+  else if (canSh(p.selectedFormat) && p.shDegree) q += `&sh=${p.shDegree}`;
   return q;
 }
 

@@ -98,8 +98,9 @@ export async function handleConvert(req, res, u) {
     if (fmt === 'vpc') { res.writeHead(400, CORS); res.end('a .vpc is not converted as a whole: use /stream/tileset.json?format=vpc&url=… (a mosaic of its COPC items)'); return true; }
     const centroids = ['1', 'true', 'yes'].includes((u.searchParams.get('centroids') || '').toLowerCase());
     const tiling = u.searchParams.get('tiling') || undefined;   // 'implicit' | 'explicit'
-    const key = keyFor(src, fmt, centroids, tiling);
-    const outDir = await ensureConverted(src, fmt, key, { centroidsOnly: centroids, tiling });
+    const sh = Math.max(0, Math.min(3, Math.floor(Number(u.searchParams.get('sh'))) || 0));   // splats: harmonics degree (rad)
+    const key = keyFor(src, fmt, centroids, (tiling || '') + (sh ? `|sh${sh}` : ''));
+    const outDir = await ensureConverted(src, fmt, key, { centroidsOnly: centroids, tiling, ...(sh ? { sh } : {}) });
     const tileset = JSON.parse(await fs.readFile(path.join(outDir, 'tileset.json'), 'utf8'));
     rewriteUris(tileset.root, `/convert/${key}/`);
     // Same user-directed globe placement as /stream (&lon=&lat=[&alt=][&heading=][&scale=]) — applied

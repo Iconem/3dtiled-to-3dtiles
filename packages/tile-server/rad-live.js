@@ -198,9 +198,12 @@ const GAUSSIAN_EXT = {
   extensionsRequired: ['KHR_gaussian_splatting', 'KHR_gaussian_splatting_compression_spz_2'],
 };
 
-function makeTileset(ctx, urlParam, centroids = false) {
+// `sh`: the spherical-harmonic degree asked for (0 = base colour only), carried by every tile URL like `centroids`.
+const shDegree = (v) => Math.max(0, Math.min(3, Math.floor(Number(v)) || 0));
+
+function makeTileset(ctx, urlParam, centroids = false, sh = 0) {
   const enc = encodeURIComponent(urlParam);
-  const cq = centroids ? '&centroids=1' : '';
+  const cq = (centroids ? '&centroids=1' : '') + (sh ? `&sh=${sh}` : '');
   const ts = buildTileset(ctx.nodes, { tileUriTemplate: `tile/{index}.glb?url=${enc}${cq}` });
   ts.extensionsUsed = ['3DTILES_content_gltf'];
   // centroids mode emits glTF POINTS tiles → do NOT advertise the gaussian-splatting extension.
@@ -213,9 +216,9 @@ function makeTileset(ctx, urlParam, centroids = false) {
 // it treats as root) — only the TRUE tree root needs it; a nested subtree.json's own "root" is really
 // an interior node that already inherits the real root's transform once the external reference
 // resolves, so re-applying it there would double-flip the content.
-function makeLazyTileset(nodes, urlParam, centroids, isRoot) {
+function makeLazyTileset(nodes, urlParam, centroids, isRoot, sh = 0) {
   const enc = encodeURIComponent(urlParam);
-  const cq = centroids ? '&centroids=1' : '';
+  const cq = (centroids ? '&centroids=1' : '') + (sh ? `&sh=${sh}` : '');
   // ABSOLUTE /stream/... URIs (baking &format=rad in ourselves) — this tileset.json can be served
   // from EITHER /stream/tileset.json (isRoot) or /stream/rad/subtree/<n>.json (nested); a relative
   // "tile/…" would resolve against whichever of those two paths actually served it, which is wrong
@@ -230,7 +233,7 @@ function makeLazyTileset(nodes, urlParam, centroids, isRoot) {
   return ts;
 }
 
-async function serveTileGlb(hctx, nodeIndex, centroids = false) {
+async function serveTileGlb(hctx, nodeIndex, centroids = false, sh = 0) {
   // chunkIndex === nodeIndex always in this adapter (see getFullCtx above) — no need for the full
   // node table just to serve one tile, so this works unchanged for both cache modes.
   const chunk = hctx.header.chunks[nodeIndex];
@@ -238,12 +241,12 @@ async function serveTileGlb(hctx, nodeIndex, centroids = false) {
   const cbuf = await hctx.readChunk(chunk);
   const local = hctx.rangeSupported ? { offset: 0, bytes: chunk.bytes } : chunk;
   const base  = hctx.rangeSupported ? 0 : hctx.payloadBase;
-  const here = async () => Buffer.from(await radChunkGlb(cbuf, local, base, centroids));
+  const here = async () => Buffer.from(await radChunkGlb(cbuf, local, base, centroids, sh));
   const pool = tilePool();
   if (!pool) return here();
   // TILED_WORKERS: a worker inflates the chunk and encodes the GLB; a tile it had no memory for is built here instead.
   const bytes = ownBytes(cbuf);
-  const glb = await runTileTaskOr(pool, SPLAT_TASKS, 'radTileTask', { cbuf: bytes, local, base, centroids }, [bytes.buffer], here);
+  const glb = await runTileTaskOr(pool, SPLAT_TASKS, 'radTileTask', { cbuf: bytes, local, base, centroids, sh }, [bytes.buffer], here);
   return Buffer.isBuffer(glb) ? glb : Buffer.from(glb.buffer, glb.byteOffset, glb.byteLength);
 }
 
@@ -251,13 +254,14 @@ async function serveTileGlb(hctx, nodeIndex, centroids = false) {
 export const radTileRe = /^\d+$/;
 
 export async function radTileset(url, opts = {}) {
-  if (opts.hierarchy === 'eager') return makeTileset(await getFullCtx(url), url, opts.centroids);
+  const sh = shDegree(opts.sh);
+  if (opts.hierarchy === 'eager') return makeTileset(await getFullCtx(url), url, opts.centroids, sh);
   const hctx = await getHeaderCtx(url);
-  if (!hctx.rangeSupported) return makeTileset(await getFullCtx(url), url, opts.centroids); // see scanBoundedTopology comment
+  if (!hctx.rangeSupported) return makeTileset(await getFullCtx(url), url, opts.centroids, sh); // see scanBoundedTopology comment
   const nodes = await scanBoundedTopology(hctx, 0, RAD_LAZY_DEPTH);
-  return makeLazyTileset(nodes, url, opts.centroids, true);
+  return makeLazyTileset(nodes, url, opts.centroids, true, sh);
 }
-export async function radTile(url, key, opts = {}) { return serveTileGlb(await getHeaderCtx(url), Number(key), opts.centroids); }
+export async function radTile(url, key, opts = {}) { return serveTileGlb(await getHeaderCtx(url), Number(key), opts.centroids, shDegree(opts.sh)); }
 
 // cache=none's external-tileset continuation — see the file header + scanBoundedTopology comment.
 // Namespaced under /stream/rad/subtree/… (not the generic /stream/subtrees/ route, which is the
@@ -265,5 +269,5 @@ export async function radTile(url, key, opts = {}) { return serveTileGlb(await g
 export async function radSubtree(url, chunkIndexStr, opts = {}) {
   const hctx = await getHeaderCtx(url);
   const nodes = await scanBoundedTopology(hctx, Number(chunkIndexStr), RAD_LAZY_DEPTH);
-  return makeLazyTileset(nodes, url, opts.centroids, false);
+  return makeLazyTileset(nodes, url, opts.centroids, false, shDegree(opts.sh));
 }

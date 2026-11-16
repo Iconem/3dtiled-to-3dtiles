@@ -19,8 +19,8 @@ export function lccSplatGlb(buf, pts, scaleMin, scaleMax, centroids = false) {
 }
 
 /** One RAD chunk → GLB (`local`, `base`: where the chunk sits in `cbuf`, as rad-live.js reads it). */
-export async function radChunkGlb(cbuf, local, base, centroids = false) {
-  return (await encodeChunkGlb(cbuf, local, base, { centroidsOnly: centroids })).glb;
+export async function radChunkGlb(cbuf, local, base, centroids = false, sh = 0) {
+  return (await encodeChunkGlb(cbuf, local, base, { centroidsOnly: centroids, sh })).glb;
 }
 
 /** One streamed-SOG chunk (its meta.json and WebP files, by name) → the decoded table's columns, as plain typed arrays. */
