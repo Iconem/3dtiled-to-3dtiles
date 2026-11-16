@@ -14,46 +14,14 @@
  */
 import { open as fsOpen } from 'node:fs/promises';
 
-const HEADER_SIZE = 375;          // LAS 1.4
-const PDRF = 7;                   // XYZ + intensity + return/classification + GPS time + RGB
-const RECORD_LEN = 36;
+import { lasHeaderBytes, writeLasRecord, LAS_HEADER_SIZE, LAS_RECORD_LEN as RECORD_LEN } from './las-format.js';
 
-// Build the 375-byte LAS 1.4 header. `count`/`bbox` may be patched later (write placeholders first).
-function buildHeader({ scale, offset, count = 0, bbox = null }) {
-  const h = Buffer.alloc(HEADER_SIZE);
-  h.write('LASF', 0, 'latin1');
-  h.writeUInt8(1, 24); h.writeUInt8(4, 25);                 // version 1.4
-  h.write('3dtiled las-writer', 58, 'latin1');              // generating software
-  h.writeUInt16LE(HEADER_SIZE, 94);                          // header size
-  h.writeUInt32LE(HEADER_SIZE, 96);                          // offset to point data (no VLRs)
-  h.writeUInt32LE(0, 100);                                   // # VLRs
-  h.writeUInt8(PDRF, 104);                                   // point data record format
-  h.writeUInt16LE(RECORD_LEN, 105);                          // point data record length
-  // legacy 32-bit count: valid only for PDRF 0–5; PDRF 6–10 → must be 0 (use the 64-bit field).
-  h.writeUInt32LE(0, 107);
-  h.writeDoubleLE(scale[0], 131); h.writeDoubleLE(scale[1], 139); h.writeDoubleLE(scale[2], 147);
-  h.writeDoubleLE(offset[0], 155); h.writeDoubleLE(offset[1], 163); h.writeDoubleLE(offset[2], 171);
-  const b = bbox || { min: [0, 0, 0], max: [0, 0, 0] };
-  h.writeDoubleLE(b.max[0], 179); h.writeDoubleLE(b.min[0], 187);   // MaxX, MinX
-  h.writeDoubleLE(b.max[1], 195); h.writeDoubleLE(b.min[1], 203);   // MaxY, MinY
-  h.writeDoubleLE(b.max[2], 211); h.writeDoubleLE(b.min[2], 219);   // MaxZ, MinZ
-  h.writeBigUInt64LE(BigInt(count), 247);                   // 64-bit number of point records
-  return h;
-}
-
-// Encode one PDRF-7 record into `buf` at `o`. coords are already quantized int32.
-function writeRecord(buf, o, ix, iy, iz, intensity, r, g, b) {
-  buf.writeInt32LE(ix, o); buf.writeInt32LE(iy, o + 4); buf.writeInt32LE(iz, o + 8);
-  buf.writeUInt16LE(intensity & 0xffff, o + 12);
-  buf.writeUInt8(0x11, o + 14);     // return number 1 / number of returns 1
-  buf.writeUInt8(0, o + 15);        // classification flags / scanner channel / dir / edge
-  buf.writeUInt8(0, o + 16);        // classification
-  buf.writeUInt8(0, o + 17);        // user data
-  buf.writeInt16LE(0, o + 18);      // scan angle
-  buf.writeUInt16LE(0, o + 20);     // point source id
-  buf.writeDoubleLE(0, o + 22);     // GPS time (PDRF 6+ requires it)
-  buf.writeUInt16LE(r & 0xffff, o + 30); buf.writeUInt16LE(g & 0xffff, o + 32); buf.writeUInt16LE(b & 0xffff, o + 34);
-}
+const HEADER_SIZE = LAS_HEADER_SIZE;
+// The header and the records are las-format.js's (shared with the browser); here they are handed out as Buffers.
+const asBuffer = (u8) => Buffer.from(u8.buffer, u8.byteOffset, u8.byteLength);
+const buildHeader = (opts) => asBuffer(lasHeaderBytes(opts));
+const viewOf = (buf) => new DataView(buf.buffer, buf.byteOffset, buf.byteLength);
+const writeRecord = (buf, o, ix, iy, iz, intensity, r, g, b) => writeLasRecord(buf._view ?? (buf._view = viewOf(buf)), o, ix, iy, iz, intensity, r, g, b);
 
 // ── disk-free streaming helpers (2-pass: count in pass 1, write header, stream records in pass 2) ──
 export const LAS_RECORD_LEN = RECORD_LEN;
