@@ -52,7 +52,6 @@ export const CATALOG: SampleGroup[] = [
       { id: 'skatepark', label: 'Skatepark', format: 'sog', origin: 'PlayCanvas', src: 'https://code.playcanvas.com/examples_data/example_skatepark_02/lod-meta.json' },
       { id: 'roman', label: 'Roman Parish', format: 'sog', origin: 'PlayCanvas', src: 'https://code.playcanvas.com/examples_data/example_roman_parish_02/lod-meta.json' },
       { id: 'grace', label: 'Grace Cathedral SF', format: 'sog', origin: 'Vincent Woo (community)', src: 'https://d28zzqy0iyovbz.cloudfront.net/b8b1fd14/v1/lod-meta.json' },
-      { id: 'oval', label: 'Oval Interior Spaces', format: 'sog', origin: 'community capture', src: 'https://d28zzqy0iyovbz.cloudfront.net/b7c8d8c5/v1/lod-meta.json' },
     ],
   },
   {

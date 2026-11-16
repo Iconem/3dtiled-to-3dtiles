@@ -108,8 +108,9 @@ A `.spz` or `.ply` chunk cannot be read in part: the server downloads it whole a
 radix samples below: the rows of a run land in their node's box on every axis where the node is interior to the scene
 (the SPZ and PLY of the Unreal scene decode to the metre the LCC v1 original is at).
 
-Not carried over: spherical harmonics above degree 0 (as for every splat format here), the environment chunk, the
-collision meshes and `virtualLoD`.
+Spherical harmonics above degree 0 are carried on request (`&sh=1|2|3`, `--sh N`, the viewer's *harmonics* pill),
+from `.sog` and `.spz` chunks; by default the tiles hold the base colour only. Not carried over: the environment
+chunk, the collision meshes and `virtualLoD`.
 
 ## The public datasets (2026-11-10)
 

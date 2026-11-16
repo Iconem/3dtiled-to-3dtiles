@@ -20,13 +20,29 @@ on the [future work](/docs/guide/todo-future-work) page, which also holds the ea
   *harmonics* pill in the viewer's top bar for these formats. Capped by the source's own degree. RAD's bands come
   from Spark's decoder (part 2); SOG's from PlayCanvas's reader, which looks each splat's coefficients up in the
   chunk's palette. Without the option the harmonics planes of a SOG chunk are no longer fetched or decoded at all
-  (a quarter to a third of a chunk's bytes).
+  (a quarter to a third of a chunk's bytes: the first Skatepark chunk is 6.39 MB of files without them, 8.46 MB
+  with its two `shN_*` planes).
 - **Extract** passes them through: `/extract/splat` on a tileset asked with `sh=2` gives a PLY with the 24
   coefficient columns (Skatepark, 83 585 splats: 4.7 MB without, 12.7 MB with).
 - **No rotation to apply.** None of the readers turns the splats: every format's rotation is in the tileset's root
   transform, which the renderer applies to the coefficients too. So the rotation test of the plan has no case
   today; it becomes needed the day a reader bakes one.
 - **GeoSplats has none to carry**: its octants hold the base colour only (means, rotations, scales, `sh0`).
+  Checked on the two MapTiler samples of the viewer: 107 970 files listed over their 38 sub-models, and no
+  `shN` plane among them.
+
+**Which samples hold harmonics.** The first tile of every streamed-SOG, LCC2 and RAD sample of the viewer, asked
+with `sh=3`, and the degree it comes back with (2026-11-16):
+
+| Format | With harmonics | Base colour only |
+|---|---|---|
+| Streamed SOG | Skatepark, Arrival jaffa3, Grace Cathedral, Cathedral Interior, Vyšehrad, Dittrichova hrobka: degree 3 | Roman Parish, Jastrzębia Góra, Lublin, Itaka Stadium |
+| LCC2 | Tunis, Sutro Tower (`.spz` chunks), Bicycle (`.sog` chunks): degree 3 | Unreal street, Unreal statues, Showroom (`.spz`), Unreal example scene (`.ply`) |
+| RAD | Coit Tower: degree 1 | Poland village, Cave, Tastier |
+
+So 10 of the 21 samples have something to show with the *harmonics* pill on; on the others it changes nothing.
+The first tile grows by 10 % to 53 % with them (Sutro Tower: 2.06 times). The *Oval Interior Spaces* sample was
+left out: its host now answers 403, and it was removed from the samples.
 
 **What it costs**, the same tiles asked at each degree, sizes as sent (the payload is gzip):
 
