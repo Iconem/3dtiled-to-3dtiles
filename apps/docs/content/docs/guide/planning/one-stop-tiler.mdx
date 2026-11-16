@@ -1,0 +1,88 @@
+---
+title: "One-stop tiler (draft)"
+description: "Draft plan for the desktop app's third flow: give it raw, untiled input and it runs the right third-party tiler, then streams or exports the result."
+---
+
+Draft, 2026-11-16. Not started. The roadmap item is on the [future work](/docs/guide/todo-future-work) page; the
+tools are surveyed on [existing tilers](/docs/guide/existing-tilers).
+
+## The idea
+
+Today the desktop app takes sources that are **already tiled** (COPC, Potree, SOG, LCC, RAD, I3S, 3MX, OSGB, Nexus)
+and streams or exports them. The third flow, next to *Stream live* and *Export to a folder*: drop a **raw** file
+(LAS/LAZ/E57, a mesh, a splat PLY), pick a tiler, and the app
+
+1. gets the tool if it is not there yet,
+2. shows the tool's own options in a form,
+3. runs it as a subprocess, with its log, progress and Cancel,
+4. hands the output to the existing flows: a COPC, a Potree folder, a streamed SOG or a RAD goes to `/stream`; a 3D
+   Tiles folder opens as is.
+
+We write no tiler ourselves. The value is in choosing, installing and chaining the official ones.
+
+## Is the dependency side a nightmare?
+
+Not if each tool is delivered the way its authors already ship it, and if we start with Windows, where most of them
+publish a ready `.exe`. Four kinds of tools, from easiest to hardest:
+
+| Kind | How it gets on the machine | Tools |
+|---|---|---|
+| **Already in our bundle** | nothing to install: the app ships Node | `@playcanvas/splat-transform` (PLY → streamed SOG) |
+| **One binary per platform** | download the release asset, check its hash, unzip into the app's tools folder | PotreeConverter 2.x, gocesiumtiler, Obj2Tiles, fanvanzh/3dtiles |
+| **Needs a runtime** | a portable runtime next to the tool, never a system install | mago-3d-tiler (Java: a portable JRE), py3dtiles (Python: a private environment made with `uv`) |
+| **Heavy native stacks** | find an existing install first (QGIS ships PDAL and untwine), else a conda-style environment (`pixi`/`micromamba`) | PDAL `writers.copc`, untwine |
+
+Docker images (py3dtiles, mago-3d-tiler, GeoSolutions' digital-twin-toolbox) are the fallback for the server, not
+for the desktop app.
+
+Release assets, versions and licences are **to be checked tool by tool** before anything is redistributed; the
+table says how, not that every asset exists.
+
+## Tool matrix (first pass)
+
+| Input | Tool | Output we then stream | Notes |
+|---|---|---|---|
+| LAS / LAZ | **PDAL `writers.copc`** or **untwine** | COPC | the reference path; out-of-core |
+| LAS / LAZ | **PotreeConverter 2.x** | Potree 2.0 | very fast, Windows `.exe` released |
+| LAS / LAZ | **gocesiumtiler** | 3D Tiles 1.1 | single Go binary |
+| LAS / LAZ | **py3dtiles** `convert` | 3D Tiles | Python |
+| E57 | PDAL (`readers.e57`) then `writers.copc` | COPC | |
+| OBJ | **Obj2Tiles** | 3D Tiles | .NET, self-contained builds |
+| OBJ, IFC, CityGML, LAS, … | **mago-3d-tiler** | 3D Tiles | Java; the widest input list |
+| OSGB | **fanvanzh/3dtiles** | 3D Tiles | we already stream OSGB live; offline export only |
+| splat PLY | **splat-transform** | streamed SOG | in our bundle already |
+| splat PLY | Spark `build-lod` | RAD | delivery to check (npm or a Rust build) |
+
+## How the app manages tools
+
+- A **manifest** per tool, in the repo: name, version, download URL per platform, SHA-256, licence, the command
+  line, and the form fields (each the tool's own flag, with its default and help text).
+- **Detect before downloading**: the tool on `PATH`, a QGIS install for PDAL and untwine, or a path the user points
+  to. A downloaded tool lives in the app's data folder, per version, so an update never breaks a running job.
+- **Run** through the same subprocess runner as "Run in: CLI subprocess": stdout to the log panel, a progress
+  parser per tool where its output allows, Cancel kills the process tree.
+- **Chain**: the output folder is then opened by the stream or export flow, like any library item, and the run goes
+  into the library history with its command line.
+
+## Windows first
+
+One platform makes it much smaller: one asset per tool, one path layout, one subprocess model. The known problem is
+**Defender**: unsigned downloaded `.exe` files can be blocked, as our own launcher already is (see the Electrobun
+notes). Signing our app does not cover third-party binaries, so the form should say which tool was blocked and how
+to allow it. macOS and Linux come after, with the same manifests.
+
+## Phases
+
+1. **Windows, three tools**: splat-transform (no download), PotreeConverter (one binary), PDAL/untwine found in a
+   QGIS install. Proves detect, download, run, chain.
+2. **More single binaries**: gocesiumtiler, Obj2Tiles, fanvanzh/3dtiles.
+3. **Runtimes**: py3dtiles in a private `uv` environment, mago-3d-tiler with a portable JRE.
+4. **macOS and Linux**, then the server variant (the same manifests, Docker images where they exist).
+
+## Open questions
+
+- Licences of each tool, for downloading on the user's behalf (we redistribute nothing if the app downloads from
+  the official release page; to confirm per licence).
+- Checksums: pinned per version in the manifest, so a moved or replaced asset fails loudly.
+- Disk and memory: tilers are out-of-core but write large temporary folders; the form should show where.
+- Which defaults to expose per tool, and which to hide behind "Advanced".

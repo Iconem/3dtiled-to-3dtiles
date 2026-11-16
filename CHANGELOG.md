@@ -5,6 +5,11 @@ Format loosely follows [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+### Docs — 2026-11-16 (the one-stop tiler, drafted)
+- **[One-stop tiler (draft)](/docs/guide/planning/one-stop-tiler)**: the desktop app's planned third flow, raw input
+  through the official tilers (PDAL/untwine, PotreeConverter, gocesiumtiler, py3dtiles, Obj2Tiles, mago-3d-tiler,
+  fanvanzh/3dtiles, splat-transform), how each gets on the machine, Windows first, in four phases.
+
 ### Upstream — 2026-11-04 to 2026-11-16 (what we sent to other projects)
 - **3DTilesRendererJS [#1792](https://github.com/NASA-AMMOS/3DTilesRendererJS/pull/1792)** (open): adaptive point size
   for implicit `ADD` octrees in `PointCloudEffectsPlugin`, fixing our issue
