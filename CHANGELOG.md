@@ -5,6 +5,17 @@ Format loosely follows [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+### Added — 2026-11-16 (crop and extract in the browser)
+- **Crop & Extract runs in the browser**: a *Tile server / In the browser* switch in the section. In the browser
+  the page fetches the tiles and writes the file itself, in a Web Worker, with progress and Cancel: LAS, merged
+  GLB, splats (SPZ, GLB, PLY), a zip of the tiles. Chrome and Edge write to disk as they go (no size limit);
+  other browsers build the file in memory, up to 1 GB. Without a reachable tile server it is the default.
+- **Same files as the server's**: LAS, zip, cropped tileset and merged GLB are identical byte for byte on the
+  cases compared; a splat PLY differs by float rounding only.
+- **One extractor**: the walk, the box test and the writers moved to `core/extract-core.js` (no Node imports),
+  which the tile server's `/extract` and the viewer both call. The server's output is unchanged.
+- Not in the browser: COPC, SOG output, Draco-compressed tiles (skipped and counted).
+
 ### Added — 2026-11-16 (spherical harmonics from streamed SOG and LCC2)
 - **`sh=1|2|3` now works for streamed SOG and LCC2** as for RAD (`/stream`, `/convert`, `--sh N` offline, the
   *harmonics* pill in the viewer). The coefficients are looked up in each chunk's palette by PlayCanvas's reader.

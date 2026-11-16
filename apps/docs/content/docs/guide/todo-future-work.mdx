@@ -36,7 +36,7 @@ Roughly in the order we're tackling them, grouped by theme below.
   newer formats; verify the uniform-crop flip table holds for non-georeferenced sources too.
 - **Encoding/extract** — WebP texture encode, `simplify`/`weld`/`quantize` geometry ops, encode support
   on `/gltf`; `rtc_center`/decompress for ingesting *existing* remote 3D Tiles; a browser-native bbox
-  crop/subsample extract tool ([plan](/docs/guide/planning/browser-crop-extract)).
+  crop/subsample extract tool (**done 2026-11-16**, [how](/docs/guide/planning/browser-crop-extract)).
 - **Performance** — Draco+KTX2 decode: measured and sped up on 2026-11-16 (KTX2 kept on request, untouched tiles
   passed through, tile workers); meshopt on point tiles measured, stays opt-in. Numbers on the
   [benchmarks](/docs/guide/planning/benchmarks) page.
@@ -432,8 +432,9 @@ flowchart LR
 - [ ] **`rtc_center` / decompress for ingestion** — apply the existing per-tile decompress pipeline to
   *existing remote 3D Tiles* (not just our own output) so consumers that can't read Draco/KTX2/
   `CESIUM_RTC` (e.g. blender **BLOSM**) can load them.
-- [ ] **Browser-native bbox crop / subsample extract** (plan:
-  [Crop and extract in the browser (draft)](/docs/guide/planning/browser-crop-extract)) — pull a cropped/decimated copy of a tiled asset
+- [x] **Browser-native bbox crop / subsample extract** (done 2026-11-16: LAS, merged GLB, splats and zip, the
+  same files as the server's; left: Draco tiles, SOG output, an oriented box;
+  [Crop and extract in the browser](/docs/guide/planning/browser-crop-extract)) — pull a cropped/decimated copy of a tiled asset
   (point cloud, mesh, or splat) by an OBB defined in the viewer — BLOSM-style but JS/browser-native.
   See the dump-tiles feature idea (memory). **Refinement-aware traversal**: for **ADD** octrees
   (COPC/Potree) accumulate all points down to the desired geometric error within the OBB; for

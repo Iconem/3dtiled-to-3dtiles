@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Checkbox } from '@/components/ui/checkbox';
@@ -8,6 +8,7 @@ import { ToggleGroup, ToggleGroupItem } from '@/components/ui/toggle-group';
 import { useViewerStore } from '@/state/store';
 import { useUrlState } from '@/state/urlState';
 import { extractCrop, type ExtractKind } from '@/lib/extract';
+import { runBrowserExtract, canStreamToDisk, BROWSER_SPLAT_FORMATS, type BrowserExtractKind } from '@/lib/browserExtract';
 import { buildMiddlewareUrl, type MiddlewareParams } from '@/lib/middleware';
 import { MW, type AssetType } from '@/lib/formats';
 import type { ViewerHandle } from '@/lib/viewer-handle';
@@ -25,6 +26,24 @@ export default function CropExtractSection({ activeHandleRef }: { activeHandleRe
   const [family, setFamily] = useState<AssetType>(currentType);
   useEffect(() => setFamily(currentType), [currentType]);
 
+  // Where the extract runs. The tile server's /extract is the default; without a reachable server (a statically
+  // hosted viewer) the browser is, and it is offered either way. Asked once, when the section mounts.
+  const inBrowser = s.extractWhere === 'browser';
+  const [serverUp, setServerUp] = useState<boolean | null>(null);
+  useEffect(() => {
+    let alive = true;
+    fetch(`${MW}/openapi.json`, { method: 'HEAD' }).then((r) => r.ok, () => false).then((ok) => {
+      if (!alive) return;
+      setServerUp(ok);
+      if (!ok) useViewerStore.getState().setExtractWhere('browser');
+    });
+    return () => { alive = false; };
+  }, []);
+  // A browser extract in progress: what it has done so far, and how to stop it.
+  const [running, setRunning] = useState<string | null>(null);
+  const abortRef = useRef<AbortController | null>(null);
+  useEffect(() => () => abortRef.current?.abort(), []);
+
   const params: MiddlewareParams = {
     selectedFormat: url.format, viewerMode: url.mode, cacheScope: url.cache,
     prefetchN: url.prefetch, transformOp: url.transform, centroidsOnly: url.centroids, tilingMode: url.tiling, shDegree: url.sh,
@@ -36,12 +55,35 @@ export default function CropExtractSection({ activeHandleRef }: { activeHandleRe
     return s.rawUrlMode && !field.startsWith(MW) ? buildMiddlewareUrl(field, params) : field;
   }
 
+  async function doBrowserExtract(kind: BrowserExtractKind, tilesetUrl: string, bbox: [number, number, number, number, number, number], extractMatrix: number[] | null) {
+    if (running) return;
+    const ctl = new AbortController(); abortRef.current = ctl;
+    const t0 = performance.now();
+    setRunning('starting…');
+    s.tlog(`⬇ extract ${kind} in the browser (GE ${s.maxGE})…`);
+    try {
+      const r = await runBrowserExtract(
+        { kind, tilesetUrl, bbox, maxGE: s.maxGE, enuFrame: s.enuFrame, splatFormat: s.splatFormat, splatClip: s.splatClip, extractMatrix },
+        { signal: ctl.signal, onProgress: (p) => setRunning(Object.entries(p).filter(([k]) => k !== 'pass').map(([k, v]) => `${Number(v).toLocaleString()} ${k}`).join(', ') + (p.pass === 'count' ? ' (counting)' : '')) },
+      );
+      if (!r) { s.tlog('extract cancelled'); return; }
+      const what = Object.entries(r.stats).filter(([k]) => k !== 'bytes').map(([k, v]) => `${v.toLocaleString()} ${k}`).join(', ');
+      const skipped = r.skipped ? ` · ${r.skipped} tiles skipped (${r.firstSkip})` : '';
+      s.tlog(`✓ ${r.fileName}: ${what} in ${((performance.now() - t0) / 1000).toFixed(1)} s${skipped}`);
+      s.setStatus(`Extract written: ${r.fileName} (${what})${skipped}`);
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e);
+      s.tlog(`✗ extract failed: ${msg}`); s.setStatus(`Extract failed: ${msg}`);
+    } finally { abortRef.current = null; setRunning(null); }
+  }
+
   function doExtract(kind: ExtractKind) {
     const tilesetUrl = resolvedTilesetUrl();
     if (!tilesetUrl) return;
     const { w, s: sN, minH, e, n, maxH } = s.crop;
     if ([w, sN, minH, e, n, maxH].some(Number.isNaN)) { s.setStatus('Set the crop box first (⬚ Set box to view).'); return; }
     const extractMatrix = h()?.getExtractMatrix() ?? null;
+    if (inBrowser && kind !== 'copc') { void doBrowserExtract(kind, tilesetUrl, [w, sN, minH, e, n, maxH], extractMatrix); return; }
     const outUrl = extractCrop({
       kind, tilesetUrl, bbox: [w, sN, minH, e, n, maxH], maxGE: s.maxGE,
       lasStream: s.lasStream, enuFrame: s.enuFrame, splatFormat: s.splatFormat, splatClip: s.splatClip, extractMatrix,
@@ -82,6 +124,11 @@ export default function CropExtractSection({ activeHandleRef }: { activeHandleRe
           <Input type="number" className="h-7" value={s.crop.minH} onChange={(e) => s.setCrop({ minH: parseFloat(e.target.value) })} />
           <Input type="number" className="h-7" value={s.crop.maxH} onChange={(e) => s.setCrop({ maxH: parseFloat(e.target.value) })} />
         </div>
+        <ToggleGroup type="single" variant="outline" size="sm" value={s.extractWhere} onValueChange={(v) => v && s.setExtractWhere(v as 'server' | 'browser')}
+          title="Where the extract runs. Tile server: every output, any size. Browser: no server needed, the file is written by this page (LAS, GLB, SPZ/PLY/GLB splats, zip); no COPC">
+          <ToggleGroupItem value="server" className="h-7 flex-1 text-xs" disabled={serverUp === false} title={serverUp === false ? 'No tile server reachable' : undefined}>Tile server</ToggleGroupItem>
+          <ToggleGroupItem value="browser" className="h-7 flex-1 text-xs">In the browser</ToggleGroupItem>
+        </ToggleGroup>
         <ToggleGroup type="single" variant="outline" size="sm" value={family} onValueChange={(v) => v && setFamily(v as AssetType)}
           title="Extract output family — defaults to the loaded asset's type, but e.g. 3D Tiles can hold mesh, point-cloud, or splat content">
           <ToggleGroupItem value="pointcloud" className="h-7 flex-1 text-xs">Pointcloud</ToggleGroupItem>
@@ -90,17 +137,19 @@ export default function CropExtractSection({ activeHandleRef }: { activeHandleRe
         </ToggleGroup>
         {family === 'pointcloud' && (
           <>
-            <Label className="text-xs" title="LAS: disk-free out-of-core streaming">
-              <Checkbox checked={s.lasStream} onCheckedChange={(v) => s.setLasStream(!!v)} />
-              LAS disk-free stream (2-pass)
-            </Label>
+            {!inBrowser && (
+              <Label className="text-xs" title="LAS: disk-free out-of-core streaming">
+                <Checkbox checked={s.lasStream} onCheckedChange={(v) => s.setLasStream(!!v)} />
+                LAS disk-free stream (2-pass)
+              </Label>
+            )}
             <Label className="text-xs" title="LAS/COPC: local ENU frame instead of ECEF">
               <Checkbox checked={s.enuFrame} onCheckedChange={(v) => s.setEnuFrame(!!v)} />
               LAS local ENU frame (else ECEF)
             </Label>
             <div className="flex gap-1">
               <Button size="sm" variant="outline" onClick={() => doExtract('las')}>⬇ LAS</Button>
-              <Button size="sm" variant="outline" onClick={() => doExtract('copc')}>⬇ COPC</Button>
+              <Button size="sm" variant="outline" disabled={inBrowser} title={inBrowser ? 'COPC is made by PDAL on the tile server' : undefined} onClick={() => doExtract('copc')}>⬇ COPC</Button>
             </div>
           </>
         )}
@@ -117,7 +166,7 @@ export default function CropExtractSection({ activeHandleRef }: { activeHandleRe
                 <SelectContent>
                   <SelectItem value="spz">SPZ</SelectItem>
                   <SelectItem value="glb">GLB</SelectItem>
-                  <SelectItem value="sog">SOG</SelectItem>
+                  {!inBrowser && <SelectItem value="sog">SOG</SelectItem>}
                   <SelectItem value="ply">PLY</SelectItem>
                 </SelectContent>
               </Select>
@@ -130,6 +179,12 @@ export default function CropExtractSection({ activeHandleRef }: { activeHandleRe
           </>
         )}
         <Button size="sm" variant="outline" onClick={() => doExtract('zip')}>⬇ ZIP (bundle)</Button>
+        {running && (
+          <div className="flex items-center justify-between gap-2 text-xs">
+            <span className="truncate text-muted-foreground" title={running}>⏳ {running}</span>
+            <Button size="sm" variant="outline" className="h-6 shrink-0" onClick={() => abortRef.current?.abort()}>Cancel</Button>
+          </div>
+        )}
         {url.renderer === '3dtrjs' && (
           <Button size="sm" variant={s.cropGizmoOn ? 'default' : 'outline'} onClick={() => { const on = !s.cropGizmoOn; s.setCropGizmoOn(on); if (on) h()?.showCropGizmo?.(); else h()?.hideCropGizmo?.(); }}>
             ⬚ 3D box gizmo (3DTRJS)
@@ -148,7 +203,12 @@ export default function CropExtractSection({ activeHandleRef }: { activeHandleRe
             ))}
           </div>
         )}
-        <p className="text-xs text-muted-foreground">Extracts the loaded tileset within the box. Octree sources are fetched as explicit tiling.</p>
+        <p className="text-xs text-muted-foreground">
+          Extracts the loaded tileset within the box. Octree sources are fetched as explicit tiling.
+          {inBrowser && (canStreamToDisk()
+            ? ' In the browser: you pick the file, and it is written tile by tile.'
+            : ' In the browser: built in memory and downloaded, up to 1 GB (Chrome and Edge write straight to disk).')}
+        </p>
     </SidebarCollapsibleSection>
   );
 }

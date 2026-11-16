@@ -1,9 +1,49 @@
 ---
-title: "Crop and extract in the browser (draft)"
-description: "Draft plan to run the viewer's Crop & Extract in the browser itself: draw a box, download the points, mesh or splats inside it, with no tile server."
+title: "Crop and extract in the browser"
+description: "The viewer's Crop & Extract can run in the browser itself: draw a box, save the points, mesh or splats inside it, with no tile server. What was built, how it was checked, and what is left."
 ---
 
-Draft, 2026-11-16. Not started. The roadmap item is on the [future work](/docs/guide/todo-future-work) page.
+Plan of 2026-11-16, **built the same day** (phases 1 to 5; see *Result*). The roadmap item is on the
+[future work](/docs/guide/todo-future-work) page.
+
+## Result (2026-11-16)
+
+The Crop & Extract section has a switch, **Tile server** or **In the browser**. In the browser, the page fetches the
+tileset and its tiles itself and writes the file; nothing goes through a server.
+
+**One extractor, two places.** The walk, the box test and the writers are now `packages/core/extract-core.js`, with
+no Node imports. The tile server's `/extract` and the viewer's worker are both thin callers of it, so they cannot
+drift apart.
+
+**Checked: the browser's file against the server's**, same tileset, same box, in headless Chrome.
+
+| Extract | Source | Result |
+|---|---|---|
+| LAS, local frame | Autzen (COPC), 18 tiles, 63 183 points | identical, byte for byte |
+| cropped tileset | Autzen, 38 tiles | identical |
+| zip of tiles | Autzen, 18 tiles, 9.4 MB | identical |
+| merged GLB | Dayanta (OSGB), 63 tiles, 123 primitives | identical |
+| splats, PLY | Skatepark (streamed SOG), 83 585 splats | same size; 630 of 1.17 M values differ, by 1e-16 at most (float rounding) |
+| splats, SPZ and GLB | Skatepark | same size as the server's |
+
+- The server's own output did not change with the move: nine extracts compared before and after, all identical.
+- **Written to disk as it goes**, where the browser can (Chrome, Edge): you pick the file first, then it is
+  written tile by tile and its header completed at the end. The same LAS written this way is identical.
+- **Elsewhere** (Firefox, Safari) it is built in memory and downloaded, and refused above 1 GB with a message.
+- **Cancel** midway leaves the picked file as it was: the browser only replaces it when the extract completes.
+- **meshopt tiles** are decoded (Autzen with `transform=meshopt`: 63 185 points, two more than plain, from the
+  rounding at the box edge). KTX2 and WebP textures are copied as they are into the merged GLB.
+- **An unreachable or cross-origin-blocked tileset** fails with a message that names the host and CORS.
+- **Speed**: about 1.5 times the server's time on the same machine (Autzen LAS, 18 tiles; most of it is the tile
+  requests either way).
+
+**Not in the browser:**
+
+- **COPC** (PDAL, on the server) and **SOG** output (its encoder was not tried in a browser).
+- **Draco-compressed tiles**: no decoder in the worker yet. Such tiles are skipped and counted in the result line.
+- The **file dialog itself** was not exercised by the automated check (it needs a real click); the writing behind
+  it was, through a file handle of the browser's private storage.
+- Not measured: a multi-gigabyte extract, and memory while it runs.
 
 ## Where we are
 
@@ -61,8 +101,9 @@ gizmo. Same parameters as the server, so one form drives both.
 | **cropped tileset** as a zip | tiles copied untouched, tileset JSON trimmed | no decode at all: the cheapest one |
 | **LAZ, COPC** | not in the browser: stays on the server (PDAL) | `laz-perf`'s encoder in WebAssembly is **to be checked** before promising LAZ |
 
-**Where the code lives.** `packages/core` gets the walk and the box test, shared by the server and the viewer.
-The viewer picks "in the browser" when no tile server is configured or reachable, and offers both otherwise.
+**Where the code lives.** `packages/core/extract-core.js` has the walk, the box test and the writers, shared by the
+server (`tile-server/extract-live.js`) and the viewer (`src/lib/extract.worker.ts`, `browserExtract.ts`). The viewer
+picks "in the browser" when no tile server answers, and offers both otherwise.
 
 **Workers.** Decoding and testing run in a Web Worker so the viewer stays responsive, with progress and Cancel in
 the section, as exports have today.

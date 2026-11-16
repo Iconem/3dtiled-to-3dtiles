@@ -12,7 +12,8 @@
  * browser's file stream or a list of chunks.
  *
  * The tile server's /extract routes (tile-server/extract-live.js) and the viewer's "in the browser" extract
- * (apps/viewer/src/lib/browserExtract.ts) are both thin callers of this module.
+ * (apps/viewer/src/lib/browserExtract.ts) are both thin callers of this module. A tile that cannot be fetched or
+ * read is skipped, and reported through `onSkip(tileUrl, error)` when given; a cancelled `signal` stops the walk.
  *
  * `bb` is GEOGRAPHIC: [west°, south°, minH m, east°, north°, maxH m]. The walk honours each tile's refine: **ADD**
  * tiles contribute at every level down to `maxGE`; **REPLACE** tiles only at the refinement frontier (geometric error
@@ -278,7 +279,7 @@ export async function extractZip(o, sink) {
   const zip = zipStore((b) => sink.write(b)); const children = []; let i = 0;
   await walkTileset(o.url, o.bb, { ...o, fetchBytes: o.deps.fetchBytes }, async (tileUrl, worldM, node) => {
     const name = `tiles/tile_${i++}.glb`;
-    try { await zip.add(name, bytesOf(await o.deps.fetchBytes(tileUrl))); } catch { return; }   // one tile in RAM at a time
+    try { await zip.add(name, bytesOf(await o.deps.fetchBytes(tileUrl))); } catch (e) { o.onSkip?.(tileUrl, e); return; }   // one tile in RAM at a time
     children.push({ transform: Array.from(worldM), boundingVolume: { box: node?.boundingVolume?.box || UNIT_BOX }, geometricError: 0, refine: 'ADD', content: { uri: name } });
     o.onProgress?.({ tiles: children.length });
   });
@@ -356,7 +357,7 @@ export async function extractLas(o, sink) {
   const pass = async (stats, countOnly) => {
     tiles = 0;
     await walkTileset(o.url, o.bb, walkOpts, async (tileUrl, worldM) => {
-      let doc; try { doc = await o.deps.readGlb(await o.deps.fetchBytes(tileUrl)); } catch { return; }
+      let doc; try { doc = await o.deps.readGlb(await o.deps.fetchBytes(tileUrl)); } catch (e) { if (!countOnly) o.onSkip?.(tileUrl, e); return; }
       tiles++;
       const records = tilePointRecords(doc, worldM, o.bb, { proj, scale, offset, stats, countOnly });
       if (records) await sink.write(records);
@@ -395,7 +396,7 @@ export async function extractMeshDocument(o) {
   let tiles = 0, prims = 0;
   const p = [0, 0, 0];
   await walkTileset(o.url, o.bb, { ...o, fetchBytes: o.deps.fetchBytes }, async (tileUrl, worldM) => {
-    let doc; try { doc = await o.deps.readGlb(await o.deps.fetchBytes(tileUrl)); } catch { return; }
+    let doc; try { doc = await o.deps.readGlb(await o.deps.fetchBytes(tileUrl)); } catch (e) { o.onSkip?.(tileUrl, e); return; }
     tiles++;
     const root = doc.getRoot(), nodes = root.listNodes();
     for (const mesh of root.listMeshes()) {
@@ -538,7 +539,7 @@ export async function extractSplats(o) {
   const pool = o.deps.splatPool ?? st.createChunkDataPool();
   const dts = []; let totIn = 0, totRaw = 0;
   await walkTileset(url, bb, { ...o, fetchBytes: o.deps.fetchBytes }, async (tileUrl, worldM) => {
-    let glb; try { glb = await o.deps.fetchBytes(tileUrl); } catch { return; }
+    let glb; try { glb = await o.deps.fetchBytes(tileUrl); } catch (e) { o.onSkip?.(tileUrl, e); return; }
     const sp = spzOfTile(glb); if (!sp) return;
     const rfs = new st.MemoryReadFileSystem(); rfs.set('t.spz', new Uint8Array(sp.blob));
     let dt; try { const src = await st.readSpz(await rfs.createSource('t.spz'), pool); dt = await st.materializeToDataTable(src, pool); await src.close?.(); } catch (e) { return void o.deps.warn?.(`readSpz: ${e.message}`); }

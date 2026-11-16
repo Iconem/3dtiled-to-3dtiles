@@ -114,6 +114,8 @@ interface ViewerStore {
   enuFrame: boolean;
   splatFormat: string;
   splatClip: boolean;
+  /** where Crop & Extract runs: the tile server's /extract, or this browser (lib/browserExtract.ts) */
+  extractWhere: 'server' | 'browser';
   cropGizmoOn: boolean;
   setCrop: (v: Partial<CropBbox>) => void;
   setMaxGE: (v: number) => void;
@@ -121,6 +123,7 @@ interface ViewerStore {
   setEnuFrame: (v: boolean) => void;
   setSplatFormat: (v: string) => void;
   setSplatClip: (v: boolean) => void;
+  setExtractWhere: (v: 'server' | 'browser') => void;
   setCropGizmoOn: (v: boolean) => void;
   // Shared between the crop-box gizmo and the tileset-placement gizmo (3DTRJS only) — drei's
   // TransformControls only ever does ONE of translate/rotate/scale at a time (W/E/R keys cycle it in
@@ -249,6 +252,7 @@ export const useViewerStore = create<ViewerStore>((set, get) => ({
   enuFrame: true,
   splatFormat: 'spz',
   splatClip: true,
+  extractWhere: 'server',
   cropGizmoOn: false,
   setCrop: (v) => set((s) => ({ crop: { ...s.crop, ...v } })),
   setMaxGE: (v) => set({ maxGE: v }),
@@ -256,6 +260,7 @@ export const useViewerStore = create<ViewerStore>((set, get) => ({
   setEnuFrame: (v) => set({ enuFrame: v }),
   setSplatFormat: (v) => set({ splatFormat: v }),
   setSplatClip: (v) => set({ splatClip: v }),
+  setExtractWhere: (v) => set({ extractWhere: v }),
   setCropGizmoOn: (v) => set({ cropGizmoOn: v }),
   gizmoMode: 'translate',
   setGizmoMode: (v) => set({ gizmoMode: v }),

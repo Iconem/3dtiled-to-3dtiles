@@ -93,6 +93,22 @@ toward the point under the cursor.
 
 Draws a box and extracts what is inside it to a file. The tooltip on each control gives its format.
 
+It runs in one of two places, chosen by the switch in the section:
+
+| | Tile server | In the browser |
+|---|---|---|
+| Needs | a running tile server | nothing: the page fetches the tiles and writes the file |
+| Points | LAS, COPC | LAS |
+| Meshes | merged GLB | merged GLB |
+| Splats | SPZ, GLB, SOG, PLY | SPZ, GLB, PLY |
+| Any | zip of the tiles | zip of the tiles |
+| Size | any | any in Chrome and Edge (written to disk as it goes); 1 GB elsewhere |
+| Compressed tiles | Draco, meshopt, KTX2 | meshopt; Draco tiles are skipped and counted |
+
+Both run the same code and give the same file. Without a reachable tile server the switch starts on
+*In the browser*. The tileset's host must allow cross-origin requests for the browser to read it. Details:
+[Crop and extract in the browser](/docs/guide/planning/browser-crop-extract).
+
 ### Local Frame
 
 Moves the tileset as a whole.
