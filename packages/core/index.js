@@ -14,7 +14,8 @@ export { DEG, llhToEcef, ecefToLlh, enuFrame, enuMatrix, georefFromCrs, crsToEce
 export { Source } from './source.js';
 export { CORS, sendJson, sendGlb, sendBin, sendErr } from './http.js';
 export { buildImplicitTileset } from './octree.js';
-export { decompressGlb } from './gltf-decompress.js';
+export { decompressGlb, glbNeedsDecode } from './gltf-decompress.js';
+export { decompressTile, compressTile } from './gltf-tiles.js';
 export { compressGlb } from './gltf-compress.js';
 export { progressStart, progressTick, progressDone, progressGet } from './progress.js';
 export { LasWriter, writeLasBuffer, lasHeaderBuffer, lasRecordBuffer, LAS_RECORD_LEN } from './las-writer.js';

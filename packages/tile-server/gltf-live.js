@@ -10,14 +10,17 @@
  *   GET /gltf/tile.glb?url=<absolute tile GLB URL>&ops=decompress
  *
  * `ops` = comma list: `decompress` (= draco+meshopt+ktx) | `draco` | `meshopt` | `ktx`.
+ * `tex` = what KTX2 textures become: `jpg` (default, the fastest encode) | `webp` (smallest) | `png` | `ktx2` (kept
+ * as they are, for clients that read KTX2: re-encoding textures is most of the cost of a decode).
+ * A tile with nothing to decode is passed on untouched; with TILED_WORKERS the decode runs on a tile worker.
  * Works on EXPLICIT tilesets with concrete tile URIs (Bing GLB, 3MX, external mesh 3D Tiles). Implicit
  * `{level}-{x}-{y}` templates can't be per-tile-rewritten, so those pass through untouched.
  */
-import { decompressGlb, sendJson, sendGlb, sendErr, CORS } from '../core/index.js';
+import { decompressTile, sendJson, sendGlb, sendErr, CORS } from '../core/index.js';
 
 const opsToOpts = (ops, tex) => {
   const set = new Set((ops || 'decompress').split(',').map(s => s.trim()));
-  const texFormat = (tex === 'png' || tex === 'jpg' || tex === 'webp') ? tex : 'jpg';   // KTX2 → jpg (default) | png | webp
+  const texFormat = (tex === 'png' || tex === 'jpg' || tex === 'webp' || tex === 'ktx2') ? tex : 'jpg';   // KTX2 → jpg (default) | png | webp | kept
   if (set.has('decompress')) return { draco: true, meshopt: true, ktx: true, texFormat };
   return { draco: set.has('draco'), meshopt: set.has('meshopt'), ktx: set.has('ktx'), texFormat };
 };
@@ -51,7 +54,7 @@ export async function handleGltf(req, res, u) {
   if (!u.pathname.startsWith('/gltf/')) return false;
   const url = u.searchParams.get('url');
   const ops = u.searchParams.get('ops') || 'decompress';
-  const tex = u.searchParams.get('tex') || 'jpg';            // KTX2 output: jpg (default) | png
+  const tex = u.searchParams.get('tex') || 'jpg';            // KTX2 output: jpg (default) | webp | png | ktx2 (kept)
   const qs = `ops=${encodeURIComponent(ops)}&tex=${encodeURIComponent(tex)}`;
   if (!url) { sendErr(res, 400, 'missing ?url='); return true; }
 
@@ -63,8 +66,7 @@ export async function handleGltf(req, res, u) {
       return true;
     }
     if (u.pathname === '/gltf/tile.glb') {
-      const { glb } = await decompressGlb(await fetchBuf(url), opsToOpts(ops, tex));
-      sendGlb(res, glb);
+      sendGlb(res, await decompressTile(await fetchBuf(url), opsToOpts(ops, tex)));
       return true;
     }
     sendErr(res, 404, 'not found');

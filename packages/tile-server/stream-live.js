@@ -49,7 +49,7 @@ import { osgbTileset, osgbTile, osgbTileRe, osgbNode } from './osgb-live.js';
 import { geosplatsTileset, geosplatsTile, geosplatsTileRe } from './geosplats-live.js';
 import { nexusTileset, nexusTile, nexusTileRe } from './nexus-live.js';
 import { handleSelfContained } from './3dtiles-self-contained.js';
-import { detectFormatByName, compressGlb, decompressGlb, applyPlacement, curvedParam, attributesSpec } from '../core/index.js';
+import { detectFormatByName, compressTile, decompressTile, applyPlacement, curvedParam, attributesSpec } from '../core/index.js';
 
 // Per-tile glTF-Transform op applied to every streamed tile GLB, the streaming counterpart of the
 // /gltf proxy (which only reaches *explicit* tilesets). Because /stream builds each tile GLB itself,
@@ -59,14 +59,16 @@ import { detectFormatByName, compressGlb, decompressGlb, applyPlacement, curvedP
 //   transform=ktx        → KHR_texture_basisu (KTX2 ETC1S) textures, in-process WASM (mesh tiles w/ textures)
 //   transform=ktx-uastc  → KTX2 UASTC (higher quality / larger)
 //   transform=decompress → decode draco+meshopt+KTX2 (for consumers like blosm that can't read them)
-// &tex=jpg|png chooses the KTX2 decode output (decompress only). No-op transforms pass the GLB through.
+// &tex=jpg|webp|png|ktx2 chooses the KTX2 decode output (decompress only; ktx2 keeps the textures and decodes the
+// geometry alone). A tile with nothing to decode passes through; with TILED_WORKERS transforms run on a tile worker.
+const TEX = new Set(['jpg', 'png', 'webp', 'ktx2']);
 async function applyTransform(glb, transform, tex) {
   if (!glb || !transform) return glb;
   try {
-    if (transform === 'decompress') return (await decompressGlb(glb, { texFormat: (tex === 'png' || tex === 'webp') ? tex : 'jpg' })).glb;
-    if (transform === 'meshopt' || transform === 'draco') return (await compressGlb(glb, { [transform]: true })).glb;
-    if (transform === 'ktx') return (await compressGlb(glb, { ktx: true })).glb;
-    if (transform === 'ktx-uastc') return (await compressGlb(glb, { ktx: true, uastc: true })).glb;
+    if (transform === 'decompress') return await decompressTile(glb, { texFormat: TEX.has(tex) ? tex : 'jpg' });
+    if (transform === 'meshopt' || transform === 'draco') return await compressTile(glb, { [transform]: true });
+    if (transform === 'ktx') return await compressTile(glb, { ktx: true });
+    if (transform === 'ktx-uastc') return await compressTile(glb, { ktx: true, uastc: true });
   } catch (e) { console.warn(`[stream] transform=${transform} failed:`, e.message); }
   return glb;
 }
@@ -248,7 +250,7 @@ export async function handleStream(req, res, u) {
     const centroids = u.searchParams.get('centroids') === '1' || u.searchParams.get('centroids') === 'true';
     // transform: per-tile glTF-Transform op; rides along on child tile URIs so /stream/tile carries it.
     const transform = TRANSFORMS.has(u.searchParams.get('transform')) ? u.searchParams.get('transform') : null;
-    const tex = u.searchParams.get('tex') === 'png' ? 'png' : 'jpg';
+    const tex = TEX.has(u.searchParams.get('tex')) ? u.searchParams.get('tex') : 'jpg';
     // geosplats-only tuning knobs (ignored by every other adapter, same pattern as tiling/centroids above).
     const geosplatsOpts = fmt === 'geosplats' ? {
       lod: u.searchParams.has('lod') ? Number(u.searchParams.get('lod')) : undefined,
@@ -281,7 +283,7 @@ export async function handleStream(req, res, u) {
     // attributes: the scalar attributes point tiles carry besides COLOR_0 (PDAL names: `Intensity,Classification`, …, or `all`); none by default
     const attrsQ = attributesParam(u.searchParams.get('attributes'));
     tagContentUris(ts.root, `&format=${fmt}` + colorsQ + (attrsQ ? `&attributes=${attrsQ}` : '') + (centroids ? '&centroids=1' : '') + (crs ? `&crs=${encodeURIComponent(crs)}` : '') + (curved ? `&curved=${curved}` : '')
-      + (transform ? `&transform=${transform}` + (transform === 'decompress' && tex === 'png' ? '&tex=png' : '') : ''));
+      + (transform ? `&transform=${transform}` + (transform === 'decompress' && tex !== 'jpg' ? `&tex=${tex}` : '') : ''));
     res.writeHead(200, { 'Content-Type': 'application/json', ...CORS });
     res.end(JSON.stringify(ts));
     return true;

@@ -17,7 +17,7 @@
  *   const { glb }          = await compressGlb(buf, { ktx:true, uastc:true }); // textures → KTX2 UASTC
  */
 import { NodeIO } from '@gltf-transform/core';
-import { ALL_EXTENSIONS } from '@gltf-transform/extensions';
+import { ALL_EXTENSIONS, KHRTextureBasisu } from '@gltf-transform/extensions';
 import { draco as dracoFn, meshopt as meshoptFn } from '@gltf-transform/functions';
 import { ktx2 as ktx2Fn } from 'ktx2-encoder/gltf-transform';
 import draco3d from 'draco3dgltf';
@@ -81,10 +81,14 @@ export async function compressGlb(buf, opts = {}) {
 
   // Textures first (independent of geometry): PNG/JPEG → KTX2 via the WASM basis encoder.
   if (ktx) {
-    try {
-      await doc.transform(ktx2Fn({ imageDecoder, isUASTC: !!uastc }));
-      encoded.ktx = doc.getRoot().listTextures().filter(t => t.getMimeType() === 'image/ktx2').length;
-    } catch (e) { console.warn('[gltf-compress] KTX2 encode failed:', e.message); }
+    // ktx2-encoder converts the textures, then declares KHR_texture_basisu with the glTF-Transform it resolves
+    // itself, which can be another version than ours (3.x beside our 4.4): that last step then throws, leaving
+    // KTX2 images without their extension. So the extension is declared here, with ours, from what was converted.
+    let failed = null;
+    try { await doc.transform(ktx2Fn({ imageDecoder, isUASTC: !!uastc })); } catch (e) { failed = e; }
+    encoded.ktx = doc.getRoot().listTextures().filter(t => t.getMimeType() === 'image/ktx2').length;
+    if (encoded.ktx) doc.createExtension(KHRTextureBasisu).setRequired(true);
+    else if (failed) console.warn('[gltf-compress] KTX2 encode failed:', failed.message);
   }
   // Geometry: draco (mesh) OR meshopt (general). Apply at most one; both target the same primitives.
   if (draco) {

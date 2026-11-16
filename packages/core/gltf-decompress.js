@@ -34,8 +34,9 @@ async function decodeIO() {
   });
   return _decodeIO;
 }
-// A plain writer with no encoder dependencies → geometry is serialized uncompressed.
-const writeIO = () => new NodeIO().registerExtensions(ALL_EXTENSIONS);
+// A plain writer with no encoder dependencies → geometry is serialized uncompressed. One for the process.
+let _writeIO = null;
+const writeIO = () => (_writeIO ??= new NodeIO().registerExtensions(ALL_EXTENSIONS));
 
 let _basis = null;
 async function basisModule() {
@@ -77,8 +78,9 @@ const MIME = { png: 'image/png', jpg: 'image/jpeg', jpeg: 'image/jpeg', webp: 'i
 /** KTX2 bytes → {img:Buffer, mime} (RGBA via Basis transcode, then encode to jpg|png|webp). `jpg` is
  *  the default: pure-JS jpeg-js encodes far faster than pngjs and is much smaller. `webp` (WASM,
  *  @jsquash) is ~25-30% smaller than jpg at similar quality. All no sharp/native dep. */
-async function ktx2ToImage(ktx2Bytes, fmt = 'jpg', quality = 85) {
+async function ktx2ToImage(ktx2Bytes, fmt = 'jpg', quality = 85, t = null) {
   const mod = await basisModule();
+  const t0 = performance.now(); let t1 = t0;
   const file = new mod.KTX2File(ktx2Bytes);
   try {
     if (!file.startTranscoding()) throw new Error('KTX2File.startTranscoding failed');
@@ -87,6 +89,7 @@ async function ktx2ToImage(ktx2Bytes, fmt = 'jpg', quality = 85) {
     const rgba = new Uint8Array(size);
     if (!file.transcodeImage(rgba, 0, 0, 0, cTFRGBA32, 0, -1, -1)) throw new Error('KTX2File.transcodeImage failed');
     const data = Buffer.from(rgba.buffer, rgba.byteOffset, rgba.byteLength);
+    t1 = performance.now();
     if (fmt === 'webp') {
       try {
         const webpEncode = await getWebpEncoder();
@@ -99,19 +102,55 @@ async function ktx2ToImage(ktx2Bytes, fmt = 'jpg', quality = 85) {
     return { img: PNG.sync.write(png), mime: 'image/png' };
   } finally {
     file.close(); file.delete();
+    if (t) { t.transcode += t1 - t0; t.encode += performance.now() - t1; }
   }
 }
 
+/** The JSON chunk of a GLB, or null when `buf` is not a GLB whose first chunk is JSON. */
+function glbJson(buf) {
+  const b = Buffer.isBuffer(buf) ? buf : Buffer.from(buf.buffer, buf.byteOffset, buf.byteLength);
+  if (b.length < 20 || b.readUInt32LE(0) !== 0x46546c67 || b.readUInt32LE(16) !== 0x4e4f534a) return null;
+  try { return JSON.parse(b.toString('utf8', 20, 20 + b.readUInt32LE(12))); } catch { return null; }
+}
+
 /**
- * Decompress a GLB buffer. Returns a new (uncompressed) GLB Buffer.
+ * Whether a GLB holds anything `opts` asks to decode: Draco or meshopt geometry, KTX2 textures. Read from the
+ * JSON chunk alone, so a tile with nothing to decode can be passed on as it came instead of being parsed and
+ * written again. True when in doubt (not a GLB, unreadable JSON).
  * @param {Buffer|Uint8Array} buf
- * @param {{draco?:boolean, meshopt?:boolean, ktx?:boolean}} [opts]  (all default true)
- * @returns {Promise<{glb:Buffer, decoded:{draco:boolean,meshopt:boolean,ktx:number}}>}
+ * @param {{draco?:boolean, meshopt?:boolean, ktx?:boolean, texFormat?:string}} [opts] as decompressGlb
+ */
+export function glbNeedsDecode(buf, opts = {}) {
+  const { draco = true, meshopt = true, texFormat = 'jpg' } = opts;
+  const ktx = (opts.ktx ?? true) && texFormat !== 'ktx2';
+  const json = glbJson(buf);
+  if (!json) return true;
+  const used = new Set(json.extensionsUsed || []);
+  if (draco && used.has('KHR_draco_mesh_compression')) return true;
+  if (meshopt && (used.has('EXT_meshopt_compression') || used.has('KHR_meshopt_compression'))) return true;
+  if (ktx && (used.has('KHR_texture_basisu') || (json.images || []).some(i => i.mimeType === 'image/ktx2'))) return true;
+  return false;
+}
+
+/**
+ * Decompress a GLB buffer. Returns a new (uncompressed) GLB Buffer, or the input itself when it holds nothing
+ * `opts` asks to decode (`untouched: true`). `texFormat: 'ktx2'` keeps KTX2 textures as they are, for clients
+ * that read them: the texture encode is most of the cost of a decode.
+ * @param {Buffer|Uint8Array} buf
+ * @param {{draco?:boolean, meshopt?:boolean, ktx?:boolean, texFormat?:'jpg'|'png'|'webp'|'ktx2'}} [opts]  (all default true, jpg)
+ * @returns {Promise<{glb:Buffer, untouched?:boolean, decoded:{draco:boolean,meshopt:boolean,ktx:number}, timings:{read:number,transcode:number,encode:number,write:number}}>}
+ *   `timings` in ms: reading (which decodes Draco and meshopt), KTX2 to RGBA, RGBA to the image format, writing.
  */
 export async function decompressGlb(buf, opts = {}) {
-  const { draco = true, meshopt = true, ktx = true, texFormat = 'jpg' } = opts;
+  const { draco = true, meshopt = true, texFormat = 'jpg' } = opts;
+  const ktx = (opts.ktx ?? true) && texFormat !== 'ktx2';
+  const timings = { read: 0, transcode: 0, encode: 0, write: 0 };
+  if (!glbNeedsDecode(buf, opts))
+    return { glb: Buffer.isBuffer(buf) ? buf : Buffer.from(buf.buffer, buf.byteOffset, buf.byteLength), untouched: true, decoded: { draco: false, meshopt: false, ktx: 0 }, timings };
   const io = await decodeIO();
+  let t0 = performance.now();
   const doc = await io.readBinary(buf instanceof Uint8Array ? buf : new Uint8Array(buf));
+  timings.read = performance.now() - t0;
   const decoded = { draco: false, meshopt: false, ktx: 0 };
 
   // Geometry: read() already decoded Draco/Meshopt into accessors. Dispose the extensions so the
@@ -130,7 +169,7 @@ export async function decompressGlb(buf, opts = {}) {
       const src = tex.getImage();
       if (!src) continue;
       try {
-        const { img, mime } = await ktx2ToImage(src instanceof Uint8Array ? src : new Uint8Array(src), texFormat);
+        const { img, mime } = await ktx2ToImage(src instanceof Uint8Array ? src : new Uint8Array(src), texFormat, 85, timings);
         tex.setImage(img); tex.setMimeType(mime);
         if (tex.getURI && tex.getURI()) tex.setURI(tex.getURI().replace(/\.ktx2$/i, ext));
         decoded.ktx++;
@@ -140,6 +179,8 @@ export async function decompressGlb(buf, opts = {}) {
     if (bu && decoded.ktx > 0) bu.dispose();
   }
 
+  t0 = performance.now();
   const glb = Buffer.from(await writeIO().writeBinary(doc));
-  return { glb, decoded };
+  timings.write = performance.now() - t0;
+  return { glb, decoded, timings };
 }

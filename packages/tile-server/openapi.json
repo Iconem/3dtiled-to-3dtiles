@@ -560,11 +560,13 @@
               "type": "string",
               "enum": [
                 "jpg",
-                "png"
+                "webp",
+                "png",
+                "ktx2"
               ],
               "default": "jpg"
             },
-            "description": "Output format for decoded KTX2 textures."
+            "description": "Output format for decoded KTX2 textures: `jpg` is the fastest to encode, `webp` the smallest, `ktx2` keeps the textures as they are (only the geometry is decoded)."
           }
         ],
         "responses": {
@@ -620,11 +622,13 @@
               "type": "string",
               "enum": [
                 "jpg",
-                "png"
+                "webp",
+                "png",
+                "ktx2"
               ],
               "default": "jpg"
             },
-            "description": "Output format for decoded KTX2 textures."
+            "description": "Output format for decoded KTX2 textures: `jpg` is the fastest to encode, `webp` the smallest, `ktx2` keeps the textures as they are (only the geometry is decoded)."
           }
         ],
         "responses": {

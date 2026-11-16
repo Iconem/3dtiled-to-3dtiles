@@ -31,7 +31,7 @@
  * Related: s1dny/bing-maps-tile-downloader (https://github.com/s1dny/bing-maps-tile-downloader/) — a
  * downloader for the same Bing `tf=3dv4` tiles (offline grab vs. our live `td1` → 3D Tiles proxy).
  */
-import { decompressGlb, sendJson, sendGlb, sendErr, CORS } from '../core/index.js';
+import { decompressTile, sendJson, sendGlb, sendErr, CORS } from '../core/index.js';
 import { globeTileGlb, resolveBasemap, DEFAULT_GLOBE_MAX_LEVEL } from './bing-globe.js';
 
 const BING_HOST = 't.ssl.ak.tiles.virtualearth.net';
@@ -228,7 +228,7 @@ export async function handleBing(req, res, u) {
       const [, face, level, x, y] = tile;
       const buf = await fetchBing(`mtx${face}-${level}-${x}-${reverseY(+level, +y)}`, g);   // y→reverseY
       if (!buf || buf.length < 8 || buf.toString('latin1', 0, 4) !== 'glTF') { sendErr(res, 404, 'no Bing tile'); return true; }
-      sendGlb(res, decompress ? (await decompressGlb(buf, { draco: true, meshopt: true, ktx: true })).glb : buf);
+      sendGlb(res, decompress ? await decompressTile(buf, { draco: true, meshopt: true, ktx: true }) : buf);
       return true;
     }
     sendErr(res, 404, 'not found');
