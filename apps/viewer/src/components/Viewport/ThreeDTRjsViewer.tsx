@@ -47,6 +47,7 @@ const useGlobeQueues = (t: any) => {
 };
 const useGlobeCache = (t: any) => { if (t && t.lruCache !== GLOBE_LRU_CACHE) t.lruCache = GLOBE_LRU_CACHE; };
 import { GaussianSplatPlugin } from '3d-tiles-rendererjs-3dgs-plugin';
+import { GaussianSplatRenderer } from 'gaussian-splat-lite';
 import * as THREE from 'three';
 import { acceleratedRaycast, computeBoundsTree, disposeBoundsTree } from 'three-mesh-bvh';
 import type { ViewerHandle } from '@/lib/viewer-handle';
@@ -262,9 +263,9 @@ function setContentRenderOrder(scene: THREE.Object3D) {
 // R3F port of viewer.html's 3DTilesRendererJS section (lines ~1838-2753). Uses 3d-tiles-renderer's
 // OFFICIAL /r3f components (<TilesRenderer>, <TilesPlugin>, <GlobeControls>, <EnvironmentControls>,
 // <CameraTransition>) instead of hand-rolled imperative three.js — see the plan file for why. The
-// Gaussian-splat plugin (@sparkjsdev/spark-based) has no official R3F wrapper, so it's registered like
-// any other TilesPlugin but its per-frame Spark update rides on the same useFrame TilesRenderer already
-// drives (Spark's SplatMesh updates lazily via the scene graph, no extra tick needed for our purposes).
+// Gaussian-splat plugin (3d-tiles-rendererjs-3dgs-plugin 0.3, on Gaussian Splat Lite) has no official R3F wrapper,
+// so it's registered like any other TilesPlugin. Since 0.2 the plugin only loads the tiles: the application owns
+// the one scene-level GaussianSplatRenderer that draws them (created below while a splat tileset is loaded).
 //
 // The crop-box 3D gizmo is drei's <TransformControls> (translate + scale) on a plain box mesh — a
 // first-pass replacement for viewer.html's hand-rolled PivotControls-style gizmo; it edits the SAME
@@ -1503,7 +1504,18 @@ const Scene = forwardRef<ViewerHandle, { loadArgs: LoadArgs; tooltip: TooltipCha
     if (plugin) plugin.mode = native ? 'native' : 'stream';
     invalidate();
   }, [native, invalidate]);
-  const splatArgs = useMemo(() => ({ renderer: gl, scene }), [gl, scene]);
+  // The scene-level splat renderer (Gaussian Splat Lite): one for the scene, alive while a splat tileset is loaded.
+  // Without it the tiles load and nothing is drawn. `onDirty` asks for a frame, since the canvas renders on demand
+  // (a sort finishing in its worker changes the image without any React state changing).
+  useEffect(() => {
+    if (!isSplat) return;
+    // blurAmount 0.3 with no pre-blur is the antialiased look the Spark-based plugin drew with (and the legacy page
+    // sets the same); Gaussian Splat Lite's own defaults are the other way round.
+    const splats = new GaussianSplatRenderer({ renderer: gl as any, onDirty: () => invalidate(), maxStdDev: Math.sqrt(8), blurAmount: 0.3, preBlurAmount: 0, focalAdjustment: 2 });
+    scene.add(splats);
+    invalidate();
+    return () => { scene.remove(splats); splats.dispose(); invalidate(); };
+  }, [isSplat, gl, scene, invalidate]);
 
   // Point size was only ever (re)applied by the rAF-throttled effect below, which fires on slider drag
   // or on the INITIAL loadArgs change — but tiles for a large point cloud keep streaming in well after
@@ -2195,7 +2207,7 @@ const Scene = forwardRef<ViewerHandle, { loadArgs: LoadArgs; tooltip: TooltipCha
           <TilesPlugin plugin={FootprintGatePlugin as any} args={gateArgs as any} />
           <TilesPlugin plugin={StaleLoadAbortPlugin as any} />
           <TilesPlugin plugin={NativeLeavesPlugin as any} args={nativeArgs as any} />
-          {isSplat && <TilesPlugin plugin={GaussianSplatPlugin as any} args={splatArgs as any} />}
+          {isSplat && <TilesPlugin plugin={GaussianSplatPlugin as any} />}
           {debugMode === 'tiles' && <TilesPlugin plugin={DebugTilesPlugin as any} displayBoxBounds colorMode={7} />}
           {(debugMode === 'cells' || debugMode === 'cells-only') && <MosaicOutlines url={loadArgs.url} tilesRef={tilesRef} cellsOnly={debugMode === 'cells-only'} />}
           {/* enableDoubleTapZoom off: the controls' own double-click zoom raced our animated one

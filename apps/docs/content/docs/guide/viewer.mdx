@@ -27,7 +27,7 @@ below for the app itself.
 
 The **original**, pre-React reference viewer — kept as a from-scratch fallback that needs nothing but
 Vite (no Node backend beyond the tile-server, no component framework). All its deps (Cesium, three,
-3d-tiles-renderer, @sparkjsdev/spark, the 3DGS plugin) are **npm dependencies bundled by Vite — no CDN,
+3d-tiles-renderer, Gaussian Splat Lite, the 3DGS plugin) are **npm dependencies bundled by Vite — no CDN,
 works fully offline**. Served at `/vanilla-viewer` by `apps/viewer`'s own dev server/build (above),
 sharing that package's own `package.json` deps and `vite.config.ts`. (There used to be a second,
 repo-root copy of this file with its own standalone Vite config and duplicated dependencies in the root
@@ -38,7 +38,7 @@ pnpm uses `pnpm-workspace.yaml` + `.npmrc` (`node-linker=hoisted`, so the meta-c
 `import('rad-to-3dtiles')` resolves like npm's flat layout); npm uses the `workspaces` field. Either works.
 
 `vite-plugin-cesium` copies Cesium's Workers/Assets/Widgets and sets `CESIUM_BASE_URL`; `three` is
-de-duplicated (`resolve.dedupe`) so SparkJS + the 3DGS plugin share one instance (replacing the old
+de-duplicated (`resolve.dedupe`) so Gaussian Splat Lite + the 3DGS plugin share one instance (replacing the old
 esm.sh `?external=three` trick). Verified: **0 CDN requests** — Cesium, the 3DTRJS globe, and Gaussian
 splat streaming all load from `node_modules`. The dev server serves `sample-data/output/**` too, so the
 built-in presets (which point at `http://localhost:3000/sample-data/...`) resolve against the same origin.
@@ -49,26 +49,26 @@ Additional online viewers:
 
 `viewer.html` includes a **3DTilesRendererJS mode** (toggle the `3DTRJS` button) backed by Three.js.
 For Gaussian splat streaming, it uses [3D-Tiles-RendererJS-3DGS-Plugin](https://github.com/WilliamLiu-1997/3D-Tiles-RendererJS-3DGS-Plugin)
-which streams `.rad`/SPZ content via `@sparkjsdev/spark`:
+which loads the splat tiles; since its 0.2 they are drawn by its author's own renderer,
+[Gaussian Splat Lite](https://github.com/WilliamLiu-1997/Gaussian-Splat-Lite) (the viewer moved to plugin 0.3.1 on
+2026-11-16, from 0.1.13 on Spark). The application creates the one renderer of the scene:
 
 ```sh
-npm install 3d-tiles-rendererjs-3dgs-plugin three 3d-tiles-renderer @sparkjsdev/spark
+npm install 3d-tiles-rendererjs-3dgs-plugin gaussian-splat-lite three 3d-tiles-renderer
 ```
 
 ```js
 import { TilesRenderer } from '3d-tiles-renderer';
+import { GaussianSplatRenderer } from 'gaussian-splat-lite';
 import { GaussianSplatPlugin } from '3d-tiles-rendererjs-3dgs-plugin';
 
+scene.add(new GaussianSplatRenderer({ renderer, blurAmount: 0.3, preBlurAmount: 0 }));   // one per scene
 const tiles = new TilesRenderer('http://localhost:3000/tileset.json');
-tiles.registerPlugin(new GaussianSplatPlugin({
-  renderer, scene,
-  minRaycastOpacity: 0.1,
-  sparkRendererOptions: { focalAdjustment: 2 },
-}));
+tiles.registerPlugin(new GaussianSplatPlugin({ minRaycastOpacity: 0.1 }));
 scene.add(tiles.group);
 ```
 
-> The viewer bundles this plugin (and SparkJS) as local npm deps via Vite — shared `three@0.180`
+> The viewer bundles this plugin (and Gaussian Splat Lite) as local npm deps via Vite — shared `three@0.187`
 > through `resolve.dedupe`, no CDN. `npm run dev` serves it offline.
 
 `viewer.html` consolidates all controls into a right **sidebar** (Renderer · Basemap · Tileset &

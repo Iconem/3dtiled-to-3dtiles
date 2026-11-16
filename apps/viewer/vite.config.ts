@@ -141,7 +141,7 @@ export default defineConfig({
     dedupe: ['three'],
     alias: { '@': fileURLToPath(new URL('./src', import.meta.url)) },
   },
-  optimizeDeps: { include: ['three', '3d-tiles-renderer', '@sparkjsdev/spark'] },
+  optimizeDeps: { include: ['three', '3d-tiles-renderer', 'gaussian-splat-lite'] },
   // vanilla-viewer.html is the legacy standalone page (still the fallback/reference implementation —
   // see README) copied in from the repo root's viewer.html so it's served — and, via this entry,
   // included in `dist/` on build — by this app's own dev server instead of needing a separate one.

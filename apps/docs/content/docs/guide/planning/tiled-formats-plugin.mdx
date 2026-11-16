@@ -95,9 +95,8 @@ extents, the per-tile sampled placement (documented on the [meta-tilesets](/docs
 large ones. Grid shift files are the open point (see below).
 
 **Splats.** Splat formats produce splats, not meshes, so their plugin feeds a splat renderer. Which one is a
-decision of phase 4. Today the viewer draws splat tiles through `3d-tiles-rendererjs-3dgs-plugin` 0.1.13, on Spark;
-newer versions of that plugin use its author's own renderer, Gaussian Splat Lite, which reads SOG, RAD and LCC2
-streams itself. So for splats the first thing to check is how much of this phase that renderer already covers.
+decision of phase 4. The viewer draws splat tiles through `3d-tiles-rendererjs-3dgs-plugin` 0.3, on its author's
+own renderer, Gaussian Splat Lite, which reads SOG, RAD and LCC2 streams itself. So for splats the first thing to check is how much of this phase that renderer already covers.
 
 **Where it lives.** In this repo first, as its own package, published under our name. Offering any of it upstream
 is a later conversation and only with the maintainer's interest; nothing is posted without a go.

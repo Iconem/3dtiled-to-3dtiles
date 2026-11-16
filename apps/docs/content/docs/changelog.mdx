@@ -8,6 +8,16 @@ Format loosely follows [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+### Changed — 2026-11-16 (splats drawn by Gaussian Splat Lite, three.js 0.187)
+- **`3d-tiles-rendererjs-3dgs-plugin` 0.1.13 → 0.3.1**, which draws through
+  [Gaussian Splat Lite](https://github.com/WilliamLiu-1997/Gaussian-Splat-Lite) (1.8.1) instead of Spark, and
+  **`three` 0.180 → 0.187** (viewer and `packages/core`). The viewer and the legacy page now own the one scene-level
+  splat renderer, created with the blur settings Spark drew with. Spark leaves the viewer bundle: 5.1 MB of
+  JavaScript replaced by 2.6 MB. The Spark LoD workaround (`lodInflate`) is gone with it.
+- Checked in headless Chrome on the new stack: the Nexus gargoyle, the Autzen COPC, the Potree lab (plugin and
+  stream modes) and the Skatepark streamed SOG, which now draws there. Still to compare by eye: the look of each
+  splat preset against before.
+
 ### Changed — 2026-11-16 (Draco and KTX2 decode faster, meshopt measured)
 - **`tex=ktx2`** on `/gltf` and `/stream?transform=decompress`: KTX2 textures are kept and only the geometry is
   decoded, for clients that read KTX2. Re-encoding textures was measured at nine tenths of a decode; this is 80×

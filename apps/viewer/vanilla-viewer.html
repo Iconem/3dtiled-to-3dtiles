@@ -354,7 +354,7 @@
 </style>
 
 <!-- Offline/self-contained via Vite (npm run dev). All deps resolve from node_modules — no CDN.
-     `three`, `3d-tiles-renderer`, `@sparkjsdev/spark`, the 3DGS plugin are bare ESM imports Vite
+     `three`, `3d-tiles-renderer`, `gaussian-splat-lite`, the 3DGS plugin are bare ESM imports Vite
      resolves; Cesium is imported here and exposed as the `Cesium` global the non-module scripts use.
      `vite-plugin-cesium` injects CESIUM_BASE_URL + copies Cesium's Workers/Assets/Widgets. -->
 <script type="module">
@@ -1859,7 +1859,7 @@ function toggle3DT() {
     };
     tryStart(0);
 
-    const splatNote = isSplat ? '\nGaussianSplatPlugin — Gaussian splat streaming via SparkJS' : '';
+    const splatNote = isSplat ? '\nGaussianSplatPlugin — Gaussian splat streaming via Gaussian Splat Lite' : '';
     setStatus('3DTilesRendererJS — Three.js renderer' + splatNote);
   } else {
     document.getElementById('three-container').style.display = 'none';
@@ -1902,40 +1902,28 @@ import { DRACOLoader } from 'three/addons/loaders/DRACOLoader.js';
 const _dracoLoader = new DRACOLoader();
 _dracoLoader.setDecoderPath('https://www.gstatic.com/draco/versioned/decoders/1.5.6/');
 
-// SparkJS + the 3DGS plugin share the importmap's single `three` instance (esm.sh
-// ?external=three), so SparkJS's getShaders() registers THREE.ShaderChunk.splatDefines
-// onto the same ShaderChunk the renderer compiles against — fixing the
-// "#include <splatDefines>" resolution error that the duplicate-three CDN build had.
+// The 3DGS plugin (0.3) only loads splat tiles; Gaussian Splat Lite draws them, through one scene-level
+// GaussianSplatRenderer the page owns (created with the first splat tileset, see _splatRendererFor).
 let GaussianSplatPlugin = null;
-let getSparkRendererForScene = null;
+let GaussianSplatRenderer = null;
 try {
-  await import('@sparkjsdev/spark');
-  ({ GaussianSplatPlugin, getSparkRendererForScene } = await import('3d-tiles-rendererjs-3dgs-plugin'));
-  console.log('[3DTRJS] ✓ GaussianSplatPlugin + SparkJS loaded');
+  ({ GaussianSplatRenderer } = await import('gaussian-splat-lite'));
+  ({ GaussianSplatPlugin } = await import('3d-tiles-rendererjs-3dgs-plugin'));
+  console.log('[3DTRJS] ✓ GaussianSplatPlugin + Gaussian Splat Lite loaded');
 } catch (e) {
   console.warn('[3DTRJS] GaussianSplatPlugin unavailable:', e.message);
 }
 
-// SparkRenderer-level LoD settings that the plugin's `sparkRendererOptions` allowlist
-// does NOT expose (maxStdDev/blurAmount ARE in the allowlist and set on the plugin;
-// these two are not). SparkJS's own viewer sets them — lodInflate inflates coarse LoD
-// splats so opacity ≤ 1 (better blending of merged splats), lodSplatScale scales the
-// active-splat budget. We reach the shared SparkRenderer via getSparkRendererForScene
-// and set them directly. Until the plugin supports passing these through, this is the
-// only lever (feature request filed: see docs-references/plugin-feature-request.md).
-let SPARK_LOD_INFLATE = true;
-let SPARK_LOD_SPLAT_SCALE = 1.0;
-let _sparkLodApplied = false;
-function applySparkLodSettings() {
-  if (_sparkLodApplied || !getSparkRendererForScene) return;
-  let spark = null;
-  try { spark = getSparkRendererForScene(scene); } catch { /* not ready */ }
-  if (!spark) return;
-  if ('lodInflate'    in spark) spark.lodInflate    = SPARK_LOD_INFLATE;
-  if ('lodSplatScale' in spark) spark.lodSplatScale = SPARK_LOD_SPLAT_SCALE;
-  spark.lodDirty = true;
-  _sparkLodApplied = true;
-  console.log(`[3DTRJS] SparkRenderer LoD set — lodInflate=${SPARK_LOD_INFLATE}, lodSplatScale=${SPARK_LOD_SPLAT_SCALE}`);
+// One splat renderer per scene. The settings are those the Spark-based plugin was given before, which Gaussian
+// Splat Lite takes under the same names: the antialiased look (blurAmount 0.3, no pre-blur) and the full
+// gaussian cutoff (maxStdDev sqrt(8)).
+let _splatRenderer = null;
+function _splatRendererFor(scene, renderer) {
+  if (_splatRenderer && _splatRenderer.parent === scene) return _splatRenderer;
+  if (_splatRenderer) { _splatRenderer.removeFromParent(); _splatRenderer.dispose(); }
+  _splatRenderer = new GaussianSplatRenderer({ renderer, maxStdDev: Math.sqrt(8), blurAmount: 0.3, preBlurAmount: 0.0, focalAdjustment: 2 });
+  scene.add(_splatRenderer);
+  return _splatRenderer;
 }
 
 // Default splat error target (lower = higher-resolution splats stream in).
@@ -2192,7 +2180,6 @@ function onDoubleClick(e) {
 // ── Tileset loading ───────────────────────────────────────────────────────────
 
 function _makeTiles(url, isSplat, fetchOptions) {
-  _sparkLodApplied = false;   // re-apply SparkRenderer LoD settings for the new tileset
   const t = new TilesRenderer(url);
   t.errorTarget = errorTargetOverride ?? (isSplat ? SPLAT_ERROR_TARGET : 6);
   t.downloadQueue.maxJobs = 10;
@@ -2203,21 +2190,10 @@ function _makeTiles(url, isSplat, fetchOptions) {
   const _gltfLoader = new GLTFLoader(t.manager);
   _gltfLoader.setDRACOLoader(_dracoLoader);
   t.manager.addHandler(/\.glb$|\.gltf$/i, _gltfLoader);
-  if (isSplat && GaussianSplatPlugin)
-    t.registerPlugin(new GaussianSplatPlugin({
-      renderer, scene, minRaycastOpacity: 0.1,
-      // Match SparkJS's own viewer render settings (from its spark-2.0 explore.html)
-      // so our tiles look like the native RAD render — the right place to control
-      // appearance, instead of filtering/discarding splats at conversion time.
-      //   maxStdDev sqrt(8): gaussian render cutoff (desktop default)
-      //   blurAmount 0.3 / preBlurAmount 0.0: SparkJS antialiasing (aa=true path)
-      sparkRendererOptions: {
-        maxStdDev: Math.sqrt(8),
-        blurAmount: 0.3,
-        preBlurAmount: 0.0,
-        focalAdjustment: 2,
-      },
-    }));
+  if (isSplat && GaussianSplatPlugin) {
+    _splatRendererFor(scene, renderer);
+    t.registerPlugin(new GaussianSplatPlugin({ minRaycastOpacity: 0.1 }));
+  }
   // Debug visualisation: OBB helpers + colour-by-octree-depth. Registered always
   // (cheap when off); the checkbox flips displayBoxBounds + colorMode live.
   debugPlugin = new DebugTilesPlugin({
@@ -2457,7 +2433,6 @@ function animate() {
     try { tiles.update(); }
     catch (e) { if (!_tilesUpdateErrLogged) { console.warn('[3DTRJS] tiles.update() threw (continuing):', e.message); _tilesUpdateErrLogged = true; } }
     if (debugOn) _dimDebugBoxes();
-    applySparkLodSettings();   // applies once the shared SparkRenderer exists
   }
   if (_projTween) {
     if (_projTween.cam !== camera) { _projTween = null; }   // camera swapped again mid-tween — abort

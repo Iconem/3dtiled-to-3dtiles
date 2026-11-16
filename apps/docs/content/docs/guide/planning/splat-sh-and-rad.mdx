@@ -58,8 +58,8 @@ switch: `sh=0|1|2|3` on `/stream` and on the converters, capped by what the sour
 - **Coarse levels.** SOG, RAD and LCC store coefficients for their merged, coarse splats too, so levels of detail
   come for free; no averaging of our own.
 - **Extract.** `/extract/splat` passes coefficients through when the tiles have them.
-- **Clients.** Which viewers draw the coefficients from an SPZ tile (the 3DGS plugin, on Spark in the version the
-  viewer uses and on Gaussian Splat Lite in newer ones; CesiumJS; Cesium for Unreal) is **to check** first: if the main viewer ignores them, the option is only worth its bytes on
+- **Clients.** Which viewers draw the coefficients from an SPZ tile (the 3DGS plugin on Gaussian Splat Lite, CesiumJS,
+  Cesium for Unreal) is **to check** first: if the main viewer ignores them, the option is only worth its bytes on
   export.
 
 ### Phases
