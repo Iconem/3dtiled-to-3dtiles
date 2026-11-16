@@ -13,6 +13,12 @@ Format loosely follows [Keep a Changelog](https://keepachangelog.com/).
   (`sizing=adaptive|tile|fixed`, replacing the `geSize` toggle, still read) adds *adaptive*, where each point takes
   the size of the deepest loaded tile at its position, for implicit `ADD` octrees. It runs on a copy of
   3DTilesRendererJS#1792's files in `src/potree-lab/vendor` until that PR is released; the main viewer is unchanged.
+- **Fixed: the Potree lab's per-tile and fixed sizes were 2 px dots** since the 0.5.4 upgrade: GLTFLoader marks glTF
+  points as not attenuated (the spec's 1 px), which 3DTilesRendererJS honours since 0.5.4, so a size in metres was
+  read as pixels and clamped. The lab now turns attenuation on with the size.
+- **Docs: the glTF layers, drawn** (attribute, accessor, element, component, typed array, buffer view, buffer, the
+  two layouts and padding) in *The glTF-Transform patch, explained*, with why glTF aligns to 4 bytes and which of our
+  attributes the patch speeds up.
 
 ### Fixed — 2026-11-14 (a Nexus mesh drawn while it loads)
 - **A Nexus mesh drew nothing until its deepest level had loaded** in 3DTilesRendererJS (the dragon after its 85

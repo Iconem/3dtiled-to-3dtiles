@@ -240,13 +240,26 @@ function sizeFor(tile) {
   return params.sizing === 'tile' ? tile.geometricError * params.geFactor * params.pointScale : params.fixedSize * params.pointScale;
 }
 
+/**
+ * A world size in metres for a tile's points. GLTFLoader marks glTF points as not attenuated (the
+ * glTF spec's 1 px), which 3d-tiles-renderer honours since 0.5.4, so the size would be read as pixels:
+ * turn attenuation on. The plugin keeps each octree material's original size and attenuation and
+ * restores them whenever its settings change, so update that record too.
+ */
+function setWorldSize(material, size) {
+  const original = effects._octreeMaterials?.get(material);
+  if (original) { original.size = size; original.sizeAttenuation = true; }
+  material.size = size;
+  if (!material.sizeAttenuation) { material.sizeAttenuation = true; material.needsUpdate = true; }
+}
+
 function applyStreamSizes() {
   if (!tiles || params.mode === 'potree') return;
   effects.adaptivePointSize = params.sizing === 'adaptive';
   effects.pointScale = params.pointScale;
   if (params.sizing === 'adaptive') return;        // the plugin sizes the points itself
   tiles.forEachLoadedModel((model, tile) => {
-    model.traverse((o) => { if (o.isPoints && o.material?.isPointCloudMaterial) o.material.size = sizeFor(tile); });
+    model.traverse((o) => { if (o.isPoints && o.material?.isPointCloudMaterial) setWorldSize(o.material, sizeFor(tile)); });
   });
 }
 
@@ -276,7 +289,7 @@ function initTiles() {
     tiles.registerPlugin(effects);
     tiles.addEventListener('load-model', ({ scene: model, tile }) => {
       if (params.sizing === 'adaptive') return;
-      model.traverse((o) => { if (o.isPoints && o.material?.isPointCloudMaterial) o.material.size = sizeFor(tile); });
+      model.traverse((o) => { if (o.isPoints && o.material?.isPointCloudMaterial) setWorldSize(o.material, sizeFor(tile)); });
     });
   }
   tiles.registerPlugin(new DebugTilesPlugin({ displayBoxBounds: params.displayBoxBounds }));
