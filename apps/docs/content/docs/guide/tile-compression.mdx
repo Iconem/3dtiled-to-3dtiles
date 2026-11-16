@@ -1,0 +1,92 @@
+---
+title: "Tile compression: meshopt, Draco, KTX2"
+description: "The optional per-tile compression of the live server: what each option does, what it costs, what it loses, how to turn it on and which viewers read it."
+---
+
+By default the tile server sends tiles as it builds them: nothing is compressed inside the GLB, which is the
+fastest for the server and loses nothing. Compression is **opt-in**, per request, with `transform=` on `/stream`.
+
+| `transform=` | What it does | For |
+|---|---|---|
+| `meshopt` | `EXT_meshopt_compression` on the geometry | **point clouds** (COPC, Potree, VPC), and meshes |
+| `draco` | `KHR_draco_mesh_compression` | meshes only; Draco leaves points untouched |
+| `ktx` / `ktx-uastc` | textures to KTX2 (ETC1S, or UASTC: sharper and larger) | textured meshes |
+| `decompress` | the other way: decodes Draco, meshopt and KTX2 | clients that read none of them (Blender add-ons) |
+
+## meshopt on point tiles
+
+### What it gives, what it costs
+
+Measured on 40 tiles of the Autzen COPC (median tile 0.9 MB), see [benchmarks](/docs/guide/planning/benchmarks):
+
+| | Server time per tile | Bytes sent |
+|---|---|---|
+| no transform (default) | 1× | 100 % |
+| `transform=meshopt` | **1.1×** | **36 %** |
+| gzip of the plain tile, for comparison | 1.1× | 58 % |
+
+A third of the bytes for a tenth more server time. In the browser the decoded points also take less memory,
+because positions stay 16-bit integers: the lab's lion goes from 5 MB to 3 MB of tile cache.
+
+### What it loses
+
+meshopt as glTF-Transform applies it **rounds the data** before compressing:
+
+- **Positions** are stored on 14 bits of the tile's own extent: a step of 1/16 384 of the tile's size. A tile
+  100 m wide is rounded to 6 mm, a tile 3 km wide to 18 cm. Coarse tiles are the wide ones and their points are
+  far apart, so the step stays roughly a hundred times smaller than the spacing between points at every level.
+- **Colours** go from 16 to 8 bits per channel. Most sources hold 8-bit colours anyway.
+- Extra attributes (intensity, classification) keep their values.
+
+That is invisible on screen and fine for visualisation. For measurements at the millimetre, or to archive, keep the
+default.
+
+### How to turn it on
+
+| Where | How |
+|---|---|
+| any `/stream` URL | add `&transform=meshopt`: `/stream/tileset.json?format=copc&url=<src>&transform=meshopt` |
+| the viewer | the *transform* menu in the top bar, **meshopt ↓** (or `?transform=meshopt` in the page URL) |
+| the Potree lab | `?transform=meshopt` in the lab's URL, in *stream* mode |
+| an export to a folder | export the `/stream` URL that carries `transform=meshopt`: the exporter copies what the URL serves |
+
+The option travels in the tileset: the root request carries it, and every tile URL inside repeats it.
+
+With tile workers (`TILED_WORKERS=auto`) the encode runs on a worker thread, not on the server's own.
+
+### Which viewers read it
+
+| Viewer | Reads `EXT_meshopt_compression` |
+|---|---|
+| this repo's viewer and Potree lab (3DTilesRendererJS) | yes, since 2026-11-16: the decoder was not registered before, and meshopt tiles failed to load |
+| any 3DTilesRendererJS app | yes, once the app passes `meshoptDecoder` to `GLTFExtensionsPlugin` (below) |
+| CesiumJS | yes |
+| Cesium for Unreal, Cesium for Unity (cesium-native) | yes |
+| QGIS, Blender add-ons | to check per tool; use the default, or `transform=decompress` on tiles that already are compressed |
+
+```js
+import { GLTFExtensionsPlugin } from '3d-tiles-renderer/plugins';
+import { MeshoptDecoder } from 'three/addons/libs/meshopt_decoder.module.js';
+
+tiles.registerPlugin(new GLTFExtensionsPlugin({ meshoptDecoder: MeshoptDecoder }));
+```
+
+## Draco and KTX2
+
+`transform=draco` and `transform=ktx` encode mesh tiles the same way, per request. They are much slower to encode
+than meshopt (KTX2 takes seconds per texture), so they suit a cached or exported tileset
+(`cache=full`, or an export), not live streaming.
+
+## Decoding: `transform=decompress` and `/gltf`
+
+For clients that read no compression, `/stream?transform=decompress` and the `/gltf` proxy (for existing tilesets)
+decode tiles. Re-encoding the textures is nine tenths of that cost, so pick the texture output with `tex=`:
+
+| `tex=` | Use it when |
+|---|---|
+| `jpg` (default) | the client reads no KTX2: the fastest to encode |
+| `webp` | the smallest files matter more than the server's time (twice as slow as JPEG) |
+| `png` | the textures must stay lossless |
+| `ktx2` | the client reads KTX2 and only lacks Draco or meshopt: textures are kept, 80× faster |
+
+A tile that holds nothing to decode is passed on untouched.

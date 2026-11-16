@@ -11,6 +11,9 @@ import {
 import { DebugTilesPlugin, XYZTilesOverlay, QuantizedMeshPlugin, CesiumIonAuthPlugin, ImageOverlayPlugin, GoogleCloudAuthPlugin, ImplicitTilingPlugin, GLTFExtensionsPlugin } from '3d-tiles-renderer/plugins';
 import { DRACOLoader } from 'three/addons/loaders/DRACOLoader.js';
 import { KTX2Loader } from 'three/addons/loaders/KTX2Loader.js';
+// meshopt-compressed tiles (`/stream?transform=meshopt`, and third-party tilesets): without the decoder GLTFLoader
+// throws "setMeshoptDecoder must be called" and the tile fails. A small WebAssembly module, loaded on first use.
+import { MeshoptDecoder } from 'three/addons/libs/meshopt_decoder.module.js';
 // GeneratedSurfacePlugin is exported at runtime (3d-tiles-renderer/src/three/plugins/index.js) but
 // missing from this package's .d.ts — imported via the namespace + cast to dodge the stale types.
 import * as ThreeTilesPlugins from '3d-tiles-renderer/plugins';
@@ -450,7 +453,7 @@ function GoogleGlobe({ ktxLoader }: { ktxLoader: KTX2Loader }) {
       <TilesPlugin plugin={GoogleCloudAuthPlugin as any} args={{ apiToken: GOOGLE_MAPS_API_KEY, autoRefreshToken: true } as any} />
       {/* Google Photorealistic 3D Tiles ships Draco-compressed (and sometimes KTX2-textured) geometry —
           same decoders as content below. */}
-      <TilesPlugin plugin={GLTFExtensionsPlugin as any} args={{ dracoLoader, ktxLoader } as any} />
+      <TilesPlugin plugin={GLTFExtensionsPlugin as any} args={{ dracoLoader, ktxLoader, meshoptDecoder: MeshoptDecoder } as any} />
       <TilesPlugin plugin={StaleLoadAbortPlugin as any} />
       <TilesPlugin plugin={MotionLodPlugin as any} />
     </TilesRendererR3F>
@@ -1466,7 +1469,7 @@ const Scene = forwardRef<ViewerHandle, { loadArgs: LoadArgs; tooltip: TooltipCha
   // EVERY Scene render: a terrain, point-size or controls change disposed the Potree child renderers,
   // and the new plugin never re-claims already-parsed leaves ("switching terrain / changing point
   // size / switching controls disables the Potree tileset" with native leaves on).
-  const gltfArgs = useMemo(() => ({ dracoLoader, ktxLoader }), [ktxLoader]);
+  const gltfArgs = useMemo(() => ({ dracoLoader, ktxLoader, meshoptDecoder: MeshoptDecoder }), [ktxLoader]);
   const gltfArgsRef = useRef(gltfArgs);
   gltfArgsRef.current = gltfArgs;
   const nativeRef = useRef(native);

@@ -8,6 +8,15 @@ Format loosely follows [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+### Fixed — 2026-11-16 (meshopt tiles load in the viewer)
+- **`transform=meshopt` tiles failed in our own three.js viewer** ("setMeshoptDecoder must be called"): the server
+  could send them, CesiumJS could read them, the 3DTilesRendererJS viewer could not. The meshopt decoder is now
+  registered in the viewer, the legacy page and the Potree lab (`?transform=meshopt` in stream mode). Checked on
+  the Autzen COPC (163 tiles, none failed) and the lab's lion, with adaptive point size.
+- **Docs: [Tile compression](/docs/guide/tile-compression)**, a page of its own: what meshopt, Draco and KTX2 do
+  per tile, the measured cost, what meshopt rounds (positions to 1/16 384 of the tile, colours to 8 bits), how to
+  turn it on, which viewers read it.
+
 ### Changed — 2026-11-16 (splats drawn by Gaussian Splat Lite, three.js 0.187)
 - **`3d-tiles-rendererjs-3dgs-plugin` 0.1.13 → 0.3.1**, which draws through
   [Gaussian Splat Lite](https://github.com/WilliamLiu-1997/Gaussian-Splat-Lite) (1.8.1) instead of Spark, and

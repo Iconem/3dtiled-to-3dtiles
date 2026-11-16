@@ -32,7 +32,8 @@ import { PivotPointMesh } from '3d-tiles-renderer/src/three/renderer/controls/Pi
 import { installFilteredRaycast, pickPoint, pointerNdc } from '@/lib/picking';
 import { TilesRenderer, EnvironmentControls, GlobeControls } from '3d-tiles-renderer';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
-import { DebugTilesPlugin, ImplicitTilingPlugin, ReorientationPlugin } from '3d-tiles-renderer/plugins';
+import { DebugTilesPlugin, GLTFExtensionsPlugin, ImplicitTilingPlugin, ReorientationPlugin } from '3d-tiles-renderer/plugins';
+import { MeshoptDecoder } from 'three/addons/libs/meshopt_decoder.module.js';
 import { GUI } from 'three/addons/libs/lil-gui.module.min.js';
 import { PotreePlugin } from '@/lib/potreePlugin';
 import { PointCloudEffectsPlugin } from './vendor/PointCloudEffectsPlugin.js';
@@ -226,13 +227,15 @@ function applyControlsRange() {
 }
 makeControls(params.controls);
 
+// ?transform=meshopt on the lab's own URL: stream mode asks /stream for meshopt-compressed tiles (a third of the bytes)
+const MESHOPT = new URLSearchParams(location.search).get('transform') === 'meshopt';
 function streamUrl(src) {
   if (params.mode === 'tileset') return src;
   // "<url>#crs=EPSG:n" carries a CRS for sources that declare none
   const [bare, frag = ''] = src.split('#');
   const crs = new URLSearchParams(frag).get('crs');
   const format = /\.copc\.laz$/i.test(bare) ? 'copc' : 'potree';
-  return `${MW}/stream/tileset.json?format=${format}&url=${encodeURIComponent(bare)}&cache=none${crs ? `&crs=${encodeURIComponent(crs)}` : ''}`;
+  return `${MW}/stream/tileset.json?format=${format}&url=${encodeURIComponent(bare)}&cache=none${crs ? `&crs=${encodeURIComponent(crs)}` : ''}${MESHOPT ? '&transform=meshopt' : ''}`;
 }
 
 /** Point size for a /stream tile. GE of a Potree-derived tile is its point spacing, so reuse it. */
@@ -283,6 +286,7 @@ function initTiles() {
   } else {
     tiles = new TilesRenderer(streamUrl(params.url));
     tiles.registerPlugin(new ImplicitTilingPlugin());
+    tiles.registerPlugin(new GLTFExtensionsPlugin({ meshoptDecoder: MeshoptDecoder }));   // &transform=meshopt tiles
     // /stream may emit a georeferenced (ECEF) root; recentre + orient so both modes frame the same way.
     tiles.registerPlugin(new ReorientationPlugin({ recenter: true }));
     effects = new PointCloudEffectsPlugin({ ...effectOpts, adaptivePointSize: params.sizing === 'adaptive', pointScale: params.pointScale });

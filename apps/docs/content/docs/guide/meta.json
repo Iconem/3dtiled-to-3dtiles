@@ -2,6 +2,7 @@
   "pages": [
     "supported-formats",
     "gltf-transform",
+    "tile-compression",
     "demo-viewer",
     "cli-usage",
     "meta-tilesets",

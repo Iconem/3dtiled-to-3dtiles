@@ -553,7 +553,8 @@ meshopt for point tiles because Draco skips `POINTS`, and `/stream?transform=mes
   the server time of a tile (22 ms on 184 ms) and sends 36 % of the bytes; gzip of the raw tile costs the same CPU
   and reaches 58 %. But it is lossy (positions on 14 bits of the tile's extent, colours from 16 to 8 bits) and needs
   the decoder in the client, so the default keeps sending tiles as built: fastest and exact. `transform=meshopt`
-  for slow links. Table on the [benchmarks](/docs/guide/planning/benchmarks) page.
+  for slow links. Table on the [benchmarks](/docs/guide/planning/benchmarks) page; how to use it on
+  [Tile compression](/docs/guide/tile-compression). The viewer and the Potree lab read it since the same day.
 - [ ] **Read `KHR_meshopt_compression`** as well as `EXT_` in `gltf-decompress.js` when glTF-Transform
   ships the name; the decoder is the same `meshoptimizer` WASM.
 - [ ] Re-verify the 3DTRjs `PotreePlugin` / `PointCloudEffectsPlugin` path and CesiumJS against a

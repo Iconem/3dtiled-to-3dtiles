@@ -1897,6 +1897,7 @@ import {
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import { DRACOLoader } from 'three/addons/loaders/DRACOLoader.js';
+import { MeshoptDecoder } from 'three/addons/libs/meshopt_decoder.module.js';
 
 // Shared DRACOLoader — reused across all TilesRenderer instances (decoder path = CDN).
 const _dracoLoader = new DRACOLoader();
@@ -2189,6 +2190,7 @@ function _makeTiles(url, isSplat, fetchOptions) {
   // Register a GLTFLoader with Draco support so Draco-compressed tiles (e.g. Utrecht) load correctly.
   const _gltfLoader = new GLTFLoader(t.manager);
   _gltfLoader.setDRACOLoader(_dracoLoader);
+  _gltfLoader.setMeshoptDecoder(MeshoptDecoder);   // transform=meshopt tiles
   t.manager.addHandler(/\.glb$|\.gltf$/i, _gltfLoader);
   if (isSplat && GaussianSplatPlugin) {
     _splatRendererFor(scene, renderer);
