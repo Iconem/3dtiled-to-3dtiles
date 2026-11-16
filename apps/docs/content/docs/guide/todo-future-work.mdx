@@ -181,7 +181,7 @@ evaluated before assuming this would be a novel effort.
   it the same way first.
 - [ ] **Send the glTF-Transform fast path upstream.** `patches/@gltf-transform__core@4.4.0.patch` copies a lone vertex
   accessor whole instead of component by component (`VertexLayout.SEPARATE`): seven times faster on megabyte tiles,
-  same bytes ([what it does and why](/docs/guide/supported-formats#the-gltf-transform-patch-explained)). The pull
+  same bytes ([what it does and why](/docs/guide/gltf-transform#the-writer-patch)). The pull
   request is drafted against `packages/core/src/io/writer.ts` of donmccurdy/glTF-Transform (`main` is unchanged
   there since 4.4.0; 4.5.1 is current) and waits for a go-ahead to open; merged, it would let the patch go. The
   patch is pinned to 4.4.0: pnpm refuses to install if the version moves without it.

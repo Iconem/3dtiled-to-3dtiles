@@ -1,6 +1,7 @@
 {
   "pages": [
     "supported-formats",
+    "gltf-transform",
     "demo-viewer",
     "cli-usage",
     "meta-tilesets",

@@ -190,44 +190,10 @@ format, and whether the server and the offline converter can spread it over work
 | OSGB | OpenSceneGraph itself (C++, what `fanvanzh/3dtiles` and every desktop converter link); `osg-serializer-js` / `osgb` on npm (unmaintained, file versions up to about 100, no block sizes past them); `flywave/go-osg` (Go) | No native module can be built or shipped here, and the JavaScript reader stops before the versions DJI Terra writes (131). The format is a fixed layout per class and version: the reader is a table of fields, 500 lines, written from the layout and checked on 3 918 real files. |
 | Nexus | Nexus itself (C++, GPL) and its JavaScript loader `nexus.js` (MIT, for three.js); Corto's C++ and its JavaScript decoder (MIT) | The file is a fixed layout of four tables and per-node streams, 270 lines to read; only the decoders are taken, unchanged, so that nothing GPL is linked. |
 
-### The glTF-Transform patch, explained
+### glTF-Transform
 
-I3S and Bing globe tiles are written with [glTF-Transform](https://gltf-transform.dev) since 2026-11-05, and a
-patch of it ships in `patches/` (applied by pnpm at install, in Docker and in the desktop bundle). What it is for:
-
-A GLB holds its vertex data in one binary blob. For a mesh tile that blob is a few arrays laid end to end:
-all the positions, then all the normals, then all the texture coordinates, each a plain run of 32-bit floats. We
-already have each of those arrays in memory as a typed array (`Float32Array`), and a typed array *is* already the
-exact bytes the file needs, in the right order. Producing the blob should be a copy, the way `memcpy` is a copy.
-
-The words glTF uses for each layer, from the mesh down to the bytes:
-
-<GltfLayers />
-
-Why 4 bytes: glTF requires every element of a vertex attribute to start on a 4-byte boundary (`byteStride` and the
-accessor offsets are multiples of 4), because GPUs fetch vertex data in aligned 4-byte words, and Metal and
-Direct3D reject unaligned vertex strides outright.
-
-glTF-Transform's writer was built for the other layout too, *interleaved*: position, normal and UV of vertex 0,
-then those of vertex 1, and so on. Its one routine handles both layouts the same way: for every vertex, for
-every attribute, for every component (x, then y, then z), it reads one number from the typed array and writes it
-into the output through a `DataView`, which is JavaScript's byte-by-byte writer. For a tile of 300 000 vertices
-with three attributes that is a few million small calls, and it took 88 ms of a tile's time. The arrays were
-already in the right shape; the routine just did not notice.
-
-With the default *separate* layout this is not a rare case: every vertex attribute of every tile gets its own buffer
-view, so each one went through the per-component loop. For us that is positions, normals and UVs of meshes, and
-positions and colours of point clouds (`core/points-glb.js` writes colours as `VEC4` for this alignment). The
-optional point attributes (`_INTENSITY` as uint16, `_CLASSIFICATION` as uint8…) are padded scalars and still take
-the loop. Indices and other non-vertex data already took a plain copy (`concatAccessors`).
-
-The patch adds one check at the top of that routine: if this buffer view is made of a single attribute, and its
-elements are not padded (a `VEC3` of floats is 12 bytes, which needs no padding; a `VEC3` of bytes would), then
-the typed array's bytes are the output, and they are copied in one call. Otherwise the old loop runs. For the
-same tile the write drops to 13 ms, and the file is identical to the byte: the output hash of the I3S run did not
-change. Ten lines, in `interleaveAccessors` of `packages/core/src/io/writer.ts`. The pull request to send it
-upstream is drafted (see the [future work](/docs/guide/todo-future-work) page); merged, our patch goes away. Until
-then it is pinned to glTF-Transform 4.4.0: pnpm refuses to install if the dependency moves without it.
+Every GLB here is written with glTF-Transform, and a small patch of its writer makes the write about seven
+times faster (88 to 13 ms on a 300 000-vertex tile). Both are on their own page: [glTF-Transform](/docs/guide/gltf-transform).
 
 ### What tile workers gain, measured
 

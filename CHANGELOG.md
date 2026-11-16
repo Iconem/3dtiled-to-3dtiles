@@ -31,7 +31,8 @@ Format loosely follows [Keep a Changelog](https://keepachangelog.com/).
   points as not attenuated (the spec's 1 px), which 3DTilesRendererJS honours since 0.5.4, so a size in metres was
   read as pixels and clamped. The lab now turns attenuation on with the size.
 - **Docs: the glTF layers, drawn** (attribute, accessor, element, component, typed array, buffer view, buffer, the
-  two layouts and padding) in *The glTF-Transform patch, explained*, with why glTF aligns to 4 bytes and which of our
+  two layouts and padding) on a new [glTF-Transform](/docs/guide/gltf-transform) page, moved out of *Supported
+  formats* with the writer patch, plus where glTF-Transform is used, why glTF aligns to 4 bytes and which of our
   attributes the patch speeds up.
 
 ### Fixed — 2026-11-14 (a Nexus mesh drawn while it loads)

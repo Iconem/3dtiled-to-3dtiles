@@ -1,0 +1,63 @@
+---
+title: "glTF-Transform: how every tile is written"
+description: "Where glTF-Transform writes and reads tiles in this repo, the glTF layers from a mesh attribute down to the bytes, and the writer patch we ship."
+---
+
+Every GLB the converters and the tile server produce is built and written with
+[glTF-Transform](https://gltf-transform.dev) (`@gltf-transform/core` 4.4.0): a `Document` is filled with typed arrays,
+then `NodeIO.writeBinary` turns it into bytes. Since that runs once per tile, on every request in the live server,
+the speed of the writer matters.
+
+## Where it is used
+
+| Code | What it writes or reads |
+|---|---|
+| `core/points-glb.js` | every point tile: COPC, Potree, VPC, I3S point layers, live and offline (`POSITION`, `COLOR_0`, optional PDAL attributes) |
+| `copc-to-3dtiles`, `potree-to-3dtiles` `glbWriter.js` | the offline point converters' tiles |
+| `i3s-to-3dtiles/src/glbBuild.js` | I3S mesh and point nodes, and the Bing 3D globe's own tiles (a hand-written GLB until 2026-11-05) |
+| `tile-server/mesh-tile.js` | live mesh tiles of I3S, 3MX and OSGB, on the server's thread or a tile worker |
+| `nexus-to-3dtiles/src/nexus-glb.js` | one Nexus node, offline, live and on workers |
+| `rad-to-3dtiles` `glbWriter.js` and the other splat writers | the GLB around SPZ splat data (`KHR_gaussian_splatting`) |
+| `core/gltf-decompress.js`, `core/gltf-compress.js` | the `/gltf` tool: decode Draco, meshopt and KTX2 for clients without them, or encode them |
+| `tile-server/extract-live.js` | reads tiles back for `/extract` (merged GLB, LAS) |
+
+## The glTF layers, from a mesh down to the bytes
+
+A GLB holds its vertex data in one binary blob. For a mesh tile that blob is a few arrays laid end to end:
+all the positions, then all the normals, then all the texture coordinates, each a plain run of 32-bit floats. We
+already have each of those arrays in memory as a typed array (`Float32Array`), and a typed array *is* already the
+exact bytes the file needs, in the right order. Producing the blob should be a copy, the way `memcpy` is a copy.
+
+The words glTF uses for each layer:
+
+<GltfLayers />
+
+Why 4 bytes: glTF requires every element of a vertex attribute to start on a 4-byte boundary (`byteStride` and the
+accessor offsets are multiples of 4), because GPUs fetch vertex data in aligned 4-byte words, and Metal and
+Direct3D reject unaligned vertex strides outright.
+
+## The writer patch
+
+A patch of glTF-Transform's writer ships in `patches/`, applied by pnpm at install, in Docker and in the desktop
+bundle. What it is for:
+
+glTF-Transform's writer was built for the other layout too, *interleaved*: position, normal and UV of vertex 0,
+then those of vertex 1, and so on. Its one routine handles both layouts the same way: for every vertex, for
+every attribute, for every component (x, then y, then z), it reads one number from the typed array and writes it
+into the output through a `DataView`, which is JavaScript's byte-by-byte writer. For a tile of 300 000 vertices
+with three attributes that is a few million small calls, and it took 88 ms of a tile's time. The arrays were
+already in the right shape; the routine just did not notice.
+
+With the default *separate* layout this is not a rare case: every vertex attribute of every tile gets its own buffer
+view, so each one went through the per-component loop. For us that is positions, normals and UVs of meshes, and
+positions and colours of point clouds (`core/points-glb.js` writes colours as `VEC4` for this alignment). The
+optional point attributes (`_INTENSITY` as uint16, `_CLASSIFICATION` as uint8…) are padded scalars and still take
+the loop. Indices and other non-vertex data already took a plain copy (`concatAccessors`).
+
+The patch adds one check at the top of that routine: if this buffer view is made of a single attribute, and its
+elements are not padded (a `VEC3` of floats is 12 bytes, which needs no padding; a `VEC3` of bytes would), then
+the typed array's bytes are the output, and they are copied in one call. Otherwise the old loop runs. For the
+same tile the write drops to 13 ms, and the file is identical to the byte: the output hash of the I3S run did not
+change. Ten lines, in `interleaveAccessors` of `packages/core/src/io/writer.ts`. The pull request to send it
+upstream is drafted (see the [future work](/docs/guide/todo-future-work) page); merged, our patch goes away. Until
+then it is pinned to glTF-Transform 4.4.0: pnpm refuses to install if the dependency moves without it.
