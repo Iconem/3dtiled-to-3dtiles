@@ -44,6 +44,8 @@ function coordsOfBox(box, rootBox, depth) {
 export async function convert(inDir, outDir, opts = {}) {
   if (!inDir || !outDir) throw new Error('Usage: potree-to-3dtiles <potree-dir> <outDir>');
   const t0 = Date.now();
+  // The octree's own entry file names its folder too: …/cloud.js or …/metadata.json is read as the folder it is in.
+  if (/^(cloud\.js|metadata\.json)$/i.test(path.basename(inDir)) && (await fs.stat(inDir).catch(() => null))?.isFile()) inDir = path.dirname(inDir);
   const has = async f => !!(await fs.stat(path.join(inDir, f)).catch(() => null));
   // Prefer cloud.js (Potree 1.x) over metadata.json: the mirrored .src dir may contain stale
   // Potree 2.0 files from a previous run with a colliding cache key.

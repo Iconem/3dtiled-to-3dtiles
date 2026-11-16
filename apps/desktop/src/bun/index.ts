@@ -216,12 +216,21 @@ const isWindows = (globalThis as any).process?.platform === "win32";
  * called from an RPC request handler never answers (its synchronous FFI call blocks the event loop the answer must
  * travel on: blackboardsh/electrobun#156, open), so neither picker worked. The modern dialogs under pwsh (.NET 5+), the
  * classic ones under Windows PowerShell. Cancel answers [], like the native dialog. `allowedFileTypes` is Electrobun's
- * comma list of extensions.
+ * comma list of extensions, or groups of them for the dialog's type list: `label=ext,ext;label=ext` (`fileTypeGroups`).
  */
+function fileTypeGroups(allowedFileTypes: string): { label: string; exts: string[] }[] {
+	const clean = (list: string) => list.split(",").map((e) => e.trim().replace(/^\*?\.?/, "")).filter((e) => /^[\w.]+$/.test(e));
+	return allowedFileTypes.split(";").map((g) => {
+		const eq = g.indexOf("=");
+		return eq < 0 ? { label: "Datasets", exts: clean(g) } : { label: g.slice(0, eq).replace(/[^\w ,()-]/g, "").trim() || "Files", exts: clean(g.slice(eq + 1)) };
+	}).filter((g) => g.exts.length);
+}
 async function pickWindows(directory: boolean, allowedFileTypes: string): Promise<string[]> {
 	const { execFile } = await import("node:child_process");
-	const exts = allowedFileTypes.split(",").map((e) => e.trim().replace(/^\*?\.?/, "")).filter((e) => e && e !== "*");
-	const filter = exts.length ? `Datasets (${exts.map((e) => `*.${e}`).join(", ")})|${exts.map((e) => `*.${e}`).join(";")}|All files (*.*)|*.*` : "All files (*.*)|*.*";
+	// one line per group in the dialog's type list; a long group shows its first extensions only (the filter has them all)
+	const groups = fileTypeGroups(allowedFileTypes);
+	const shown = (exts: string[]) => exts.slice(0, 8).map((e) => `*.${e}`).join(", ") + (exts.length > 8 ? ", …" : "");
+	const filter = [...groups.map((g) => `${g.label} (${shown(g.exts)})|${g.exts.map((e) => `*.${e}`).join(";")}`), "All files (*.*)|*.*"].join("|");
 	const script = directory
 		? "Add-Type -AssemblyName System.Windows.Forms; $d = New-Object System.Windows.Forms.FolderBrowserDialog; "
 			+ "$d.Description = 'Pick a dataset folder'; $d.ShowNewFolderButton = $true; "
@@ -260,7 +269,7 @@ const rpc = defineElectrobunRPC<DesktopRPC, "bun">("bun", {
 					canChooseFiles: !directory,
 					canChooseDirectory: directory,
 					allowsMultipleSelection: false,
-					allowedFileTypes: allowedFileTypes || "*",
+					allowedFileTypes: fileTypeGroups(allowedFileTypes || "").flatMap((g) => g.exts).join(",") || "*",
 				}),
 
 			/**

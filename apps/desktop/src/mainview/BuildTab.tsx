@@ -50,7 +50,15 @@ const PLACEMENT_FIELDS: Record<(typeof PLACEMENT)[number], { label: React.ReactN
 // Tree formats are a FOLDER (Potree's cloud.js directory, a streamed-SOG LOD folder, an unpacked
 // 3D Tiles tree); single-file formats are a FILE (.copc.laz, .rad, .lcc, .3tz). Hence two buttons
 // rather than one dialog that has to guess — on Windows a single dialog cannot offer both.
-const DATASET_FILE_TYPES = 'laz,las,copc,rad,lcc,json,js,zip,3tz,slpk,glb,b3dm,e57,ply,spz,sog,splat,ksplat';
+// Grouped for the Windows dialog's type list (`label=ext,ext;…`, see pickWindows); elsewhere the groups are merged.
+// The raw groups are what the "Tile raw input" flow takes (packages/tilers/tools.js).
+const DATASET_FILE_TYPES = [
+  'Datasets and raw input=laz,las,copc,rad,lcc,lcc2,json,js,zip,3tz,slpk,nxs,nxz,glb,b3dm,e57,ptx,xyz,csv,ply,spz,sog,splat,ksplat,obj,fbx,3ds,gltf,gml,kml,shp,geojson,gpkg',
+  'Tiled datasets=laz,rad,lcc,lcc2,json,js,zip,3tz,slpk,nxs,nxz',
+  'Raw point clouds=las,laz,e57,ptx,xyz,csv,ply',
+  'Raw meshes=obj,fbx,3ds,gltf,glb,gml,kml,shp,geojson,gpkg',
+  'Raw Gaussian splats=ply,spz,sog,splat,ksplat',
+].join(';');
 
 export function BuildTab({ app, message }: { app: AppModel; message: Message | null }) {
   const { form, patchForm, url, say } = app;
@@ -131,8 +139,8 @@ export function BuildTab({ app, message }: { app: AppModel; message: Message | n
             {/* Outside the Electrobun host (e.g. the bundle rendered in a plain browser for verification) the
                 native dialog cannot exist — hide the buttons rather than offering an action that always fails. */}
             {pickerAvailable() && <>
-              <Button id="browse-file" title="Pick a single-file dataset (.copc.laz, .rad, .lcc, .3tz…), or a raw file to tile (.las, .laz, .e57, .ply)" onClick={() => browse(false)}>File…</Button>
-              <Button id="browse-dir" title="Pick a dataset folder (Potree cloud.js dir, streamed-SOG LOD dir, unpacked 3D Tiles)" onClick={() => browse(true)}>Folder…</Button>
+              <Button id="browse-file" title="Pick a single-file dataset (.copc.laz, .rad, .lcc, .3tz…), or a raw file to tile: a point cloud (.las, .laz, .e57, .ply), a mesh (.obj, .fbx, .glb…) or splats (.ply, .spz, .sog, .ksplat)" onClick={() => browse(false)}>File…</Button>
+              <Button id="browse-dir" title="Pick a dataset folder (Potree cloud.js dir, streamed-SOG LOD dir, unpacked 3D Tiles), or a folder of raw files to tile (LAS/LAZ files, an OSGB tree, meshes)" onClick={() => browse(true)}>Folder…</Button>
             </>}
           </UrlBar>
         </Field>

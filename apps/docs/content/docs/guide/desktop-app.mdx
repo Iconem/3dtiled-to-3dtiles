@@ -282,31 +282,54 @@ viewer (48 and 42 tiles). The same exporter is on the CLI as
 
 ### Tile raw input
 
-The third flow of the Build tab, for a file that is **not tiled yet**: a LAS, LAZ or E57 point cloud, a splat PLY.
-It runs a third-party tiler on it, then hands the result to *Stream live*. The app writes no tiler: it finds, fetches
-and calls the official ones ([plan and results](/docs/guide/planning/one-stop-tiler)).
+The third flow of the Build tab, for input that is **not tiled yet**: a point cloud, a mesh or Gaussian splats, as
+a **file or a folder**. It runs a third-party tiler on it, then opens the result. The app writes no tiler: it finds,
+fetches and calls the official ones ([plan and results](/docs/guide/planning/one-stop-tiler)).
+
+Pick the input with **File…** or **Folder…** above (the file dialog lists the types by family), or paste a path.
 
 | Input | Tools offered | Result |
 |---|---|---|
-| `.las`, `.laz` | PDAL (`writers.copc`), untwine, PotreeConverter 2 | a COPC file, or a Potree 2 folder |
-| `.e57` | PDAL | a COPC file |
-| `.ply`, `.spz`, `.sog`, `.splat`, `.ksplat` | PlayCanvas splat-transform | a streamed SOG with levels of detail |
+| **Point cloud** `.las`, `.laz` (a file, or a folder of them) | PDAL, untwine | a COPC file |
+| | PotreeConverter 2, PotreeConverter 1.7 | a Potree 2 or Potree 1.x folder |
+| | gocesiumtiler, point-tiler, py3dtiles, mago 3DTiler | 3D Tiles |
+| `.e57` | PDAL, gocesiumtiler | COPC, or 3D Tiles |
+| `.ptx`, a point `.ply`, `.xyz`, `.csv` | PotreeConverter 1.7, gocesiumtiler, py3dtiles, point-tiler (by format) | Potree 1.x, or 3D Tiles |
+| **Mesh** `.obj` | Obj2Tiles, mago 3DTiler | 3D Tiles |
+| `.fbx`, `.3ds`, `.gltf`, `.glb`, CityGML, KML, Shapefile, GeoJSON, GeoPackage | mago 3DTiler | 3D Tiles |
+| an OSGB folder (`metadata.xml` and `Data/`) | 3dtile (fanvanzh/3dtiles) | 3D Tiles |
+| **Splats** `.ply`, `.spz`, `.sog`, `.splat`, `.ksplat` | PlayCanvas splat-transform | a streamed SOG with levels of detail |
+| a splat `.ply` | gocesiumtiler `splats` | 3D Tiles with SPZ splats, harmonics kept on request |
 
-- **Where a tool comes from** is written under the tool's name. splat-transform ships with the app. PDAL and
-  untwine are looked for on the machine: `PATH`, a QGIS or OSGeo4W install (QGIS ships both), pixi, or the
-  `PDAL_BIN` and `UNTWINE_BIN` environment variables. PotreeConverter is **downloaded** from its authors' GitHub
-  release the first time (14 MB), checked against a SHA-256 pinned in this repo, and kept in
-  `%LOCALAPPDATA%\3D Tiled\tools`. The button reads *Download and run* when that will happen.
+- **A `.ply` can be points, a mesh or splats.** The app reads its header and offers only the tools for what it
+  holds; the line under the tool says which it found. A folder is matched by the files in it.
+- **Where a tool comes from** is written under its name:
+  - splat-transform **ships with the app**;
+  - PDAL and untwine are **looked for on the machine**: `PATH`, a QGIS or OSGeo4W install (QGIS ships both), pixi,
+    or the `PDAL_BIN` and `UNTWINE_BIN` environment variables;
+  - the others are **downloaded the first time** from their authors' GitHub release, checked against a SHA-256
+    pinned in this repo, and kept in `%LOCALAPPDATA%\3D Tiled\tools` (13 to 24 MB each; mago 3DTiler is 390 MB);
+  - mago 3DTiler is a Java program and needs **Java 25**: a `java` of that version on the machine is used, else a
+    Temurin runtime (59 MB) is downloaded next to it, the same way. Nothing is installed system-wide;
+  - py3dtiles is a Python program: [uv](https://docs.astral.sh/uv/) installs a pinned version from PyPI into a
+    **private environment with its own Python**, in the tools folder (about 270 MB on disk).
+  The button reads *Download and run* when a download will happen, and the text above it says what and how much.
 - **A tool already on the machine is offered first**, so nothing is downloaded unless you pick a tool that needs it.
 - **The options are the tool's own**, with its defaults; the rarer ones are under *Advanced*, next to the equivalent
-  command line.
+  command line. A cloud or a mesh without a georeference takes a CRS or a longitude and latitude there. Another
+  input starts from the defaults again: the CRS typed for one file is not carried to the next.
 - **Run** starts the tool in a subprocess, as *Run in: CLI subprocess* does for an export: its output is shown as
   it comes, and **Cancel** stops it and what it started.
-- **Stream it**, when the run ends, puts what was written in the dataset field (with `cache=full`: a file on disk
-  is converted once to the local cache) and opens *Stream live*.
+- **When the run ends:**
+  - a COPC, a Potree folder or a streamed SOG: **Stream it** puts what was written in the dataset field (with
+    `cache=full`: a file on disk is converted once to the local cache) and opens *Stream live*;
+  - a 3D Tiles tileset is finished already: **Preview in Cesium**, **Preview in 3DTRjs** and **Copy URL** open it
+    as it is, served from its folder by the app's tile server. The folder can be hosted on any web server.
+- **Nothing at hand?** With an empty dataset field, *Write tiny sample files* puts a 20 000-point LAS, a
+  3 000-splat PLY and a textured OBJ (1.3 MB, synthetic) in a folder you pick.
 
 The same from a terminal: `node packages/convert/cli.js tile run <tool> <input> <outDir>`
-([CLI usage](/docs/guide/cli-usage#tile-raw-input-with-a-third-party-tiler)). Windows first: the download and the
+([CLI usage](/docs/guide/cli-usage#tile-raw-input-with-a-third-party-tiler)). Windows first: the downloads and the
 QGIS lookup are Windows'; on macOS and Linux a tool on `PATH` is found.
 
 ### Library

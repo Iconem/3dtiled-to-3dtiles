@@ -60,28 +60,52 @@ with `TILED_ALLOW_EXPORT=1`.
 
 ### Tile raw input with a third-party tiler
 
-For a file that is not tiled yet, `3dtiled tile` runs the right third-party tiler and says what to serve afterwards.
+For input that is not tiled yet, `3dtiled tile` runs a third-party tiler and says what to open afterwards.
 It is the command behind the desktop app's *Tile raw input* flow ([tools, results](/docs/guide/planning/one-stop-tiler)).
 
 ```sh
 node packages/convert/cli.js tile list                 # the tools, what they take and write, their options
 node packages/convert/cli.js tile detect               # which are on this machine, and where
-node packages/convert/cli.js tile for scan.laz         # the tools that take this file
-node packages/convert/cli.js tile install potreeconverter   # download a tool that publishes a binary (hash-checked)
+node packages/convert/cli.js tile for scan.laz         # the tools that take this file or folder
+node packages/convert/cli.js tile samples C:\tmp\samples   # tiny synthetic inputs: a LAS, a splat PLY, a textured OBJ
+node packages/convert/cli.js tile install gocesiumtiler     # fetch a tool (hash-checked), and the runtime it needs
 node packages/convert/cli.js tile run <tool> <input> <outDir> [--<option> <value>]… [--install] [--overwrite] [--dry-run]
 ```
 
-| Tool | Input | Writes |
-|---|---|---|
-| `pdal` | `.las`, `.laz`, `.e57` | `<outDir>/<name>.copc.laz` |
-| `untwine` | `.las`, `.laz` | `<outDir>/<name>.copc.laz` |
-| `potreeconverter` | `.las`, `.laz` | a Potree 2 folder |
-| `splat-transform` | `.ply`, `.spz`, `.sog`, `.splat`, `.ksplat` | `<outDir>/lod-meta.json` (streamed SOG) |
+| Tool | Input | Writes | Comes from |
+|---|---|---|---|
+| `pdal` | `.las`, `.laz`, `.e57` | `<outDir>/<name>.copc.laz` | found: `PATH`, QGIS, pixi |
+| `untwine` | `.las`, `.laz`, a folder | `<outDir>/<name>.copc.laz` | found: `PATH`, QGIS, pixi |
+| `potreeconverter` | `.las`, `.laz`, a folder | a Potree 2 folder | download, 14 MB |
+| `potreeconverter1` | `.las`, `.laz`, `.ptx`, a point `.ply`, a folder | a Potree 1.x folder (`cloud.js`) | download, 17 MB |
+| `gocesiumtiler` | `.las`, `.laz`, `.e57`, a point `.ply`, a folder | 3D Tiles | download, 18 MB |
+| `point-tiler` | `.las`, `.laz`, `.csv`, `.txt` | 3D Tiles | download, 17 MB |
+| `py3dtiles` | `.las`, `.laz`, `.xyz`, a point `.ply` | 3D Tiles | uv, a private Python environment |
+| `obj2tiles` | `.obj` | 3D Tiles | download, 24 MB |
+| `mago-3d-tiler` | `.obj`, `.fbx`, `.3ds`, `.gltf`, `.glb`, `.gml`, `.kml`, `.shp`, `.geojson`, `.gpkg`, `.las`, `.laz`, a folder | 3D Tiles | download, 390 MB, and Java 25 |
+| `fanvanzh-3dtiles` | an OSGB folder | 3D Tiles (b3dm) | download, 13 MB |
+| `splat-transform` | `.ply`, `.spz`, `.sog`, `.splat`, `.ksplat` (splats) | `<outDir>/lod-meta.json` (streamed SOG) | ships with the repo |
+| `gocesiumtiler-splats` | a splat `.ply` | 3D Tiles (SPZ splats) | the same download as `gocesiumtiler` |
 
-- `run` ends with one line, `TILER_RESULT {"format":…,"output":…}`: the path and format to give to `3dtiled serve`.
+```sh
+# a LAS without a CRS record, straight to 3D Tiles
+node packages/convert/cli.js tile run gocesiumtiler points.las C:\tiled\points --crs EPSG:32631 --install
+# a textured OBJ, placed on the globe
+node packages/convert/cli.js tile run obj2tiles mesh.obj C:\tiled\mesh --lon 2.2945 --lat 48.8584 --install
+# splats to 3D Tiles, keeping their spherical harmonics
+node packages/convert/cli.js tile run gocesiumtiler-splats scene.ply C:\tiled\scene --maxShDegree 3 --upAxis -y
+```
+
+- `run` ends with one line, `TILER_RESULT {"format":…,"output":…}`. A `copc`, `potree` or `sog` output is the path
+  to give to `3dtiled serve`; a `3dtiles` output is a finished tileset, to host as it is.
 - `--dry-run` prints the commands without running them; `--install` fetches a missing tool first.
 - Options are the tool's own (`tile list` shows them with their defaults), and are checked before the tool is called.
+- A `.ply` is read to see whether it holds points, a mesh or splats; a tool for another kind refuses it.
+- The output folder gets a `.3dtiled-tiler.json`: the tool, its version, the input, the options and the commands run.
 - Downloaded tools live in `%LOCALAPPDATA%\3D Tiled\tools` (`~/.cache/3dtiled/tools` elsewhere), or `TILED_TOOLS_DIR`.
+  A tool installed elsewhere is named by its environment variable: `PDAL_BIN`, `UNTWINE_BIN`,
+  `POTREECONVERTER_BIN`, `POTREECONVERTER1_BIN`, `GOTILER_BIN`, `PTILER_BIN`, `OBJ2TILES_BIN`,
+  `MAGO_3D_TILER_JAR`, `FANVANZH_3DTILE_BIN`; a Java runtime by `TILED_JAVA` or `JAVA_HOME`.
 
 ### Tile workers (experimental)
 
@@ -296,6 +320,8 @@ node src/index.js coit.rad ./out-rad
 #   --opacity-filter=0.05   drop faint splats (final opacity < N)
 #   --max-scale-mult=30     drop giant "floating noise" splats (maxScale > per-chunk median×N)
 node src/index.js coit.rad ./out-rad --opacity-filter=0.05 --max-scale-mult=30  # only for data with known noise
+# Spherical harmonics (OPT-IN, default 0 = base colour only): keep up to degree N of what the file holds
+node src/index.js coit.rad ./out-rad --sh 1
 # Tune splat size and LoD (rarely needed — raw values match the reference):
 node src/index.js coit.rad ./out-rad --scale=2         # σ×2 (larger splats)
 node src/index.js coit.rad ./out-rad --ge-scale=2      # GE×2 (refine at greater distance)
@@ -336,6 +362,10 @@ stream (a streaming-manifest `.rad` has no embedded chunk data); `/convert` prod
 Converts a PlayCanvas **[Streamed SOG](/docs/references/3dgs-splats/streamed-sog)** dataset (`lod-meta.json`
 + per-chunk unbundled [SOG](/docs/references/3dgs-splats/sog) dirs) to 3D Tiles 1.1 with the same
 `KHR_gaussian_splatting` + `_compression_spz_2` GLB tiles as the RAD path.
+
+`--sh N` (1 to 3) keeps the splats' spherical harmonics up to that degree, as `&sh=N` does on `/stream` and
+`/convert`; without it the tiles carry the base colour only and the `shN_*` planes are not read. The same flag
+works for LCC2 and RAD.
 
 > **Arrival.Space `.lod` uses this same streamed-SOG format.** An Arrival entity's `lodParameter.glbUrl`
 > points at a `…_LOD/lod-meta.json` whose tree + per-chunk `version:2` webp splats (`means_l/u`, `quats`,

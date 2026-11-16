@@ -16,7 +16,7 @@
 
 export const ALLOWED_SCRIPTS = ['packages/convert/cli.js', 'scripts/pack-3dtiles.mjs', 'packages/tilers/cli.js'] as const;
 /** What the view may ask of the tilers CLI: the tools are named by id and their options checked there (packages/tilers). */
-const TILER_COMMANDS = ['list', 'detect', 'for', 'install', 'run'];
+const TILER_COMMANDS = ['list', 'detect', 'for', 'samples', 'install', 'run'];
 export const TAIL_LINES = 200;
 
 export type CliState = 'running' | 'done' | 'failed' | 'cancelled';

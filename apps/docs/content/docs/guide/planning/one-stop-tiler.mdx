@@ -1,13 +1,117 @@
 ---
 title: "One-stop tiler"
-description: "The desktop app's third flow: give it raw, untiled input and it runs the right third-party tiler, then streams the result. Phase 1 is built (four tools, Windows); the plan for the rest."
+description: "The desktop app's third flow: give it raw, untiled input and it runs a third-party tiler, then opens the result. Phases 1 to 3 are built (twelve tools, Windows); the plan for the rest."
 ---
 
-Plan of 2026-11-16. **Phase 1 was built the same day** (see *Result*); phases 2 to 4 are not started. The roadmap
-item is on the [future work](/docs/guide/todo-future-work) page; the tools are surveyed on
-[existing tilers](/docs/guide/existing-tilers).
+Plan of 2026-11-16. **Phases 1 to 3 were built the same day** (see the two *Result* sections); phase 4, macOS,
+Linux and the server variant, is not started. The roadmap item is on the [future work](/docs/guide/todo-future-work)
+page; the tools are surveyed on [existing tilers](/docs/guide/existing-tilers). How to use it:
+[desktop app](/docs/guide/desktop-app#tile-raw-input), [CLI](/docs/guide/cli-usage#tile-raw-input-with-a-third-party-tiler).
+
+## Result: phases 2 and 3 (2026-11-16)
+
+Eight more tools, twelve in all, now for meshes too. A tool may write **3D Tiles** directly: that output is
+finished, so the app previews it as it is instead of streaming it.
+
+| Tool | Input | Output | How it gets on the machine |
+|---|---|---|---|
+| **gocesiumtiler 3.2.0** (`gotiler pcloud`) | `.las`, `.laz`, `.e57`, a point `.ply`, a folder | 3D Tiles 1.1 or 1.0 | download, 18 MB |
+| **gocesiumtiler 3.2.0** (`gotiler splats`) | a splat `.ply` | 3D Tiles with SPZ splats | the same download |
+| **point-tiler 0.0.12** | `.las`, `.laz`, `.csv` | 3D Tiles 1.1 | download, 17 MB, one `.exe` |
+| **PotreeConverter 1.7** | `.las`, `.laz`, `.ptx`, a point `.ply`, a folder | Potree 1.x folder | download, 17 MB |
+| **py3dtiles 12.1.1** | `.las`, `.laz`, `.xyz`, a point `.ply` | 3D Tiles | uv installs it into a private environment with its own Python |
+| **Obj2Tiles 1.10.2** | `.obj` | 3D Tiles | download, 24 MB |
+| **mago 3DTiler 1.17.0** | `.obj`, `.fbx`, `.3ds`, `.gltf`, `.glb`, CityGML, KML, Shapefile, GeoJSON, GeoPackage, `.las`, `.laz`, a folder | 3D Tiles | download, 390 MB `.jar`, and a Java 25 runtime |
+| **fanvanzh/3dtiles 0.4** | an OSGB folder | 3D Tiles (b3dm) | download, 13 MB (the 2021 binary) |
+
+**What changed in the package:**
+
+- **Three more ways to deliver a tool.** An asset that is the program itself (an `.exe`, a `.jar`) rather than a
+  zip. A **runtime** a tool runs on: Java for mago, looked for on the machine (`TILED_JAVA`, `JAVA_HOME`, `PATH`)
+  and used only if it is version 25 or newer, else Temurin's runtime is downloaded like a tool (59 MB, pinned
+  SHA-256). A **Python tool**: uv installs a pinned version from PyPI into a private environment, with a Python
+  that uv downloads, all inside the tools folder. Nothing is installed system-wide.
+- **Large downloads are written to disk as they come**, hashed on the way (the 390 MB jar is never held in memory).
+- **The input is a file or a folder.** A folder is matched by the extensions found in it; a tool says whether it
+  takes folders (untwine, both PotreeConverters, gocesiumtiler, mago) or only a folder (OSGB).
+- **A `.ply` is sniffed**: its header says points, a mesh or splats, and only the tools for that kind are offered.
+  A PLY mesh has no tool here yet.
+- **A 3D Tiles output is served from its folder** by `GET /tilers/files/<key>/…` (loopback, and only a folder a
+  run finished in: every run leaves a `.3dtiled-tiler.json` there, with the tool, its version, the input, the
+  options and the commands).
+- **Required options**: point-tiler cannot run without the input's EPSG code, and says so before it starts.
+
+**Tried on this machine (Windows 11)**, each tool run through the package on tiny synthetic inputs (a 20 000-point
+LAS, a 3 000-splat PLY with degree-1 harmonics, a textured OBJ of 3 200 triangles, all from
+`3dtiled tile samples`) and three OSGB tiles of the Dayanta sample; then every tileset and tile of the output
+fetched back through the tile server:
+
+| Run | Result, as served |
+|---|---|
+| gocesiumtiler on the LAS (`--crs EPSG:32631`) | 6 GLB tiles, 20 000 points |
+| gocesiumtiler `splats` on the PLY (`--max-sh-degree 3`) | 1 tile, 3 000 splats, harmonics of degree 1 kept (what the file holds) |
+| point-tiler on the LAS | 4 tiles |
+| py3dtiles on the LAS | 8 tiles (`.pnts`, 3D Tiles 1.0: see below) |
+| PotreeConverter 1.7 on the LAS, with a proj4 projection | Potree 1.x folder, streamed: 20 000 points |
+| Obj2Tiles on the OBJ, placed by longitude and latitude | 337 GLB tiles over 3 levels |
+| mago 3DTiler on the LAS, and on the OBJ | 5 tiles, 20 000 points; 4 tiles |
+| fanvanzh/3dtiles on the OSGB folder | 4 tilesets, 9 b3dm tiles |
+| the four tools of phase 1, again | COPC (PDAL, untwine), Potree 2, streamed SOG: served |
+
+- **Every download matched its pinned hash**, the 390 MB jar and the Java runtime included.
+- **Java 17 was on this machine**: it was passed over, and the Java 25 runtime fetched.
+- **Defender did not block** any of the eight downloaded programs here (this machine has an exclusion for the
+  app's own folder only, not for the tools folder).
+- One fix on the way: a Potree source given by its `cloud.js` path, not its folder, did not convert.
+
+**Run inside the built desktop app** (a local build, version 2026.11.16, installed on this machine). The *Tile raw
+input* form was driven through the app's own window, with real clicks sent over WebView2's debugging port: the
+dataset typed, the tool picked in the list, its options filled, *Run* pressed, then the preview or *Stream it*.
+Fourteen runs, all twelve tools, on the same tiny inputs:
+
+| Input | Tool | In the app |
+|---|---|---|
+| `points.las` | PDAL, untwine | COPC written; *Stream it* gave a tileset URL that answered, previewed in Cesium |
+| | PotreeConverter 2, PotreeConverter 1.7 | Potree folder written, streamed, previewed |
+| | gocesiumtiler | 3D Tiles, 6 tiles loaded in the Cesium preview, at the right place |
+| | point-tiler | **downloaded by the app** (button *Download and run*), then 3D Tiles, previewed |
+| | py3dtiles | 3D Tiles (`.pnts`), 8 tiles loaded in Cesium, once its default was changed (see below) |
+| | mago 3DTiler | 3D Tiles, 5 tiles loaded in Cesium |
+| a folder holding one LAS | gocesiumtiler | offered for the folder, 3D Tiles written |
+| `mesh.obj` | Obj2Tiles | **downloaded by the app**, 301 tiles loaded in Cesium at the longitude and latitude given |
+| | mago 3DTiler | 3D Tiles, 4 tiles loaded in Cesium at the longitude and latitude given |
+| the OSGB folder | fanvanzh/3dtiles | 3D Tiles, 12 tiles loaded in Cesium |
+| `splats.ply` (read as splats) | splat-transform | streamed SOG, previewed in the 3DTRjs viewer |
+| | gocesiumtiler `splats` | 3D Tiles, the splats drawn in the 3DTRjs viewer at the place given |
+
+- The app's bundled copy of the package, its subprocess runner under the app's own runtime, and its tile server
+  (serving the tools list, the input's description and the output folders) worked together.
+- **Found there and fixed:** the options typed for one input stayed for the next (a CRS left from a LAS was sent
+  with an OBJ, which then landed at 1.5° W on the equator), and the colour codes of a tool's output were shown as
+  text. Both fixed; another input now starts from the defaults. The app was rebuilt and reinstalled with the
+  fixes, and the runs they touch repeated in it (gocesiumtiler, py3dtiles, mago on the LAS then on the OBJ).
+- **py3dtiles' glTF tiles did not display.** Asked for 3D Tiles 1.1, py3dtiles 12.1.1 wrote tiles that Cesium
+  drew as one dot and 3DTilesRendererJS as a misplaced, saturated cloud (their byte colours are not marked as
+  normalized). Its 3D Tiles 1.0 output (`.pnts`), the tool's own default, displays correctly in Cesium, so 1.0 is
+  now the default here too; 1.1 stays as an option, with that warning.
+- **Not run inside the app:** the 390 MB mago download and py3dtiles' install (both were already installed, by
+  the same code from the command line), *Write tiny sample files* and the two *Folder…* buttons (they open a
+  native dialog), and Cancel (every run here ends in seconds).
+
+**Not verified:**
+
+- macOS and Linux: every download entry is Windows'.
+- Large inputs, and Cancel midway through a long run.
+- E57, PTX, XYZ, CSV, FBX, glTF, CityGML, KML, Shapefile, GeoJSON and GeoPackage inputs: the tools list them, none
+  was run. A folder input was run with gocesiumtiler only.
+- A machine without uv, where py3dtiles' install first downloads uv (here uv was already on `PATH`).
+- fanvanzh/3dtiles on a whole OSGB dataset: three tiles of one were cut out, and their deepest level was missing.
+- The file dialog's grouped type list: it needs a real click.
 
 ## Result: phase 1 (2026-11-16)
+
+The first four tools. What it says is *not verified* below was since done in phases 2 and 3, except macOS, Linux
+and large inputs.
 
 A new package, `packages/tilers`, finds a tool, fetches it when its authors publish a binary, builds its command
 line from checked options and runs it. The desktop app has a third flow, **Tile raw input**, on top of it, and the
@@ -131,14 +235,20 @@ to allow it. macOS and Linux come after, with the same manifests.
 
 1. **Windows, three tools** (**done**, as four: PDAL and untwine are separate entries): splat-transform (no
    download), PotreeConverter (one binary), PDAL/untwine found in a QGIS install. Proves detect, download, run, chain.
-2. **More single binaries**: gocesiumtiler, Obj2Tiles, fanvanzh/3dtiles.
-3. **Runtimes**: py3dtiles in a private `uv` environment, mago-3d-tiler with a portable JRE.
+2. **More single binaries** (**done**): gocesiumtiler (points and splats), point-tiler, PotreeConverter 1.7,
+   Obj2Tiles, fanvanzh/3dtiles.
+3. **Runtimes** (**done**): py3dtiles in a private `uv` environment, mago 3DTiler on a Java runtime fetched next
+   to it.
 4. **macOS and Linux**, then the server variant (the same manifests, Docker images where they exist).
 
 ## Open questions
 
 - Licences of each tool, for downloading on the user's behalf (we redistribute nothing if the app downloads from
-  the official release page; to confirm per licence).
+  the official release page; to confirm per licence). gocesiumtiler and Obj2Tiles are AGPL-3.0, untwine GPL-3.0:
+  the app runs them as separate programs and ships none of them.
+- Spark `build-lod` (splat PLY to RAD) has no released binary: it would need a Rust build, or the authors to
+  publish one.
+- A tiler for a PLY or OBJ mesh without textures, and for E57 to Potree.
 - Checksums: pinned per version in the manifest, so a moved or replaced asset fails loudly.
 - Disk and memory: tilers are out-of-core but write large temporary folders; the form should show where.
 - Which defaults to expose per tool, and which to hide behind "Advanced".

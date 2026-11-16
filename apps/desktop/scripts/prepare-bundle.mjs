@@ -27,7 +27,8 @@ fs.cpSync(path.join(repo, 'packages'), path.join(out, 'packages'), {
   recursive: true,
   filter: (src) => {
     const name = path.basename(src);
-    return name !== 'node_modules' && !name.endsWith('.test.js') && !name.endsWith('.test.mjs');
+    // `target`: a Rust build folder (rad-to-3dtiles/rust), hundreds of MB on a machine that built the wasm reader
+    return name !== 'node_modules' && name !== 'target' && !name.endsWith('.test.js') && !name.endsWith('.test.mjs');
   },
 });
 // Only the packages: the viewer's and docs' dependencies stay out, and with them most of the size.

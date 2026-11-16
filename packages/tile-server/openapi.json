@@ -1404,7 +1404,7 @@
     "/tilers": {
       "get": {
         "summary": "Third-party tilers for raw input, and where they are on this machine",
-        "description": "The tools the one-stop tiler can run on raw, untiled input (a LAS, an E57, a splat PLY): what each takes and writes, its options with their defaults, and whether it is on this machine (bundled, on PATH, in a QGIS install, downloaded) or can be downloaded. Read-only: a tool is run with `3dtiled tile run`, which the desktop app does in a subprocess (see `packages/tilers`). Loopback clients only, on a server started with TILED_ALLOW_EXPORT=1: the answer names paths of this machine.",
+        "description": "The tools the one-stop tiler can run on raw, untiled input (a point cloud, a mesh, Gaussian splats; a file or a folder): what each takes and writes, its options with their defaults, and whether it is on this machine (bundled, on PATH, in a QGIS install, downloaded) or what a download would fetch (`found.missing`, `found.downloadBytes`). Read-only: a tool is run with `3dtiled tile run`, which the desktop app does in a subprocess (see `packages/tilers`). Loopback clients only, on a server started with TILED_ALLOW_EXPORT=1: the answer names paths of this machine.",
         "tags": [
           "misc"
         ],
@@ -1415,7 +1415,7 @@
             "schema": {
               "type": "string"
             },
-            "description": "A file path or name: the answer then lists, in `for`, the tools that take it (by its extension)."
+            "description": "A file or folder path: the answer then describes it in `input` (a file or a folder, its extensions, and for a .ply whether it holds points, a mesh or splats) and lists, in `for`, the tools that take it."
           }
         ],
         "responses": {
@@ -1451,6 +1451,46 @@
           },
           "403": {
             "description": "Not enabled, or not a loopback client"
+          }
+        }
+      }
+    },
+    "/tilers/files/{key}/{path}": {
+      "get": {
+        "summary": "A file of a folder a tiler wrote",
+        "description": "Serves the output folder of a one-stop tiler run as a static host would, so that a 3D Tiles tileset a tool wrote opens in a viewer without a second server: `/tilers/files/<key>/tileset.json`, its tiles resolving next to it. `key` is the folder's absolute path, UTF-8, in base64url. Only a folder a run finished in is served (it holds the run's record, `.3dtiled-tiler.json`), never an arbitrary one. Loopback clients only, on a server started with TILED_ALLOW_EXPORT=1.",
+        "tags": [
+          "misc"
+        ],
+        "parameters": [
+          {
+            "name": "key",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "The output folder's absolute path, UTF-8, base64url"
+          },
+          {
+            "name": "path",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "A file inside it, e.g. tileset.json or data/0.glb"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The file"
+          },
+          "403": {
+            "description": "Not enabled, not a loopback client, or a path outside the folder"
+          },
+          "404": {
+            "description": "Not the output folder of a tiler run, or no such file"
           }
         }
       }

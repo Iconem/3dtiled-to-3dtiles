@@ -142,9 +142,9 @@ evaluated before assuming this would be a novel effort.
   as a personal dataset library, not a one-shot CLI wrapper. Purely an idea at this point — no design
   work, no scoping, not started.
 
-- [ ] **The desktop app as a one-stop tiler for raw, untiled input** (noted 2026-11-05; **phase 1 built 2026-11-16**:
-  PDAL, untwine, PotreeConverter and splat-transform on Windows, as the app's *Tile raw input* flow and `3dtiled tile`;
-  left: more tools, runtimes, macOS and Linux, a run inside a built app). Before it, the app took only sources 
+- [ ] **The desktop app as a one-stop tiler for raw, untiled input** (noted 2026-11-05; **phases 1 to 3 built 2026-11-16**:
+  twelve tools on Windows, for point clouds, meshes and splats, as the app's *Tile raw input* flow and `3dtiled tile`;
+  left: macOS and Linux, the server variant, large inputs). Before it, the app took only sources 
   that are already tiled (COPC, Potree, SOG, LCC, RAD, I3S, 3MX) and streamed or exported them. The shape: give it
   a raw LAS/LAZ/E57, a mesh (OBJ, glTF, OSGB) or a splat PLY, and it runs the right third-party tiler for you.
   It would fetch the tool's binary for the platform when a release exists (PotreeConverter, GoTiler, py3dtiles,

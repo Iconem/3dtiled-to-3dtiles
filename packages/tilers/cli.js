@@ -4,7 +4,8 @@
  *
  *   node packages/tilers/cli.js list [--json]                 the tools, what they take and write, their options
  *   node packages/tilers/cli.js detect [<tool>] [--json]      which are on this machine, and where
- *   node packages/tilers/cli.js for <input> [--json]          the tools that take this file
+ *   node packages/tilers/cli.js for <input> [--json]          the tools that take this file or folder
+ *   node packages/tilers/cli.js samples <folder>              write tiny synthetic inputs to try the tools on
  *   node packages/tilers/cli.js install <tool>                download a tool that publishes a binary (hash-checked)
  *   node packages/tilers/cli.js run <tool> <input> <outDir> [--<option> <value>]… [--install] [--overwrite] [--dry-run]
  *
@@ -16,7 +17,9 @@
  * The desktop app runs this file through its subprocess runner; options are checked against the tool's declared ones,
  * so nothing the caller sends reaches a command line unchecked.
  */
-import { TOOLS, listTools, detectTool, installTool, planRun, runTool, toolsFor, toolsDir, commandLine } from './index.js';
+import fs from 'node:fs';
+import { TOOLS, listTools, detectTool, installTool, planRun, runTool, toolsFor, describeInput, toolsDir, commandLine } from './index.js';
+import { writeSamples, SAMPLES } from './samples.js';
 
 const argv = process.argv.slice(2), cmd = argv[0];
 const json = argv.includes('--json');
@@ -38,8 +41,14 @@ try {
     out({ tools: found, toolsDir: toolsDir() }, found.map((d) => `${d.id.padEnd(16)} ${d.status.padEnd(8)} ${where(d)}`).join('\n'));
   } else if (cmd === 'for') {
     if (!argv[1]) fail('usage: for <input>');
-    const ids = toolsFor(argv[1]);
-    out({ input: argv[1], tools: ids }, ids.length ? ids.join('\n') : `no tool takes ${argv[1]}`);
+    const d = describeInput(argv[1]), ids = toolsFor(d);
+    const what = d.dir ? `a folder holding ${d.exts.map((e) => '.' + e).join(', ') || 'no file'}` : `a .${d.ext} file${d.ply ? ` of ${d.ply === 'mesh' ? 'a mesh' : d.ply}` : ''}`;
+    out({ input: d, tools: ids }, ids.length ? ids.join('\n') : `no tool takes ${what}: ${argv[1]}`);
+  } else if (cmd === 'samples') {
+    if (!argv[1] || argv[1].startsWith('--')) fail('usage: samples <folder>');
+    const files = writeSamples(argv[1]);
+    out({ dir: argv[1], files, samples: SAMPLES }, files.map((f) => `${String(fs.statSync(f).size).padStart(8)} B  ${f}`).join('\n') + '\n' + SAMPLES.map((s) => `${s.file}: ${s.about}`).join('\n'));
+    console.log(`TILER_SAMPLES ${JSON.stringify({ dir: argv[1], files })}`);
   } else if (cmd === 'install') {
     if (!argv[1]) fail('usage: install <tool>');
     const r = await installTool(argv[1], { log: (l) => console.log(l), force: argv.includes('--force') });
@@ -67,7 +76,7 @@ try {
       console.log(`TILER_RESULT ${JSON.stringify(r)}`);
     }
   } else {
-    console.log('usage: 3dtiled-tile list | detect [tool] | for <input> | install <tool> | run <tool> <input> <outDir> [--<option> <value>]… [--install] [--overwrite] [--dry-run]   (add --json for a machine-readable line)');
+    console.log('usage: 3dtiled-tile list | detect [tool] | for <input> | samples <folder> | install <tool> | run <tool> <input> <outDir> [--<option> <value>]… [--install] [--overwrite] [--dry-run]   (add --json for a machine-readable line)');
     process.exit(cmd && cmd !== 'help' && cmd !== '--help' ? 1 : 0);
   }
 } catch (e) { fail(e.message); }

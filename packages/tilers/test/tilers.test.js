@@ -8,7 +8,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import zlib from 'node:zlib';
-import { TOOLS, toolById, listTools, toolsFor, resolveOptions, planRun, unzip, installTool, detectTool, commandLine } from '../index.js';
+import { TOOLS, RUNTIMES, toolById, listTools, toolsFor, describeInput, sniffPly, resolveOptions, planRun, unzip, installTool, detectTool, detectRuntime, commandLine } from '../index.js';
 
 const found = (exe = ['tool.exe']) => ({ status: 'ready', source: 'path', exe });
 const tmp = () => fs.mkdtempSync(path.join(os.tmpdir(), 'tilers-test-'));
@@ -37,27 +37,57 @@ test('the manifest: every tool says what it takes, what it writes, how it is del
   for (const t of listTools()) {
     assert.ok(t.name && t.summary && t.licence && /^https:\/\//.test(t.homepage), t.id);
     assert.ok(t.inputs.length && t.output.format && t.output.label, t.id);
-    assert.ok(['bundled', 'download', 'detect'].includes(t.delivery));
+    assert.ok(['pointcloud', 'mesh', 'splat'].includes(t.kind), t.id);
+    assert.ok(['copc', 'potree', 'sog', '3dtiles'].includes(t.output.format), `${t.id}: an output this repo opens`);
+    assert.ok(['bundled', 'download', 'uv', 'detect'].includes(t.delivery));
+    assert.equal(t.inputs.includes('ply'), !!t.ply, `${t.id}: a tool that takes PLY says which kind`);
     for (const o of t.options) {
       assert.ok(o.key && o.label && o.help && ['int', 'number', 'bool', 'enum', 'text'].includes(o.type), `${t.id}.${o.key}`);
       assert.notEqual(o.default, undefined, `${t.id}.${o.key} has a default`);
       if (o.type === 'enum') assert.ok(o.values.includes(o.default));
+      if (o.required) assert.equal(o.default, '', `${t.id}.${o.key}: a required option has no default`);
     }
     assert.equal(JSON.parse(JSON.stringify(t)).id, t.id, 'plain data: it goes to a form as JSON');
   }
-  for (const t of TOOLS) for (const [key, dl] of Object.entries(t.provide.download ?? {})) {
+  for (const t of [...TOOLS, ...Object.values(RUNTIMES).map((r) => ({ provide: r }))]) for (const [key, dl] of Object.entries(t.provide.download ?? {})) {
     if (key === 'version') continue;
     assert.match(dl.url, /^https:\/\/github\.com\/[^/]+\/[^/]+\/releases\/download\//, 'a release asset of the project itself');
     assert.match(dl.sha256, /^[0-9a-f]{64}$/); assert.ok(dl.bytes > 0 && dl.exe);
   }
+  for (const t of TOOLS) if (t.provide.needs) assert.ok(RUNTIMES[t.provide.needs.runtime] && t.provide.command, `${t.id}: its runtime is declared`);
+  for (const t of TOOLS) if (t.provide.uv) assert.match(t.provide.uv.spec, /==\d/, `${t.id}: a pinned version`);
 });
 
-test('which tools take a file', () => {
-  assert.deepEqual(toolsFor('C:\\scans\\site.LAS'), ['potreeconverter', 'pdal', 'untwine']);
-  assert.deepEqual(toolsFor('/data/scan.e57'), ['pdal']);
-  assert.deepEqual(toolsFor('scene.ply'), ['splat-transform']);
+test('which tools take a file or a folder', () => {
+  assert.deepEqual(toolsFor('C:\\scans\\site.LAS'), ['pdal', 'untwine', 'potreeconverter', 'potreeconverter1', 'gocesiumtiler', 'point-tiler', 'py3dtiles', 'mago-3d-tiler']);
+  assert.deepEqual(toolsFor('/data/scan.e57'), ['pdal', 'gocesiumtiler']);
   assert.deepEqual(toolsFor('already.copc.laz'), [], 'a COPC is tiled already: it is streamed, not tiled again');
-  assert.deepEqual(toolsFor('model.obj'), []);
+  assert.deepEqual(toolsFor('model.obj'), ['obj2tiles', 'mago-3d-tiler']);
+  assert.deepEqual(toolsFor('scene.spz'), ['splat-transform']);
+  assert.deepEqual(toolsFor('notes.docx'), []);
+
+  // A PLY is points, a mesh or splats: its header says, and only the tools for that kind are offered.
+  const dir = tmp(), ply = (name, header) => { const f = path.join(dir, name); fs.writeFileSync(f, `ply\nformat binary_little_endian 1.0\n${header}\nend_header\n`); return f; };
+  const points = ply('points.ply', 'element vertex 10\nproperty float x\nproperty float y\nproperty float z\nproperty uchar red');
+  const splats = ply('splats.ply', 'element vertex 10\nproperty float x\nproperty float f_dc_0\nproperty float opacity\nproperty float scale_0');
+  const mesh = ply('mesh.ply', 'element vertex 10\nproperty float x\nelement face 20\nproperty list uchar int vertex_indices');
+  assert.deepEqual([sniffPly(points), sniffPly(splats), sniffPly(mesh)], ['points', 'splats', 'mesh']);
+  assert.deepEqual(toolsFor(points), ['potreeconverter1', 'gocesiumtiler', 'py3dtiles']);
+  assert.deepEqual(toolsFor(splats), ['splat-transform', 'gocesiumtiler-splats']);
+  assert.deepEqual(toolsFor(mesh), [], 'no tool here tiles a PLY mesh');
+  assert.equal(toolsFor('not-on-disk.ply').length, 5, 'a PLY that cannot be read is offered every PLY tool');
+
+  // A folder is matched by what it holds.
+  const scans = path.join(dir, 'scans'), osgb = path.join(dir, 'oblique');
+  fs.mkdirSync(scans); fs.writeFileSync(path.join(scans, 'a.las'), ''); fs.writeFileSync(path.join(scans, 'b.laz'), '');
+  fs.mkdirSync(path.join(osgb, 'Data', 'Tile_1'), { recursive: true }); fs.writeFileSync(path.join(osgb, 'metadata.xml'), ''); fs.writeFileSync(path.join(osgb, 'Data', 'Tile_1', 'Tile_1.osgb'), '');
+  assert.deepEqual(describeInput(scans).exts, ['las', 'laz']);
+  assert.deepEqual(toolsFor(scans), ['untwine', 'potreeconverter', 'potreeconverter1', 'gocesiumtiler', 'mago-3d-tiler'], 'the tools that take a folder');
+  assert.deepEqual(toolsFor(osgb), ['fanvanzh-3dtiles']);
+  assert.deepEqual(toolsFor(path.join(osgb, 'Data', 'Tile_1', 'Tile_1.osgb')), [], 'an OSGB tile alone is not an input: the folder is');
+  assert.throws(() => planRun('pdal', scans, path.join(dir, 'out'), {}, found()), /takes one file .*not a folder/);
+  assert.throws(() => planRun('gocesiumtiler', scans, path.join(scans, 'out'), {}, found()), /inside the input folder/);
+  assert.throws(() => planRun('splat-transform', points, path.join(dir, 'out'), {}, found()), /reads a PLY of splats; this one holds points/);
 });
 
 test('options: defaults filled, values checked, nothing undeclared or flag-like gets through', () => {
@@ -73,6 +103,11 @@ test('options: defaults filled, values checked, nothing undeclared or flag-like 
   assert.throws(() => resolveOptions(pdal, { srs: '--writers.copc.filename=C:\\x' }), /not a valid value/);
   assert.throws(() => resolveOptions(pdal, { srs: 'EPSG:2154\n--x' }), /not a valid value/);
   assert.equal(resolveOptions(pdal, { srs: ' EPSG:2154 ' }).srs, 'EPSG:2154');
+  const ptiler = toolById('point-tiler');
+  assert.throws(() => resolveOptions(ptiler), /inputEpsg: point-tiler \(MIERUNE\) needs it/, 'an option the tool cannot run without');
+  assert.equal(resolveOptions(ptiler, {}, true).inputEpsg, '', 'a form still being filled is not an error');
+  assert.equal(resolveOptions(toolById('potreeconverter1'), { projection: '+proj=utm +zone=31 +datum=WGS84' }).projection, '+proj=utm +zone=31 +datum=WGS84');
+  assert.equal(resolveOptions(toolById('gocesiumtiler-splats'), { upAxis: '-y', lon: '-2.5' }).lon, -2.5, 'a negative number and a signed axis are values, not flags');
 });
 
 test('commands: each tool is called the way it documents', () => {
@@ -102,6 +137,30 @@ test('commands: each tool is called the way it documents', () => {
   assert.equal(planRun('splat-transform', ply, out, { levels: 1 }, found(['node', 'cli.mjs'])).steps.length, 1, 'one level: no decimation');
   assert.equal(planRun('splat-transform', ply, out, { adaptive: true, levels: 2 }, found(['x'])).steps[0].cmd[3], '--decimate-adaptive');
 
+  // the tools that write 3D Tiles: the tileset is the output, opened as is
+  const exe = found(['t.exe']), ts = path.join(out, 'tileset.json'), obj = path.join(dir, 'model.obj');
+  const g = planRun('gocesiumtiler', las, out, { crs: 'EPSG:32631', version: '1.0' }, exe);
+  assert.deepEqual(g.steps[0].cmd, ['t.exe', 'pcloud', '--plain', '-o', out, '--version', '1.0', '--points-per-tile', '50000', '--refine-mode', 'add', '--crs', 'EPSG:32631', las]);
+  assert.deepEqual([g.output.format, g.output.path], ['3dtiles', ts]);
+  const gs = planRun('gocesiumtiler-splats', ply, out, { maxShDegree: 3, upAxis: '-y', lon: 2.29, lat: 48.86 }, exe);
+  assert.deepEqual(gs.steps[0].cmd, ['t.exe', 'splats', '--plain', '--no-preview', '-o', out, '--max-sh-degree', '3', '--input-up-axis', '-y', '--splats-per-tile', '40000', '--min-opacity', '0.05', '--longitude', '2.29', '--latitude', '48.86', ply]);
+  const pt = planRun('point-tiler', las, out, { inputEpsg: 32631, meshopt: true }, exe);
+  assert.deepEqual(pt.steps[0].cmd, ['t.exe', '--input', las, '--output', out, '--input-epsg', '32631', '--output-epsg', '4979', '--min', '15', '--max', '18', '--max-memory-mb', '4096', '--temp-dir', path.join(out, '.tiler-tmp'), '--meshopt']);
+  const o2 = planRun('obj2tiles', obj, out, {}, exe);
+  assert.deepEqual(o2.steps[0].cmd, ['t.exe', '--lods', '3', '--divisions', '2', '--texture-format', 'Jpeg', '--decimation-mode', 'Standard', '--max-texture-size', '4096', '--local', '--glb', '--octree', obj, out], 'no position given: a local tileset');
+  assert.ok(planRun('obj2tiles', obj, out, { lon: 2.29, lat: 48.86 }, exe).steps[0].cmd.join(' ').includes('--lon 2.29 --lat 48.86 --alt 0'));
+  const p1 = planRun('potreeconverter1', las, out, { format: 'LAZ', attributes: 'rgb intensity', projection: '+proj=utm +zone=31' }, exe);
+  assert.deepEqual(p1.steps[0].cmd, ['t.exe', las, '-o', out, '--output-format', 'LAZ', '--output-attributes', 'RGB', 'INTENSITY', '--projection', '+proj=utm +zone=31']);
+  assert.deepEqual([p1.output.path, path.basename(p1.output.proof)], [out, 'cloud.js']);
+  const py = planRun('py3dtiles', las, out, { srsIn: 32631 }, exe);
+  assert.deepEqual(py.steps[0].cmd, ['t.exe', 'convert', las, '--out', out, '--overwrite', '--spec-version', '1.0', '--srs_in', '32631', '--srs_out', '4978']);
+  assert.ok(!planRun('py3dtiles', las, out, {}, exe).steps[0].cmd.includes('--srs_out'), 'no reprojection asked of a file without a CRS');
+  const m = planRun('mago-3d-tiler', obj, out, { crs: 'EPSG:5186', rotateX: 90 }, found(['java', '-jar', 'mago.jar']));
+  assert.deepEqual(m.steps[0].cmd, ['java', '-jar', 'mago.jar', '--input', obj, '--output', out, '--temp', path.join(out, '.tiler-tmp'), '--inputType', 'obj', '--tilesVersion', '1.1', '--crs', '5186', '--rotateXAxis', '90']);
+  const osgb = path.join(dir, 'oblique'); fs.mkdirSync(path.join(osgb, 'Data'), { recursive: true }); fs.writeFileSync(path.join(osgb, 'Data', 'a.osgb'), '');
+  const f = planRun('fanvanzh-3dtiles', osgb, out, { lon: 108.96, lat: 34.22, maxLevel: 18 }, exe);
+  assert.deepEqual(f.steps[0].cmd, ['t.exe', '-f', 'osgb', '-i', osgb, '-o', out, '-c', '{"x":108.96,"y":34.22,"max_lvl":18}']);
+
   assert.throws(() => planRun('potreeconverter', ply, out, {}, found()), /takes \.las, \.laz, not \.ply/);
   assert.throws(() => planRun('pdal', las, out, {}, { status: 'missing', hint: 'not found: install QGIS' }), /not available: not found: install QGIS/);
   assert.throws(() => planRun('nope', las, out), /unknown tool/);
@@ -119,6 +178,48 @@ test('a download that does not match its pinned hash installs nothing', async ()
   assert.equal(detectTool('potreeconverter').source === 'downloaded', false);
   await assert.rejects(installTool('potreeconverter', { fetch: async () => new Response('gone', { status: 404 }) }), /HTTP 404/);
   await assert.rejects(installTool('pdal'), /no download/);
+});
+
+test('a tool that needs a runtime says what is missing, and a found runtime that is too old is passed over', async (t) => {
+  const dir = tmp(); process.env.TILED_TOOLS_DIR = dir;
+  const saved = { path: process.env.PATH, Path: process.env.Path, home: process.env.JAVA_HOME };
+  process.env.PATH = dir; delete process.env.Path; delete process.env.JAVA_HOME;      // a machine without Java
+  try {
+    const key = `${process.platform}-${process.arch}`, has = !!RUNTIMES.java.download[key];
+    const d = detectTool('mago-3d-tiler');
+    assert.equal(d.status, 'missing');
+    if (has) {
+      assert.equal(d.missing.length, 2, 'the program and its Java runtime');
+      assert.equal(d.downloadBytes, toolById('mago-3d-tiler').provide.download[key].bytes + RUNTIMES.java.download[key].bytes);
+      assert.equal(d.downloadable, true);
+    }
+    assert.equal(detectRuntime('java', 25).status, 'missing');
+    // a `java` that answers version 17 is not one mago can run on (Node stands in for it, asked to print that)
+    const asked = RUNTIMES.java.version;
+    RUNTIMES.java.version = { ...asked, args: ['-e', 'console.error(\'openjdk version "17.0.12" 2024-07-16\')'] };
+    t.after(() => { RUNTIMES.java.version = asked; });
+    process.env.TILED_JAVA = process.execPath;
+    const old = detectRuntime('java', 25);
+    assert.equal(old.status, 'missing'); assert.match(old.hint, /is version 17/);
+    assert.equal(detectRuntime('java', 17).status, 'ready', 'the same one is fine for a tool that asks for 17');
+  } finally {
+    process.env.PATH = saved.path; if (saved.Path !== undefined) process.env.Path = saved.Path; if (saved.home !== undefined) process.env.JAVA_HOME = saved.home; delete process.env.TILED_JAVA;
+  }
+});
+
+test('an asset that is the program itself (an .exe, a .jar) is put in place, hash-checked like an archive', async (t) => {
+  const dir = tmp(); process.env.TILED_TOOLS_DIR = dir;
+  const tool = toolById('point-tiler'), key = `${process.platform}-${process.arch}`, real = tool.provide.download[key];
+  if (!real) return;
+  const program = Buffer.from('MZ a program');
+  tool.provide.download[key] = { ...real, sha256: createHash('sha256').update(program).digest('hex'), bytes: program.length };
+  t.after(() => { tool.provide.download[key] = real; });
+  const r = await installTool('point-tiler', { fetch: async () => new Response(program) });
+  assert.equal(fs.readFileSync(r.exe, 'utf8'), 'MZ a program');
+  assert.equal(path.basename(r.exe), real.exe);
+  assert.deepEqual(fs.readdirSync(path.join(dir, 'point-tiler')), [tool.provide.download.version], 'no download file left beside it');
+  // two tools that are one binary share the install
+  assert.equal(toolById('gocesiumtiler').provide, toolById('gocesiumtiler-splats').provide);
 });
 
 test('a matching download is unpacked where detection finds it, without its wrapping folder', async (t) => {

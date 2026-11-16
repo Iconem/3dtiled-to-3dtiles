@@ -5,6 +5,31 @@ Format loosely follows [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+### Added — 2026-11-16 (one-stop tiler, phases 2 and 3)
+- **Eight more tools in *Tile raw input*, twelve in all**, now for meshes too and with 3D Tiles as an output:
+  gocesiumtiler 3.2 (points, and splats to 3D Tiles with SPZ), point-tiler, py3dtiles, PotreeConverter 1.7,
+  Obj2Tiles, mago 3DTiler, fanvanzh/3dtiles (OSGB). Each is downloaded from its authors' release and checked
+  against a pinned SHA-256.
+- **Runtimes, next to the tool and never system-wide**: mago 3DTiler runs on a Java 25 runtime that is fetched
+  when the machine has none; py3dtiles is installed by uv into a private environment with its own Python.
+- **The input is a file or a folder**, and a `.ply` is read to tell points, a mesh and splats apart, so only the
+  tools for what it holds are offered. The file dialog lists the types by family.
+- **A 3D Tiles output is previewed as it is**: the tile server serves the folder a tiler wrote
+  (`GET /tilers/files/<key>/…`, loopback, only for a folder a run finished in).
+- **`3dtiled tile samples <folder>`** writes tiny synthetic inputs (a LAS, a splat PLY, a textured OBJ); the app
+  has it as *Write tiny sample files*.
+- **Run inside a built desktop app**: all twelve tools, fourteen runs on tiny synthetic inputs, driven through the
+  app's own form, with the result previewed. Two form bugs found there and fixed (options carried over to the next
+  input; colour codes shown in a tool's output). py3dtiles defaults to 3D Tiles 1.0: its 1.1 glTF tiles did not
+  display.
+- **Fix**: a Potree source given by its `cloud.js` or `metadata.json` path, instead of its folder, now converts.
+- **Desktop bundle**: a Rust build folder no longer ends up in a locally built installer (238 MB down to 194 MB).
+
+### Docs — 2026-11-16 (spherical harmonics, for users)
+- The viewer guide describes the *harmonics* and *centroids* pills; the CLI guide has `--sh N`; the harmonics page
+  lists which of the 21 streamed-SOG, LCC2 and RAD samples hold harmonics (10 do).
+- The *Oval Interior Spaces* sample was removed: its host answers 403.
+
 ### Added — 2026-11-16 (one-stop tiler, phase 1)
 - **Desktop app: a third flow, *Tile raw input*.** Give it a raw LAS, LAZ, E57 or splat PLY: it offers the
   third-party tilers that take it, shows each tool's own options, runs it in a subprocess with its output and
