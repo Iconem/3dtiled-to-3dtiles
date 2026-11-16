@@ -176,14 +176,13 @@ evaluated before assuming this would be a novel effort.
   `node_modules/3d-tiles-tools/`, 148 KB of headers, which no small test app has. One line fixes it,
   `const count: usize = @min(…)`: with it, `verifyTree` on our tree takes 53 s. The same function runs when a
   retained tar is migrated, which is the first case. Nothing on their tracker reports it; the feature landed on
-  `main` in four commits over 29 hours with no pull request. The report to Electrobun is drafted
-  (`.local/electrobun-issue.md`) and waits for a go-ahead. Move past 2.0.2 once a release carries the fix, and test
+  `main` in four commits over 29 hours with no pull request. Reported on
+  [#605](https://github.com/blackboardsh/electrobun/issues/605#issuecomment-6875378103) on 2026-11-14. Move past 2.0.2 once a release carries the fix, and test
   it the same way first.
 - [ ] **Send the glTF-Transform fast path upstream.** `patches/@gltf-transform__core@4.4.0.patch` copies a lone vertex
   accessor whole instead of component by component (`VertexLayout.SEPARATE`): seven times faster on megabyte tiles,
-  same bytes ([what it does and why](/docs/guide/gltf-transform#the-writer-patch)). The pull
-  request is drafted against `packages/core/src/io/writer.ts` of donmccurdy/glTF-Transform (`main` is unchanged
-  there since 4.4.0; 4.5.1 is current) and waits for a go-ahead to open; merged, it would let the patch go. The
+  same bytes ([what it does and why](/docs/guide/gltf-transform#the-writer-patch)). Opened
+  upstream on 2026-11-16 as [glTF-Transform#1877](https://github.com/donmccurdy/glTF-Transform/pull/1877); once merged and released, the patch goes. The
   patch is pinned to 4.4.0: pnpm refuses to install if the version moves without it.
 - [x] **`@playcanvas/splat-transform` 3.x** (done 2026-11-08: 2.6.0 to 3.10.3). The SOG tiles are the same bytes;
   decode time and the two-second load per thread are unchanged (3.0's "7× faster" is a streaming PLY filter
