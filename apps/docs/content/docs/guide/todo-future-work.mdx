@@ -25,8 +25,8 @@ Roughly in the order we're tackling them, grouped by theme below.
   already is except `remote-zip.js`'s SLPK unzip (`node:zlib` call with no browser equivalent). Now a project plan:
   [Tiled formats read in the browser (draft)](/docs/guide/planning/tiled-formats-plugin), 3DTilesRendererJS plugins
   over the readers of this repo, no tile server.
-- **Rendering/viewer** — a drafted upstream feature request for `3d-tiles-rendererjs-3dgs-plugin` to
-  expose `lodInflate`/`lodSplatScale` SparkRenderer settings (currently worked around internally).
+- **Rendering/viewer** — upgrade `3d-tiles-rendererjs-3dgs-plugin` from 0.1.13 (Spark) to 0.3.x (its author's
+  Gaussian Splat Lite renderer), which needs a newer three.js; the drafted Spark LoD feature request is obsolete.
 - **Streaming architecture** — route `tiling=explicit` through the existing `implicit-to-explicit` tool
   instead of bespoke per-adapter logic (design sketch only); a server-side progress endpoint for
   `cache=hierarchy`/`cache=full` jobs.
@@ -302,7 +302,15 @@ flowchart LR
     bounding-box centre lands offset by exactly that amount, so a gizmo built on this will want the
     as-yet-unbuilt `&anchor=center|origin` option to feel predictable.
 
-- [ ] **Feature request draft — expose SparkRenderer LoD options in `3d-tiles-rendererjs-3dgs-plugin`.**
+- [ ] **Upgrade the splat plugin: `3d-tiles-rendererjs-3dgs-plugin` 0.1.13 → 0.3.x** (noted 2026-11-16). The viewer
+  is still on 0.1.13, which draws through Spark (`@sparkjsdev/spark` 2.1.0). Since 0.2.0 (2026-08-28) the plugin
+  draws through its author's own renderer, [Gaussian Splat Lite](https://github.com/WilliamLiu-1997/Gaussian-Splat-Lite)
+  (WebGPU and WebGL2), and no longer uses Spark. 0.3.1 asks for `three` 0.187 or later (the viewer is on 0.180) and
+  `gaussian-splat-lite` 1.6 or later, so it is a three.js upgrade first. To do with it: drop Spark and the
+  `getSparkRendererForScene` workaround, re-check every splat preset, and compare frame times before and after.
+- [x] ~~**Feature request draft — expose SparkRenderer LoD options in `3d-tiles-rendererjs-3dgs-plugin`.**~~
+  Obsolete (2026-11-16): the plugin left Spark for Gaussian Splat Lite, so there is nothing to ask. The draft is
+  kept below for the record of what the workaround does until the upgrade above.
   **Target repo:** https://github.com/WilliamLiu-1997/3D-Tiles-RendererJS-3DGS-Plugin
 
   **Title:** Allow passing `lodInflate` / `lodSplatScale` (and other SparkRenderer LoD settings) through
