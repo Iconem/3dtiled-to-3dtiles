@@ -197,7 +197,8 @@ evaluated before assuming this would be a novel effort.
   `materializeToDataTable`; `writeSog` wants `iterations`; `readLcc`/`readLcc2` left the root exports (they are
   behind `readFile({inputFormat})`). Node 22 or later is now required, which Docker and the desktop bundle already
   had. The library and its peers are compared on the [splat tools](/docs/guide/splat-tools) page.
-- [ ] **RAD through Spark's own Rust reader, as WebAssembly.** Spark's `rust/spark-lib` crate has a `rad` feature
+- [x] **RAD through Spark's own Rust reader, as WebAssembly** (done 2026-11-16: it agrees with our reader on three
+  files and found a colour bug in ours on files with spherical harmonics; see the *Result* in the plan linked below). Spark's `rust/spark-lib` crate has a `rad` feature
   (`rad.rs`, 1 800 lines, decoder and encoder) and `wasm-pack` build scripts. The published npm package embeds the
   module as base64 with the renderer's exports only, so it is a build of our own: `wasm-pack build --target nodejs
   --no-default-features --features rad,gsplat`, a thin binding from Spark's packed splats to columns, tiles compared

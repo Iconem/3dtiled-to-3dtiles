@@ -3,7 +3,7 @@ title: "Splats: spherical harmonics and Spark's RAD reader (draft)"
 description: "Draft plan to carry view-dependent colour (spherical harmonics above degree 0) through every tiled splat format, and to read RAD with Spark's own Rust code compiled to WebAssembly."
 ---
 
-Draft, 2026-11-16. Not started. Two plans that meet: the second gives the first its RAD part. The roadmap items are
+Draft, 2026-11-16. **Part 2 is done** (same day, see its *Result*); part 1 is not started. Two plans that meet: the second gives the first its RAD part. The roadmap items are
 on the [future work](/docs/guide/todo-future-work) page, which also holds the earlier design notes.
 
 ## Part 1: spherical harmonics above degree 0
@@ -85,6 +85,27 @@ switch: `sh=0|1|2|3` on `/stream` and on the converters, capped by what the sour
 - **Sources without coefficients** give exactly today's tiles whatever `sh` says.
 
 ## Part 2: RAD through Spark's own Rust reader
+
+### Result (2026-11-16)
+
+Done as planned, in `packages/rad-to-3dtiles`: `rust/spark-rad-wasm` is a thin crate over `spark-lib` at a pinned
+commit (Spark 2.4.0), its build is committed in `vendor/spark-rad-wasm` (250 KB), and `src/sparkRad.js` calls it.
+
+| Compared on | Chunks | Result |
+|---|---|---|
+| Tastier (0.7 M splats) | 6 of 11 | positions, opacity and colour identical; scale and rotation equal to float rounding |
+| Cave (World Labs) | 4 | the same |
+| Coit Tower (51 M splats, degree-1 harmonics) | 5 | **colours differed by up to 0.145**: a bug of ours, fixed |
+
+- **The bug it found.** A file with spherical harmonics stores base colours outside 0..1 (Coit: -0.015 to 1.145) and
+  says so in the property's `min` and `max`. Our reader read the byte as 0..1, so every colour of such a file was
+  shifted. It now applies the range, and the two readers agree to 1e-7.
+- **Speed.** Spark's decoder takes 0.7 to 0.9 times the time of ours per chunk, single thread.
+- **Decision.** Ours stays the reader that makes tiles: it is exact, has no binary, and reads only the properties a
+  request needs. Spark's is the reference in the tests (`tile-server/spark-rad.test.js`, a chunk built in the
+  file's layout and decoded by both) and on real files (`scripts/compare-rad-readers.mjs`), and it is where the
+  spherical-harmonic bands of part 1 will come from: it already returns `sh1` for Coit.
+- **Not done:** writing RAD (the encoder is in the crate, not exposed yet); a browser build.
 
 ### Where we are
 

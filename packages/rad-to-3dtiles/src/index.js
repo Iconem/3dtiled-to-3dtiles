@@ -107,16 +107,20 @@ function decodeF16(raw, count) {
  * Decode r8_delta column: channel-planar uint8 with delta accumulation.
  * [R deltas 0..N-1][G deltas N..2N-1][B deltas 2N..3N-1]
  * First value per channel is absolute; subsequent values are signed deltas.
- * Returns Float32Array rgb interleaved [r0,g0,b0, r1,g1,b1, ...] in [0,1].
+ * The byte is a position between the property's `min` and `max` (Spark's decode_r8_delta): files with spherical
+ * harmonics store a base colour that leaves [0,1] (Coit: -0.015 to 1.145), and reading the byte as 0..1 shifted
+ * every colour by up to 0.145. Found by comparing with Spark's own decoder (sparkRad.js).
+ * Returns Float32Array rgb interleaved [r0,g0,b0, r1,g1,b1, ...].
  */
-function decodeRgbDelta(raw, count) {
+function decodeRgbDelta(raw, count, min = 0, max = 1) {
   const result = new Float32Array(count * 3);
+  const k = (max - min) / 255;
   for (let c = 0; c < 3; c++) {
     let val = raw[c * count] & 0xFF;
-    result[c] = val / 255;
+    result[c] = val * k + min;
     for (let i = 1; i < count; i++) {
       val = (val + raw[c * count + i]) & 0xFF;
-      result[i * 3 + c] = val / 255;
+      result[i * 3 + c] = val * k + min;
     }
   }
   return result;
@@ -258,7 +262,13 @@ async function writeChunkGlb(buf, chunk, payloadBase, outputPath) {
   return { bounds, featureSize, count, kept };
 }
 
-async function _encodeChunkGlb(buf, chunk, payloadBase) {
+/**
+ * One chunk's splats as columns, as our own reader decodes them (no filtering, no scaling): what the tiles are made
+ * from, and what `sparkRad.js` is compared with. `alphaRaw` is the stored opacity; a `lodOpacity` file stores half.
+ * @returns {{count:number, lodOpacity:boolean, positions:Float32Array, alphaRaw:Float32Array|null,
+ *            rgb:Float32Array|null, scales:Float32Array|null, rotations:Float32Array|null}}
+ */
+export function decodeChunkColumns(buf, chunk, payloadBase) {
   const { meta, count, props } = parseRadcChunk(buf, chunk, payloadBase,
     ['center', 'alpha', 'rgb', 'scales', 'orientation']);
 
@@ -275,26 +285,35 @@ async function _encodeChunkGlb(buf, chunk, payloadBase) {
   const enc    = meta.splatEncoding ?? {};
   const lnMin  = enc.lnScaleMin  ?? LN_SCALE_MIN;
   const lnMax  = enc.lnScaleMax  ?? LN_SCALE_MAX;
-  const lodOp  = enc.lodOpacity  ?? false;
+  const rgbProp = (meta.properties ?? []).find(p => p.property === 'rgb');
+  return {
+    count, lodOpacity: enc.lodOpacity ?? false,
+    // Raw RAD coordinates — NO global-centroid subtraction. Subtracting a float
+    // offset before int24 quantisation buys nothing (RAD scenes already sit near
+    // the origin) and would just be an extra lossy step; keeping the native frame
+    // also means a real root transform could place the tileset later if needed.
+    positions: decodeF32LeBytes(props.get('center'), 3, count),
+    alphaRaw:  props.has('alpha')       ? decodeF16(props.get('alpha'), count) : null,
+    rgb:       props.has('rgb')         ? decodeRgbDelta(props.get('rgb'), count, rgbProp?.min ?? enc.rgbMin ?? 0, rgbProp?.max ?? enc.rgbMax ?? 1) : null,
+    scales:    props.has('scales')      ? decodeScales(props.get('scales'), count, lnMin, lnMax) : null,
+    rotations: props.has('orientation') ? decodeOrientationToQuat(props.get('orientation'), count) : null,
+  };
+}
 
-  // Raw RAD coordinates — NO global-centroid subtraction. Subtracting a float
-  // offset before int24 quantisation buys nothing (RAD scenes already sit near
-  // the origin) and would just be an extra lossy step; keeping the native frame
-  // also means a real root transform could place the tileset later if needed.
-  const positions = decodeF32LeBytes(props.get('center'), 3, count);
+async function _encodeChunkGlb(buf, chunk, payloadBase) {
+  const cols = decodeChunkColumns(buf, chunk, payloadBase);
+  const { count, positions } = cols;
+  const lodOp = cols.lodOpacity;
+  let { rgb, scales, rotations } = cols;
 
   const alphas = new Float32Array(count);
-  if (props.has('alpha')) {
-    const raw = decodeF16(props.get('alpha'), count);
+  if (cols.alphaRaw) {
+    const raw = cols.alphaRaw;
     for (let i = 0; i < count; i++)
       alphas[i] = Math.max(0, Math.min(1, (lodOp ? raw[i] * 2 : raw[i]) * OPTS.alphaScale));
   } else {
     alphas.fill(1);
   }
-
-  let rgb       = props.has('rgb')         ? decodeRgbDelta(props.get('rgb'), count)               : null;
-  let scales    = props.has('scales')      ? decodeScales(props.get('scales'), count, lnMin, lnMax) : null;
-  let rotations = props.has('orientation') ? decodeOrientationToQuat(props.get('orientation'), count) : null;
 
   // ── Noise / outlier filtering ──────────────────────────────────────────────
   // SparkJS's native renderer hides faint and giant "floating noise" splats via

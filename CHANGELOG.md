@@ -5,6 +5,18 @@ Format loosely follows [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+### Added — 2026-11-16 (Spark's own RAD decoder, as a reference)
+- **`packages/rad-to-3dtiles/src/sparkRad.js`**: Spark's Rust RAD decoder (`spark-lib`, pinned at Spark 2.4.0)
+  compiled to WebAssembly (`vendor/spark-rad-wasm`, 250 KB, built from `rust/spark-rad-wasm`). It decodes one chunk
+  into columns, spherical harmonics included. Our reader still makes the tiles; Spark's checks it, in the tests and
+  with `node scripts/compare-rad-readers.mjs <a .rad url>`.
+
+### Fixed — 2026-11-16 (RAD colours on files with spherical harmonics)
+- **Colours of a RAD file that carries spherical harmonics were shifted by up to 0.145** (of 1): such files store
+  base colours outside 0..1 and give the range in the property's `min`/`max`, which our reader ignored. Found by the
+  comparison with Spark's decoder on the Coit Tower file; the two now agree to 1e-7 on colour, exactly on position
+  and opacity. Files without harmonics (range 0..1) are unchanged.
+
 ### Fixed — 2026-11-16 (meshopt tiles load in the viewer)
 - **`transform=meshopt` tiles failed in our own three.js viewer** ("setMeshoptDecoder must be called"): the server
   could send them, CesiumJS could read them, the 3DTilesRendererJS viewer could not. The meshopt decoder is now

@@ -1,0 +1,13 @@
+{
+  "name": "spark-rad-wasm",
+  "description": "Spark's own RAD decoder (rust/spark-lib, feature `rad`) as a WebAssembly module for Node: one RAD chunk in, its splat columns out.",
+  "version": "0.1.0",
+  "license": "MIT",
+  "files": [
+    "spark_rad_wasm_bg.wasm",
+    "spark_rad_wasm.js",
+    "spark_rad_wasm.d.ts"
+  ],
+  "main": "spark_rad_wasm.js",
+  "types": "spark_rad_wasm.d.ts"
+}
