@@ -1,0 +1,150 @@
+---
+title: "Splats: spherical harmonics and Spark's RAD reader (draft)"
+description: "Draft plan to carry view-dependent colour (spherical harmonics above degree 0) through every tiled splat format, and to read RAD with Spark's own Rust code compiled to WebAssembly."
+---
+
+Draft, 2026-11-16. Not started. Two plans that meet: the second gives the first its RAD part. The roadmap items are
+on the [future work](/docs/guide/todo-future-work) page, which also holds the earlier design notes.
+
+## Part 1: spherical harmonics above degree 0
+
+### Where we are
+
+A Gaussian splat's colour changes with the viewing direction: a base colour (degree 0) plus up to three bands of
+spherical-harmonic coefficients (degrees 1 to 3: 3, 8 and 15 coefficients per colour channel). Every splat path
+here keeps the base colour only:
+
+| Source | What it stores | What we do today |
+|---|---|---|
+| **Streamed SOG, LCC2** | `shN_centroids.webp` + `shN_labels.webp`: a palette of coefficient sets, one label per splat, 1 to 3 bands | the `shN_*` planes are not even downloaded (`sogBundle.js`) |
+| **LCC** | `Shcoef.bin` in *Quality* scenes: 64 bytes per splat, 15 coefficients packed on 11 bits, degree 3 | not read |
+| **RAD** | `sh1`, `sh2`, `sh3` in Spark's packed form | read by the Spark path, not written to tiles |
+| **GeoSplats** | built on SOG chunks, so presumably the same planes | **to confirm** |
+| **SPZ, PLY** (extract, future inputs) | SPZ: quantised coefficients; PLY: `f_rest_*` columns | PLY's are decoded and dropped |
+
+So shiny and view-dependent surfaces look flat. It is the largest remaining gap in splat quality.
+
+### The output side is ready
+
+Tiles are GLBs with `KHR_gaussian_splatting` and its SPZ compression (`core/spz-glb.js`). SPZ has a field for the
+degree and stores the coefficients on 8 bits each, and the uncompressed form of the extension reserves
+`SH_DEGREE_n_COEF_m` attributes. Nothing new to specify: the writer has to fill what the formats already define.
+
+### What it costs
+
+Coefficients are most of a splat's bytes. Per splat, before gzip:
+
+| Degree kept | Extra bytes | Tile size against today's 19 bytes per splat |
+|---|---|---|
+| 0 (today) | 0 | 1× |
+| 1 | 9 | about 1.5× |
+| 2 | 24 | about 2.3× |
+| 3 | 45 | about 3.4× |
+
+These are the raw SPZ sizes; gzip narrows the gap, by how much is **to measure**. So the degree is an option, not a
+switch: `sh=0|1|2|3` on `/stream` and on the converters, capped by what the source holds.
+
+### Design
+
+- **One option, `sh`**, default to be chosen after the size and speed measurements below (candidates: `0` live and
+  the source's degree on export; or `1` everywhere).
+- **`core/spz-glb.js`** takes optional coefficient arrays and writes the SPZ degree. One writer serves every format.
+- **Each reader** returns coefficients in one layout (per splat, per coefficient, RGB) and one convention, converted
+  from its own: SOG's palette looked up, LCC's packed values unpacked and scaled, RAD's unpacked.
+- **Rotations.** Coefficients are expressed in the splat's frame. A rotation carried by the tile's transform needs
+  nothing: the renderer applies it. A rotation the reader **bakes into positions** (the axis flips some formats get,
+  LCC's upright fix) must be applied to the coefficients too, band by band. This is the part most likely to be
+  wrong silently, so it has its own test.
+- **Coarse levels.** SOG, RAD and LCC store coefficients for their merged, coarse splats too, so levels of detail
+  come for free; no averaging of our own.
+- **Extract.** `/extract/splat` passes coefficients through when the tiles have them.
+- **Clients.** Which viewers draw the coefficients from an SPZ tile (Spark through the 3DGS plugin, CesiumJS,
+  Cesium for Unreal) is **to check** first: if the main viewer ignores them, the option is only worth its bytes on
+  export.
+
+### Phases
+
+| Phase | What | Done when |
+|---|---|---|
+| **0. Check the clients** | one hand-made degree-3 tile, loaded in each viewer | we know who draws it |
+| **1. Writer** | `spz-glb.js` writes degrees 1 to 3 | a tile read back with `splat-transform` gives the coefficients within quantisation |
+| **2. Streamed SOG** (and LCC2, GeoSplats on the same code) | read the `shN_*` planes when `sh>0` | a SOG scene matches PlayCanvas's own viewer from fixed views |
+| **3. RAD** | from the Spark reader of part 2 | matches Spark's viewer |
+| **4. LCC** | `Shcoef.bin` | matches the LCC viewer on a *Quality* scene |
+| **5. Extract and docs** | pass-through, option documented, sizes published | benchmark table on the [splat tools](/docs/guide/splat-tools) page |
+
+### Tests to do
+
+- **Round trip**: a PLY with known coefficients → tile → read back: equal within the 8-bit step.
+- **Rotation**: a synthetic splat lit from one side, pushed through each baked flip; the bright side must stay on
+  the same world side. One case per format that bakes a rotation.
+- **Convention** (sign and order of coefficients) per format, against that format's own viewer, from four fixed
+  views. Splats do not render in our headless Chrome, so this is numbers first, then eyes.
+- **Size and speed** per degree on one scene per format: tile bytes raw and gzipped, decode time on the server,
+  frame time in the viewer.
+- **Sources without coefficients** give exactly today's tiles whatever `sh` says.
+
+## Part 2: RAD through Spark's own Rust reader
+
+### Where we are
+
+RAD is Spark's streamed splat format. We read it with our own JavaScript port (`radHeader.js`, `lodWalker.js`).
+Spark's source has the reference reader and writer in Rust (`rust/spark-lib`, feature `rad`), built for the
+browser with `wasm-pack`. The npm package embeds that module with the renderer's exports only, so the RAD
+functions are not reachable from it.
+
+### The idea
+
+Build Spark's crate ourselves, once, to WebAssembly for Node, and call it from the RAD package:
+
+```
+wasm-pack build --target nodejs --no-default-features --features rad,gsplat
+```
+
+then a thin binding from Spark's packed splats to the columns our tiles are written from.
+
+### Why
+
+- **A reference to check against.** Our port was written from reading the format; Spark's code *is* the format.
+  Every difference found is a bug on one side.
+- **Format changes** arrive by rebuilding, not by re-porting.
+- **Spherical harmonics** come decoded by the code that packed them (part 1, phase 3).
+- **Writing RAD**, later: the crate has the encoder, so the [one-stop tiler](/docs/guide/planning/one-stop-tiler)
+  could build a RAD from a PLY with no Rust toolchain on the user's machine.
+
+### Plan
+
+1. **Build** at a pinned Spark commit; note the exact command, toolchain versions and the crate's licence beside
+   the output.
+2. **Vendor** the `.wasm` (a few hundred kilobytes, to confirm) and its JavaScript glue in `packages/rad-to-3dtiles`,
+   committed. No Rust in CI: a script rebuilds it by hand when Spark changes the format.
+3. **Bind**: one function per need (header, hierarchy chunk, node splats), returning typed arrays.
+4. **Compare** with our reader on every RAD sample we have: node counts, bounds, and per node the positions,
+   scales, rotations, opacities and colours within the format's own quantisation.
+5. **Measure** decode time per node and memory, as ratios against the JavaScript reader, single thread and on tile
+   workers (each worker loads its own module).
+6. **Decide**: Spark's reader as the default with ours as fallback, or ours kept and Spark's used in tests only.
+   The comparison and the timings decide; a slower but exact reader is still worth keeping as the test oracle.
+
+About a day for steps 1 to 4.
+
+### Tests to do
+
+- The comparison of step 4 as a permanent test, on a small RAD sample kept in the repo or on a release.
+- A RAD written by a newer Spark than the pinned commit: a clear error, not a wrong tile.
+- The module loads in a tile worker and in the desktop bundle (the bundler must copy the `.wasm`).
+- Byte-identical tiles between the two readers where they agree; a written list of where they do not, and why.
+
+### Open questions
+
+- **Licence and attribution** for a vendored build of Spark's crate: to read before committing a binary.
+- **Does the crate build for Node without the renderer's features?** The feature flags suggest so; the spike says.
+- **Browser use**: the same module would serve the [browser plugins](/docs/guide/planning/tiled-formats-plugin),
+  built with `--target web`.
+
+## Docs to write
+
+- `sh` in the [stream options](/docs/guide/architecture-caching) and the CLI usage of each splat converter.
+- Sizes and timings per degree on the [splat tools](/docs/guide/splat-tools) page.
+- The format reference pages (SOG, LCC, RAD): what we now read of each.
+- How the vendored Spark module is rebuilt, next to it.

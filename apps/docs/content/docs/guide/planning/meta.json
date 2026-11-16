@@ -7,6 +7,9 @@
     "sample-data",
     "benchmarks",
     "one-stop-tiler",
+    "tiled-formats-plugin",
+    "browser-crop-extract",
+    "splat-sh-and-rad",
     "design-log",
     "handoff-2026-10-29",
     "appendix-schema-diagrams"

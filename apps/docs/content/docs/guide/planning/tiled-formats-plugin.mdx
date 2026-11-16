@@ -1,0 +1,156 @@
+---
+title: "Tiled formats read in the browser (draft)"
+description: "Draft plan for 3DTilesRendererJS plugins that read COPC, Potree, Nexus, I3S, 3MX, OSGB, streamed SOG, RAD and LCC directly in the browser, with no tile server, reusing the readers of this repo."
+---
+
+Draft, 2026-11-16. Not started. A project of its own, though most of its code exists: the readers behind `/stream`.
+The roadmap item is on the [future work](/docs/guide/todo-future-work) page.
+
+## The idea
+
+Today a tiled source reaches the renderer through the tile server:
+
+```
+COPC / Potree / SOG / …  →  tile server (/stream)  →  3D Tiles (tileset.json + GLB)  →  3DTilesRendererJS
+```
+
+The server does three things per source: reads the source's own hierarchy, turns it into a 3D Tiles tree, and
+decodes one node into one GLB on request. All three are JavaScript. The plan is to run them **inside the renderer**,
+as plugins:
+
+```
+COPC / Potree / SOG / …  →  3DTilesRendererJS + a plugin (range requests, decode in Web Workers)
+```
+
+3DTilesRendererJS already works this way for several formats: `PotreePlugin` reads a Potree `cloud.js`,
+`QuantizedMeshPlugin` reads terrain, the image plugins read XYZ, TMS, WMTS and Deep Zoom pyramids. Each one loads a
+foreign root, builds tiles for the renderer's traversal, and parses one tile's bytes into a three.js object. We add
+the formats of this repo the same way.
+
+## What it gives, what it costs
+
+| | Tile server (today) | Plugin in the browser |
+|---|---|---|
+| Hosting | a Node process somewhere | none: the source on any static host or bucket |
+| Works offline, in any three.js app | no | yes |
+| Source requirements | the server must reach it | CORS and HTTP range requests from the browser |
+| Decode CPU | the server's cores, shared by all viewers | each viewer's own cores (Web Workers) |
+| Cache | shared: one decode serves everyone (`cache=full`) | per browser |
+| Other clients (CesiumJS, Unreal, QGIS, Blender) | all of them: they receive plain 3D Tiles | 3DTilesRendererJS only |
+| Transforms, export, aggregation, extract | yes | not in this project |
+
+So the plugins do not replace the server. They cover the case "I have a COPC on a bucket and a three.js page" with
+nothing to run, and the server stays the answer for every other client and for anything that writes.
+
+## What already exists
+
+Per format, the reader in this repo and what ties it to Node today. The decoders were audited once on the
+[future work](/docs/guide/todo-future-work) page (*Runtime: Node today / browser-capable?*); this table is the
+starting point, each row is **to be confirmed by the spike of phase 0**.
+
+| Format | Reader here | Decoder | Node-only parts to replace |
+|---|---|---|---|
+| **COPC** | `copc-live.js`, `core/octree.js` | `copc` + `laz-perf` (WebAssembly) | `fs` in the offline converter only; `proj4` runs in browsers |
+| **Potree 2.0** | `potree2.js` | plain JavaScript | Brotli-encoded nodes use `node:zlib`: needs a WebAssembly Brotli decoder. The default encoding needs nothing |
+| **Potree 1.x** | `potree1.js` | plain JavaScript, LAZ nodes through `laz-perf` | upstream `PotreePlugin` already reads `cloud.js`: compare first, add only what it lacks |
+| **VPC, grid VPC** | `vpc-live.js`, `vpc-grid.js` | JSON | none: a tree of COPCs, so it rides on the COPC plugin |
+| **Nexus** (`.nxs`, `.nxz`) | `nexus-reader.js`, `nexus-glb.js` | plain JavaScript (Corto) | none found |
+| **3MX** | `threemx-live.js`, `ctm-decode.js` | OpenCTM (vendored) | how the vendored decoder is loaded (`node:fs`) |
+| **I3S, SLPK** | `i3sParse.js`, `lepccDecode.js` | Draco, LEPCC | `node:zlib` (gzip: `DecompressionStream`); the SLPK unzip (`remote-zip.js`) |
+| **OSGB** | `osgb-reader.js`, `osgb-image.js` | plain JavaScript | `node:zlib`, `pngjs`, `jpeg-js`: in a browser, images decode natively |
+| **Streamed SOG, LCC2** | `sogChunk.js`, `sogBundle.js`, `lodMeta.js` | WebP planes, through `@playcanvas/splat-transform` | `node:zlib`; in a browser WebP decodes natively |
+| **RAD** | `radHeader.js`, `lodWalker.js` | plain JavaScript, gzip | `node:zlib`, `worker_threads` |
+| **LCC** | `lccDecode.js`, `lcc2.js` | plain JavaScript | `fs` only |
+
+Range reads already go through `fetch` with a `Range` header, which browsers do the same way.
+
+## Design
+
+**One set of readers, two front ends.** The readers move to a package with no Node imports. A reader takes a
+*source* (an object with `range(offset, length)` and `whole()`), and offers:
+
+- `open(source)`: the header and whatever part of the hierarchy is needed first;
+- `children(node)`: the next nodes, read lazily (COPC hierarchy pages, Potree hierarchy chunks, RAD chunks);
+- `decode(node, bytes)`: **typed arrays** (positions, colours, extra attributes, indices, texture bytes), not a GLB.
+
+The server keeps writing a GLB from those arrays. The plugin builds a `BufferGeometry` from them directly: writing
+a GLB to parse it again in the same process would be wasted work. Several readers are split this way already
+(`copcViewGlb`, `potreeDataGlb`, `mesh-tile.js`); the rest need the same cut.
+
+**The plugin.** One plugin class per family, over the shared readers:
+
+- it loads the root and hands the renderer a tile tree. Octrees are exposed with their `(level, x, y, z)`, so the
+  adaptive point size of [3DTilesRendererJS#1792](https://github.com/NASA-AMMOS/3DTilesRendererJS/pull/1792) and
+  the eye-dome lighting of `PointCloudEffectsPlugin` apply as they do to implicit 3D Tiles;
+- it expands nodes as the traversal reaches them;
+- it fetches one node by range and decodes it in a Web Worker. The task shape is the one tile workers use on the
+  server (`{ module, fn, args }`), so the task modules are shared too;
+- it frees what it built when the renderer disposes the tile.
+
+The exact hooks are those `PotreePlugin` and the image plugins use; **step one of the spike is to read those two
+and write the hook list down**, not to assume it.
+
+**Placement.** A source in a projected CRS is placed with `proj4`, as on the server: a root transform for small
+extents, the per-tile sampled placement (documented on the [meta-tilesets](/docs/guide/meta-tilesets) page) for
+large ones. Grid shift files are the open point (see below).
+
+**Splats.** Splat formats produce splats, not meshes, so their plugin feeds a splat renderer. Which one is a
+decision of phase 4: today the viewer draws splat tiles through `3d-tiles-rendererjs-3dgs-plugin` on Spark.
+
+**Where it lives.** In this repo first, as its own package, published under our name. Offering any of it upstream
+is a later conversation and only with the maintainer's interest; nothing is posted without a go.
+
+## Phases
+
+| Phase | What | Done when |
+|---|---|---|
+| **0. Spike** | COPC only, in the Potree lab as a new mode next to the server one. Reader called as is, bundled for the browser. | Autzen renders from the bucket with no server; time to first tile, tiles per second and main-thread stalls are written down beside the server path |
+| **1. Shared readers** | The package without Node imports: the source abstraction, `decode` to typed arrays, gzip and Brotli swapped for browser equivalents. The server moves onto it. | every existing test passes on the server; the readers' tests also pass in a browser |
+| **2. Point clouds** | COPC, Potree 2.0, VPC and grid VPC. Potree 1.x only where upstream's plugin falls short. | the lab's presets load in plugin mode, sized and coloured as in server mode |
+| **3. Meshes** | Nexus, 3MX, then I3S and OSGB. | the viewer's mesh presets load in plugin mode |
+| **4. Splats** | Streamed SOG, RAD, LCC, into the chosen splat renderer. | the splat presets load in plugin mode |
+| **5. Release** | npm package, a demo page on GitHub Pages per format, the docs below. | someone outside can load their own COPC from a README snippet |
+| **6. Upstream** | Show it to 3DTilesRendererJS, ask what, if anything, belongs there. | a reply |
+
+Phases 2 to 4 are independent once phase 1 is done.
+
+## Tests to do
+
+- **Same bytes, both sides.** For a fixed list of nodes per format, the typed arrays decoded in Node and in a
+  browser hash the same. This is the test that lets the server and the plugin share readers safely.
+- **Reader unit tests** run under `node --test` as today, and once more in headless Chrome.
+- **Render checks** with the existing headless Chrome script: each preset in plugin mode against server mode, same
+  camera, point counts and bounding boxes compared, a screenshot kept. Splats do not render headless here, so they
+  are checked on decoded numbers and by eye.
+- **Hosting matrix**: a bucket with and without CORS, with and without range support, behind a CDN that answers
+  `200` to a range request. Each failure must give a message that names the cause.
+- **Performance**, as ratios against the server path on the same source: time to first tile, tiles per second,
+  longest main-thread stall, memory after a fly-through. On a laptop and on a phone.
+- **Bundle size** per plugin, with a budget (the LAZ decoder alone is a few hundred kilobytes): each format is
+  imported on its own, a COPC viewer never downloads the OpenCTM decoder.
+- **Large inputs**: a 200 GB COPC, a country-wide VPC, a Potree with millions of nodes. The hierarchy must stay
+  lazy.
+- **Lifecycle**: tiles disposed and reloaded many times, the page left open for an hour, workers terminated.
+
+## Docs to write
+
+- **Getting started**: one page, a COPC on a bucket rendered in twenty lines.
+- **One page per plugin**: options, what the source must provide, what is not supported.
+- **Hosting**: CORS, range requests, bucket settings for the common hosts.
+- **Server or plugin?**: the table above, as a guide for choosing.
+- **Migrating from `/stream`**: which URL parameters have an option on the plugin, which have none.
+- **API reference** from JSDoc, generated, never edited by hand.
+- Updates here: [architecture](/docs/guide/architecture-caching), [supported formats](/docs/guide/supported-formats),
+  the [Potree lab](/docs/guide/potree-lab) page.
+
+## Open questions
+
+- **CRS grids.** `proj4` without grid shift files is exact enough for most national grids, not all. Fetching grids
+  on demand in a browser is unsolved here.
+- **Brotli.** Potree 2.0's Brotli encoding needs a WebAssembly decoder: which one, and its size.
+- **Licences** of what a browser bundle would redistribute: OpenCTM, Corto, the LEPCC port, `laz-perf`.
+- **Sources that are folders** (OSGB, 3MX): a browser cannot list a directory, so the entry file must name
+  everything. To check per format.
+- **Which splat renderer** in phase 4, and whether splat formats belong in this project or in that renderer.
+- **How much upstream wants.** `PotreePlugin` exists there; a COPC plugin may be welcome, nine formats probably not.
+- **Mobile memory.** A LAZ chunk decodes to several times its size; node size limits may be needed.

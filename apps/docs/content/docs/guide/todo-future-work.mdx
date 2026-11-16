@@ -22,7 +22,9 @@ Roughly in the order we're tackling them, grouped by theme below.
 - **`potree-to-copc`** — assessed, blocked: no pure-JS/WASM LAZ *encoder* exists yet (only decoders).
   Deferred until one is wired.
 - **Runtime (Node → browser)** — audit of what's browser-portable per converter; almost everything
-  already is except `remote-zip.js`'s SLPK unzip (`node:zlib` call with no browser equivalent).
+  already is except `remote-zip.js`'s SLPK unzip (`node:zlib` call with no browser equivalent). Now a project plan:
+  [Tiled formats read in the browser (draft)](/docs/guide/planning/tiled-formats-plugin), 3DTilesRendererJS plugins
+  over the readers of this repo, no tile server.
 - **Rendering/viewer** — a drafted upstream feature request for `3d-tiles-rendererjs-3dgs-plugin` to
   expose `lodInflate`/`lodSplatScale` SparkRenderer settings (currently worked around internally).
 - **Streaming architecture** — route `tiling=explicit` through the existing `implicit-to-explicit` tool
@@ -33,9 +35,10 @@ Roughly in the order we're tackling them, grouped by theme below.
   newer formats; verify the uniform-crop flip table holds for non-georeferenced sources too.
 - **Encoding/extract** — WebP texture encode, `simplify`/`weld`/`quantize` geometry ops, encode support
   on `/gltf`; `rtc_center`/decompress for ingesting *existing* remote 3D Tiles; a browser-native bbox
-  crop/subsample extract tool.
-- **Performance** — Draco+KTX2 decode speed (WebP instead of pngjs, reused decoder instances, worker
-  pool); the `WorkerPool` multicore tier isn't wired yet for any converter.
+  crop/subsample extract tool ([plan](/docs/guide/planning/browser-crop-extract)).
+- **Performance** — Draco+KTX2 decode: measured and sped up on 2026-11-16 (KTX2 kept on request, untouched tiles
+  passed through, tile workers); meshopt on point tiles measured, stays opt-in. Numbers on the
+  [benchmarks](/docs/guide/planning/benchmarks) page.
 - **Spec direction (noted 2026-10-20)** — point-cloud compression: Khronos closed glTF#1809
   (a Draco point-compression extension) as *superseded by `KHR_meshopt_compression`*, which is what
   `/stream?transform=meshopt` already emits; 3D Tiles 2.0 is being baselined on **glTF 2.1 as a set
@@ -44,7 +47,8 @@ Roughly in the order we're tackling them, grouped by theme below.
 - **Format coverage** — spherical harmonics (view-dependent color) for Gaussian splats: every splat
   converter currently emits DC-only color. Design sketch covers what each format (RAD/LCC/SOG/GeoSplats)
   stores and what the `KHR_gaussian_splatting` output extension already supports — LCC/SOG look like a
-  straightforward "carry the bytes through" job, RAD needs a "does it even store this" check first.
+  straightforward "carry the bytes through" job, RAD needs a "does it even store this" check first. Now a plan:
+  [Splats: spherical harmonics and Spark's RAD reader (draft)](/docs/guide/planning/splat-sh-and-rad).
 
 ## Core: "fastest" point-cloud → COPC/3D Tiles tiler
 
@@ -197,7 +201,8 @@ evaluated before assuming this would be a novel effort.
   module as base64 with the renderer's exports only, so it is a build of our own: `wasm-pack build --target nodejs
   --no-default-features --features rad,gsplat`, a thin binding from Spark's packed splats to columns, tiles compared
   with today's. About a day. Ship the `.wasm` committed, a few hundred kilobytes, not a Rust toolchain in CI; rebuild
-  it by hand when Spark changes the format.
+  it by hand when Spark changes the format. Planned step by step, with the comparison tests, in
+  [Splats: spherical harmonics and Spark's RAD reader (draft)](/docs/guide/planning/splat-sh-and-rad).
 - [ ] **LEPCC through loaders.gl once 5.0 is stable.** `@loaders.gl/tiles-3d` 5.0 (alpha and beta today) has a
   dependency-free TypeScript LEPCC decoder, `i3s-lepcc.ts` (MIT): the same four blob types as our port. Compare the
   two on the New York and point-cloud SLPKs, then keep one.
@@ -413,7 +418,8 @@ flowchart LR
 - [ ] **`rtc_center` / decompress for ingestion** — apply the existing per-tile decompress pipeline to
   *existing remote 3D Tiles* (not just our own output) so consumers that can't read Draco/KTX2/
   `CESIUM_RTC` (e.g. blender **BLOSM**) can load them.
-- [ ] **Browser-native bbox crop / subsample extract** — pull a cropped/decimated copy of a tiled asset
+- [ ] **Browser-native bbox crop / subsample extract** (plan:
+  [Crop and extract in the browser (draft)](/docs/guide/planning/browser-crop-extract)) — pull a cropped/decimated copy of a tiled asset
   (point cloud, mesh, or splat) by an OBB defined in the viewer — BLOSM-style but JS/browser-native.
   See the dump-tiles feature idea (memory). **Refinement-aware traversal**: for **ADD** octrees
   (COPC/Potree) accumulate all points down to the desired geometric error within the OBB; for
@@ -426,10 +432,13 @@ flowchart LR
 
 ## Performance
 
-- [ ] **Draco+KTX2 decode speed** — the per-tile decode (~250 ms/tile) can be cut by (1) **passing
-  KTX2 through untouched** when the consumer reads it, (2) emitting **WebP** (WASM encoder) instead of
-  `pngjs` PNG, (3) reusing decoder/transcoder instances across tiles, (4) a worker-thread pool. pngjs
-  PNG-encode of the ~1.4 MB RGBA is the main avoidable cost.
+- [x] **Draco+KTX2 decode speed** (measured and done 2026-11-16). Measured first: re-encoding the decoded textures
+  is nine tenths of a decode (160 ms per 2048² texture as JPEG, twice that as WebP or PNG), the geometry 8 ms. So:
+  (1) `tex=ktx2` keeps KTX2 textures for clients that read them, 80× faster; (2) JPEG stays the default, it was
+  already the fastest, WebP is offered as the smallest; (3) a tile with nothing to decode is passed on untouched,
+  and the writer is created once; (4) with `TILED_WORKERS` the transforms run on tile workers, about 4× the tiles
+  per second on 8 workers. A bug found on the way: `transform=ktx` left KTX2 textures without their
+  `KHR_texture_basisu` declaration; fixed. Tables on the [benchmarks](/docs/guide/planning/benchmarks) page.
 - [ ] **`WorkerPool` (`worker_threads`) tier not wired.** All converters currently use only the
   async-gzip + `parallelMap` tier (main-thread decode on the libuv pool) — see
   ["Parallelism (per converter)"](/docs/guide/architecture-the-materialization-continuum-cache-none-hierar)
@@ -449,7 +458,9 @@ flowchart LR
   and `offset` place a scene as LCC's do while the whitepaper calls `offset` reserved; the collision meshes
   (`data/mesh/*.ply`), which could be a second, mesh tileset of the same tree.
 
-- [ ] **Spherical harmonics (view-dependent color) for Gaussian splats.** Every splat converter
+- [ ] **Spherical harmonics (view-dependent color) for Gaussian splats.** Plan, phases and tests:
+  [Splats: spherical harmonics and Spark's RAD reader (draft)](/docs/guide/planning/splat-sh-and-rad); the earlier
+  design notes follow. Every splat converter
   (RAD/LCC/SOG/GeoSplats) currently emits **DC-only** color — the source formats' higher-order SH bands
   are decoded-and-discarded (or never touched) on the way to a 3D Tiles GLB, so specular/view-dependent
   appearance is lost.
@@ -525,8 +536,11 @@ So meshopt on `POINTS` is as small as Draco points, decodes as fast, and is the 
 that survives into glTF 2.1. This is already the repo's position: `core/gltf-compress.js` defaults to
 meshopt for point tiles because Draco skips `POINTS`, and `/stream?transform=meshopt` serves it.
 
-- [ ] **Make meshopt the default on point GLBs** served by `/stream` for COPC/Potree/LAS once the
-  CPU cost per tile is measured against the ~37 % size (encode is per request unless `cache=full`).
+- [x] **meshopt on point tiles, measured (2026-11-16): it stays opt-in.** On 40 Autzen tiles it adds about 10 % to
+  the server time of a tile (22 ms on 184 ms) and sends 36 % of the bytes; gzip of the raw tile costs the same CPU
+  and reaches 58 %. But it is lossy (positions on 14 bits of the tile's extent, colours from 16 to 8 bits) and needs
+  the decoder in the client, so the default keeps sending tiles as built: fastest and exact. `transform=meshopt`
+  for slow links. Table on the [benchmarks](/docs/guide/planning/benchmarks) page.
 - [ ] **Read `KHR_meshopt_compression`** as well as `EXT_` in `gltf-decompress.js` when glTF-Transform
   ships the name; the decoder is the same `meshoptimizer` WASM.
 - [ ] Re-verify the 3DTRjs `PotreePlugin` / `PointCloudEffectsPlugin` path and CesiumJS against a

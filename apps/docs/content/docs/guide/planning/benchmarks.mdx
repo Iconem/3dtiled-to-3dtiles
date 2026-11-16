@@ -44,6 +44,53 @@ Reading the numbers:
   the path with the most multicore headroom.
 - **RAD is nearly free** (0.53 s for 500 k splats) — column decode + SPZ encode, no image codecs.
 
+## Per-tile transforms (2026-11-16)
+
+What the optional per-tile transforms of the live server cost, on real tiles, with
+`node scripts/bench-tile-transforms.mjs`. Same laptop as above, so read the ratios, not the milliseconds.
+
+### meshopt on point tiles
+
+40 tiles of the Autzen COPC (of 278; 31 MB of GLB, median tile 0.9 MB), each built, then encoded.
+
+| Per tile, median | Time | Size, share of the raw GLB |
+|---|---|---|
+| building the tile (fetch, LAZ decode, GLB write) | 184 ms | 100 % |
+| `transform=meshopt` on top | **+22 ms (about +10 %)** | **36 %** |
+| gzip level 6 of the raw tile, for comparison | +23 ms | 58 % |
+| Brotli quality 5 of the raw tile | +31 ms | 54 % |
+| meshopt, then gzip | +29 ms | 32 % |
+
+So meshopt costs a tenth more server time per tile and sends a third of the bytes, for the same CPU as gzip, which
+only reaches 58 %. Its price is elsewhere: it is **lossy** (positions are quantised to 14 bits of the tile's
+extent, colours from 16 to 8 bits per channel), and the client needs the meshopt decoder. It stays opt-in
+(`transform=meshopt`): the default sends tiles as built, the fastest for the server and exact.
+
+### Decoding Draco and KTX2 (`/gltf`, `transform=decompress`)
+
+One mesh tile of 70 000 triangles with five 2048 × 2048 textures, as Draco + KTX2 (2.2 MB).
+
+| Step | Time |
+|---|---|
+| reading the tile, Draco decode included | 8 ms |
+| KTX2 to pixels, per texture | 16 ms |
+| pixels to JPEG / WebP / PNG, per texture | **160 ms** / 320 ms / 320 ms |
+| writing the tile | 14 ms |
+
+Re-encoding the textures is nine tenths of a decode. What follows from it:
+
+| Texture output (`tex=`) | Whole tile | Tile size |
+|---|---|---|
+| `jpg` (default) | 886 ms | 3.4 MB |
+| `webp` | 1 697 ms | 2.0 MB |
+| `png` | 1 652 ms | 9.8 MB |
+| `ktx2`: textures kept, geometry decoded | **11 ms (80× faster)** | 2.7 MB |
+
+- JPEG was already the default and is the fastest to encode; WebP is the smallest and twice as slow.
+- A tile with nothing to decode is now passed on untouched in 0.2 ms, instead of being parsed and written again.
+- With tile workers (`TILED_WORKERS=auto`, 8 here), 16 such tiles at once go from 1.1 to about 4.3 tiles per
+  second, and the server's own thread stays free; without workers it is held for the whole batch.
+
 ## External tilers (context, not apples-to-apples)
 
 | Tool | Job | Their reported speed |

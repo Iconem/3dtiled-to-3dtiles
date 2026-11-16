@@ -8,6 +8,34 @@ Format loosely follows [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+### Changed — 2026-11-16 (Draco and KTX2 decode faster, meshopt measured)
+- **`tex=ktx2`** on `/gltf` and `/stream?transform=decompress`: KTX2 textures are kept and only the geometry is
+  decoded, for clients that read KTX2. Re-encoding textures was measured at nine tenths of a decode; this is 80×
+  faster. `tex=webp` is now accepted on `/stream` as on `/gltf`; `jpg` stays the default, it is the fastest encode.
+- **A tile with nothing to decode is passed on untouched** (read from its JSON chunk) instead of being parsed and
+  written again.
+- **With `TILED_WORKERS`, per-tile transforms run on tile workers** (`core/gltf-tiles.js`, `core/gltf-task.js`):
+  about 4× the tiles per second on 8 workers, and the server's thread stays free. Used by `/gltf`, `/stream`
+  transforms and the Bing decode.
+- **meshopt on point tiles measured**: about +10 % server time per tile for 36 % of the bytes, lossy; it stays
+  opt-in. Numbers and method on the [benchmarks](/docs/guide/planning/benchmarks) page;
+  `scripts/bench-tile-transforms.mjs` reproduces them.
+
+### Fixed — 2026-11-16
+- **`transform=ktx` wrote KTX2 textures without declaring `KHR_texture_basisu`**: the encoder library declared the
+  extension through another version of glTF-Transform than ours, which threw after the textures were converted.
+  The extension is now declared here.
+
+### Docs — 2026-11-16 (three more plans drafted)
+- **[Tiled formats read in the browser (draft)](/docs/guide/planning/tiled-formats-plugin)**: 3DTilesRendererJS
+  plugins that read COPC, Potree, Nexus, I3S, 3MX, OSGB, streamed SOG, RAD and LCC with no tile server, over the
+  readers of this repo; design, six phases, tests and docs to write.
+- **[Crop and extract in the browser (draft)](/docs/guide/planning/browser-crop-extract)**: the viewer's Crop &
+  Extract without a server, streamed to disk.
+- **[Splats: spherical harmonics and Spark's RAD reader (draft)](/docs/guide/planning/splat-sh-and-rad)**:
+  view-dependent colour for every tiled splat format behind an `sh` option, and RAD read by Spark's own Rust code
+  as WebAssembly.
+
 ### Docs — 2026-11-16 (the one-stop tiler, drafted)
 - **[One-stop tiler (draft)](/docs/guide/planning/one-stop-tiler)**: the desktop app's planned third flow, raw input
   through the official tilers (PDAL/untwine, PotreeConverter, gocesiumtiler, py3dtiles, Obj2Tiles, mago-3d-tiler,

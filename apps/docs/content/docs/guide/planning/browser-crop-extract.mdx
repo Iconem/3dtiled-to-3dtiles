@@ -1,0 +1,106 @@
+---
+title: "Crop and extract in the browser (draft)"
+description: "Draft plan to run the viewer's Crop & Extract in the browser itself: draw a box, download the points, mesh or splats inside it, with no tile server."
+---
+
+Draft, 2026-11-16. Not started. The roadmap item is on the [future work](/docs/guide/todo-future-work) page.
+
+## Where we are
+
+The viewer has a **Crop & Extract** section: draw a box, pick an output, and the tile server's `/extract` walks the
+tileset, keeps what is inside the box and sends a file.
+
+| Output | Endpoint | Made with |
+|---|---|---|
+| LAS | `/extract/las` | our LAS writer |
+| COPC | `/extract/copc` | PDAL, which must be installed beside the server |
+| merged GLB (meshes) | `/extract/glb` | glTF-Transform |
+| splats (SPZ, GLB, SOG, PLY) | `/extract/splat` | `@playcanvas/splat-transform` |
+| a cropped tileset, a zip | `/extract/tileset`, `/extract/zip` | the same walk, tiles copied |
+
+It needs the server, so it does not work in a statically hosted viewer, nor for someone who opened a public tileset
+and just wants the part in front of them.
+
+## The idea
+
+Run the same walk in the browser. The tiles are 3D Tiles whatever the source, so one extractor serves every format.
+The server version stays for COPC output, for very large extracts and for scripted use.
+
+```
+box drawn in the viewer  →  walk the tileset in the browser  →  keep what is inside  →  write a file to disk
+```
+
+## Design
+
+**The walk** is the one `extract-live.js` does, moved to a module with no Node imports:
+
+- `ADD` trees (point clouds): every tile that touches the box contributes, down to the chosen geometric error.
+- `REPLACE` trees (meshes): only the finest tiles that touch the box, at the chosen geometric error or at leaves.
+- External tilesets are followed. Implicit tilings are expanded from their subtrees.
+- Each vertex goes to ECEF through the tile's transforms, and is tested against the box.
+
+The walk fetches tiles itself; it does not read what the renderer has on screen, because the screen holds a
+view-dependent mix of levels and an extract must be complete at one level. Tiles the browser already downloaded
+come back from its HTTP cache.
+
+**The box** comes from the existing section (west, south, east, north, heights), or an oriented box from the
+gizmo. Same parameters as the server, so one form drives both.
+
+**Writing the file.** Extracts can be gigabytes, so output is streamed where the browser allows:
+
+- Chromium: the File System Access API (`showSaveFilePicker`), written tile by tile; memory stays flat.
+- Elsewhere: built in memory and downloaded as a blob, with a size limit and a clear message above it.
+
+**Outputs**, in the order they are worth doing:
+
+| Output | How | Note |
+|---|---|---|
+| **LAS** | `core/las-writer.js`; its record and header builders are plain JavaScript, only the file handle is Node | the header's point count and bounds are written last: needs a seekable file, or two passes |
+| **merged GLB** | glTF-Transform's `WebIO`; textures copied as they are, not re-encoded | one material per source texture; an atlas is out of scope |
+| **splats** (PLY, SPZ) | `@playcanvas/splat-transform` runs in browsers | per-splat clip as on the server |
+| **cropped tileset** as a zip | tiles copied untouched, tileset JSON trimmed | no decode at all: the cheapest one |
+| **LAZ, COPC** | not in the browser: stays on the server (PDAL) | `laz-perf`'s encoder in WebAssembly is **to be checked** before promising LAZ |
+
+**Where the code lives.** `packages/core` gets the walk and the box test, shared by the server and the viewer.
+The viewer picks "in the browser" when no tile server is configured or reachable, and offers both otherwise.
+
+**Workers.** Decoding and testing run in a Web Worker so the viewer stays responsive, with progress and Cancel in
+the section, as exports have today.
+
+## Phases
+
+| Phase | What | Done when |
+|---|---|---|
+| **1. Shared walk** | the traversal and box test out of `extract-live.js`, no Node imports; the server uses it | the server's extract tests pass unchanged |
+| **2. Points to LAS** | browser run, streamed to disk, progress and Cancel | an Autzen crop made in the browser equals the server's, point for point |
+| **3. Meshes to GLB** | merged GLB of the finest tiles in the box | a crop of a mesh preset opens in Blender, placed as the server's |
+| **4. Splats** | PLY and SPZ | a crop of a splat preset matches the server's splat count |
+| **5. Cropped tileset** | zip of untouched tiles | the zip loads back in the viewer |
+
+## Tests to do
+
+- **Same result as the server**: for one preset per content type, the browser's file and the server's hold the same
+  points (count, bounds, a hash of sorted positions), the same triangles, the same splats.
+- **Refinement**: an `ADD` tree and a `REPLACE` tree, at two geometric errors each; no point twice, no hole.
+- **Georeferenced and local** sources: the two cases the server's crop already distinguishes.
+- **Large extract**: several gigabytes through the File System Access path, memory watched; the blob path refuses
+  above its limit with a message.
+- **Cancel** midway leaves no half-written file open.
+- **Compressed tiles** (Draco, meshopt, KTX2): decoded in the browser by the loaders the viewer already has.
+- **A tileset on another origin without CORS** fails with a message that names CORS.
+
+## Docs to write
+
+- The [viewer guide](/docs/guide/viewer)'s Crop & Extract part: the two ways to run it, what each can write.
+- A short "extract without a server" recipe.
+- Limits: browsers that stream, the size limit elsewhere, no COPC.
+
+## Open questions
+
+- **LAZ in the browser**: is the `laz-perf` encoder usable from WebAssembly? If yes, LAZ output is close; COPC is
+  not (it needs the octree build).
+- **Attributes**: the server's LAS carries intensity, classification and colour when tiles have them; the same
+  mapping from glTF attributes must be kept.
+- **Textures of merged meshes**: many small textures make a heavy GLB; whether to offer a simple atlas.
+- **Extract straight from a source** (a COPC, without going through tiles) belongs with the
+  [browser plugins](/docs/guide/planning/tiled-formats-plugin): a COPC crop could then copy LAZ chunks untouched.
