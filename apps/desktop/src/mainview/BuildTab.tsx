@@ -1,6 +1,6 @@
 /**
- * Build — a dataset, then three flows, each in its own tab: live-stream (a paste-ready URL), export to disk, or,
- * for a raw file that is not tiled yet, run a third-party tiler on it first.
+ * Build — a tiled dataset, then two flows, each in its own tab: live-stream (a paste-ready URL) or export to disk.
+ * Raw input that is not tiled yet has its own top-level tab (TilerCard), with its own input field.
  */
 import { useState } from 'react';
 import { Button } from '@/components/ui/button';
@@ -9,7 +9,6 @@ import type { AppModel } from './App';
 import { Card } from './components/Card';
 import { Actions, Advanced, Choice, Code, Field, FieldLabel, Hint, Result, TextInput, UrlBar, type Message } from './components/bits';
 import { ExportCard } from './ExportCard';
-import { TilerCard } from './TilerCard';
 import { base, pickDataset, pickerAvailable, viewerUrl } from './host';
 import { newId } from './library';
 import { nameFor, PLACEMENT, typeOfFormat } from './urls';
@@ -17,7 +16,6 @@ import { nameFor, PLACEMENT, typeOfFormat } from './urls';
 const FLOWS = [
   ['stream', 'Stream live', 'A tileset URL converted on demand while this app runs: nothing is written to disk'],
   ['export', 'Export to a folder', 'Files on disk: crawl the stream, or run the offline converter'],
-  ['tile', 'Tile raw input', 'A raw point cloud, mesh or splat file (or a PostGIS table): run a third-party tiler on it, then open the result'],
 ] as const;
 /** How many threads the app's server builds tiles on: one setting, for the tiles it streams and the exports it runs. */
 export const WORKERS = [
@@ -50,20 +48,13 @@ const PLACEMENT_FIELDS: Record<(typeof PLACEMENT)[number], { label: React.ReactN
 // Tree formats are a FOLDER (Potree's cloud.js directory, a streamed-SOG LOD folder, an unpacked
 // 3D Tiles tree); single-file formats are a FILE (.copc.laz, .rad, .lcc, .3tz). Hence two buttons
 // rather than one dialog that has to guess — on Windows a single dialog cannot offer both.
-// Grouped for the Windows dialog's type list (`label=ext,ext;…`, see pickWindows); elsewhere the groups are merged.
-// The raw groups are what the "Tile raw input" flow takes (packages/tilers/tools.js).
-const DATASET_FILE_TYPES = [
-  'Datasets and raw input=laz,las,copc,rad,lcc,lcc2,json,js,zip,3tz,slpk,nxs,nxz,glb,b3dm,e57,ptx,pts,pcd,bpf,xyz,csv,txt,ply,spz,sog,splat,ksplat,obj,fbx,3ds,gltf,stl,dae,ifc,3mf,x3d,gml,kml,shp,geojson,gpkg',
-  'Tiled datasets=laz,rad,lcc,lcc2,json,js,zip,3tz,slpk,nxs,nxz',
-  'Raw point clouds=las,laz,e57,ply,ptx,pts,pcd,bpf,xyz,csv,txt',
-  'Raw meshes and vectors=obj,fbx,3ds,gltf,glb,ply,stl,dae,ifc,3mf,x3d,gml,kml,shp,geojson,gpkg',
-  'Raw Gaussian splats=ply,spz,sog,splat,ksplat,lcc',
-].join(';');
+// A label for the Windows dialog's type list (`label=ext,ext;…`, see pickWindows). Tiled sources only: raw input
+// is picked in the "Tile raw input" tab.
+const DATASET_FILE_TYPES = 'Tiled datasets=laz,rad,lcc,lcc2,json,js,zip,3tz,slpk,nxs,nxz,glb,b3dm';
 
-export function BuildTab({ app, message }: { app: AppModel; message: Message | null }) {
+export function BuildTab({ app, message, flow, setFlow }: { app: AppModel; message: Message | null; flow: string; setFlow: (flow: string) => void }) {
   const { form, patchForm, url, say } = app;
   const [checking, setChecking] = useState(false);
-  const [flow, setFlow] = useState<string>('stream');
 
   async function browse(directory: boolean) {
     if (!pickerAvailable()) return say('The native picker needs the desktop app — paste a path instead.', 'err');
@@ -135,12 +126,12 @@ export function BuildTab({ app, message }: { app: AppModel; message: Message | n
       <Card>
         <Field label="Dataset — local path or URL">
           <UrlBar>
-            <TextInput id="src" value={form.src} onChange={(e) => patchForm({ src: e.target.value })} placeholder="C:\data\scan.copc.laz   or   https://…/cloud.js   or, to tile a PostGIS table, postgresql://user@host:5432/database" className="flex-1" />
+            <TextInput id="src" value={form.src} onChange={(e) => patchForm({ src: e.target.value })} placeholder="C:\data\scan.copc.laz   or   https://…/cloud.js" className="flex-1" />
             {/* Outside the Electrobun host (e.g. the bundle rendered in a plain browser for verification) the
                 native dialog cannot exist — hide the buttons rather than offering an action that always fails. */}
             {pickerAvailable() && <>
-              <Button id="browse-file" title="Pick a single-file dataset (.copc.laz, .rad, .lcc, .3tz…), or a raw file to tile: a point cloud (.las, .laz, .e57, .ply), a mesh (.obj, .fbx, .glb…) or splats (.ply, .spz, .sog, .ksplat)" onClick={() => browse(false)}>File…</Button>
-              <Button id="browse-dir" title="Pick a dataset folder (Potree cloud.js dir, streamed-SOG LOD dir, unpacked 3D Tiles), or a folder of raw files to tile (LAS/LAZ files, an OSGB tree, meshes)" onClick={() => browse(true)}>Folder…</Button>
+              <Button id="browse-file" title="Pick a single-file dataset (.copc.laz, .rad, .lcc, .3tz, .slpk, .nxs…). A raw file that is not tiled yet goes to the Tile raw input tab" onClick={() => browse(false)}>File…</Button>
+              <Button id="browse-dir" title="Pick a dataset folder (Potree cloud.js dir, streamed-SOG LOD dir, unpacked 3D Tiles, an OSGB tree to stream)" onClick={() => browse(true)}>Folder…</Button>
             </>}
           </UrlBar>
         </Field>
@@ -211,7 +202,6 @@ export function BuildTab({ app, message }: { app: AppModel; message: Message | n
         </Card>
         </TabsContent>
         <TabsContent value="export" id="flow-export" keepMounted><ExportCard app={app} /></TabsContent>
-        <TabsContent value="tile" id="flow-tile" keepMounted><TilerCard app={app} onStream={() => setFlow('stream')} /></TabsContent>
       </Tabs>
     </section>
   );

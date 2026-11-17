@@ -1,11 +1,12 @@
 /**
- * Tile raw input — the third flow, next to "Stream live" and "Export to a folder".
+ * Tile raw input — a top-level tab, next to Build (which takes sources that are tiled already).
  *
- * The dataset above is RAW input here, a file or a folder: a point cloud (LAS, LAZ, E57, PTX, a point PLY), a mesh
- * (OBJ, FBX, glTF, an OSGB folder…) or Gaussian splats (PLY, SPZ, SOG, .splat, .ksplat), not a tiled source. This
- * card picks a third-party tiler for it, shows that tool's own options, runs it in a subprocess with its output and
+ * Its own input field holds RAW input, a file or a folder (or a PostgreSQL address): a point cloud (LAS, LAZ, E57,
+ * PTX, a point PLY), a mesh (OBJ, FBX, glTF, an OSGB folder…) or Gaussian splats (PLY, SPZ, SOG, .splat, .ksplat),
+ * not a tiled source. The Build tab's dataset is another field: only "Stream it" writes to it. This
+ * card picks a third-party tiler for the input, shows that tool's own options, runs it in a subprocess with its output and
  * Cancel, and opens what it wrote: a COPC, a Potree folder, a streamed SOG, a RAD, a Nexus file or a .3tz archive goes
- * to the stream flow; a 3D Tiles tileset folder is finished already and is previewed as is, served by the tile-server.
+ * to the Build tab's stream flow; a 3D Tiles tileset folder is finished already and is previewed as is, served by the tile-server.
  *
  * Which tools take the input is the server's answer (`GET /tilers?input=`): it looks at the path, so a folder is
  * matched by what it holds and a PLY by its header (points, a mesh or splats).
@@ -61,9 +62,18 @@ export function tilerArgs(tool: Tool, input: string, outDir: string, values: Rec
   return args;
 }
 
+// What the tools read (packages/tilers/tools.js), grouped for the Windows dialog's type list (`label=ext,ext;…`).
+const RAW_FILE_TYPES = [
+  'Raw input=las,laz,e57,ply,ptx,pts,pcd,bpf,xyz,csv,txt,obj,fbx,3ds,gltf,glb,stl,dae,ifc,3mf,x3d,gml,kml,shp,geojson,gpkg,spz,sog,splat,ksplat,lcc',
+  'Point clouds=las,laz,e57,ply,ptx,pts,pcd,bpf,xyz,csv,txt',
+  'Meshes and vectors=obj,fbx,3ds,gltf,glb,ply,stl,dae,ifc,3mf,x3d,gml,kml,shp,geojson,gpkg',
+  'Gaussian splats=ply,spz,sog,splat,ksplat,lcc',
+].join(';');
+
 export function TilerCard({ app, onStream }: { app: AppModel; onStream: () => void }) {
-  const { form, patchForm } = app;
-  const src = form.src.trim();
+  const { patchForm } = app;
+  const [input, setInput] = useState('');
+  const src = input.trim();
   const [tools, setTools] = useState<Tool[] | null>(null);
   const [unavailable, setUnavailable] = useState('');
   const [toolId, setToolId] = useState('');
@@ -138,6 +148,11 @@ export function TilerCard({ app, onStream }: { app: AppModel; onStream: () => vo
   const args = tool && src && outDir.trim() ? tilerArgs(tool, src, outDir.trim(), vals, willDownload) : null;
   const cliText = args ? `node ${args.map(quote).join(' ')}` : '';
 
+  async function browseIn(directory: boolean) {
+    const picked = await pickDataset({ directory, allowedFileTypes: directory ? '*' : RAW_FILE_TYPES }).catch((e) => { say(`File picker failed: ${e}`, 'err'); return []; });
+    if (picked?.[0]) setInput(picked[0]);
+  }
+
   async function browseOut() {
     if (!host) return say('The native picker needs the desktop app: type a folder path instead.', 'err');
     const picked = await pickDataset({ directory: true, allowedFileTypes: '*' }).catch(() => []);
@@ -146,7 +161,7 @@ export function TilerCard({ app, onStream }: { app: AppModel; onStream: () => vo
 
   async function start() {
     if (!src) return say('Enter the raw file above first.', 'err');
-    if (!tool) return say(`No tool takes ${what}. Tiled sources (COPC, Potree, SOG…) go to Stream live.`, 'err');
+    if (!tool) return say(`No tool takes ${what}. Tiled sources (COPC, Potree, SOG…) go to the Build tab.`, 'err');
     if (blocked) return say(`${tool.name} is not on this machine: ${tool.found.hint}`, 'err');
     if (!outDir.trim()) return say('Pick an empty output folder.', 'err');
     if (!host || !pickerRpc) return say('Running a tiler needs the desktop app. The command below does the same from a terminal.', 'err');
@@ -162,7 +177,7 @@ export function TilerCard({ app, onStream }: { app: AppModel; onStream: () => vo
 
   /**
    * Tiny synthetic inputs to try the tools on (packages/tilers/samples.js): a LAS, a splat PLY and a textured OBJ,
-   * written into a `3dtiled-samples` folder of the picked one. The LAS becomes the dataset.
+   * written into a `3dtiled-samples` folder of the picked one. The LAS becomes the input.
    */
   async function makeSamples() {
     if (!host || !pickerRpc) return say('Writing the samples needs the desktop app: node packages/tilers/cli.js samples <folder> does the same.', 'err');
@@ -179,8 +194,8 @@ export function TilerCard({ app, onStream }: { app: AppModel; onStream: () => vo
         if (st.state !== 'done' || !line) return say(`Could not write the samples: ${st.tail[st.tail.length - 1] ?? ''}`, 'err');
         const { files } = JSON.parse(line.slice('TILER_SAMPLES '.length)) as { files: string[] };
         lastSrc.current = files[0]!;                    // this change of input is ours: keep the message below
-        patchForm({ src: files[0]! });
-        return say(`Samples written to ${dir}: points.las (set as the dataset; its CRS is EPSG:32631), splats.ply, and the same terrain as mesh/mesh.obj, mesh.glb and mesh.ply.`, 'ok');
+        setInput(files[0]!);
+        return say(`Samples written to ${dir}: points.las (set as the input; its CRS is EPSG:32631), splats.ply, and the same terrain as mesh/mesh.obj, mesh.glb and mesh.ply.`, 'ok');
       }
     } catch (e) { say(`Could not write the samples: ${e instanceof Error ? e.message : e}`, 'err'); }
   }
@@ -223,7 +238,7 @@ export function TilerCard({ app, onStream }: { app: AppModel; onStream: () => vo
     }
   }
 
-  /** What the tiler wrote becomes the dataset, and the stream flow opens on it. */
+  /** What the tiler wrote becomes the Build tab's dataset, and that tab opens on its stream flow. */
   function streamIt() {
     if (!result) return;
     // A file on disk is read by the converter-backed route (cache=full: converted once to the local cache).
@@ -273,15 +288,24 @@ export function TilerCard({ app, onStream }: { app: AppModel; onStream: () => vo
 
   return (
     <Card id="tiler-card">
-      <FieldLabel className="mb-[9px] text-[13.5px] leading-normal text-foreground">Tile raw input <span className="text-xs font-normal text-muted-foreground">— a point cloud, a mesh or Gaussian splats that are not tiled yet, a file or a folder: run a tiler on it, then open the result</span></FieldLabel>
+      <FieldLabel className="mb-[9px] text-[13.5px] leading-normal text-foreground">Tile raw input <span className="text-xs font-normal text-muted-foreground">— a point cloud, a mesh or Gaussian splats that are not tiled yet: a third-party tiler runs on this machine, then the result is opened</span></FieldLabel>
+      <Field label="Raw input — a file, a folder, or a PostgreSQL address" className="mb-3">
+        <UrlBar>
+          <TextInput id="tiler-src" value={input} onChange={(e) => setInput(e.target.value)} disabled={running} placeholder="C:\data\scan.laz   or   C:\data\model.obj   or   postgresql://user@host:5432/database" className="flex-1" />
+          {host && <>
+            <Button id="tiler-browse-file" disabled={running} title="Pick a raw file: a point cloud (.las, .laz, .e57, .ply, .pts, .xyz…), a mesh (.obj, .fbx, .glb, .ifc…), vectors (.shp, .geojson, .gpkg) or splats (.ply, .spz, .sog, .splat, .ksplat, .lcc)" onClick={() => browseIn(false)}>File…</Button>
+            <Button id="tiler-browse-dir" disabled={running} title="Pick a folder of raw files: LAS or LAZ files, an OSGB tree, meshes" onClick={() => browseIn(true)}>Folder…</Button>
+          </>}
+        </UrlBar>
+      </Field>
       {unavailable && <Result id="tiler-unavailable" message={{ msg: unavailable, kind: 'err' }} />}
       {tools && !tool && <Result id="tiler-status-none" message={status} />}
       {tools && !tool && (
         <Hint id="tiler-none">
-          {src ? <>No tool here takes <strong>{what}</strong>. </> : <>Enter a raw file or folder in the dataset field above (<em>File…</em> or <em>Folder…</em>). </>}
+          {src ? <>No tool here takes <strong>{what}</strong>. </> : <>Enter a raw file or folder above (<em>File…</em> or <em>Folder…</em>). </>}
           {(Object.keys(KINDS) as Tool['kind'][]).map((k) => <span key={k} id={`tiler-inputs-${k}`}><strong>{KINDS[k]}:</strong> {[...new Set(tools.filter((t) => t.kind === k).flatMap((t) => t.inputs))].filter((e) => e !== 'postgres').map((e) => `.${e}`).join(', ')}. </span>)}
           {tools.some((t) => t.inputs.includes('postgres')) && <span id="tiler-inputs-db"><strong>PostGIS table:</strong> postgresql://user@host:5432/database. </span>}
-          A source that is already tiled (COPC, Potree, streamed SOG, 3D Tiles…) goes straight to <em>Stream live</em>.
+          A source that is already tiled (COPC, Potree, streamed SOG, 3D Tiles…) goes to the <em>Build</em> tab.
           {!src && host && <> Nothing at hand? <button id="tiler-samples" type="button" onClick={makeSamples} className="cursor-pointer underline">Write tiny sample files</button> (a LAS, a splat PLY, a textured OBJ, 1.3 MB) into a folder you pick.</>}
         </Hint>
       )}

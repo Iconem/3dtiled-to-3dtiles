@@ -20,6 +20,7 @@ import { BuildTab } from './BuildTab';
 import { LINKS } from './catalog';
 import { RELEASE_URL, setServerWorkers, base, buildLabel, docsUrl, fitWindowForPreview, fitWindowToContent, openExternal, pickerAvailable, pickerRpc, resetFit, staticPort, tilePort, viewerUrl } from './host';
 import { LibraryTab } from './LibraryTab';
+import { TilerCard } from './TilerCard';
 import { loadLibrary, noteServed, parseLibrary, saveLocal, serialize, type DatasetOptions, type Library } from './library';
 import { SamplesTab } from './SamplesTab';
 import { THEMES, nextTheme, useTheme, type Theme } from './theme';
@@ -73,9 +74,17 @@ interface Overlay {
   renderer: Renderer | null;
 }
 
+const TAB_TITLES = {
+  build: 'A tiled dataset (COPC, Potree, SOG, RAD, LCC, I3S…): stream it as 3D Tiles, or export it to a folder',
+  tile: 'A raw point cloud, mesh or splat file that is not tiled yet (or a PostGIS table): run a third-party tiler on it',
+  library: 'Bookmarks and exports',
+  samples: 'Public datasets to try',
+} as const;
+
 export function App() {
   const [theme, cycleTheme] = useTheme();
   const [tab, setTab] = useState('build');
+  const [flow, setFlow] = useState('stream');            // the Build tab's flow: stream or export
   const [libCompact, setLibCompact] = useState(() => localStorage.getItem(LIB_VIEW_KEY) !== 'detailed');
   const setLibView = (c: boolean) => { setLibCompact(c); localStorage.setItem(LIB_VIEW_KEY, c ? 'compact' : 'detailed'); };
   // Auto unless this machine chose otherwise: the server is told at start and on every change.
@@ -250,10 +259,10 @@ export function App() {
         <Tabs value={tab} onValueChange={(v) => setTab(String(v))} className="gap-0">
           <div className="mb-3.5 flex items-center gap-3">
           <TabsList id="tabs" className="h-auto gap-0.5 self-start rounded-md p-[3px]">
-            {(['build', 'library', 'samples'] as const).map((name) => (
-              <TabsTrigger key={name} value={name} data-tab={name}
+            {(['build', 'tile', 'library', 'samples'] as const).map((name) => (
+              <TabsTrigger key={name} value={name} data-tab={name} title={TAB_TITLES[name]}
                 className="h-[30px] flex-none gap-[7px] rounded-sm border-0 px-3.5 text-[13px] font-medium text-muted-foreground hover:text-foreground data-active:bg-background data-active:text-foreground data-active:shadow-xs dark:data-active:border-0 dark:data-active:bg-background">
-                {name === 'build' ? 'Build' : name === 'library' ? 'Library' : 'Samples'}
+                {name === 'build' ? 'Build' : name === 'tile' ? 'Tile raw input' : name === 'library' ? 'Library' : 'Samples'}
                 {name === 'library' && <span id="lib-count" className="rounded-full bg-background px-1.5 py-[3px] text-[11px] leading-none text-muted-foreground">{lib.bookmarks.length}</span>}
               </TabsTrigger>
             ))}
@@ -269,7 +278,8 @@ export function App() {
           )}
           </div>
           {/* Kept mounted: an export carries on while you switch tabs. */}
-          <TabsContent value="build" id="panel-build" keepMounted><BuildTab app={app} message={message} /></TabsContent>
+          <TabsContent value="build" id="panel-build" keepMounted><BuildTab app={app} message={message} flow={flow} setFlow={setFlow} /></TabsContent>
+          <TabsContent value="tile" id="panel-tile" keepMounted><TilerCard app={app} onStream={() => { setFlow('stream'); setTab('build'); }} /></TabsContent>
           <TabsContent value="library" id="panel-library" keepMounted><LibraryTab app={app} /></TabsContent>
           <TabsContent value="samples" id="panel-samples" keepMounted><SamplesTab app={app} /></TabsContent>
         </Tabs>

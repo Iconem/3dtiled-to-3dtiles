@@ -8,7 +8,7 @@ The desktop companion (`apps/desktop`) is the **run-the-middleware-on-device** a
 3D Tiles endpoint you can paste into Cesium for Unreal/Unity, QGIS, or CesiumJS.
 
 Enter a dataset, then choose one of two flows: **Live-stream** gives a URL to copy, and **Export to
-disk** writes a finished folder. Everything else (format, materialization, placement, export method, CLI
+disk** writes a finished folder. Input that is not tiled yet has its own tab, [*Tile raw input*](#tile-raw-input). Everything else (format, materialization, placement, export method, CLI
 command) is folded under *Advanced*.
 
 The **Library** tab holds your bookmarks, and a history of what you served or exported: a URL you copied,
@@ -123,9 +123,10 @@ Two Node children, both reusing scripts already in this repo:
 If a 3dtiled server is already listening on a candidate port (e.g. you have `pnpm dev` up), the app
 **adopts** it instead of starting a second copy, and leaves it running on quit.
 
-## The three tabs
+## The four tabs
 
-The Build tab holds a dataset and three flows: *Stream live*, *Export to a folder* and *Tile raw input*.
+*Build* holds a tiled dataset and two flows, *Stream live* and *Export to a folder*. *Tile raw input* has its own
+input field, for files that are not tiled yet. *Library* and *Samples* list what you kept and what you can try.
 
 ### Build
 
@@ -282,11 +283,13 @@ viewer (48 and 42 tiles). The same exporter is on the CLI as
 
 ### Tile raw input
 
-The third flow of the Build tab, for input that is **not tiled yet**: a point cloud, a mesh or Gaussian splats, as
+A tab of its own, next to *Build*, for input that is **not tiled yet**: a point cloud, a mesh or Gaussian splats, as
 a **file or a folder**, or a table of a PostGIS database. It runs a third-party tiler on it, then opens the result. The app writes no tiler: it finds,
 fetches and calls the official ones ([plan and results](/docs/guide/planning/one-stop-tiler)).
 
-Pick the input with **File…** or **Folder…** above (the file dialog lists the types by family), or paste a path.
+Pick the input with the tab's own **File…** or **Folder…** (the file dialog lists the types by family), or paste a
+path. This field is not the Build tab's dataset: that one only takes sources that are tiled already, and its
+dialog only lists those.
 
 | Input | Tools offered | Result |
 |---|---|---|
@@ -331,7 +334,7 @@ Pick the input with **File…** or **Folder…** above (the file dialog lists th
     removed. It needs neither Visual Studio's build tools nor an administrator, and leaves `PATH` alone.
   The button reads *Download and run* when a download will happen, and the text above it says what and how much.
 - **A database instead of a file.** pg2b3dm tiles a PostGIS table: type `postgresql://user@host:5432/database` in
-  the dataset field and give the table under the tool. A password can be part of the address
+  the tab's input field and give the table under the tool. A password can be part of the address
   (`user:password@host`): it is passed to the tool through its environment, never on a command line, in the log
   or in the run's record. Without one, `PGPASSWORD` or the machine's pgpass file is used.
 - **A tool already on the machine is offered first**, so nothing is downloaded unless you pick a tool that needs it.
@@ -341,11 +344,11 @@ Pick the input with **File…** or **Folder…** above (the file dialog lists th
 - **Run** starts the tool in a subprocess, as *Run in: CLI subprocess* does for an export: its output is shown as
   it comes, and **Cancel** stops it and what it started.
 - **When the run ends:**
-  - a COPC, a Potree folder, a streamed SOG, a RAD, a Nexus file or a `.3tz` archive: **Stream it** puts what was written in the dataset field (with
-    `cache=full`: a file on disk is converted once to the local cache) and opens *Stream live*;
+  - a COPC, a Potree folder, a streamed SOG, a RAD, a Nexus file or a `.3tz` archive: **Stream it** puts what was written in the Build tab's dataset field (with
+    `cache=full`: a file on disk is converted once to the local cache) and opens that tab on *Stream live*;
   - a 3D Tiles tileset is finished already: **Preview in Cesium**, **Preview in 3DTRjs** and **Copy URL** open it
     as it is, served from its folder by the app's tile server. The folder can be hosted on any web server.
-- **Nothing at hand?** With an empty dataset field, *Write tiny sample files* puts a 20 000-point LAS, a
+- **Nothing at hand?** With an empty input field, *Write tiny sample files* puts a 20 000-point LAS, a
   3 000-splat PLY and the same small terrain as a textured OBJ, a GLB and a PLY mesh (1.5 MB, synthetic) in a
   folder you pick.
 

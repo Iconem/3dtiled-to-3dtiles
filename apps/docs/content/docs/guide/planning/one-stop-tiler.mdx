@@ -1,6 +1,6 @@
 ---
 title: "One-stop tiler"
-description: "The desktop app's third flow: give it raw, untiled input and it runs a third-party tiler, then opens the result. Phases 1 to 3 are built (twenty tools, Windows); the plan for the rest."
+description: "The desktop app's Tile raw input tab: give it raw, untiled input and it runs a third-party tiler, then opens the result. Phases 1 to 3 are built (twenty tools, Windows); the plan for the rest."
 ---
 
 Plan of 2026-11-16. **Phases 1 to 3 were built the same day** (see the two *Result* sections); phase 4, macOS,
@@ -20,15 +20,17 @@ Twenty tools now. Each tool's own help was read again and compared with what the
 | **PotreeConverter 1.7** | `.xyz`, `.txt`, `.pts` | each one. **PTX was withdrawn**: the tool's help lists it, but the released Windows binary crashed on two PTX files that PDAL reads |
 | **fanvanzh/3dtiles** | a Shapefile of footprints, extruded by a height field (a second tool, `shape`) | 16 footprints: displayed, placed correctly |
 | **rusty-tiles** | GeoJSON and GeoPackage (a third tool, `vector`) | both, to a `.3tz` archive |
-| **Spark `build-lod`** | `.splat`, `.ksplat`, a compressed `.ply` | `.splat` and the compressed PLY. A SOG written by splat-transform 3.11 was refused by the tool, so `.sog` is not offered |
-| **splat-transform** | an XGRIDS `.lcc`; a compressed `.ply` is now recognised as splats | the compressed PLY. `.lcc` is not tried: no small scene at hand |
+| **Spark `build-lod`** | `.splat`, `.ksplat`, a compressed `.ply` | `.splat`, the compressed PLY and, later the same day, two `.ksplat` files (compression levels 0 and 1, written by GaussianSplats3D 0.4 from the 3 000-splat sample). A SOG written by splat-transform 3.11 was refused by the tool, so `.sog` is not offered |
+| **splat-transform** | an XGRIDS `.lcc`; a compressed `.ply` is now recognised as splats | the compressed PLY. Later the same day: an `.lcc` (PlayCanvas's public *bigmirror* scene, 999 758 splats in 2 levels: the output holds the same 2 levels, 666 700 and 333 058 splats, as the scene's own header says) and the two `.ksplat` files (3 levels, 3 000, 1 500 and 750 splats) |
 
 Unchanged, their lists already matched: untwine, PotreeConverter 2, gocesiumtiler, point-tiler, py3dtiles, Obj2Tiles,
 mago 3DTiler, Nexus (its `.tsp` input is left out), the two splat-to-3D-Tiles converters.
 
 - **A bug found on the way.** splat-transform was offered for `.spz`, `.sog`, `.splat` and `.ksplat`, and failed on
   all four: it merges levels of detail from PLY files only. Such an input is now first written out as a PLY.
-  `.spz`, `.sog` and `.splat` were run after the fix; these had never been tried before.
+  `.spz`, `.sog` and `.splat` were run after the fix; these had never been tried before. The cause is a check in
+  the tool, not a decoding failure: its `lod-meta.json` writer takes either one source that already holds levels
+  (a streamed SOG, an LCC) or local PLY files, and refuses anything else by its extension.
 - **rusty-tiles refused to write over its own output**, so a second run into the same folder failed. It is now
   called with `--force` (the app has already checked that the folder may be overwritten).
 - **A folder is no longer taken for a point cloud because it holds a `.txt`.**
@@ -68,7 +70,9 @@ through the command line only, not from the form.
 has each one's reason): py3dtilers (py3dtiles is the maintained one, and is in), gltf-to-3d-tiles, ept-tools,
 schwarzwald, potree23dtiles, the terrain builders. `pdal_wrench build_vpc` is the one candidate left.
 
-**Not verified this round:** `.ksplat` and `.lcc` inputs; pg2b3dm against a remote or TLS-only database and
+**The tab of its own, in a built app** (a local build, 2026.11.17, later the same day): a LAS through PDAL, the two `.ksplat` runs and the `.lcc` run were typed in the tab's own input field and run from it; *Stream it* opened the Build tab on a stream URL that answered 200 each time, and the `.ksplat` and `.lcc` results were displayed in 3DTRjs. The `.lcc` form still shows the level and decimation options, which that input ignores.
+
+**Not verified this round:** pg2b3dm against a remote or TLS-only database and
 with 3DCityDB tables; the fetched Rust toolchain on a machine that truly has no Rust (it was hidden, not absent),
 on Windows on ARM, or behind a proxy.
 
@@ -229,8 +233,8 @@ The first four tools. What it says is *not verified* below was since done in pha
 and large inputs.
 
 A new package, `packages/tilers`, finds a tool, fetches it when its authors publish a binary, builds its command
-line from checked options and runs it. The desktop app has a third flow, **Tile raw input**, on top of it, and the
-CLI has `3dtiled tile`.
+line from checked options and runs it. The desktop app has **Tile raw input** on top of it (first a third flow of the Build tab; a tab of its own, with its
+own input field, since 2026-11-17), and the CLI has `3dtiled tile`.
 
 | Tool | Input | Output, then streamed as | How it gets on the machine |
 |---|---|---|---|

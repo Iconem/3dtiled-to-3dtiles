@@ -8,6 +8,12 @@ Format loosely follows [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+### Changed — 2026-11-17 (desktop app: *Tile raw input* is a tab of its own)
+- **Tile raw input moved out of the Build tab**: it is now a top-level tab, next to Build, Library and Samples, with
+  its own input field and its own **File…** and **Folder…** buttons. The Build tab's dataset takes tiled sources
+  only again, and its file dialog lists only those. *Stream it* still hands the result to the Build tab.
+- `.ksplat` (splat-transform and Spark `build-lod`) and `.lcc` (splat-transform) inputs are now tried: both run.
+
 ### Added — 2026-11-17 (one-stop tiler: every input each tool reads, pg2b3dm, a Rust toolchain fetched when needed)
 - **Twenty tools.** New: **pg2b3dm** (a PostGIS table to 3D Tiles: the dataset is `postgresql://user@host:5432/database`),
   **3dtile `shape`** (a Shapefile of footprints, extruded) and **rusty-tiles `vector`** (GeoJSON, GeoPackage).
