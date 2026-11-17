@@ -8,7 +8,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import zlib from 'node:zlib';
-import { TOOLS, RUNTIMES, toolById, listTools, toolsFor, describeInput, sniffPly, resolveOptions, planRun, unzip, installTool, detectTool, detectRuntime, commandLine, stepLine } from '../index.js';
+import { TOOLS, RUNTIMES, RUST_BUILD, toolById, listTools, toolsFor, describeInput, parseDb, sniffPly, resolveOptions, planRun, unzip, installTool, detectTool, detectRuntime, commandLine, stepLine } from '../index.js';
 
 const found = (exe = ['tool.exe']) => ({ status: 'ready', source: 'path', exe });
 const tmp = () => fs.mkdtempSync(path.join(os.tmpdir(), 'tilers-test-'));
@@ -71,6 +71,12 @@ test('which tools take a file or a folder', () => {
   assert.deepEqual(toolsFor('part.stl'), ['mago-3d-tiler', 'nexus']);
   assert.deepEqual(toolsFor('building.ifc'), ['mago-3d-tiler']);
   assert.deepEqual(toolsFor('scene.spz'), ['splat-transform', 'spark-build-lod']);
+  assert.deepEqual(toolsFor('scene.splat'), ['splat-transform', 'spark-build-lod']);
+  assert.deepEqual(toolsFor('scan.ptx'), ['pdal'], 'PotreeConverter 1.7 lists PTX but its binary crashes on it');
+  assert.deepEqual(toolsFor('cloud.txt'), ['pdal', 'potreeconverter1', 'point-tiler']);
+  assert.deepEqual(toolsFor('cloud.xyz'), ['potreeconverter1', 'py3dtiles']);
+  assert.deepEqual(toolsFor('footprints.shp'), ['mago-3d-tiler', 'fanvanzh-3dtiles-shape']);
+  assert.deepEqual(toolsFor('parcels.geojson'), ['mago-3d-tiler', 'rusty-tiles-vector']);
   assert.deepEqual(toolsFor('notes.docx'), []);
 
   // A PLY is points, a mesh or splats: its header says, and only the tools for that kind are offered.
@@ -78,11 +84,12 @@ test('which tools take a file or a folder', () => {
   const points = ply('points.ply', 'element vertex 10\nproperty float x\nproperty float y\nproperty float z\nproperty uchar red');
   const splats = ply('splats.ply', 'element vertex 10\nproperty float x\nproperty float f_dc_0\nproperty float opacity\nproperty float scale_0');
   const mesh = ply('mesh.ply', 'element vertex 10\nproperty float x\nelement face 20\nproperty list uchar int vertex_indices');
-  assert.deepEqual([sniffPly(points), sniffPly(splats), sniffPly(mesh)], ['points', 'splats', 'mesh']);
-  assert.deepEqual(toolsFor(points), ['potreeconverter1', 'gocesiumtiler', 'py3dtiles']);
+  const packed = ply('scene.compressed.ply', 'element chunk 4\nproperty float min_x\nelement vertex 10\nproperty uint packed_position\nproperty uint packed_rotation');
+  assert.deepEqual([sniffPly(points), sniffPly(splats), sniffPly(mesh), sniffPly(packed)], ['points', 'splats', 'mesh', 'splats']);
+  assert.deepEqual(toolsFor(points), ['pdal', 'potreeconverter1', 'gocesiumtiler', 'py3dtiles']);
   assert.deepEqual(toolsFor(splats), ['splat-transform', 'gocesiumtiler-splats', '3dgs-ply-3dtiles-converter', 'spark-build-lod']);
   assert.deepEqual(toolsFor(mesh), ['mago-3d-tiler', 'nexus'], 'a PLY mesh goes to the mesh tools');
-  assert.equal(toolsFor('not-on-disk.ply').length, 9, 'a PLY that cannot be read is offered every PLY tool');
+  assert.equal(toolsFor('not-on-disk.ply').length, 10, 'a PLY that cannot be read is offered every PLY tool');
 
   // A folder is matched by what it holds.
   const scans = path.join(dir, 'scans'), osgb = path.join(dir, 'oblique');
@@ -91,6 +98,9 @@ test('which tools take a file or a folder', () => {
   assert.deepEqual(describeInput(scans).exts, ['las', 'laz']);
   assert.deepEqual(toolsFor(scans), ['untwine', 'potreeconverter', 'potreeconverter1', 'gocesiumtiler', 'rusty-tiles-points', 'mago-3d-tiler'], 'the tools that take a folder');
   assert.deepEqual(toolsFor(osgb), ['fanvanzh-3dtiles']);
+  // a folder is not a point cloud because it holds a text file
+  const notes = path.join(dir, 'notes'); fs.mkdirSync(notes); fs.writeFileSync(path.join(notes, 'readme.txt'), '');
+  assert.deepEqual(toolsFor(notes), []);
   assert.deepEqual(toolsFor(path.join(osgb, 'Data', 'Tile_1', 'Tile_1.osgb')), [], 'an OSGB tile alone is not an input: the folder is');
   assert.throws(() => planRun('pdal', scans, path.join(dir, 'out'), {}, found()), /takes one file .*not a folder/);
   assert.throws(() => planRun('gocesiumtiler', scans, path.join(scans, 'out'), {}, found()), /inside the input folder/);
@@ -171,10 +181,10 @@ test('commands: each tool is called the way it documents', () => {
   // tools that write one file to stream: a .3tz archive, a Nexus file, a RAD
   const glb = path.join(dir, 'model.glb');
   const rm = planRun('rusty-tiles', glb, out, { lon: 2.29, lat: 48.86 }, exe);
-  assert.deepEqual(rm.steps[0].cmd, ['t.exe', 'mesh', '--input', glb, '--output', path.join(out, 'model.3tz'), '--profile', 'balanced', '--anchor', '2.29', '48.86', '0']);
+  assert.deepEqual(rm.steps[0].cmd, ['t.exe', 'mesh', '--force', '--input', glb, '--output', path.join(out, 'model.3tz'), '--profile', 'balanced', '--anchor', '2.29', '48.86', '0']);
   assert.deepEqual([rm.output.format, rm.output.path], ['package', path.join(out, 'model.3tz')]);
   const rp = planRun('rusty-tiles-points', las, out, { sourceCrs: 'EPSG:32631' }, exe);
-  assert.deepEqual(rp.steps[0].cmd, ['t.exe', 'point-cloud', '--input', las, '--output', path.join(out, 'scan one.3tz'), '--sourceCrs', 'EPSG:32631', '--maxPoints', '8192', '--heightOffset', '0']);
+  assert.deepEqual(rp.steps[0].cmd, ['t.exe', 'point-cloud', '--force', '--input', las, '--output', path.join(out, 'scan one.3tz'), '--sourceCrs', 'EPSG:32631', '--maxPoints', '8192', '--heightOffset', '0']);
   assert.throws(() => planRun('rusty-tiles-points', las, out, {}, exe), /sourceCrs: .* needs it/);
   const nx = planRun('nexus', obj, out, { compress: true, colors: true }, found(['C:\\tools\\nxsbuild.exe']));
   assert.deepEqual(nx.steps.map((x) => x.cmd), [
@@ -265,13 +275,65 @@ test('an archive whose entries are named with backslashes unpacks to the same pa
   assert.ok(fs.existsSync(path.join(r.dir, 'nxscompress.exe')) && fs.existsSync(path.join(r.dir, 'plugins', 'a.dll')));
 });
 
-test('a tool published as source only is offered when the machine can build it, and says what it needs otherwise', async () => {
+test('a tool published as source only is built with the machine\'s Rust toolchain, or with one fetched for the build', async (t) => {
   const dir = tmp(); process.env.TILED_TOOLS_DIR = dir;
+  const key = `${process.platform}-${process.arch}`, rust = RUST_BUILD[key];
   const d = detectTool('spark-build-lod');
   assert.equal(d.status, 'missing');
   if (d.downloadable) assert.match(d.hint, /built here with cargo/);
   else assert.match(d.hint, /needs the Rust toolchain to build: install it from https:\/\/rustup\.rs/);
   assert.equal(listTools().find((x) => x.id === 'spark-build-lod').delivery, 'cargo');
+
+  // without a cargo on the machine: the toolchain is part of what is fetched, where one is declared for the platform
+  process.env.TILED_PRIVATE_RUST = '1';
+  t.after(() => { delete process.env.TILED_PRIVATE_RUST; });
+  const none = detectTool('spark-build-lod');
+  assert.equal(none.downloadable, !!rust);
+  if (rust) {
+    assert.equal(none.missing.length, 2);
+    assert.match(none.missing[1], /a Rust toolchain \d+\.\d+\.\d+ for the build, removed after it/);
+    assert.equal(none.downloadBytes, toolById('spark-build-lod').provide.cargo.bytes + rust.bytes + rust.toolchainBytes);
+  } else assert.match(none.hint, /install it from https:\/\/rustup\.rs/);
+  // the installer is pinned like any download, and it comes from the Rust project
+  for (const [k, dl] of Object.entries(RUST_BUILD)) {
+    if (typeof dl !== 'object') continue;
+    assert.match(dl.url, /^https:\/\/static\.rust-lang\.org\/rustup\/archive\/\d+\.\d+\.\d+\//, k);
+    assert.match(dl.sha256, /^[0-9a-f]{64}$/); assert.ok(dl.bytes > 0 && dl.toolchainBytes > 0 && dl.host);
+  }
+  assert.match(RUST_BUILD.version, /^\d+\.\d+\.\d+$/, 'a pinned toolchain');
+});
+
+test('a database input: the address is parsed, its password kept out of every description, command line and record', () => {
+  const address = 'postgresql://gis:s3cret@db.example.org:5433/city';
+  assert.deepEqual(parseDb(address), { host: 'db.example.org', port: 5433, user: 'gis', password: 's3cret', database: 'city' });
+  assert.equal(parseDb('postgres://localhost/city').port, 5432);
+  assert.equal(parseDb('postgresql://localhost'), null, 'no database');
+  assert.equal(parseDb('postgresql://u@h/db;Password=x'), null, 'nothing that would add a key to the connection string');
+  assert.equal(parseDb('C:\\data\\a.las'), null);
+  const d = describeInput(address);
+  assert.deepEqual(d, { path: 'postgresql://gis@db.example.org:5433/city', exists: true, dir: false, ext: 'postgres', exts: ['postgres'], ply: null, db: true });
+  assert.ok(!JSON.stringify(describeInput('postgresql://gis:s3cret@/')).includes('s3cret'), 'an incomplete address too');
+  assert.deepEqual(toolsFor(address), ['pg2b3dm']);
+
+  const out = path.join(tmp(), 'out');
+  const plan = planRun('pg2b3dm', address, out, { table: 'public.buildings', attributes: 'name,height' }, found(['pg2b3dm.exe']));
+  assert.deepEqual(plan.steps[0].cmd, ['pg2b3dm.exe', '--connection', 'Host=db.example.org;Port=5433;Username=gis;Database=city;CommandTimeOut=0', '-t', 'public.buildings', '-c', 'geom', '-o', out,
+    '--max_features_per_tile', '1000', '-g', '2000', '-r', 'ADD', '--subdivision', 'QUADTREE', '-a', 'name,height']);
+  assert.deepEqual(plan.steps[0].env, { PGPASSWORD: 's3cret' });
+  assert.ok(!stepLine(plan.steps[0]).includes('s3cret'));
+  assert.equal(planRun('pg2b3dm', 'postgresql://localhost/city', out, { table: 't' }, found()).steps[0].env, undefined, 'no password given: PGPASSWORD or pgpass of the machine');
+  assert.throws(() => planRun('pg2b3dm', address, out, {}, found()), /table: pg2b3dm needs it/);
+  assert.throws(() => planRun('pg2b3dm', 'C:\\data\\a.las', out, { table: 't' }, found()), /takes a PostgreSQL address/);
+  assert.throws(() => planRun('obj2tiles', address, out, {}, found()), /not a database/);
+});
+
+test('splat-transform: a format other than PLY is first written out as a PLY, and an LCC keeps its own levels', () => {
+  const out = path.join(tmp(), 'out'), exe = found(['node', 'cli.mjs']);
+  const spz = planRun('splat-transform', 'C:\\s\\scene.spz', out, { levels: 2 }, exe).steps;
+  assert.equal(spz.length, 3);
+  assert.deepEqual(spz[0].cmd.slice(2), ['-w', path.resolve('C:\\s\\scene.spz'), path.join(out, '.tiler-tmp', 'lod0.ply')]);
+  assert.equal(spz[1].cmd[3], path.join(out, '.tiler-tmp', 'lod0.ply'), 'level 1 is decimated from that PLY');
+  assert.equal(planRun('splat-transform', 'C:\\s\\scene.lcc', out, {}, exe).steps.length, 1);
 });
 
 test('a matching download is unpacked where detection finds it, without its wrapping folder', async (t) => {

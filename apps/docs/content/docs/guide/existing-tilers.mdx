@@ -12,35 +12,46 @@ tools — studied here for format handling, tree/geometric-error strategy, and p
 
 ## Run from the desktop app
 
-Seventeen of the tools below can be run from the desktop app's [*Tile raw input*](/docs/guide/desktop-app#tile-raw-input)
+Twenty of the tools below can be run from the desktop app's [*Tile raw input*](/docs/guide/desktop-app#tile-raw-input)
 flow, or from `3dtiled tile`: the app finds the tool or fetches its official release, shows its options and opens
 what it wrote.
 
 | Family | Tools the app runs |
 |---|---|
-| Point clouds → COPC | PDAL `writers.copc`, untwine |
+| Point clouds → COPC | PDAL `writers.copc` (LAS, LAZ, E57, PLY, PTS, PTX, PCD, BPF, CSV, text), untwine |
 | Point clouds → Potree | PotreeConverter 2.1.5, PotreeConverter 1.7 |
 | Point clouds → 3D Tiles | gocesiumtiler 3.2, point-tiler 0.0.12, py3dtiles 12.1, mago 3DTiler 1.17, rusty-tiles 0.4 (`.3tz`) |
 | Meshes → 3D Tiles | Obj2Tiles 1.10, mago 3DTiler 1.17, fanvanzh/3dtiles 0.4 (OSGB), rusty-tiles 0.4 (glTF, `.3tz`) |
+| Footprints and vectors → 3D Tiles | fanvanzh/3dtiles 0.4 `shape` (Shapefile footprints, extruded), rusty-tiles 0.4 `vector` (GeoJSON, GeoPackage, `.3tz`), mago 3DTiler |
+| A PostGIS table → 3D Tiles | pg2b3dm 2.28 |
 | Meshes → Nexus | Nexus `nxsbuild` 2025.05 |
 | Splats | PlayCanvas splat-transform (streamed SOG), gocesiumtiler `splats` and 3DGS-PLY-3DTiles-Converter 0.6.5 (3D Tiles with SPZ), Spark `build-lod` 2.4.0 (RAD, built from source) |
 
 Not run by the app: potree23dtiles, ept-tools and schwarzwald (no released binary), entwine (it writes EPT, which
-this repo does not read), the Kitware VTK writer, and the commercial suites.
+this repo does not read), the Kitware VTK writer, and the commercial suites. Each is weighed in the next table.
 
 ### Other open-source tilers, by stars
 
-A search of GitHub on 2026-11-17 for tilers of raw point clouds, meshes or splats, beyond the ones above. Stars
-are GitHub's that day.
+A search of GitHub on 2026-11-17 for tilers of raw point clouds, meshes or splats, beyond the ones above, and
+every tool this page names that the app does not run. Stars and last commits are GitHub's that day.
 
 | Tool | Stars | What it does | Why the app does not run it |
 |---|---|---|---|
 | [PrincessGod/objTo3d-tiles](https://github.com/PrincessGod/objTo3d-tiles) | 841 | OBJ → b3dm, i3dm or a batched tileset (Node) | no levels of detail: one tile per model; last commit 2023 |
 | [visgl/loaders.gl](https://github.com/visgl/loaders.gl) `tile-converter` | 860 | I3S ↔ 3D Tiles | converts between tiled formats, not raw input; this repo streams I3S itself |
 | [connormanning/entwine](https://github.com/connormanning/entwine) | 535 | LAS/LAZ → EPT octree | EPT is not read here; untwine (same authors) writes COPC |
-| [Geodan/pg2b3dm](https://github.com/Geodan/pg2b3dm) | 498 | PostGIS geometries → 3D Tiles | its input is a database, not a file |
-| [Oslandia/py3dtilers](https://github.com/Oslandia/py3dtilers) | 246 | OBJ, CityGML databases, GeoJSON, IFC → 3D Tiles (Python) | candidate: installable with uv like py3dtiles; mago 3DTiler covers its file inputs |
-| [xuzhusheng/gltf-to-3d-tiles](https://github.com/xuzhusheng/gltf-to-3d-tiles) | 194 | glTF → b3dm or a tileset (Python) | candidate; mago 3DTiler and rusty-tiles take glTF |
+| [Oslandia/py3dtilers](https://github.com/Oslandia/py3dtilers) | 246 | OBJ, CityGML databases, GeoJSON, IFC → 3D Tiles (Python) | not on PyPI and last commit November 2025; its sibling **py3dtiles** is the maintained one (12.1.1, March 2026) and the app runs it. mago 3DTiler covers these file inputs |
+| [xuzhusheng/gltf-to-3d-tiles](https://github.com/xuzhusheng/gltf-to-3d-tiles) | 194 | glTF → GLB, b3dm, or a tileset split by a bounding-volume hierarchy (Python) | a script with no package or release to pin; it splits without simplifying, so no coarser levels. mago 3DTiler and rusty-tiles take glTF |
+| [PDAL/wrench](https://github.com/PDAL/wrench) `build_vpc` | 92 | a set of LAS, LAZ or COPC files → a virtual point cloud (`.vpc`) | **candidate, next**: this repo streams VPC, and QGIS ships `pdal_wrench`. It needs two steps (each file to COPC, then the index), not wired yet |
+| [njam/citygml-to-3dtiles](https://github.com/njam/citygml-to-3dtiles) | 189 | CityGML → 3D Tiles (Node) | last commit 2024; mago 3DTiler reads CityGML |
+| [yangjs6/splat-3dtiles](https://github.com/yangjs6/splat-3dtiles) | 121 | a splat PLY → 3D Tiles (Python) | last commit 2025; gocesiumtiler `splats` and the bundled converter do this |
+| [Gaia3D/mago-3d-terrainer](https://github.com/Gaia3D/mago-3d-terrainer), [cesium-terrain-builder](https://github.com/tum-gis/cesium-terrain-builder-docker) | 108, 272 | GeoTIFF elevation → quantized-mesh terrain | terrain, not a dataset this repo tiles or streams |
+| [MIERUNE/plateau-gis-converter](https://github.com/MIERUNE/plateau-gis-converter) | 106 | Japan's PLATEAU CityGML → 3D Tiles and other formats | one national dataset |
+| [CesiumGS/cdb-to-3dtiles](https://github.com/CesiumGS/cdb-to-3dtiles) | 93 | OGC CDB → 3D Tiles | last commit 2024; a simulation-industry format |
+| [connormanning/ept-tools](https://github.com/connormanning/ept-tools) | 56 | EPT → 3D Tiles, on the fly or to disk | last commit 2024; its input is EPT, which only entwine writes |
+| [yeyan00/potree23dtiles](https://github.com/yeyan00/potree23dtiles) | 58 | Potree 1.x → 3D Tiles | last commit 2021; this repo converts and streams Potree itself |
+| [igd-geo/schwarzwald](https://github.com/igd-geo/schwarzwald) | 48 | LAS → 3D Tiles or Potree | no released binary, last commit February 2025 |
+| [mattshax/cesium_pnt_generator](https://github.com/mattshax/cesium_pnt_generator), [tum-gis/cesium-point-cloud-generator](https://github.com/tum-gis/cesium-point-cloud-generator) | 199, 195 | LAS → `.pnts` tiles | last commits 2017 and 2022 |
 | [LAStools](https://github.com/LAStools/LAStools) `lascopcindex` | 1 077 | LAS/LAZ → COPC | `lascopcindex` is among LAStools' closed, licensed tools, not its open-source part |
 | [graphdeco-inria/hierarchical-3d-gaussians](https://github.com/graphdeco-inria/hierarchical-3d-gaussians), [city-super/Octree-GS](https://github.com/city-super/Octree-GS) | 1 481, 865 | splats with levels of detail | research training pipelines: the hierarchy is trained from the photos, not built from a finished PLY, and has its own viewer |
 | [francescofugazzi/3dgsconverter](https://github.com/francescofugazzi/3dgsconverter) | 607 | converts and cleans splat PLYs | no tiling |

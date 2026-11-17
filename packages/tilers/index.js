@@ -6,7 +6,8 @@
  * builds the tool's command line from validated options, and runs it. The tools and their options are in tools.js.
  *
  *   listTools()                          the manifest, as plain data (for a form)
- *   describeInput(path)                  what a path is: a file or a folder, its extensions, which kind of PLY
+ *   describeInput(path)                  what a path is: a file or a folder, its extensions, which kind of PLY; or a
+ *                                        PostgreSQL address (postgresql://user@host:5432/database), for pg2b3dm
  *   toolsFor(path)                       the tools that take it
  *   detectTool(id)                       where the tool is, or what is missing and whether it can be fetched
  *   installTool(id)                      download, verify, unpack into the tools folder (and its runtime, if any)
@@ -21,9 +22,9 @@ import os from 'node:os';
 import path from 'node:path';
 import zlib from 'node:zlib';
 import { createRequire } from 'node:module';
-import { TOOLS, RUNTIMES, toolById } from './tools.js';
+import { TOOLS, RUNTIMES, RUST_BUILD, toolById } from './tools.js';
 
-export { TOOLS, RUNTIMES, toolById };
+export { TOOLS, RUNTIMES, RUST_BUILD, toolById };
 
 const isWin = process.platform === 'win32';
 const platformKey = `${process.platform}-${process.arch}`;
@@ -70,18 +71,40 @@ export function sniffPly(file) {
   if (!head.startsWith('ply')) return null;
   const end = head.indexOf('end_header');
   if (end >= 0) head = head.slice(0, end);
-  if (/property\s+\w+\s+f_dc_0\b/.test(head) || /property\s+\w+\s+scale_0\b/.test(head)) return 'splats';
+  // 3DGS trainers' properties, or PlayCanvas' compressed PLY (chunks of packed splats)
+  if (/property\s+\w+\s+(f_dc_0|scale_0|packed_position)\b/.test(head)) return 'splats';
   const faces = head.match(/element\s+face\s+(\d+)/);
   return faces && Number(faces[1]) > 0 ? 'mesh' : 'points';
 }
 
+const DB = /^postgres(ql)?:\/\//i;
+/**
+ * A PostgreSQL address (`postgresql://user:password@host:5432/database`) → its parts, or null when it is not one.
+ * The password is returned here only: no description, log line or record carries it.
+ */
+export function parseDb(input) {
+  if (!DB.test(String(input))) return null;
+  let u; try { u = new URL(input); } catch { return null; }
+  let db;
+  try { db = { host: u.hostname, port: Number(u.port || 5432), user: decodeURIComponent(u.username), password: decodeURIComponent(u.password), database: decodeURIComponent(u.pathname.replace(/^\//, '')) }; } catch { return null; }
+  // these go into a connection string, `key=value;key=value`
+  if (!db.host || !db.database || [db.host, db.user, db.database].some((v) => /[;='"\s]/.test(v))) return null;
+  return db;
+}
+
 /**
  * What a path is, for choosing a tool.
- * @returns {{path:string, exists:boolean, dir:boolean, ext:string, exts:string[], ply:('points'|'splats'|'mesh'|null)}}
+ * @returns {{path:string, exists:boolean, dir:boolean, ext:string, exts:string[], ply:('points'|'splats'|'mesh'|null), db?:boolean}}
  *   a file: its extension (`exts` is that one). A folder: the extensions found in it, three levels deep at most.
- *   A path that does not exist is described from its name alone.
+ *   A path that does not exist is described from its name alone. A PostgreSQL address: `db`, the extension
+ *   `postgres`, and `path` the address without its password.
  */
 export function describeInput(input) {
+  if (DB.test(String(input))) {
+    const db = parseDb(input);
+    const shown = db ? `postgresql://${db.user ? `${db.user}@` : ''}${db.host}:${db.port}/${db.database}` : String(input).replace(/\/\/([^:@/]*):[^@/]*@/, '//$1@');
+    return { path: shown, exists: !!db, dir: false, ext: 'postgres', exts: ['postgres'], ply: null, db: true };
+  }
   const abs = path.resolve(input);
   if (isDirectory(abs)) {
     const exts = new Set();
@@ -101,7 +124,7 @@ export function describeInput(input) {
 }
 
 const accepts = (tool, d) => (d.dir
-  ? !!tool.dir && d.exts.some((e) => tool.inputs.includes(e))
+  ? !!tool.dir && d.exts.some((e) => (tool.dirInputs ?? tool.inputs).includes(e))
   : tool.dir !== 'only' && tool.inputs.includes(d.ext) && (d.ext !== 'ply' || !d.ply || !tool.ply || tool.ply === d.ply));
 
 /** The tools that take this file or folder, in manifest order. */
@@ -212,6 +235,7 @@ const UV_DONE = '.installed';
  */
 let cargoFound;
 export function findCargo() {
+  if (process.env.TILED_PRIVATE_RUST === '1') return null;      // build with the toolchain this package fetches, whatever the machine has
   if (cargoFound !== undefined) return cargoFound;
   const exe = onPath('cargo') ?? [path.join(os.homedir(), '.cargo', 'bin', exeName('cargo'))].find(isFile) ?? null;
   if (!exe) return (cargoFound = null);
@@ -270,8 +294,10 @@ export function detectTool(id) {
       parts.push({ name: `${tool.name} ${p.uv.version} with its own Python`, bytes: p.uv.approxBytes, ok: true });
       if (uv.status !== 'ready') parts.push({ name: `${RUNTIMES.uv.name} ${RUNTIMES.uv.download.version}`, bytes: uv.bytes ?? 0, ok: uv.downloadable });
     } else if (p.cargo) {
-      parts.push({ name: `the source of ${tool.name} ${p.cargo.version}, built here with cargo`, bytes: p.cargo.bytes, ok: !!findCargo(),
+      const own = !!findCargo(), rust = RUST_BUILD[platformKey];
+      parts.push({ name: `the source of ${tool.name} ${p.cargo.version}, built here with cargo`, bytes: p.cargo.bytes, ok: own || !!rust,
         why: `it is published as source only and needs the Rust toolchain to build: install it from https://rustup.rs${p.env ? `, or set ${p.env} to a built binary` : ''}` });
+      if (!own && rust) parts.push({ name: `a Rust toolchain ${RUST_BUILD.version} for the build, removed after it`, bytes: rust.bytes + rust.toolchainBytes, ok: true });
     } else parts.push({ name: dl ? `${tool.name} ${p.download.version}` : tool.name, bytes: dl?.bytes ?? 0, ok: !!dl });
   }
   if (rt && rt.status !== 'ready') parts.push({ name: `${RUNTIMES[rt.id].name} ${RUNTIMES[rt.id].download?.version ?? ''}`.trim(), bytes: rt.bytes ?? 0, ok: rt.downloadable, why: rt.hint });
@@ -379,6 +405,35 @@ function runLogged(cmd, env, log) {
   });
 }
 
+/**
+ * A Rust toolchain in a folder of its own (RUST_BUILD): rustup's installer, hash-checked, installs the pinned
+ * toolchain there; nothing outside `home` is written and PATH is left alone.
+ * @returns {Promise<{cargo:string[], env:object}>} the cargo to call and the environment to call it in
+ */
+async function privateRust(home, { log, fetch }) {
+  const rust = RUST_BUILD[platformKey], toolchain = `${RUST_BUILD.version}-${rust.host}`;
+  await fetchAsset({ name: 'rustup-init', version: RUST_BUILD.installer, dl: rust, dir: path.join(home, 'init'), log, fetch });
+  const env = { ...process.env, RUSTUP_HOME: path.join(home, 'rustup'), CARGO_HOME: path.join(home, 'cargo'), RUSTUP_INIT_SKIP_PATH_CHECK: 'yes', RUSTUP_TOOLCHAIN: toolchain };
+  for (const k of ['RUSTFLAGS', 'CARGO_BUILD_RUSTFLAGS', 'CARGO_BUILD_TARGET', 'RUSTC', 'RUSTC_WRAPPER']) delete env[k];
+  log(`Installing Rust ${RUST_BUILD.version} (${rust.host}) into ${home}: about ${mb(rust.toolchainBytes)} to download, removed after the build…`);
+  let code = await runLogged([path.join(home, 'init', rust.exe), '-y', '--no-modify-path', '--profile', 'minimal', '--default-host', rust.host, '--default-toolchain', RUST_BUILD.version], env, log);
+  const bin = (name) => path.join(env.CARGO_HOME, 'bin', exeName(name));
+  if (code !== 0 || !isFile(bin('cargo'))) throw new Error(`rustup could not install Rust ${RUST_BUILD.version} (exit code ${code}). Nothing was installed.`);
+  const flags = [];
+  if (rust.libsFrom) {
+    // the import libraries this host lacks, from the rust-mingw component of another target, in a folder of their own:
+    // the linker must not see that target's C runtime, only what is missing
+    code = await runLogged([bin('rustup'), 'component', 'add', `rust-mingw-${rust.libsFrom}`, '--toolchain', toolchain], env, log);
+    if (code !== 0) throw new Error(`rustup could not add rust-mingw-${rust.libsFrom} (exit code ${code}). Nothing was installed.`);
+    const libs = (target) => path.join(env.RUSTUP_HOME, 'toolchains', toolchain, 'lib', 'rustlib', target, 'lib', 'self-contained');
+    const have = new Set(await fsp.readdir(libs(rust.host))), extra = path.join(home, 'libs');
+    await fsp.mkdir(extra, { recursive: true });
+    for (const f of await fsp.readdir(libs(rust.libsFrom))) if (/^lib.+\.a$/.test(f) && !have.has(f)) await fsp.copyFile(path.join(libs(rust.libsFrom), f), path.join(extra, f));
+    flags.push('-C', 'linker=rust-lld', '-C', 'linker-flavor=ld.lld', '-C', 'link-self-contained=yes', '-L', `native=${extra}`);
+  }
+  return { cargo: [bin('cargo')], env: { ...env, ...(flags.length ? { CARGO_ENCODED_RUSTFLAGS: flags.join('\x1f') } : {}) } };
+}
+
 /** Download a runtime (RUNTIMES) that is not on the machine. One already there is left alone. */
 export async function installRuntime(id, min = null, o = {}) {
   const rt = RUNTIMES[id], log = o.log ?? (() => {}), found = detectRuntime(id, min);
@@ -429,22 +484,36 @@ export async function installTool(id, o = {}) {
     return { id, version, dir, exe, downloaded: true };
   }
   if (p.cargo) {
-    const cargo = findCargo();
-    if (!cargo) throw new Error(`${tool.name} is published as source only and needs the Rust toolchain to build: install it from https://rustup.rs, then run this again.`);
-    const src = `${dir}.src`, target = `${dir}.build`, exe = path.join(dir, 'bin', exeName(p.cargo.bin));
+    const own = findCargo(), rust = RUST_BUILD[platformKey];
+    if (!own && !rust) throw new Error(`${tool.name} is published as source only and needs the Rust toolchain to build: install it from https://rustup.rs, then run this again.`);
+    const src = `${dir}.src`, target = `${dir}.build`, home = `${dir}.rust`, exe = path.join(dir, 'bin', exeName(p.cargo.bin));
+    const built = path.join(target, 'release', exeName(p.cargo.bin));
+    const build = async (cargo, env) => {
+      await fsp.rm(target, { recursive: true, force: true });
+      const code = await runLogged([...cargo, 'build', '--release', '--locked', '--manifest-path', path.join(src, p.cargo.manifest), '--target-dir', target], { ...env, CARGO_TERM_COLOR: 'never' }, log);
+      return code === 0 && isFile(built) ? null : code;
+    };
     try {
       // the source archive, hash-checked like a binary; its build tree stays outside the install folder
       await fetchAsset({ name: `the source of ${tool.name}`, version, dl: { ...p.cargo, exe: p.cargo.manifest }, dir: src, log, fetch: o.fetch });
-      log(`Building ${p.cargo.bin} with ${path.basename(cargo[0])}${cargo[1] ? ` ${cargo[1]}` : ''} (a few minutes the first time: it compiles its dependencies)…`);
-      const code = await runLogged([...cargo, 'build', '--release', '--locked', '--manifest-path', path.join(src, p.cargo.manifest), '--target-dir', target], { ...process.env, CARGO_TERM_COLOR: 'never' }, log);
-      const built = path.join(target, 'release', exeName(p.cargo.bin));
-      if (code !== 0 || !isFile(built)) throw new Error(`cargo could not build ${p.cargo.bin} (exit code ${code}). Nothing was installed.`);
+      let failed = 'no toolchain';
+      if (own) {
+        log(`Building ${p.cargo.bin} with ${path.basename(own[0])}${own[1] ? ` ${own[1]}` : ''} (a few minutes the first time: it compiles its dependencies)…`);
+        failed = await build(own, process.env);
+        if (failed !== null && rust) log(`  this machine's Rust toolchain could not build it (exit code ${failed}): trying with a toolchain fetched for the build.`);
+      }
+      if (failed !== null && rust) {
+        // no cargo here, or one that cannot link (a Rust install without the C++ build tools): a toolchain of our own
+        const mine = await privateRust(home, { log, fetch: o.fetch });
+        log(`Building ${p.cargo.bin} with it (a few minutes: it compiles its dependencies)…`);
+        failed = await build(mine.cargo, mine.env);
+      }
+      if (failed !== null) throw new Error(`cargo could not build ${p.cargo.bin} (exit code ${failed}). Nothing was installed.`);
       await fsp.rm(dir, { recursive: true, force: true });
       await fsp.mkdir(path.dirname(exe), { recursive: true });
       await fsp.copyFile(built, exe);
     } finally {
-      await fsp.rm(src, { recursive: true, force: true }).catch(() => {});
-      await fsp.rm(target, { recursive: true, force: true }).catch(() => {});
+      for (const d of [src, target, home]) await fsp.rm(d, { recursive: true, force: true, maxRetries: 3 }).catch(() => {});
     }
     log(`  installed in ${dir}. Licence: ${tool.licence}, ${tool.homepage}`);
     return { id, version, dir, exe, downloaded: true };
@@ -500,15 +569,18 @@ export function planRun(id, input, outDir, given = {}, found = detectTool(id)) {
   if (!tool) throw new Error(`unknown tool "${id}"`);
   if (found.status !== 'ready') throw new Error(`${tool.name} is not available: ${found.hint}`);
   const d = describeInput(input), outAbs = path.resolve(outDir), list = tool.inputs.map((e) => '.' + e).join(', ');
+  const db = d.db ? parseDb(input) : null;
+  if (tool.db && !db) throw new Error(`${tool.name} takes a PostgreSQL address, postgresql://user@host:5432/database, not ${d.db ? 'this one (a host and a database are needed)' : 'a file'}`);
+  if (d.db && !tool.db) throw new Error(`${tool.name} takes ${list}, not a database`);
   if (d.dir && !tool.dir) throw new Error(`${tool.name} takes one file (${list}), not a folder`);
   if (!d.dir && tool.dir === 'only') throw new Error(`${tool.name} takes a folder of ${list} files, not a file`);
-  if (d.dir && !d.exts.some((e) => tool.inputs.includes(e))) throw new Error(`${tool.name} takes ${list}: none in ${d.path}`);
+  if (d.dir && !d.exts.some((e) => (tool.dirInputs ?? tool.inputs).includes(e))) throw new Error(`${tool.name} takes ${(tool.dirInputs ?? tool.inputs).map((e) => '.' + e).join(', ')}: none in ${d.path}`);
   if (!d.dir && !tool.inputs.includes(d.ext)) throw new Error(`${tool.name} takes ${list}, not .${d.ext}`);
   if (!d.dir && d.ext === 'ply' && d.ply && tool.ply && tool.ply !== d.ply) throw new Error(`${tool.name} reads a PLY of ${tool.ply}; this one holds ${d.ply === 'mesh' ? 'a mesh' : d.ply}`);
   if (outAbs === d.path || (d.dir && outAbs.startsWith(d.path + path.sep))) throw new Error('the output folder is inside the input folder: choose another');
-  const ext = d.dir ? tool.inputs.find((e) => d.exts.includes(e)) : d.ext;
-  const ctx = { exe: found.exe, input: d.path, isDir: d.dir, ext, outDir: outAbs, tmpDir: path.join(outAbs, '.tiler-tmp'),
-                name: d.dir ? path.basename(d.path) : path.basename(d.path, path.extname(d.path)), opt: resolveOptions(tool, given) };
+  const ext = d.dir ? (tool.dirInputs ?? tool.inputs).find((e) => d.exts.includes(e)) : d.ext;
+  const ctx = { exe: found.exe, input: d.path, isDir: d.dir, ext, outDir: outAbs, tmpDir: path.join(outAbs, '.tiler-tmp'), ...(db ? { db } : {}),
+                name: db ? db.database : d.dir ? path.basename(d.path) : path.basename(d.path, path.extname(d.path)), opt: resolveOptions(tool, given) };
   const out = tool.output.path(ctx);
   return { tool, found, options: ctx.opt, steps: tool.steps(ctx), output: { format: tool.output.format, path: out, proof: tool.output.proof?.(ctx) ?? out }, tmpDir: ctx.tmpDir };
 }
@@ -525,7 +597,7 @@ export const stepLine = (step) => (step.cmd ? commandLine(step.cmd) : step.copy 
  */
 export async function runTool(id, input, outDir, given = {}, o = {}) {
   const log = o.log ?? ((l) => console.log(l));
-  if (!fs.existsSync(input)) throw new Error(`no such input: ${input}`);
+  if (!DB.test(String(input)) && !fs.existsSync(input)) throw new Error(`no such input: ${input}`);
   const plan = planRun(id, input, outDir, given);
   const outAbs = path.resolve(outDir);
   const existing = fs.existsSync(outAbs) ? fs.readdirSync(outAbs) : [];
@@ -544,7 +616,7 @@ export async function runTool(id, input, outDir, given = {}, o = {}) {
         continue;
       }
       const code = await new Promise((resolve, reject) => {
-        const child = spawn(step.cmd[0], step.cmd.slice(1), { env: { ...process.env, ...(plan.found.env ?? {}) }, stdio: o.onOutput ? ['ignore', 'pipe', 'pipe'] : ['ignore', 'inherit', 'inherit'], windowsHide: true });
+        const child = spawn(step.cmd[0], step.cmd.slice(1), { env: { ...process.env, ...(plan.found.env ?? {}), ...(step.env ?? {}) }, stdio: o.onOutput ? ['ignore', 'pipe', 'pipe'] : ['ignore', 'inherit', 'inherit'], windowsHide: true });
         if (o.onOutput) { child.stdout.on('data', (d) => o.onOutput(String(d))); child.stderr.on('data', (d) => o.onOutput(String(d))); }
         const stop = () => { try { child.kill(); } catch { /* gone */ } };
         o.signal?.addEventListener('abort', stop, { once: true });
@@ -560,7 +632,7 @@ export async function runTool(id, input, outDir, given = {}, o = {}) {
   if (!fs.existsSync(plan.output.proof)) throw new Error(`${plan.tool.name} finished but did not write ${plan.output.proof}`);
   const result = { tool: id, kind: plan.tool.kind, format: plan.output.format, output: plan.output.path, outDir: outAbs, seconds: (Date.now() - t0) / 1000 };
   // What made this folder: a record for whoever finds it later, and what lets the tile-server serve it (tilers-live.js).
-  await fsp.writeFile(path.join(outAbs, RUN_MARKER), JSON.stringify({ ...result, input: path.resolve(input), options: plan.options, version: plan.found.version ?? null,
+  await fsp.writeFile(path.join(outAbs, RUN_MARKER), JSON.stringify({ ...result, input: describeInput(input).path, options: plan.options, version: plan.found.version ?? null,
     commands: plan.steps.map(stepLine), finished: new Date().toISOString() }, null, 2));
   return result;
 }

@@ -17,7 +17,7 @@ import { nameFor, PLACEMENT, typeOfFormat } from './urls';
 const FLOWS = [
   ['stream', 'Stream live', 'A tileset URL converted on demand while this app runs: nothing is written to disk'],
   ['export', 'Export to a folder', 'Files on disk: crawl the stream, or run the offline converter'],
-  ['tile', 'Tile raw input', 'A raw LAS, LAZ, E57 or splat PLY: run a third-party tiler on it, then stream the result'],
+  ['tile', 'Tile raw input', 'A raw point cloud, mesh or splat file (or a PostGIS table): run a third-party tiler on it, then open the result'],
 ] as const;
 /** How many threads the app's server builds tiles on: one setting, for the tiles it streams and the exports it runs. */
 export const WORKERS = [
@@ -53,11 +53,11 @@ const PLACEMENT_FIELDS: Record<(typeof PLACEMENT)[number], { label: React.ReactN
 // Grouped for the Windows dialog's type list (`label=ext,ext;…`, see pickWindows); elsewhere the groups are merged.
 // The raw groups are what the "Tile raw input" flow takes (packages/tilers/tools.js).
 const DATASET_FILE_TYPES = [
-  'Datasets and raw input=laz,las,copc,rad,lcc,lcc2,json,js,zip,3tz,slpk,nxs,nxz,glb,b3dm,e57,ptx,xyz,csv,ply,spz,sog,splat,ksplat,obj,fbx,3ds,gltf,gml,kml,shp,geojson,gpkg',
+  'Datasets and raw input=laz,las,copc,rad,lcc,lcc2,json,js,zip,3tz,slpk,nxs,nxz,glb,b3dm,e57,ptx,pts,pcd,bpf,xyz,csv,txt,ply,spz,sog,splat,ksplat,obj,fbx,3ds,gltf,stl,dae,ifc,3mf,x3d,gml,kml,shp,geojson,gpkg',
   'Tiled datasets=laz,rad,lcc,lcc2,json,js,zip,3tz,slpk,nxs,nxz',
-  'Raw point clouds=las,laz,e57,ptx,xyz,csv,ply',
-  'Raw meshes=obj,fbx,3ds,gltf,glb,gml,kml,shp,geojson,gpkg',
-  'Raw Gaussian splats=ply,spz,sog,splat,ksplat',
+  'Raw point clouds=las,laz,e57,ply,ptx,pts,pcd,bpf,xyz,csv,txt',
+  'Raw meshes and vectors=obj,fbx,3ds,gltf,glb,ply,stl,dae,ifc,3mf,x3d,gml,kml,shp,geojson,gpkg',
+  'Raw Gaussian splats=ply,spz,sog,splat,ksplat,lcc',
 ].join(';');
 
 export function BuildTab({ app, message }: { app: AppModel; message: Message | null }) {
@@ -135,7 +135,7 @@ export function BuildTab({ app, message }: { app: AppModel; message: Message | n
       <Card>
         <Field label="Dataset — local path or URL">
           <UrlBar>
-            <TextInput id="src" value={form.src} onChange={(e) => patchForm({ src: e.target.value })} placeholder="C:\data\scan.copc.laz   or   https://…/cloud.js" className="flex-1" />
+            <TextInput id="src" value={form.src} onChange={(e) => patchForm({ src: e.target.value })} placeholder="C:\data\scan.copc.laz   or   https://…/cloud.js   or, to tile a PostGIS table, postgresql://user@host:5432/database" className="flex-1" />
             {/* Outside the Electrobun host (e.g. the bundle rendered in a plain browser for verification) the
                 native dialog cannot exist — hide the buttons rather than offering an action that always fails. */}
             {pickerAvailable() && <>

@@ -1415,7 +1415,7 @@
             "schema": {
               "type": "string"
             },
-            "description": "A file or folder path: the answer then describes it in `input` (a file or a folder, its extensions, and for a .ply whether it holds points, a mesh or splats) and lists, in `for`, the tools that take it."
+            "description": "A file or folder path, or a PostgreSQL address (`postgresql://user@host:5432/database`, for pg2b3dm): the answer then describes it in `input` (a file or a folder, its extensions, and for a .ply whether it holds points, a mesh or splats; a database: `db`, and its address without the password) and lists, in `for`, the tools that take it."
           }
         ],
         "responses": {

@@ -4,7 +4,8 @@
  *
  *   GET /tilers[?input=<path>]   → { tools: [{ id, name, kind, inputs, output, options, …, found: { status, source,
  *                                    hint, missing, downloadable, downloadBytes } }], toolsDir, platform,
- *                                    input?: { exists, dir, ext, exts, ply }, for?: [ids that take that input] }
+ *                                    input?: { exists, dir, ext, exts, ply, db? }, for?: [ids that take that input] }
+ *                                    <path> may be a PostgreSQL address (pg2b3dm): its password is not echoed
  *   GET /tilers/files/<key>/<path>  → a file of a tiler's output folder, served as a static host would, so that a
  *                                    3D Tiles tileset a tool wrote opens in a viewer without a second server.
  *                                    <key> is the folder's absolute path in base64url (`outputKey`).

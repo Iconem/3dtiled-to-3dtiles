@@ -283,7 +283,7 @@ viewer (48 and 42 tiles). The same exporter is on the CLI as
 ### Tile raw input
 
 The third flow of the Build tab, for input that is **not tiled yet**: a point cloud, a mesh or Gaussian splats, as
-a **file or a folder**. It runs a third-party tiler on it, then opens the result. The app writes no tiler: it finds,
+a **file or a folder**, or a table of a PostGIS database. It runs a third-party tiler on it, then opens the result. The app writes no tiler: it finds,
 fetches and calls the official ones ([plan and results](/docs/guide/planning/one-stop-tiler)).
 
 Pick the input with **File…** or **Folder…** above (the file dialog lists the types by family), or paste a path.
@@ -295,16 +295,21 @@ Pick the input with **File…** or **Folder…** above (the file dialog lists th
 | | gocesiumtiler, point-tiler, py3dtiles, mago 3DTiler | 3D Tiles |
 | | rusty-tiles `point-cloud` | a 3D Tiles archive (`.3tz`) |
 | `.e57` | PDAL, gocesiumtiler | COPC, or 3D Tiles |
-| `.ptx`, a point `.ply`, `.xyz`, `.csv` | PotreeConverter 1.7, gocesiumtiler, py3dtiles, point-tiler (by format) | Potree 1.x, or 3D Tiles |
+| a point `.ply` | PDAL, PotreeConverter 1.7, gocesiumtiler, py3dtiles | COPC, Potree 1.x, or 3D Tiles |
+| text: `.csv`, `.txt`, `.xyz`, `.pts` | PDAL (`.csv`, `.txt`, `.pts`), PotreeConverter 1.7 (`.xyz`, `.txt`, `.pts`), point-tiler (`.csv`, `.txt`), py3dtiles (`.xyz`) | COPC, Potree 1.x, or 3D Tiles |
+| `.ptx`, `.pcd`, `.bpf` | PDAL | COPC |
 | **Mesh** `.obj` | Obj2Tiles, mago 3DTiler | 3D Tiles |
 | | Nexus `nxsbuild` | a Nexus file (`.nxs`, or `.nxz` compressed) |
 | a mesh `.ply`, `.stl` | mago 3DTiler, Nexus `nxsbuild` | 3D Tiles, or a Nexus file |
 | `.glb`, `.gltf` | mago 3DTiler, rusty-tiles `mesh` | 3D Tiles, or a 3D Tiles archive (`.3tz`) |
-| `.fbx`, `.3ds`, `.dae`, `.ifc`, `.3mf`, `.x3d`, CityGML, KML, Shapefile, GeoJSON, GeoPackage | mago 3DTiler | 3D Tiles |
+| `.fbx`, `.3ds`, `.dae`, `.ifc`, `.3mf`, `.x3d`, CityGML, KML | mago 3DTiler | 3D Tiles |
 | an OSGB folder (`metadata.xml` and `Data/`) | 3dtile (fanvanzh/3dtiles) | 3D Tiles |
-| **Splats** `.ply`, `.spz`, `.sog`, `.splat`, `.ksplat` | PlayCanvas splat-transform | a streamed SOG with levels of detail |
+| **Footprints and vectors**: a Shapefile | 3dtile `shape` (footprints extruded by a height field), mago 3DTiler | 3D Tiles |
+| GeoJSON, GeoPackage | rusty-tiles `vector` (features as drawn), mago 3DTiler | a 3D Tiles archive (`.3tz`), or 3D Tiles |
+| **A PostGIS table**: `postgresql://user@host:5432/database` typed as the dataset | pg2b3dm | 3D Tiles |
+| **Splats** `.ply` (plain or compressed), `.spz`, `.sog`, `.splat`, `.ksplat`, an XGRIDS `.lcc` | PlayCanvas splat-transform | a streamed SOG with levels of detail |
 | a splat `.ply` | gocesiumtiler `splats`, 3DGS-PLY-3DTiles-Converter | 3D Tiles with SPZ splats, harmonics kept on request |
-| a splat `.ply`, `.spz` | Spark `build-lod` | a RAD file |
+| a splat `.ply` (plain or compressed), `.spz`, `.splat`, `.ksplat` | Spark `build-lod` | a RAD file |
 
 - **A `.ply` can be points, a mesh or splats.** The app reads its header and offers only the tools for what it
   holds; the line under the tool says which it found. A folder is matched by the files in it.
@@ -320,9 +325,15 @@ Pick the input with **File…** or **Folder…** above (the file dialog lists th
     **private environment with its own Python**, in the tools folder (about 270 MB on disk). On a machine
     without uv, uv itself is downloaded first (16 MB, pinned SHA-256), into the tools folder too;
   - Spark `build-lod` is published as **source only**: its source archive is downloaded, checked against a pinned
-    SHA-256 and compiled once with the machine's own Rust toolchain (`cargo`, about three minutes). Without a
-    Rust toolchain the app says so and points to [rustup.rs](https://rustup.rs) instead of offering it.
+    SHA-256 and compiled once (about three minutes). The machine's own Rust toolchain (`cargo`) is used when it
+    can build it. **Without one, the app fetches a Rust toolchain itself**: rustup's installer (pinned SHA-256)
+    puts a pinned Rust (150 MB to download) in the tools folder, the program is built, and the toolchain is
+    removed. It needs neither Visual Studio's build tools nor an administrator, and leaves `PATH` alone.
   The button reads *Download and run* when a download will happen, and the text above it says what and how much.
+- **A database instead of a file.** pg2b3dm tiles a PostGIS table: type `postgresql://user@host:5432/database` in
+  the dataset field and give the table under the tool. A password can be part of the address
+  (`user:password@host`): it is passed to the tool through its environment, never on a command line, in the log
+  or in the run's record. Without one, `PGPASSWORD` or the machine's pgpass file is used.
 - **A tool already on the machine is offered first**, so nothing is downloaded unless you pick a tool that needs it.
 - **The options are the tool's own**, with its defaults; the rarer ones are under *Advanced*, next to the equivalent
   command line. A cloud or a mesh without a georeference takes a CRS or a longitude and latitude there. Another

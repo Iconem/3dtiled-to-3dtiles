@@ -5,6 +5,23 @@ Format loosely follows [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+### Added — 2026-11-17 (one-stop tiler: every input each tool reads, pg2b3dm, a Rust toolchain fetched when needed)
+- **Twenty tools.** New: **pg2b3dm** (a PostGIS table to 3D Tiles: the dataset is `postgresql://user@host:5432/database`),
+  **3dtile `shape`** (a Shapefile of footprints, extruded) and **rusty-tiles `vector`** (GeoJSON, GeoPackage).
+- **Inputs completed** after reading each tool's help again: PDAL also takes a point PLY, PTS, PTX, PCD, BPF, CSV
+  and text; PotreeConverter 1.7 takes XYZ, TXT and PTS; Spark `build-lod` takes `.splat`, `.ksplat` and a
+  compressed PLY; splat-transform takes an `.lcc`.
+- **Spark `build-lod` on a machine without Rust**: the app now fetches a pinned Rust toolchain for the build
+  (150 MB, removed afterwards) instead of sending the user to rustup. It needs no Visual Studio build tools.
+- A database password given in the address reaches pg2b3dm through its environment only.
+
+### Fixed — 2026-11-17 (one-stop tiler)
+- **splat-transform failed on `.spz`, `.sog`, `.splat` and `.ksplat`**, which the app offered it: such an input is
+  now first written out as a PLY.
+- **rusty-tiles could not be run twice into the same folder.**
+- **PotreeConverter 1.7 is no longer offered for PTX**: its released binary crashes on it. PDAL takes PTX.
+- A compressed splat PLY was taken for a point cloud; a folder holding a `.txt` was taken for one too.
+
 ### Added — 2026-11-17 (one-stop tiler: five more tools, seventeen in all)
 - **rusty-tiles** (glTF meshes and LAS to a `.3tz` archive), **Nexus `nxsbuild`** (PLY, OBJ, STL meshes to a Nexus
   file, which this repo streams), **3DGS-PLY-3DTiles-Converter** (splats to 3D Tiles; ships with the app) and

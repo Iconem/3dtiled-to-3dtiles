@@ -74,10 +74,10 @@ node packages/convert/cli.js tile run <tool> <input> <outDir> [--<option> <value
 
 | Tool | Input | Writes | Comes from |
 |---|---|---|---|
-| `pdal` | `.las`, `.laz`, `.e57` | `<outDir>/<name>.copc.laz` | found: `PATH`, QGIS, pixi |
+| `pdal` | `.las`, `.laz`, `.e57`, a point `.ply`, `.pts`, `.ptx`, `.pcd`, `.bpf`, `.csv`, `.txt` | `<outDir>/<name>.copc.laz` | found: `PATH`, QGIS, pixi |
 | `untwine` | `.las`, `.laz`, a folder | `<outDir>/<name>.copc.laz` | found: `PATH`, QGIS, pixi |
 | `potreeconverter` | `.las`, `.laz`, a folder | a Potree 2 folder | download, 14 MB |
-| `potreeconverter1` | `.las`, `.laz`, `.ptx`, a point `.ply`, a folder | a Potree 1.x folder (`cloud.js`) | download, 17 MB |
+| `potreeconverter1` | `.las`, `.laz`, a point `.ply`, `.xyz`, `.txt`, `.pts`, a folder | a Potree 1.x folder (`cloud.js`) | download, 17 MB |
 | `gocesiumtiler` | `.las`, `.laz`, `.e57`, a point `.ply`, a folder | 3D Tiles | download, 18 MB |
 | `point-tiler` | `.las`, `.laz`, `.csv`, `.txt` | 3D Tiles | download, 17 MB |
 | `py3dtiles` | `.las`, `.laz`, `.xyz`, a point `.ply` | 3D Tiles | uv, a private Python environment |
@@ -85,14 +85,19 @@ node packages/convert/cli.js tile run <tool> <input> <outDir> [--<option> <value
 | `obj2tiles` | `.obj` | 3D Tiles | download, 24 MB |
 | `mago-3d-tiler` | `.obj`, `.fbx`, `.3ds`, `.gltf`, `.glb`, `.dae`, a mesh `.ply`, `.stl`, `.ifc`, `.3mf`, `.x3d`, `.ase`, `.lwo`, `.lws`, `.lxo`, `.x`, `.gml`, `.kml`, `.shp`, `.geojson`, `.gpkg`, `.las`, `.laz`, a folder | 3D Tiles | download, 390 MB, and Java 25 |
 | `fanvanzh-3dtiles` | an OSGB folder | 3D Tiles (b3dm) | download, 13 MB |
+| `fanvanzh-3dtiles-shape` | a `.shp` of footprints with a height field | 3D Tiles (b3dm) | the same download as `fanvanzh-3dtiles` |
+| `pg2b3dm` | a PostGIS table: `postgresql://user@host:5432/database` and `--table` | 3D Tiles | download, 31 MB |
 | `rusty-tiles` | `.glb`, `.gltf`, a folder | `<outDir>/<name>.3tz` | the same download as `rusty-tiles-points` |
+| `rusty-tiles-vector` | `.geojson`, `.gpkg` | `<outDir>/<name>.3tz` | the same download |
 | `nexus` | a mesh `.ply`, `.obj`, `.stl`, a folder | `<outDir>/<name>.nxs` (or `.nxz`) | download, 48 MB |
-| `splat-transform` | `.ply`, `.spz`, `.sog`, `.splat`, `.ksplat` (splats) | `<outDir>/lod-meta.json` (streamed SOG) | ships with the repo |
+| `splat-transform` | `.ply`, `.spz`, `.sog`, `.splat`, `.ksplat`, `.lcc` (splats) | `<outDir>/lod-meta.json` (streamed SOG) | ships with the repo |
 | `gocesiumtiler-splats` | a splat `.ply` | 3D Tiles (SPZ splats) | the same download as `gocesiumtiler` |
 | `3dgs-ply-3dtiles-converter` | a splat `.ply` | 3D Tiles (SPZ splats, merged levels of detail) | ships with the repo |
-| `spark-build-lod` | a splat `.ply`, `.spz` | `<outDir>/<name>-lod.rad` | source, built with `cargo` |
+| `spark-build-lod` | a splat `.ply`, `.spz`, `.splat`, `.ksplat` | `<outDir>/<name>-lod.rad` | source, built with `cargo` (the machine's, or a Rust toolchain fetched for the build; `TILED_PRIVATE_RUST=1` forces the second) |
 
 ```sh
+# a PostGIS table of buildings; the password comes from PGPASSWORD (or from the address: user:password@host)
+node packages/convert/cli.js tile run pg2b3dm postgresql://gis@localhost:5432/city C:\tiled\buildings --table public.buildings --attributes name,height --install
 # a LAS without a CRS record, straight to 3D Tiles
 node packages/convert/cli.js tile run gocesiumtiler points.las C:\tiled\points --crs EPSG:32631 --install
 # a textured OBJ, placed on the globe

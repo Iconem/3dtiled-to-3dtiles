@@ -36,7 +36,7 @@ interface Tool {
   /** `missing`: what a download would fetch (the tool, the runtime it needs); `downloadBytes`: their size. */
   found: { status: 'ready' | 'missing'; source: string | null; hint: string | null; path: string | null; missing: string[]; downloadable: boolean; downloadBytes: number };
 }
-interface InputInfo { exists: boolean; dir: boolean; ext: string; exts: string[]; ply: 'points' | 'splats' | 'mesh' | null }
+interface InputInfo { exists: boolean; dir: boolean; ext: string; exts: string[]; ply: 'points' | 'splats' | 'mesh' | null; db?: boolean }
 interface TilerResult { tool: string; kind?: string; format: string; output: string; outDir: string; seconds: number }
 const KINDS: Record<Tool['kind'], string> = { pointcloud: 'Point cloud', mesh: 'Mesh', splat: 'Splats' };
 const PLY: Record<string, string> = { points: 'a point cloud', splats: 'Gaussian splats', mesh: 'a mesh' };
@@ -133,7 +133,8 @@ export function TilerCard({ app, onStream }: { app: AppModel; onStream: () => vo
   const blocked = !!tool && missing && !tool.found.downloadable;
   const isTileset = result?.format === '3dtiles';
   const tilesetUrl = result && isTileset && base ? `${base}/tilers/files/${outputKey(result.outDir)}/tileset.json` : '';
-  const what = known?.input.dir ? `a folder holding ${known.input.exts.slice(0, 6).map((e) => `.${e}`).join(', ') || 'no file'}` : `a .${ext || '?'} file${known?.input.ply ? ` holding ${PLY[known.input.ply]}` : ''}`;
+  const what = known?.input.db ? (known.input.exists ? 'a PostgreSQL database' : 'a PostgreSQL address that is not complete (postgresql://user@host:5432/database)')
+    : known?.input.dir ? `a folder holding ${known.input.exts.slice(0, 6).map((e) => `.${e}`).join(', ') || 'no file'}` : `a .${ext || '?'} file${known?.input.ply ? ` holding ${PLY[known.input.ply]}` : ''}`;
   const args = tool && src && outDir.trim() ? tilerArgs(tool, src, outDir.trim(), vals, willDownload) : null;
   const cliText = args ? `node ${args.map(quote).join(' ')}` : '';
 
@@ -278,7 +279,8 @@ export function TilerCard({ app, onStream }: { app: AppModel; onStream: () => vo
       {tools && !tool && (
         <Hint id="tiler-none">
           {src ? <>No tool here takes <strong>{what}</strong>. </> : <>Enter a raw file or folder in the dataset field above (<em>File…</em> or <em>Folder…</em>). </>}
-          {(Object.keys(KINDS) as Tool['kind'][]).map((k) => <span key={k} id={`tiler-inputs-${k}`}><strong>{KINDS[k]}:</strong> {[...new Set(tools.filter((t) => t.kind === k).flatMap((t) => t.inputs))].map((e) => `.${e}`).join(', ')}. </span>)}
+          {(Object.keys(KINDS) as Tool['kind'][]).map((k) => <span key={k} id={`tiler-inputs-${k}`}><strong>{KINDS[k]}:</strong> {[...new Set(tools.filter((t) => t.kind === k).flatMap((t) => t.inputs))].filter((e) => e !== 'postgres').map((e) => `.${e}`).join(', ')}. </span>)}
+          {tools.some((t) => t.inputs.includes('postgres')) && <span id="tiler-inputs-db"><strong>PostGIS table:</strong> postgresql://user@host:5432/database. </span>}
           A source that is already tiled (COPC, Potree, streamed SOG, 3D Tiles…) goes straight to <em>Stream live</em>.
           {!src && host && <> Nothing at hand? <button id="tiler-samples" type="button" onClick={makeSamples} className="cursor-pointer underline">Write tiny sample files</button> (a LAS, a splat PLY, a textured OBJ, 1.3 MB) into a folder you pick.</>}
         </Hint>
@@ -308,7 +310,7 @@ export function TilerCard({ app, onStream }: { app: AppModel; onStream: () => vo
                   ? <><strong>Not installed.</strong> Running it first downloads {tool.found.missing.join(' and ')} ({tool.delivery === 'uv' ? 'about ' : ''}{(tool.found.downloadBytes / 1e6).toFixed(0)} MB in all){tool.delivery === 'uv'
                       ? <>: uv installs that pinned version from PyPI into a private environment in this app's tools folder, nothing system-wide.</>
                       : tool.delivery === 'cargo'
-                      ? <>: its authors publish source only, so the archive is checked against a pinned SHA-256 and compiled once with this machine's Rust toolchain (a few minutes). The program is kept in this app's tools folder.</>
+                      ? <>: its authors publish source only, so the archive is checked against a pinned SHA-256 and compiled once (a few minutes) with this machine's Rust toolchain, or, when it has none that can build it, with one this app fetches into its tools folder for the build and removes afterwards. Only the program is kept.</>
                       : <> from {tool.found.missing.length > 1 ? 'their' : 'its'} authors' release page, checks {tool.found.missing.length > 1 ? 'each' : 'it'} against a pinned SHA-256 and keeps {tool.found.missing.length > 1 ? 'them' : 'it'} in this app's tools folder.</>}</>
                   : <><strong>Not on this machine:</strong> {tool.found.hint}.</>}
             </span>

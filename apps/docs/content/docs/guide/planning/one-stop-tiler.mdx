@@ -1,12 +1,70 @@
 ---
 title: "One-stop tiler"
-description: "The desktop app's third flow: give it raw, untiled input and it runs a third-party tiler, then opens the result. Phases 1 to 3 are built (seventeen tools, Windows); the plan for the rest."
+description: "The desktop app's third flow: give it raw, untiled input and it runs a third-party tiler, then opens the result. Phases 1 to 3 are built (twenty tools, Windows); the plan for the rest."
 ---
 
 Plan of 2026-11-16. **Phases 1 to 3 were built the same day** (see the two *Result* sections); phase 4, macOS,
 Linux and the server variant, is not started. The roadmap item is on the [future work](/docs/guide/todo-future-work)
 page; the tools are surveyed on [existing tilers](/docs/guide/existing-tilers). How to use it:
 [desktop app](/docs/guide/desktop-app#tile-raw-input), [CLI](/docs/guide/cli-usage#tile-raw-input-with-a-third-party-tiler).
+
+## Result: every input each tool reads, pg2b3dm, and a Rust toolchain fetched when needed (2026-11-17)
+
+Twenty tools now. Each tool's own help was read again and compared with what the app offered it.
+
+**What was missing, and is now offered:**
+
+| Tool | Added | Tried |
+|---|---|---|
+| **PDAL** | a point `.ply`, `.pts`, `.ptx`, `.pcd`, `.bpf`, `.csv`, `.txt` (it had LAS, LAZ, E57) | each one, to a COPC of the same 20 000 points; a text file without a header line through the new *Columns* option |
+| **PotreeConverter 1.7** | `.xyz`, `.txt`, `.pts` | each one. **PTX was withdrawn**: the tool's help lists it, but the released Windows binary crashed on two PTX files that PDAL reads |
+| **fanvanzh/3dtiles** | a Shapefile of footprints, extruded by a height field (a second tool, `shape`) | 16 footprints: displayed, placed correctly |
+| **rusty-tiles** | GeoJSON and GeoPackage (a third tool, `vector`) | both, to a `.3tz` archive |
+| **Spark `build-lod`** | `.splat`, `.ksplat`, a compressed `.ply` | `.splat` and the compressed PLY. A SOG written by splat-transform 3.11 was refused by the tool, so `.sog` is not offered |
+| **splat-transform** | an XGRIDS `.lcc`; a compressed `.ply` is now recognised as splats | the compressed PLY. `.lcc` is not tried: no small scene at hand |
+
+Unchanged, their lists already matched: untwine, PotreeConverter 2, gocesiumtiler, point-tiler, py3dtiles, Obj2Tiles,
+mago 3DTiler, Nexus (its `.tsp` input is left out), the two splat-to-3D-Tiles converters.
+
+- **A bug found on the way.** splat-transform was offered for `.spz`, `.sog`, `.splat` and `.ksplat`, and failed on
+  all four: it merges levels of detail from PLY files only. Such an input is now first written out as a PLY.
+  `.spz`, `.sog` and `.splat` were run after the fix; these had never been tried before.
+- **rusty-tiles refused to write over its own output**, so a second run into the same folder failed. It is now
+  called with `--force` (the app has already checked that the folder may be overwritten).
+- **A folder is no longer taken for a point cloud because it holds a `.txt`.**
+
+**pg2b3dm (PostGIS → 3D Tiles), the first tool whose input is not a file.** The dataset is an address,
+`postgresql://user@host:5432/database`, and the table is an option. Tried against a PostGIS 3.4 container with a
+table of 16 extruded buildings (PolyhedralSurface Z, EPSG:32631): one tile, displayed on the globe where the
+coordinates say. A password in the address goes to the tool through `PGPASSWORD`; the run's log, its command
+line and its record were searched for it and do not hold it. Without a password and without `PGPASSWORD` the
+tool fails (it would ask on a console the app does not give it); the message is the tool's own stack trace.
+
+**A Rust toolchain, fetched when the machine has none.** Spark's `build-lod` is source only. Before, a machine
+without Rust was sent to rustup.rs. Now the package installs a toolchain itself, for the build only:
+
+- rustup's installer (14 MB, SHA-256 pinned here) installs a pinned Rust (1.100.0, 135 MB to download) into a
+  folder of the tools directory; `PATH`, the registry and the user's own Rust are not touched;
+- the `windows-gnullvm` host is used because it links with the `rust-lld` it ships: **no Visual Studio build tools,
+  no MinGW, no administrator**. The usual Windows host (MSVC) cannot link without Visual Studio; the `windows-gnu`
+  one failed here for want of an assembler behind its `dlltool`;
+- that host lacks a few Windows import libraries (bcrypt, advapi32…): they are copied from the `rust-mingw`
+  component of the `windows-gnu` target into a folder the linker is pointed at;
+- after the build the toolchain is removed: 9 MB stay, the program.
+
+Tried with the machine's Rust hidden from the package (`TILED_PRIVATE_RUST=1`) and an empty tools folder: source
+and toolchain fetched, built, toolchain removed, 180 s in all, and the program then tiled the splat sample. The
+build itself was also run with an environment holding only the Windows folders on `PATH`. When the machine has a
+`cargo` that fails (a Rust install without the C++ build tools), the package falls back to the fetched toolchain.
+winget was not used: it installs rustup system-wide, and the default toolchain it brings still needs Visual Studio.
+
+**Weighed and not added** (the [table of other tilers](/docs/guide/existing-tilers#other-open-source-tilers-by-stars)
+has each one's reason): py3dtilers (py3dtiles is the maintained one, and is in), gltf-to-3d-tiles, ept-tools,
+schwarzwald, potree23dtiles, the terrain builders. `pdal_wrench build_vpc` is the one candidate left.
+
+**Not verified this round:** `.ksplat` and `.lcc` inputs; pg2b3dm against a remote or TLS-only database and
+with 3DCityDB tables; the fetched Rust toolchain on a machine that truly has no Rust (it was hidden, not absent),
+on Windows on ARM, or behind a proxy.
 
 ## Result: five more tools, and what was left untested (2026-11-17)
 

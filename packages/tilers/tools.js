@@ -13,9 +13,10 @@
  *             else downloaded the same way, next to the tool, never installed system-wide.
  *   uv        a Python tool: a pinned version installed by `uv` into a private environment of its own (its own
  *             Python too), inside the tools folder
- *   cargo     a Rust program its authors publish as source only: built once with the machine's own `cargo` from a
- *             pinned, hash-checked source archive, the binary kept in the tools folder. Without a Rust toolchain the
- *             tool is not offered for download.
+ *   cargo     a Rust program its authors publish as source only: built once from a pinned, hash-checked source
+ *             archive, the binary kept in the tools folder. With the machine's own `cargo` when it has one that can
+ *             build it; else with a private Rust toolchain (RUST_BUILD below), fetched for the build and removed
+ *             after it.
  *   detect    an existing install is looked for: an environment variable, PATH, a QGIS or OSGeo4W install (QGIS
  *             ships PDAL and untwine), pixi's global bin
  *
@@ -24,13 +25,17 @@
  *
  * `kind` is what the tool tiles (pointcloud, mesh, splat); `inputs` the extensions it takes; `dir` whether the input
  * may be a folder of such files (true) or must be one ('only'); `ply` which kind of PLY it reads (points, splats),
- * since the extension alone does not say.
+ * since the extension alone does not say; `dirInputs` the extensions that make a folder an input, when they are
+ * fewer than `inputs` (a folder is not a point cloud because it holds a .txt). `db: true` is a tool whose input is
+ * a PostgreSQL database, given as `postgresql://user@host:5432/database` instead of a path.
  *
- * `steps(ctx)` returns the steps to run in order: `{ cmd }`, an argv array (never a shell string), or a file step
+ * `steps(ctx)` returns the steps to run in order: `{ cmd }`, an argv array (never a shell string) and, when the
+ * tool reads a secret from its environment, `env` (it is never printed or stored), or a file step
  * done by this package, `{ copy: [from, to] }` or `{ move: [from, to] }`, for a tool that writes next to its input. ctx:
  *   exe      the tool's executable, as detected: an argv prefix (one path, or [node, script], or [java, -jar, jar])
  *   input    absolute path of the input file or folder
  *   isDir    whether the input is a folder
+ *   db       for a `db` tool: { host, port, user, password, database }, from the connection address
  *   ext      the input's extension, lower case (a folder: the first extension of the tool found in it)
  *   outDir   absolute path of the output folder (created, empty or new)
  *   tmpDir   a scratch folder inside outDir, removed after the run
@@ -82,6 +87,23 @@ export const RUNTIMES = {
   },
 };
 
+/**
+ * A Rust toolchain for a tool published as source only, when the machine has none that can build it: rustup's own
+ * installer, pinned and hash-checked here, which then fetches a pinned toolchain and verifies it itself.
+ * On Windows the `windows-gnullvm` host is used: it links with the `rust-lld` it ships, so neither Visual Studio's
+ * build tools nor MinGW are needed. It lacks a few Windows import libraries (bcrypt, advapi32…): they are taken from
+ * the `rust-mingw` component of the `windows-gnu` target (`libsFrom`). Installed into a folder of its own for the
+ * build and removed after it: nothing is installed system-wide and PATH is not touched.
+ */
+export const RUST_BUILD = {
+  name: 'Rust toolchain (rustup)', licence: 'Apache-2.0 or MIT', homepage: 'https://rustup.rs/', version: '1.100.0', installer: '1.28.2',
+  'win32-x64': {
+    url: 'https://static.rust-lang.org/rustup/archive/1.28.2/x86_64-pc-windows-msvc/rustup-init.exe',
+    sha256: '88d8258dcf6ae4f7a80c7d1088e1f36fa7025a1cfd1343731b4ee6f385121fc0', bytes: 13551616, exe: 'rustup-init.exe', archive: 'file',
+    host: 'x86_64-pc-windows-gnullvm', libsFrom: 'x86_64-pc-windows-gnu', toolchainBytes: 135264892,
+  },
+};
+
 // gocesiumtiler 3 (`gotiler`) is one binary with two commands, so two tools here share one install.
 const GOTILER = {
   env: 'GOTILER_BIN', path: ['gotiler'], dir: 'gotiler',
@@ -105,6 +127,17 @@ const RUSTY = {
     },
   },
 };
+// fanvanzh's 3dtile is one binary with a --format per kind of input.
+const FANVANZH = {
+  env: 'FANVANZH_3DTILE_BIN', path: ['3dtile'], dir: 'fanvanzh-3dtiles',
+  download: {
+    version: '0.4',
+    'win32-x64': {
+      url: 'https://github.com/fanvanzh/3dtiles/releases/download/v0.4/3dtile.zip',
+      sha256: '3916d2eb1a152327dc0facaa44250c5b024799153a11b1be08a6ba416c06fadb', bytes: 12993133, exe: '3dtile.exe',
+    },
+  },
+};
 const archive = { format: 'package', path: (ctx) => path.join(ctx.outDir, `${ctx.name}.3tz`), label: '3D Tiles archive (.3tz)' };
 
 export const TOOLS = [
@@ -113,21 +146,24 @@ export const TOOLS = [
     id: 'pdal',
     name: 'PDAL (writers.copc)',
     kind: 'pointcloud',
-    summary: 'A LAS, LAZ or E57 point cloud to one COPC file, with PDAL\'s COPC writer: the reference path.',
+    summary: 'A point cloud PDAL reads (LAS, LAZ, E57, a point PLY, PTS, PTX, PCD, BPF, CSV or text) to one COPC file, with PDAL\'s COPC writer: the reference path.',
     homepage: 'https://pdal.io/en/stable/stages/writers.copc.html',
     licence: 'BSD-3-Clause',
-    inputs: ['las', 'laz', 'e57'],
+    inputs: ['las', 'laz', 'e57', 'ply', 'pts', 'ptx', 'pcd', 'bpf', 'csv', 'txt'],
+    ply: 'points',
     output: { format: 'copc', path: (ctx) => path.join(ctx.outDir, `${ctx.name}.copc.laz`), label: 'COPC (.copc.laz)' },
     provide: { env: 'PDAL_BIN', path: ['pdal'], qgis: ['bin/pdal.exe'], pixi: 'pdal' },
     options: [
       { key: 'srs', label: 'Assign a CRS', type: 'text', default: '', placeholder: 'EPSG:2154', help: '--writers.copc.a_srs: for a file that carries none. It is assigned, not reprojected.' },
       { key: 'forward', label: 'Keep the header of the input', type: 'bool', default: true, advanced: true, help: '--writers.copc.forward=all: scale, offset and other header fields are copied from the input.' },
       { key: 'threads', label: 'Threads', type: 'int', min: 1, max: 64, default: 10, advanced: true, help: '--writers.copc.threads (the writer\'s default is 10).' },
+      { key: 'textHeader', label: 'Columns of a text file', type: 'text', default: '', advanced: true, placeholder: 'X Y Z Red Green Blue', help: '--readers.text.header: for a .csv or .txt without a header line, the names of its columns, separated as in the file. Empty: the first line names them.' },
     ],
     steps(ctx) {
-      const { exe, input, outDir, name, opt } = ctx;
+      const { exe, input, outDir, name, ext, opt } = ctx;
       const cmd = [...exe, 'translate', input, path.join(outDir, `${name}.copc.laz`), `--writers.copc.threads=${opt.threads}`];
       if (opt.forward && /\.la[sz]$/i.test(input)) cmd.push('--writers.copc.forward=all');
+      if (opt.textHeader && (ext === 'csv' || ext === 'txt')) cmd.push(`--readers.text.header=${opt.textHeader}`);
       if (opt.srs) cmd.push(`--writers.copc.a_srs=${opt.srs}`);
       return [{ cmd, label: 'points → COPC' }];
     },
@@ -199,10 +235,12 @@ export const TOOLS = [
     id: 'potreeconverter1',
     name: 'PotreeConverter 1.7',
     kind: 'pointcloud',
-    summary: 'The last 1.x PotreeConverter: LAS, LAZ, PTX or a point PLY to a Potree 1.x octree (cloud.js and one file per node). Slower than version 2; kept for viewers and pipelines that still read 1.x, and for PLY and PTX input.',
+    summary: 'The last 1.x PotreeConverter: LAS, LAZ, a point PLY or a text file (XYZ, TXT, PTS) to a Potree 1.x octree (cloud.js and one file per node). Slower than version 2; kept for viewers and pipelines that still read 1.x, and for the inputs version 2 does not read.',
     homepage: 'https://github.com/potree/PotreeConverter/releases/tag/1.7',
     licence: 'BSD-2-Clause',
-    inputs: ['las', 'laz', 'ptx', 'ply'],
+    // PTX is in the tool's help, but the released Windows binary crashes on it (tried on two files PDAL reads): left out
+    inputs: ['las', 'laz', 'ply', 'xyz', 'txt', 'pts'],
+    dirInputs: ['las', 'laz', 'ply', 'xyz', 'pts'],
     ply: 'points',
     dir: true,
     output: { format: 'potree', path: (ctx) => ctx.outDir, proof: (ctx) => path.join(ctx.outDir, 'cloud.js'), label: 'Potree 1.x folder (cloud.js)' },
@@ -225,10 +263,12 @@ export const TOOLS = [
       { key: 'spacing', label: 'Root spacing', type: 'number', min: 0.000001, max: 100000, default: '', advanced: true, placeholder: 'auto', help: '--spacing: distance between points at the root level; it halves at each level. Empty: derived from the bounding box.' },
       { key: 'levels', label: 'Levels', type: 'int', min: 0, max: 30, default: '', advanced: true, placeholder: 'auto', help: '--levels: how many levels are generated. Empty: as many as the points need.' },
       { key: 'scale', label: 'Coordinate scale', type: 'number', min: 0.0000001, max: 1, default: '', advanced: true, placeholder: '0.001', help: '--scale: precision of stored coordinates, for LAS and LAZ node files.' },
+      { key: 'inputFormat', label: 'Columns of a text file', type: 'text', default: '', advanced: true, placeholder: 'xyzrgb', help: '--input-format: for .xyz, .txt and .pts, what each column is: x, y, z, r, g, b, i (intensity), s (skip). Empty: the tool guesses (x y z r g b).' },
     ],
     steps(ctx) {
       const { exe, input, outDir, opt } = ctx;
       const cmd = [...exe, input, '-o', outDir, '--output-format', opt.format];
+      if (opt.inputFormat) cmd.push('--input-format', opt.inputFormat);
       const attributes = opt.attributes.split(/[\s,]+/).filter(Boolean);
       if (attributes.length) cmd.push('--output-attributes', ...attributes.map((a) => a.toUpperCase()));
       if (opt.projection) cmd.push('--projection', opt.projection);
@@ -365,7 +405,7 @@ export const TOOLS = [
     ],
     steps(ctx) {
       const { exe, input, outDir, name, opt } = ctx;
-      const cmd = [...exe, 'point-cloud', '--input', input, '--output', path.join(outDir, `${name}.3tz`), '--sourceCrs', opt.sourceCrs, '--maxPoints', String(opt.maxPoints)];
+      const cmd = [...exe, 'point-cloud', '--force', '--input', input, '--output', path.join(outDir, `${name}.3tz`), '--sourceCrs', opt.sourceCrs, '--maxPoints', String(opt.maxPoints)];
       if (opt.sourceCrs.toLowerCase() !== 'local') cmd.push('--heightOffset', String(opt.heightOffset));
       if (opt.metadata) cmd.push('--metadata');
       return [{ cmd, label: 'points → 3D Tiles archive' }];
@@ -487,16 +527,7 @@ export const TOOLS = [
     inputs: ['osgb'],
     dir: 'only',
     output: tileset,
-    provide: {
-      env: 'FANVANZH_3DTILE_BIN', path: ['3dtile'],
-      download: {
-        version: '0.4',
-        'win32-x64': {
-          url: 'https://github.com/fanvanzh/3dtiles/releases/download/v0.4/3dtile.zip',
-          sha256: '3916d2eb1a152327dc0facaa44250c5b024799153a11b1be08a6ba416c06fadb', bytes: 12993133, exe: '3dtile.exe',
-        },
-      },
-    },
+    provide: FANVANZH,
     options: [
       { key: 'lon', label: 'Longitude', type: 'number', min: -180, max: 180, default: '', placeholder: 'from metadata.xml', help: 'the "x" of the tile config: overrides the origin in metadata.xml. Give latitude too.' },
       { key: 'lat', label: 'Latitude', type: 'number', min: -90, max: 90, default: '', placeholder: 'from metadata.xml', help: 'the "y" of the tile config.' },
@@ -514,6 +545,71 @@ export const TOOLS = [
       if (opt.pbr) config.pbr = true;
       if (Object.keys(config).length) cmd.push('-c', JSON.stringify(config));
       return [{ cmd, label: 'OSGB → 3D Tiles' }];
+    },
+  },
+  {
+    id: 'fanvanzh-3dtiles-shape',
+    name: '3dtile shape (fanvanzh/3dtiles)',
+    kind: 'mesh',
+    summary: 'A Shapefile of building footprints to 3D Tiles (b3dm): each polygon is extruded by a height attribute. Tried with footprints in longitude and latitude (WGS84); a projected Shapefile was not tried. The released binary is from 2021.',
+    homepage: 'https://github.com/fanvanzh/3dtiles',
+    licence: 'Apache-2.0',
+    inputs: ['shp'],
+    output: tileset,
+    provide: FANVANZH,
+    options: [
+      { key: 'height', label: 'Height field', type: 'text', default: '', required: true, placeholder: 'height', help: '--height: the attribute that holds each footprint\'s height, in metres.' },
+    ],
+    steps(ctx) {
+      const { exe, input, outDir, opt } = ctx;
+      return [{ cmd: [...exe, '-f', 'shape', '-i', input, '-o', outDir, '--height', opt.height], label: 'footprints → 3D Tiles' }];
+    },
+  },
+  {
+    id: 'pg2b3dm',
+    name: 'pg2b3dm',
+    kind: 'mesh',
+    db: true,
+    summary: 'A PostGIS table of 3D geometries (buildings as PolyhedralSurface or MultiPolygon Z, for instance) to 3D Tiles 1.1 with implicit tiling, the chosen columns kept as feature attributes. Its input is a database, not a file: enter postgresql://user@host:5432/database as the dataset. A password is taken from that address, else from PGPASSWORD or the pgpass file.',
+    homepage: 'https://github.com/Geodan/pg2b3dm',
+    licence: 'MIT',
+    inputs: ['postgres'],
+    output: tileset,
+    provide: {
+      env: 'PG2B3DM_BIN', path: ['pg2b3dm'],
+      download: {
+        version: '2.28.0',
+        'win32-x64': {
+          url: 'https://github.com/Geodan/pg2b3dm/releases/download/v2.28.0/pg2b3dm-win-x64.zip',
+          sha256: '44532bc6ff3e9894203a6dd8ac2995fce61d68e659191a2f3d1501aba324011c', bytes: 31076953, exe: 'pg2b3dm.exe',
+        },
+      },
+    },
+    options: [
+      { key: 'table', label: 'Table', type: 'text', default: '', required: true, placeholder: 'public.buildings', help: '--table: the table, with its schema if needed.' },
+      { key: 'column', label: 'Geometry column', type: 'text', default: 'geom', help: '--column' },
+      { key: 'attributes', label: 'Attribute columns', type: 'text', default: '', placeholder: 'name,height', help: '--attributecolumns: the columns kept in the tiles, comma-separated.' },
+      { key: 'query', label: 'Filter', type: 'text', default: '', advanced: true, placeholder: 'height > 10', help: '--query: a SQL condition on the rows.' },
+      { key: 'lodColumn', label: 'LOD column', type: 'text', default: '', advanced: true, help: '--lodcolumn: a column that holds each row\'s level of detail.' },
+      { key: 'maxFeatures', label: 'Features per tile', type: 'int', min: 1, max: 1000000, default: 1000, advanced: true, help: '--max_features_per_tile' },
+      { key: 'geometricError', label: 'Geometric error', type: 'number', min: 0, max: 10000000, default: 2000, advanced: true, help: '--geometricerror: of the root tile.' },
+      { key: 'refinement', label: 'Refinement', type: 'enum', values: ['ADD', 'REPLACE'], default: 'ADD', advanced: true, help: '--refinement' },
+      { key: 'subdivision', label: 'Subdivision', type: 'enum', values: ['QUADTREE', 'OCTREE'], default: 'QUADTREE', advanced: true, help: '--subdivision' },
+      { key: 'implicit', label: 'Implicit tiling', type: 'bool', default: true, advanced: true, help: '--use_implicit_tiling: 3D Tiles 1.1 subtrees. Off: an explicit tileset.json.' },
+      { key: 'outlines', label: 'Outlines', type: 'bool', default: false, advanced: true, help: '--add_outlines: CESIUM_primitive_outline.' },
+    ],
+    steps(ctx) {
+      const { exe, db, outDir, opt } = ctx;
+      const connection = [`Host=${db.host}`, `Port=${db.port}`, db.user ? `Username=${db.user}` : null, `Database=${db.database}`, 'CommandTimeOut=0'].filter(Boolean).join(';');
+      const cmd = [...exe, '--connection', connection, '-t', opt.table, '-c', opt.column, '-o', outDir,
+        '--max_features_per_tile', String(opt.maxFeatures), '-g', String(opt.geometricError), '-r', opt.refinement, '--subdivision', opt.subdivision];
+      if (opt.attributes) cmd.push('-a', opt.attributes);
+      if (opt.query) cmd.push('-q', opt.query);
+      if (opt.lodColumn) cmd.push('-l', opt.lodColumn);
+      if (!opt.implicit) cmd.push('--use_implicit_tiling', 'false');
+      if (opt.outlines) cmd.push('--add_outlines', 'true');
+      // the password never goes on the command line: pg2b3dm reads PGPASSWORD
+      return [{ cmd, label: 'PostGIS → 3D Tiles', ...(db.password ? { env: { PGPASSWORD: db.password } } : {}) }];
     },
   },
 
@@ -536,10 +632,39 @@ export const TOOLS = [
     ],
     steps(ctx) {
       const { exe, input, outDir, name, opt } = ctx;
-      const cmd = [...exe, 'mesh', '--input', input, '--output', path.join(outDir, `${name}.3tz`), '--profile', opt.profile];
+      const cmd = [...exe, 'mesh', '--force', '--input', input, '--output', path.join(outDir, `${name}.3tz`), '--profile', opt.profile];
       if (opt.lon !== '' && opt.lat !== '') cmd.push('--anchor', String(opt.lon), String(opt.lat), String(opt.alt === '' ? 0 : opt.alt));
       if (opt.sourceCrs) cmd.push('--sourceCrs', opt.sourceCrs, '--sourceAxes', opt.sourceAxes);
       return [{ cmd, label: 'glTF → 3D Tiles archive' }];
+    },
+  },
+  {
+    id: 'rusty-tiles-vector',
+    name: 'rusty-tiles vector',
+    kind: 'mesh',
+    summary: 'A GeoJSON or GeoPackage of points, lines and polygons to one 3D Tiles 1.1 archive (.3tz) of vector features, with coarser levels above the leaves. Features are written as drawn: nothing is extruded.',
+    homepage: 'https://github.com/BenDyson-Arch/rusty-tiles',
+    licence: 'MIT',
+    inputs: ['geojson', 'gpkg'],
+    output: archive,
+    provide: RUSTY,
+    options: [
+      { key: 'layer', label: 'Layer', type: 'text', default: '', placeholder: 'every layer', help: '--layer: one layer of a file that holds several. Empty: every layer (--allLayers).' },
+      { key: 'sourceCrs', label: 'Source CRS', type: 'text', default: '', placeholder: 'from the file', help: '--sourceCrs: overrides the CRS of the input; "local" for XYZ in metres.' },
+      { key: 'heightOffset', label: 'Height offset (m)', type: 'number', min: -100000, max: 100000, default: 0, help: '--heightOffset: added to the source heights to make them ellipsoidal.' },
+      { key: 'lodLevels', label: 'Coarse levels', type: 'int', min: 1, max: 16, default: 3, advanced: true, help: '--lodLevels: simplified levels above each full-detail leaf.' },
+      { key: 'meshopt', label: 'Meshopt compression', type: 'bool', default: false, advanced: true, help: '--meshopt: EXT_meshopt_compression, lossless.' },
+      { key: 'skipInvalid', label: 'Skip invalid features', type: 'bool', default: false, advanced: true, help: '--skipInvalid: go on past a feature that cannot be converted; each one is reported.' },
+    ],
+    steps(ctx) {
+      const { exe, input, outDir, name, opt } = ctx;
+      const cmd = [...exe, 'vector', '--force', '--input', input, '--output', path.join(outDir, `${name}.3tz`), '--lodLevels', String(opt.lodLevels)];
+      if (opt.layer) cmd.push('--layer', opt.layer); else cmd.push('--allLayers');
+      if (opt.sourceCrs) cmd.push('--sourceCrs', opt.sourceCrs);
+      if (opt.heightOffset) cmd.push('--heightOffset', String(opt.heightOffset));
+      if (opt.meshopt) cmd.push('--meshopt');
+      if (opt.skipInvalid) cmd.push('--skipInvalid');
+      return [{ cmd, label: 'vector features → 3D Tiles archive' }];
     },
   },
   {
@@ -590,10 +715,10 @@ export const TOOLS = [
     id: 'splat-transform',
     name: 'PlayCanvas splat-transform',
     kind: 'splat',
-    summary: 'A Gaussian-splat file to a streamed SOG with levels of detail, each level a decimation of the one before.',
+    summary: 'A Gaussian-splat file (PLY, compressed PLY, SPZ, SOG, .splat, .ksplat, or an XGRIDS .lcc) to a streamed SOG with levels of detail, each level a decimation of the one before.',
     homepage: 'https://github.com/playcanvas/splat-transform',
     licence: 'MIT',
-    inputs: ['ply', 'spz', 'sog', 'splat', 'ksplat'],
+    inputs: ['ply', 'spz', 'sog', 'splat', 'ksplat', 'lcc'],
     ply: 'splats',
     output: { format: 'sog', path: (ctx) => path.join(ctx.outDir, 'lod-meta.json'), label: 'streamed SOG (lod-meta.json)' },
     provide: { bundled: { package: '@playcanvas/splat-transform', script: 'bin/cli.mjs' } },
@@ -606,8 +731,16 @@ export const TOOLS = [
       { key: 'gpu', label: 'Device', type: 'enum', values: ['auto', 'cpu'], default: 'auto', advanced: true, help: 'SOG compression runs on the GPU by default; "cpu" is slower and works everywhere (--gpu cpu).' },
     ],
     steps(ctx) {
-      const { exe, input, outDir, tmpDir, opt } = ctx;
+      const { exe, input, outDir, tmpDir, ext, opt } = ctx;
+      const chunks = ['--lod-chunk-count', String(opt.chunkCount), '--lod-chunk-extent', String(opt.chunkExtent), ...(opt.gpu === 'cpu' ? ['--gpu', 'cpu'] : [])];
+      // An .lcc scene carries its own levels: the tool writes them out as they are.
+      if (ext === 'lcc') return [{ cmd: [...exe, '-w', input, path.join(outDir, 'lod-meta.json'), ...chunks], label: 'the scene\'s own levels → streamed SOG' }];
       const steps = [], levels = [input];
+      // The levels are merged from PLY files only: any other format is first written out as one.
+      if (ext !== 'ply') {
+        levels[0] = path.join(tmpDir, 'lod0.ply');
+        steps.push({ cmd: [...exe, '-w', input, levels[0]], label: `.${ext} → PLY` });
+      }
       const decimate = opt.adaptive ? '--decimate-adaptive' : '--decimate';
       for (let i = 1; i < opt.levels; i++) {
         const out = path.join(tmpDir, `lod${i}.ply`);
@@ -616,8 +749,7 @@ export const TOOLS = [
       }
       const merge = [...exe, '-w'];
       levels.forEach((file, i) => merge.push(file, '-l', String(i)));
-      merge.push(path.join(outDir, 'lod-meta.json'), '--lod-chunk-count', String(opt.chunkCount), '--lod-chunk-extent', String(opt.chunkExtent));
-      if (opt.gpu === 'cpu') merge.push('--gpu', 'cpu');
+      merge.push(path.join(outDir, 'lod-meta.json'), ...chunks);
       steps.push({ cmd: merge, label: `${opt.levels} levels → streamed SOG` });
       return steps;
     },
@@ -696,10 +828,10 @@ export const TOOLS = [
     id: 'spark-build-lod',
     name: 'Spark build-lod',
     kind: 'splat',
-    summary: 'A splat PLY or SPZ to a .RAD file with Spark\'s level-of-detail tree, the format SparkJS streams. Published as Rust source only: built once here with the machine\'s own Rust toolchain (cargo), a few minutes.',
+    summary: 'A splat PLY (compressed or not), SPZ, .splat or .ksplat to a .RAD file with Spark\'s level-of-detail tree, the format SparkJS streams. Published as Rust source only: built once here, a few minutes, with the machine\'s Rust toolchain or one fetched for the build.',
     homepage: 'https://sparkjs.dev/docs/lod-getting-started/',
     licence: 'MIT',
-    inputs: ['ply', 'spz'],
+    inputs: ['ply', 'spz', 'splat', 'ksplat'],
     ply: 'splats',
     output: { format: 'rad', path: (ctx) => path.join(ctx.outDir, `${ctx.name}-lod.rad`), label: 'RAD (.rad)' },
     provide: {
