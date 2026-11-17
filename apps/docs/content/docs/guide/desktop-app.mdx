@@ -138,6 +138,11 @@ when you go from one to the other. *Tile raw input* has its own input field, for
   middleware needs an actual filesystem path. There is no folder dialog: a dataset that is a folder is
   opened by its entry file (Potree's `cloud.js` or `metadata.json`, a streamed SOG's `lod-meta.json`,
   `tileset.json`, an OSGB tree's `metadata.xml`). A folder path can still be typed or pasted.
+- **A local file streams live, like a URL.** With the default `cache=none` the server reads a file on disk by byte
+  ranges, exactly as it reads a remote host: COPC, Potree 1.x and 2, streamed SOG, LCC, LCC2, RAD and Nexus. The
+  hierarchy and the tiles are built on demand and nothing is written. The app's server does this because it runs
+  for you alone (`TILED_ALLOW_EXPORT=1`); a public tile-server refuses a local path with a message, unless it is
+  started with `TILED_LOCAL_SOURCES=1`.
 - Builds the URL against `/tiles/tileset.json`, the front door that dispatches to `/stream` for
   `cache=none|hierarchy` and `/convert` for `cache=full` — so the UI never re-encodes that routing rule.
 - **Place a local dataset on the globe** applies `&lon/&lat/&alt/&heading` as a root ENU transform *in
@@ -347,8 +352,10 @@ dialog only lists those.
 - **Run** starts the tool in a subprocess, as *Run in: CLI subprocess* does for an export: its output is shown as
   it comes, and **Cancel** stops it and what it started.
 - **When the run ends:**
-  - a COPC, a Potree folder, a streamed SOG, a RAD, a Nexus file or a `.3tz` archive: **Stream it** puts what was written in the dataset field (with
-    `cache=full`: a file on disk is converted once to the local cache) and opens the *Stream live* tab;
+  - a COPC, a Potree folder, a streamed SOG, a RAD, a Nexus file or a `.3tz` archive: **Stream it** puts what was written in the dataset field and opens the *Stream live* tab. The file is
+    streamed as a URL would be (`cache=none`): the server reads it by byte ranges and builds each tile when it is
+    asked for, so nothing is converted or copied first. Only a `.3tz` archive goes through `cache=full`, unpacked once
+    to the local cache;
   - a 3D Tiles tileset is finished already: **Preview in Cesium**, **Preview in 3DTRjs** and **Copy URL** open it
     as it is, served from its folder by the app's tile server. The folder can be hosted on any web server.
 - **Nothing at hand?** With an empty input field, *Write tiny sample files* puts a 20 000-point LAS, a

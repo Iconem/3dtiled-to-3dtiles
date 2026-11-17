@@ -15,8 +15,11 @@
  *     over several lines (pdmap.pland.gov.hk's Content-Security-Policy, the Hong Kong 3D model host): obsolete line folding,
  *     which undici rejects as malformed HTTP. Once a host has failed that way, every read of it goes the lenient way.
  */
+import fs from 'node:fs/promises';
 import http from 'node:http';
 import https from 'node:https';
+import path from 'node:path';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 const MAX_PER_HOST = Number(process.env.TILED_RANGE_MAX_PER_HOST) || 32;
 const MIN_PER_HOST = 4;
 const TRANSIENT = /ECONNRESET|ETIMEDOUT|ECONNREFUSED|EPIPE|EAI_AGAIN|socket hang up|fetch failed|other side closed|UND_ERR|network/i;
@@ -85,12 +88,62 @@ function lenientFetch(url, { headers, signal } = {}, hops = 0) {
   });
 }
 
+// ── files on this machine ──────────────────────────────────────────────────────
+// A live stream reads its source by byte ranges, and a file on disk gives those as an HTTP host does: the same
+// adapters stream a local dataset with nothing converted or copied first. A local source is a `file:` URL, so the
+// adapters' URL arithmetic (a sibling file, a child folder) works on it unchanged.
+//
+// Off unless the server runs for the person at this machine: TILED_ALLOW_EXPORT=1 (the desktop app sets it) or
+// TILED_LOCAL_SOURCES=1. A public server must not read its own disk for whoever asks; TILED_LOCAL_SOURCES=0 turns it
+// off in any case.
+export const localSourcesAllowed = () => process.env.TILED_LOCAL_SOURCES !== '0'
+  && (process.env.TILED_LOCAL_SOURCES === '1' || process.env.TILED_ALLOW_EXPORT === '1');
+
+const ENTRY_FILES = ['cloud.js', 'metadata.json', 'lod-meta.json'];
+/**
+ * A source as the range-reading adapters want it: an absolute path on this machine (`C:\\…`, `/…`) becomes a `file:`
+ * URL, a folder the URL of the entry file it holds (Potree, a streamed SOG). `byRanges(fileName)` says whether the
+ * format is one of those: the adapters that open local paths themselves (OSGB, Nexus, archives) keep the path. A URL
+ * is returned as is.
+ */
+export async function localSourceUrl(src, byRanges = () => true) {
+  if (!src || /^[a-z][a-z0-9+.-]*:\/\//i.test(src) || !path.isAbsolute(src)) return src;
+  let file = src;
+  if (await fs.stat(src).then((f) => f.isDirectory(), () => false)) {
+    for (const name of ENTRY_FILES) if (await fs.stat(path.join(src, name)).then((f) => f.isFile(), () => false)) { file = path.join(src, name); break; }
+  }
+  return byRanges(path.basename(file)) ? pathToFileURL(file).href : src;
+}
+
+/** One read of a `file:` URL, whole or the `Range` asked for → the same shape as an HTTP answer. */
+async function readLocalSource(url, headers) {
+  if (!localSourcesAllowed()) throw Object.assign(new Error('this server does not read files on its own disk: give it an http(s) URL'), { status: 403 });
+  const file = fileURLToPath(new URL(url));
+  const range = /^bytes=(\d+)-(\d*)$/.exec(headers?.Range ?? headers?.range ?? '');
+  let handle;
+  try {
+    handle = await fs.open(file, 'r');
+    const { size } = await handle.stat();
+    if (!range) return { status: 200, headers: new Headers({ 'content-length': String(size) }), body: await handle.readFile() };
+    const begin = Number(range[1]), end = Math.min(range[2] === '' ? size - 1 : Number(range[2]), size - 1);
+    if (begin > end) throw Object.assign(new Error(`read ${path.basename(file)} [${headers.Range}] → beyond its ${size} bytes`), { status: 416 });
+    const body = Buffer.allocUnsafe(end - begin + 1);
+    let got = 0;
+    while (got < body.length) { const { bytesRead } = await handle.read(body, got, body.length - got, begin + got); if (!bytesRead) break; got += bytesRead; }
+    return { status: 206, headers: new Headers({ 'content-length': String(got), 'content-range': `bytes ${begin}-${begin + got - 1}/${size}` }), body: got < body.length ? body.subarray(0, got) : body };
+  } catch (e) {
+    if (e.code === 'ENOENT' || e.code === 'ENOTDIR' || e.code === 'EISDIR') throw Object.assign(new Error(`read ${path.basename(file)} → no such file`), { status: 404 });
+    throw e;
+  } finally { await handle?.close(); }
+}
+
 /**
  * One GET with the cap, the status check and the retries → { status, headers, body: Buffer }. `ok(status)` says which answers
  * are data, default 2xx. `timeoutMs` covers the whole read, default none: a full download may rightly take long, and undici
  * already gives up on a socket that stays silent.
  */
 export async function requestSource(url, { headers, signal, attempts = 3, timeoutMs = null, ok = (s) => s >= 200 && s < 300 } = {}) {
+  if (/^file:/i.test(url)) { signal?.throwIfAborted(); return readLocalSource(url, headers); }
   const host = new URL(url).host;
   for (let attempt = 1; ; attempt++) {
     signal?.throwIfAborted();

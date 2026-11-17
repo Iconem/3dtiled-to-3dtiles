@@ -736,29 +736,51 @@ export const TOOLS = [
     output: { format: 'sog', path: (ctx) => path.join(ctx.outDir, 'lod-meta.json'), label: 'streamed SOG (lod-meta.json)' },
     provide: { bundled: { package: '@playcanvas/splat-transform', script: 'bin/cli.mjs' } },
     options: [
-      { key: 'levels', label: 'Levels of detail', type: 'int', min: 1, max: 8, default: 3, help: 'How many levels the scene gets, the finest being the input itself.' },
+      { key: 'levels', label: 'Levels of detail', type: 'int', min: 1, max: 12, default: 3, help: 'How many levels the scene gets, the finest being the input itself. A scene of tens of millions of splats takes about 10, so that the coarsest holds a few tens of thousands.' },
       { key: 'keep', label: 'Kept per level (%)', type: 'int', min: 5, max: 90, default: 50, help: 'Each level keeps this share of the splats of the level before it (--decimate).' },
-      { key: 'adaptive', label: 'Adaptive decimation', type: 'bool', default: false, help: 'Remove splats where the error is lowest (--decimate-adaptive): better on scenes of mixed scale such as skies, more memory.' },
-      { key: 'chunkCount', label: 'Splats per chunk (thousands)', type: 'int', min: 16, max: 4096, default: 512, advanced: true, help: '--lod-chunk-count: approximate size of a chunk file.' },
-      { key: 'chunkExtent', label: 'Chunk size (m)', type: 'number', min: 0.1, max: 10000, default: 16, advanced: true, help: '--lod-chunk-extent: approximate size of a chunk in the scene\'s units.' },
-      { key: 'gpu', label: 'Device', type: 'enum', values: ['auto', 'cpu'], default: 'auto', advanced: true, help: 'SOG compression runs on the GPU by default; "cpu" is slower and works everywhere (--gpu cpu).' },
+      { key: 'adaptive', label: 'Adaptive decimation', type: 'bool', default: false, help: 'Remove splats where the error is lowest (--decimate-adaptive): better on scenes of mixed scale, more memory. It keeps the large far gaussians, so on an outdoor scene the coarse levels are mostly sky and background unless the scene is cropped first (Keep inside a box).' },
+      { key: 'harmonics', label: 'Spherical harmonics', type: 'enum', values: ['keep', '0', '1', '2', '3'], default: 'keep', help: '-H: the highest band kept. 0 is base colour only, about a quarter of the size of a scene with 3 bands.' },
+      { key: 'rotate', label: 'Rotate (°)', type: 'text', numbers: true, default: '', placeholder: '-90,0,0', advanced: true, help: '-r x,y,z: Euler angles applied once, to the finest level. -90,0,0 turns a Z-up scene to the Y-down frame of trained scenes.' },
+      { key: 'box', label: 'Keep inside a box', type: 'text', numbers: true, default: '', placeholder: 'x,y,z,X,Y,Z', advanced: true, help: '-B: min and max corners, applied before the rotation. It removes far floaters and sky, which otherwise stretch the bounds and make stored positions coarser. Compare the count of a small level before and after: the axes are the tool\'s, not always the file\'s.' },
+      { key: 'floaters', label: 'Remove floaters', type: 'bool', default: false, advanced: true, help: '-F: drop gaussians that contribute to no solid voxel (GPU).' },
+      { key: 'morton', label: 'Morton order', type: 'bool', default: false, advanced: true, help: '-m: sort the finest level along a Z-order curve before the levels are decimated from it. Useful when the tool warns that the input is spatially incoherent.' },
+      { key: 'chunkCount', label: 'Splats per chunk (thousands)', type: 'int', min: 16, max: 4096, default: 512, advanced: true, help: '--lod-chunk-count: the most a leaf of the tree holds. 64 gives small bites for a dense interior.' },
+      { key: 'chunkExtent', label: 'Chunk size (m)', type: 'number', min: 0.1, max: 10000, default: 16, advanced: true, help: '--lod-chunk-extent: approximate size of a leaf in the scene\'s units. 8 for a dense interior, 16 in the open air.' },
+      { key: 'chunkMin', label: 'Do not split below (thousands)', type: 'int', min: 1, max: 4096, default: 8, advanced: true, help: '--lod-chunk-min: a region with fewer splats is kept whole instead of being split to the chunk size. 16 keeps sparse regions in one piece.' },
+      { key: 'fileCount', label: 'Splats per file (thousands)', type: 'text', numbers: true, default: '', placeholder: '512,512,512,512,128,64,32,16,8,4', advanced: true, help: '--lod-file-count: one value, or one per level from the finest (the last repeats). Empty: the chunk size. Smaller files at the coarse levels keep positions precise, as each file stores them relative to its own bounds.' },
+      { key: 'workers', label: 'Encoding threads', type: 'int', min: 0, max: 64, default: 4, advanced: true, help: '--max-workers: threads for SOG encoding. 0 runs inline.' },
+      { key: 'gpu', label: 'Device', type: 'enum', values: ['auto', 'cpu', '0', '1', '2', '3'], default: 'auto', advanced: true, help: '-g: SOG compression and adaptive decimation run on the GPU. A number picks an adapter (npx @playcanvas/splat-transform --list-gpus): choose one nothing else is using, as a busy card can reset the device mid-run. "cpu" is slower and works everywhere.' },
     ],
     steps(ctx) {
       const { exe, input, outDir, tmpDir, ext, opt } = ctx;
-      const chunks = ['--lod-chunk-count', String(opt.chunkCount), '--lod-chunk-extent', String(opt.chunkExtent), ...(opt.gpu === 'cpu' ? ['--gpu', 'cpu'] : [])];
+      const gpu = opt.gpu && opt.gpu !== 'auto' ? ['--gpu', String(opt.gpu)] : [];
+      const chunks = ['--lod-chunk-count', String(opt.chunkCount), '--lod-chunk-extent', String(opt.chunkExtent)];
+      if (opt.chunkMin !== undefined && opt.chunkMin !== 8) chunks.push('--lod-chunk-min', String(opt.chunkMin));
+      if (opt.fileCount) chunks.push('--lod-file-count', String(opt.fileCount).replace(/\s+/g, ''));
+      if (opt.workers !== undefined && opt.workers !== 4) chunks.push('--max-workers', String(opt.workers));
+      chunks.push(...gpu);
+      // What is done once, to the finest level, in the tool's order: crop and clean in the input's axes, drop
+      // harmonics, rotate, then sort.
+      const prep = [];
+      if (opt.box) prep.push('-B', String(opt.box).replace(/\s+/g, ''));
+      if (opt.floaters) prep.push('-F');
+      if (opt.harmonics && opt.harmonics !== 'keep') prep.push('-H', String(opt.harmonics));
+      if (opt.rotate) prep.push('-r', String(opt.rotate).replace(/\s+/g, ''));
+      if (opt.morton) prep.push('-m');
       // An .lcc scene carries its own levels: the tool writes them out as they are.
-      if (ext === 'lcc') return [{ cmd: [...exe, '-w', input, path.join(outDir, 'lod-meta.json'), ...chunks], label: 'the scene\'s own levels → streamed SOG' }];
+      if (ext === 'lcc') return [{ cmd: [...exe, '-w', input, ...prep.filter((a, i) => a !== '-m' && prep[i - 1] !== '-m'), path.join(outDir, 'lod-meta.json'), ...chunks], label: 'the scene\'s own levels → streamed SOG' }];
       const steps = [], levels = [input];
-      // Level 0 is the input itself, read in place. Only the stock tool, which merges from PLY files only, needs
-      // another format written out as a PLY first.
-      if (ext !== 'ply' && !splatTransformMergesAnyFormat(String(exe[exe.length - 1]))) {
+      // Level 0 is the input itself, read in place, unless it is transformed first: then the result is written once
+      // and every level is made from it. The stock tool, which merges from PLY files only, also needs another format
+      // written out as a PLY.
+      if (prep.length || (ext !== 'ply' && !splatTransformMergesAnyFormat(String(exe[exe.length - 1])))) {
         levels[0] = path.join(tmpDir, 'lod0.ply');
-        steps.push({ cmd: [...exe, '-w', input, levels[0]], label: `.${ext} → PLY` });
+        steps.push({ cmd: [...exe, '-w', ...(opt.floaters ? gpu : []), input, ...prep, levels[0]], label: prep.length ? 'finest level: cropped, rotated, sorted as asked' : `.${ext} → PLY` });
       }
       const decimate = opt.adaptive ? '--decimate-adaptive' : '--decimate';
       for (let i = 1; i < opt.levels; i++) {
         const out = path.join(tmpDir, `lod${i}.ply`);
-        steps.push({ cmd: [...exe, '-w', levels[i - 1], decimate, pct(opt.keep), out], label: `level ${i}: ${opt.keep} % of level ${i - 1}` });
+        steps.push({ cmd: [...exe, '-w', ...(opt.adaptive ? gpu : []), levels[i - 1], decimate, pct(opt.keep), out], label: `level ${i}: ${opt.keep} % of level ${i - 1}` });
         levels.push(out);
       }
       const merge = [...exe, '-w'];

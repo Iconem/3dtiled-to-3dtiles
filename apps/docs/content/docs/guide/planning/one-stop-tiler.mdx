@@ -39,6 +39,19 @@ mago 3DTiler, Nexus (its `.tsp` input is left out), the two splat-to-3D-Tiles co
   splats), one step fewer. The decimated levels are still written as PLY files in the temporary folder: the tool
   refuses `--decimate` on anything but a PLY output, by design. An install without the patch (the package
   fetched from npm alone) is detected and keeps the PLY copy. The patch is not sent upstream yet.
+- **The options of a large-scene build** (2026-11-18). The form now carries what a streamed SOG of tens of
+  millions of splats needs, each one a flag of the tool: harmonics kept (`-H`), a rotation (`-r`), a crop box
+  (`-B`) and floater removal (`-F`), Morton order (`-m`), the smallest region that is split (`--lod-chunk-min`),
+  splats per file, per level (`--lod-file-count`), encoding threads and the GPU adapter. When any of the first
+  five is set, the finest level is written once, transformed, and every level is decimated from it; otherwise the
+  input is read in place. A build that worked well on a 15 M-splat outdoor scene and a 174 M-splat interior:
+  10 levels at 50 %, adaptive, base colour only, 8 m leaves of at most 64 K splats, regions under 16 K kept
+  whole, 512 K splats per file at the fine levels and fewer at the coarse ones
+  (`512,512,512,512,128,64,32,16,8,4`), on a GPU nothing else is using. Two things that build taught: far
+  floaters stretch a file's bounds and make its stored positions coarser (4 cm against 1.5 cm at 100 m), so crop
+  first; and adaptive decimation keeps the large far gaussians, so the coarse levels of an uncropped outdoor scene
+  are mostly sky. Tried here on the 3 000-splat sample only (4 levels, harmonics dropped, rotated, sorted): the
+  flags reach the tool and the output holds 3 000, 1 500, 750 and 375 splats with no harmonics.
 - **rusty-tiles refused to write over its own output**, so a second run into the same folder failed. It is now
   called with `--force` (the app has already checked that the folder may be overwritten).
 - **A folder is no longer taken for a point cloud because it holds a `.txt`.**

@@ -550,9 +550,11 @@ export function resolveOptions(tool, given = {}, partial = false) {
       if (!o.values.includes(v)) throw new Error(`${o.key}: one of ${o.values.join(', ')} (got ${v})`);
     } else {
       v = String(v);
+      // a list of numbers (angles, the corners of a box) may start with a minus: nothing but numbers and commas gets through
+      if (o.numbers) { if (v.trim() && !/^\s*-?\d+(\.\d+)?(\s*,\s*-?\d+(\.\d+)?)*\s*$/.test(v)) throw new Error(`${o.key}: numbers separated by commas are expected`); }
       // free text ends up as a command-line argument: no control characters, and it must not look like another flag
       // (a proj4 string starts with "+", which no tool here reads as a flag)
-      if (/[\0-\x1f]/.test(v) || v.trim().startsWith('-')) throw new Error(`${o.key}: not a valid value`);
+      else if (/[\0-\x1f]/.test(v) || v.trim().startsWith('-')) throw new Error(`${o.key}: not a valid value`);
       v = v.trim();
     }
     out[o.key] = v;

@@ -8,6 +8,18 @@ Format loosely follows [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+### Added — 2026-11-18 (a local file streams live; large-scene options for splat-transform; two samples)
+- **A file on disk now streams with `cache=none`**, like a URL: the tile-server reads it by byte ranges through
+  the same adapters (COPC, Potree, streamed SOG, LCC, LCC2, RAD), so nothing is converted or copied first. A
+  folder is opened by its entry file. Before, such a path answered 502 with an empty body and needed `cache=full`.
+  Only for a server that runs for one person: on with `TILED_ALLOW_EXPORT=1` (the desktop app) or
+  `TILED_LOCAL_SOURCES=1`, refused with a message otherwise. The app's *Stream it* now uses it.
+- **Server errors carry their message again**: every failed request answered an empty body.
+- **splat-transform, large-scene options**: harmonics, rotation, crop box, floaters, Morton order, chunk minimum,
+  splats per file per level, encoding threads, GPU adapter; up to 12 levels.
+- **Two streamed SOG samples** from SuperSplat in the viewer: Shokei Falls (Izu Kawazu, 4.0 M splats, 3 levels) and
+  Jerash (Jordan, 10.0 M, 5 levels). Their up axis is read off the data and not yet confirmed by eye.
+
 ### Changed — 2026-11-17 (desktop app: four tabs; splat-transform reads every format in place)
 - **Tabs are now Stream live, Export to a folder, Tile raw input and Library.** The two flows of the former Build
   tab are tabs of their own; the dataset card is shown above both and keeps its content from one to the other.

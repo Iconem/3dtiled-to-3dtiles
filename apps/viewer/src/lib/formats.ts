@@ -167,6 +167,10 @@ export const FORMATS: FormatMeta[] = [
     // The scene of PlayCanvas' slide at the MSF splat-compression town hall (2026-11-03): 259 M gaussians at LOD 0, 518 M over 13 levels.
     { id: 'lublin-sog', label: 'Lublin, Poland (A. Shramko, CC BY, 259M) ⬀', src: 'https://d28zzqy0iyovbz.cloudfront.net/2f1ddf5f/v1/lod-meta.json', query: '&up=y' },
     { id: 'itaka-stadium-sog', label: 'Itaka Stadium, Opole (A. Shramko, CC BY, 212M) ⬀', src: 'https://d28zzqy0iyovbz.cloudfront.net/7b43aca7/v1/lod-meta.json', query: '&up=-y' },
+    // Added 2026-11-18, both streamed SOG without harmonics. Up axis read off the data (the ground is at the high-Y
+    // end, the far floaters at the low one), not yet confirmed by eye. Jerash's root bound reaches 74 000 km (floaters).
+    { id: 'shokei-falls', label: 'Shokei Falls, Izu Kawazu (Studio Duckbill, 4M) ⬀', src: 'https://d28zzqy0iyovbz.cloudfront.net/bc623b76/v1/lod-meta.json', query: '&up=-y' },
+    { id: 'jerash', label: 'Jerash, Jordan (T. Nagao, 10M) ⬀', src: 'https://d28zzqy0iyovbz.cloudfront.net/8e2a4194/v1/lod-meta.json', query: '&up=-y' },
     { id: 'dittrichova-hrobka', sh: 3, label: 'Dittrichova hrobka, Krásná Lípa (D. Dworschak, 54M) ⬀', src: 'https://d28zzqy0iyovbz.cloudfront.net/6c09cd54/v1/lod-meta.json', query: '&up=-y' },
   ] },
   { fmt: 'lcc', icon: '◆', label: 'LCC', type: 'splat', octree: false, stream: true, assets: [

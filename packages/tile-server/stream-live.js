@@ -50,6 +50,7 @@ import { geosplatsTileset, geosplatsTile, geosplatsTileRe } from './geosplats-li
 import { nexusTileset, nexusTile, nexusTileRe } from './nexus-live.js';
 import { handleSelfContained } from './3dtiles-self-contained.js';
 import { detectFormatByName, compressTile, decompressTile, applyPlacement, curvedParam, attributesSpec } from '../core/index.js';
+import { localSourceUrl } from '../core/source-fetch.js';
 
 // Per-tile glTF-Transform op applied to every streamed tile GLB, the streaming counterpart of the
 // /gltf proxy (which only reaches *explicit* tilesets). Because /stream builds each tile GLB itself,
@@ -190,8 +191,16 @@ async function handleRadSubtree(u, res) {
  */
 export const literalPlus = (reqUrl) => (reqUrl.includes('+') ? reqUrl.replace(/\+/g, '%2B') : reqUrl);
 
+const LOCAL_BY_RANGES = new Set(['copc', 'potree', 'sog', 'lcc', 'lcc2', 'rad', 'geosplats']);
+
 export async function handleStream(req, res, u) {
   if (!u.pathname.startsWith('/stream/')) return false;
+  // A path on this machine is a file: URL from here on (source-fetch.js) for the adapters that read their source by
+  // ranges through core's fetchers; OSGB, Nexus and the archives open a local path themselves and keep it.
+  if (u.searchParams.has('url')) {
+    const given = u.searchParams.get('format');
+    u.searchParams.set('url', await localSourceUrl(u.searchParams.get('url'), (name) => LOCAL_BY_RANGES.has(given || detectFormatByName(name))));
+  }
   if (await handleThreemxNode(u, res)) return true;
   if (await handleOsgbNode(u, res)) return true;
   if (await handleRadSubtree(u, res)) return true;

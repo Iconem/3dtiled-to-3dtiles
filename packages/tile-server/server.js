@@ -169,8 +169,10 @@ http.createServer(async (req, res) => {
     // was itself crashing the server with ERR_HTTP_HEADERS_SENT).
     // A source read that failed says so to the client (core/source-fetch.js): the file is not there, or the host did not
     // answer. An export takes the first for a gap in the source and retries the second; anything else is our own error.
-    if (!res.headersSent) res.writeHead(httpStatusOf(e), CORS);
-    res.end(res.headersSent ? '' : String(e.message || e));
+    // (the message only when the headers are ours: after writeHead `headersSent` is true, which left every error empty)
+    const ours = !res.headersSent;
+    if (ours) res.writeHead(httpStatusOf(e), { 'Content-Type': 'text/plain; charset=utf-8', ...CORS });
+    res.end(ours ? String(e.message || e) : '');
   }
 // HOST=127.0.0.1 (the desktop app) stays off the network, so Windows asks no firewall question.
 }).listen(PORT, process.env.HOST || undefined, () => {

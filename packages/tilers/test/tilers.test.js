@@ -110,10 +110,12 @@ test('which tools take a file or a folder', () => {
 test('options: defaults filled, values checked, nothing undeclared or flag-like gets through', () => {
   const potree = toolById('potreeconverter'), splat = toolById('splat-transform'), pdal = toolById('pdal');
   assert.deepEqual(resolveOptions(potree), { method: 'poisson', encoding: 'UNCOMPRESSED', attributes: '' });
-  assert.deepEqual(resolveOptions(splat, { levels: '4', adaptive: 'true', keep: 25 }), { levels: 4, keep: 25, adaptive: true, chunkCount: 512, chunkExtent: 16, gpu: 'auto' });
+  assert.deepEqual(resolveOptions(splat, { levels: '4', adaptive: 'true', keep: 25 }), { levels: 4, keep: 25, adaptive: true, harmonics: 'keep', rotate: '', box: '', floaters: false, morton: false, chunkCount: 512, chunkExtent: 16, chunkMin: 8, fileCount: '', workers: 4, gpu: 'auto' });
+  assert.equal(resolveOptions(splat, { rotate: '-90, 0,0' }).rotate, '-90, 0,0', 'a list of numbers may start with a minus');
+  assert.throws(() => resolveOptions(splat, { rotate: '-90,--gpu' }), /numbers separated by commas/);
   assert.equal(resolveOptions(splat, { levels: '' }).levels, 3, 'an empty field is the default');
   assert.throws(() => resolveOptions(potree, { method: 'fancy' }), /one of poisson/);
-  assert.throws(() => resolveOptions(splat, { levels: 99 }), /between 1 and 8/);
+  assert.throws(() => resolveOptions(splat, { levels: 99 }), /between 1 and 12/);
   assert.throws(() => resolveOptions(splat, { levels: 2.5 }), /whole number/);
   assert.throws(() => resolveOptions(splat, { keep: 'half' }), /whole number/);
   assert.throws(() => resolveOptions(potree, { exe: 'evil.exe' }), /no option "exe"/);
@@ -335,6 +337,17 @@ test('splat-transform: the patched tool reads a format other than PLY in place a
   const steps = planRun('splat-transform', spz, out, { levels: 2 }, found(['node', script])).steps;
   assert.deepEqual(steps.map((x) => x.cmd.slice(2, 6)), [['-w', spz, '--decimate', '50%'], ['-w', spz, '-l', '0']]);
   assert.equal(steps[1].cmd[6], t1);
+});
+
+test('splat-transform: the finest level is prepared once, and the bundle takes the chunk and file sizes', () => {
+  const out = path.join(tmp(), 'out'), ply = path.resolve('C:\\s\\scene.ply'), t = (n) => path.join(out, '.tiler-tmp', `lod${n}.ply`);
+  const steps = planRun('splat-transform', ply, out, { levels: 2, adaptive: true, harmonics: '0', rotate: '-90, 0, 0', box: '-1,-1,-1,1,1,1', morton: true,
+    chunkCount: 64, chunkExtent: 8, chunkMin: 16, fileCount: '512, 128', workers: 8, gpu: '1' }, found(['node', 'cli.mjs'])).steps.map((x) => x.cmd.slice(2));
+  assert.deepEqual(steps, [
+    ['-w', ply, '-B', '-1,-1,-1,1,1,1', '-H', '0', '-r', '-90,0,0', '-m', t(0)],
+    ['-w', '--gpu', '1', t(0), '--decimate-adaptive', '50%', t(1)],
+    ['-w', t(0), '-l', '0', t(1), '-l', '1', path.join(out, 'lod-meta.json'), '--lod-chunk-count', '64', '--lod-chunk-extent', '8', '--lod-chunk-min', '16', '--lod-file-count', '512,128', '--max-workers', '8', '--gpu', '1'],
+  ]);
 });
 
 test('splat-transform, stock: a format other than PLY is first written out as a PLY, and an LCC keeps its own levels', () => {

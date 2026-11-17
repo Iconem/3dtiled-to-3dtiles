@@ -10,7 +10,9 @@ import { once } from 'node:events';
 import { mkdtemp, writeFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
+import { pathToFileURL } from 'node:url';
 import { fetchSource, fetchSourceRange, isLenientHost, openZip, writeZip } from '../core/index.js';
+import { localSourceUrl } from '../core/source-fetch.js';
 
 const quiet = (t) => { t.mock.method(console, 'log', () => {}); t.mock.method(console, 'warn', () => {}); };
 
@@ -77,4 +79,31 @@ test('zip: members by name over range requests, deflated and stored, from a fold
     assert.equal((await local.read('tile/metadata.xml')).toString(), '<SRS>EPSG:2326</SRS>');
     await local.close();
   }
+});
+
+test('source-fetch: a file: URL is read whole or by range, only where local sources are allowed', async (t) => {
+  const dir = await mkdtemp(path.join(tmpdir(), 'local-source-'));
+  t.after(() => rm(dir, { recursive: true, force: true }));
+  const before = { ...process.env };
+  t.after(() => { for (const k of ['TILED_ALLOW_EXPORT', 'TILED_LOCAL_SOURCES']) { if (before[k] === undefined) delete process.env[k]; else process.env[k] = before[k]; } });
+  const file = path.join(dir, 'lod-meta.json');
+  await writeFile(file, '0123456789');
+  const url = pathToFileURL(file).href;
+
+  delete process.env.TILED_ALLOW_EXPORT; delete process.env.TILED_LOCAL_SOURCES;
+  await assert.rejects(fetchSource(url), (e) => e.status === 403, 'a public server does not read its disk');
+
+  process.env.TILED_ALLOW_EXPORT = '1';
+  assert.equal((await fetchSource(url)).toString(), '0123456789');
+  assert.equal((await fetchSourceRange(url, 2, 4)).toString(), '2345');
+  assert.equal((await fetchSourceRange(url, 8, 10)).toString(), '89', 'a range past the end gives what is there');
+  await assert.rejects(fetchSource(pathToFileURL(path.join(dir, 'absent.bin')).href), (e) => e.status === 404);
+  process.env.TILED_LOCAL_SOURCES = '0';
+  await assert.rejects(fetchSource(url), (e) => e.status === 403, 'TILED_LOCAL_SOURCES=0 wins');
+
+  // a path becomes a file: URL, a folder its entry file; a URL and a format that opens paths itself are left alone
+  assert.equal(await localSourceUrl(file), url);
+  assert.equal(await localSourceUrl(dir), url);
+  assert.equal(await localSourceUrl('https://host/a.copc.laz'), 'https://host/a.copc.laz');
+  assert.equal(await localSourceUrl(file, () => false), file);
 });

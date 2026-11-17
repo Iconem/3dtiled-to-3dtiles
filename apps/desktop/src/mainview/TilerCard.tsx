@@ -241,11 +241,13 @@ export function TilerCard({ app, onStream }: { app: AppModel; onStream: () => vo
   /** What the tiler wrote becomes the dataset, and the Stream live tab opens. */
   function streamIt() {
     if (!result) return;
-    // A file on disk is read by the converter-backed route (cache=full: converted once to the local cache).
+    // A file on disk streams as a URL does: the server reads it by ranges, and nothing is converted ahead (cache=none).
+    // A .3tz archive has no live adapter: it goes through the converter-backed route, unpacked once to the local cache.
     // the formats the dataset form lists by name; the others (a .3tz archive, a Nexus file) are found by their extension
-    patchForm({ src: result.output, format: ['copc', 'potree', 'sog', 'rad'].includes(result.format) ? result.format : '', cache: 'full' });
+    const live = ['copc', 'potree', 'sog', 'rad', 'nexus'].includes(result.format);
+    patchForm({ src: result.output, format: ['copc', 'potree', 'sog', 'rad'].includes(result.format) ? result.format : '', cache: live ? 'none' : 'full' });
     onStream();
-    app.say(`Now streaming ${result.output}. The first load converts it to the local cache.`, 'ok');
+    app.say(live ? `Now streaming ${result.output}: tiles are built from the file as they are asked for.` : `Now streaming ${result.output}. The first load converts it to the local cache.`, 'ok');
   }
   /** A 3D Tiles tileset is finished: nothing to convert, it is served from its folder and shown. */
   function preview(renderer: 'cesium' | '3dtrjs') {
