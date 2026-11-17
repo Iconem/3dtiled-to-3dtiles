@@ -18,7 +18,7 @@
  * so nothing the caller sends reaches a command line unchecked.
  */
 import fs from 'node:fs';
-import { TOOLS, listTools, detectTool, installTool, planRun, runTool, toolsFor, describeInput, toolsDir, commandLine } from './index.js';
+import { TOOLS, listTools, detectTool, installTool, planRun, runTool, toolsFor, describeInput, toolsDir, stepLine } from './index.js';
 import { writeSamples, SAMPLES } from './samples.js';
 
 const argv = process.argv.slice(2), cmd = argv[0];
@@ -69,7 +69,7 @@ try {
     if (flags.has('install') && detectTool(id).status !== 'ready') await installTool(id, { log: (l) => console.log(l) });
     if (flags.has('dry-run')) {
       const plan = planRun(id, input, outDir, opts);
-      out({ steps: plan.steps.map((s) => s.cmd), output: plan.output, options: plan.options }, plan.steps.map((s) => `$ ${commandLine(s.cmd)}`).join('\n') + `\n→ ${plan.output.path} (${plan.output.format})`);
+      out({ steps: plan.steps.map((s) => s.cmd ?? s.copy ?? s.move), output: plan.output, options: plan.options }, plan.steps.map((s) => `$ ${stepLine(s)}`).join('\n') + `\n→ ${plan.output.path} (${plan.output.format})`);
     } else {
       const r = await runTool(id, input, outDir, opts, { overwrite: flags.has('overwrite') });
       console.log(`Done in ${r.seconds < 60 ? r.seconds.toFixed(1) + ' s' : (r.seconds / 60).toFixed(1) + ' min'} → ${r.output}`);

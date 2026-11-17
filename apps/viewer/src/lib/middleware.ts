@@ -65,6 +65,8 @@ export interface Preset {
   rawSrc?: string;
   custom?: boolean;
   octree?: boolean;
+  /** Splats: the spherical-harmonics degree the source holds, when it holds any (formats.ts `Asset.sh`). */
+  sh?: number;
   flyTo?: { lon: number; lat: number; height: number };
   /** A whole-globe dataset (Bing 3D, Google 3D): switching between two of them keeps the camera where it is. */
   global?: boolean;
@@ -166,6 +168,7 @@ export function currentPresets(p: MiddlewareParams & { toolName: ToolName; tiles
       type: a.type ?? f.type,
       url: assetUrl(f, a, p),
       octree: f.octree,
+      sh: a.sh,
       rawSrc: srcUrl(a.streamSrc ?? a.src!),
     }))
     .filter((pr) => pr.url);

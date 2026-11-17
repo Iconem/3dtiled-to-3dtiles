@@ -13,6 +13,9 @@
  *             else downloaded the same way, next to the tool, never installed system-wide.
  *   uv        a Python tool: a pinned version installed by `uv` into a private environment of its own (its own
  *             Python too), inside the tools folder
+ *   cargo     a Rust program its authors publish as source only: built once with the machine's own `cargo` from a
+ *             pinned, hash-checked source archive, the binary kept in the tools folder. Without a Rust toolchain the
+ *             tool is not offered for download.
  *   detect    an existing install is looked for: an environment variable, PATH, a QGIS or OSGeo4W install (QGIS
  *             ships PDAL and untwine), pixi's global bin
  *
@@ -23,7 +26,8 @@
  * may be a folder of such files (true) or must be one ('only'); `ply` which kind of PLY it reads (points, splats),
  * since the extension alone does not say.
  *
- * `steps(ctx)` returns the commands to run in order, each an argv array (never a shell string). ctx:
+ * `steps(ctx)` returns the steps to run in order: `{ cmd }`, an argv array (never a shell string), or a file step
+ * done by this package, `{ copy: [from, to] }` or `{ move: [from, to] }`, for a tool that writes next to its input. ctx:
  *   exe      the tool's executable, as detected: an argv prefix (one path, or [node, script], or [java, -jar, jar])
  *   input    absolute path of the input file or folder
  *   isDir    whether the input is a folder
@@ -33,8 +37,8 @@
  *   name     the input's base name without extension
  *   opt      the options, validated against `options` and filled with their defaults
  *
- * `output.format` says how the result is opened: `copc`, `potree`, `sog` go to the stream flow; `3dtiles` is a
- * finished tileset, opened as is. `output.path(ctx)` is the file or folder to hand over, and `output.proof(ctx)`
+ * `output.format` says how the result is opened: `copc`, `potree`, `sog`, `rad`, `nexus` and `package` (a .3tz
+ * archive) go to the stream flow; `3dtiles` is a finished tileset folder, opened as is. `output.path(ctx)` is the file or folder to hand over, and `output.proof(ctx)`
  * (default: the path) the file whose presence says the run produced something.
  */
 import path from 'node:path';
@@ -89,6 +93,19 @@ const GOTILER = {
     },
   },
 };
+
+// rusty-tiles is one binary with a command per kind of input.
+const RUSTY = {
+  env: 'RUSTY_TILES_BIN', path: ['rusty-tiles'], dir: 'rusty-tiles',
+  download: {
+    version: '0.4.1',
+    'win32-x64': {
+      url: 'https://github.com/BenDyson-Arch/rusty-tiles/releases/download/v0.4.1/rusty-tiles-0.4.1-x86_64-pc-windows-msvc.zip',
+      sha256: '3fe6c62f017188935d86e38b8011b40a6b76cdebc7d1843f0f25f42abba26233', bytes: 9695576, exe: 'rusty-tiles.exe',
+    },
+  },
+};
+const archive = { format: 'package', path: (ctx) => path.join(ctx.outDir, `${ctx.name}.3tz`), label: '3D Tiles archive (.3tz)' };
 
 export const TOOLS = [
   // ── point clouds ───────────────────────────────────────────────────────────────────────────────────────────────
@@ -329,6 +346,32 @@ export const TOOLS = [
     },
   },
 
+  {
+    id: 'rusty-tiles-points',
+    name: 'rusty-tiles point-cloud',
+    kind: 'pointcloud',
+    summary: 'A LAS or LAZ point cloud, or a folder of them, to one 3D Tiles 1.1 archive (.3tz) with a disk-backed spatial hierarchy. One Rust binary, young (version 0.4).',
+    homepage: 'https://github.com/BenDyson-Arch/rusty-tiles',
+    licence: 'MIT',
+    inputs: ['las', 'laz'],
+    dir: true,
+    output: archive,
+    provide: RUSTY,
+    options: [
+      { key: 'sourceCrs', label: 'Source CRS', type: 'text', default: '', required: true, placeholder: 'EPSG:32631, or "local"', help: '--sourceCrs: the CRS of the input, an EPSG code, or "local" for plain metres. Required by the tool.' },
+      { key: 'heightOffset', label: 'Height offset (m)', type: 'number', min: -10000, max: 10000, default: 0, help: '--heightOffset: added to the heights to make them ellipsoidal. The tool wants it stated for a georeferenced cloud; 0 keeps them.' },
+      { key: 'maxPoints', label: 'Points per tile', type: 'int', min: 256, max: 8192, default: 8192, advanced: true, help: '--maxPoints: at most 8192.' },
+      { key: 'metadata', label: 'Keep every source field', type: 'bool', default: false, advanced: true, help: '--metadata: per-point fields in a property table. Off: position and colour only.' },
+    ],
+    steps(ctx) {
+      const { exe, input, outDir, name, opt } = ctx;
+      const cmd = [...exe, 'point-cloud', '--input', input, '--output', path.join(outDir, `${name}.3tz`), '--sourceCrs', opt.sourceCrs, '--maxPoints', String(opt.maxPoints)];
+      if (opt.sourceCrs.toLowerCase() !== 'local') cmd.push('--heightOffset', String(opt.heightOffset));
+      if (opt.metadata) cmd.push('--metadata');
+      return [{ cmd, label: 'points → 3D Tiles archive' }];
+    },
+  },
+
   // ── meshes ─────────────────────────────────────────────────────────────────────────────────────────────────────
   {
     id: 'obj2tiles',
@@ -381,10 +424,12 @@ export const TOOLS = [
     id: 'mago-3d-tiler',
     name: 'mago 3DTiler',
     kind: 'mesh',
-    summary: 'The widest input list: OBJ, FBX, 3DS, glTF, CityGML, KML, Shapefile, GeoJSON, GeoPackage and LAS or LAZ, a file or a folder, to 3D Tiles. A Java program (390 MB), run on a Java 25 runtime that is fetched next to it when the machine has none.',
+    summary: 'The widest input list: OBJ, FBX, 3DS, glTF, COLLADA, a PLY or STL mesh, IFC, 3MF, X3D, CityGML, KML, Shapefile, GeoJSON, GeoPackage and LAS or LAZ, a file or a folder, to 3D Tiles. A Java program (390 MB), run on a Java 25 runtime that is fetched next to it when the machine has none.',
     homepage: 'https://github.com/Gaia3D/mago-3d-tiler',
     licence: 'MPL-2.0',
-    inputs: ['obj', 'fbx', '3ds', 'gltf', 'glb', 'gml', 'kml', 'shp', 'geojson', 'gpkg', 'las', 'laz'],
+    // the extensions of its own FormatType list (version 1.17.0); `--inputType` is the extension
+    inputs: ['obj', 'fbx', '3ds', 'gltf', 'glb', 'dae', 'ply', 'stl', 'ifc', '3mf', 'x3d', 'ase', 'lwo', 'lws', 'lxo', 'x', 'gml', 'kml', 'shp', 'geojson', 'gpkg', 'las', 'laz'],
+    ply: 'mesh',
     dir: true,
     output: tileset,
     provide: {
@@ -472,6 +517,74 @@ export const TOOLS = [
     },
   },
 
+  {
+    id: 'rusty-tiles',
+    name: 'rusty-tiles mesh',
+    kind: 'mesh',
+    summary: 'A glTF or GLB mesh, or a folder of them, streamed into one 3D Tiles 1.1 archive (.3tz) with implicit tiling. One Rust binary, young (version 0.4).',
+    homepage: 'https://github.com/BenDyson-Arch/rusty-tiles',
+    licence: 'MIT',
+    inputs: ['glb', 'gltf'],
+    dir: true,
+    output: archive,
+    provide: RUSTY,
+    options: [
+      { key: 'profile', label: 'Profile', type: 'enum', values: ['balanced', 'fast', 'quality', 'lossless'], default: 'balanced', help: '--profile: how much the tool simplifies and compresses.' },
+      ...placement({ lon: '--anchor', lat: '--anchor', alt: '--anchor' }).map((o) => ({ ...o, help: `${o.help} For a model in local metres.` })),
+      { key: 'sourceCrs', label: 'Source CRS', type: 'text', default: '', advanced: true, placeholder: 'local', help: '--sourceCrs: an EPSG code when the coordinates are in a projected CRS. Empty: local metres, glTF Y up.' },
+      { key: 'sourceAxes', label: 'Axes in that CRS', type: 'enum', values: ['y-up', 'xyz'], default: 'y-up', advanced: true, help: '--sourceAxes: with a source CRS, y-up (east, height, minus north) or xyz (east, north, height).' },
+    ],
+    steps(ctx) {
+      const { exe, input, outDir, name, opt } = ctx;
+      const cmd = [...exe, 'mesh', '--input', input, '--output', path.join(outDir, `${name}.3tz`), '--profile', opt.profile];
+      if (opt.lon !== '' && opt.lat !== '') cmd.push('--anchor', String(opt.lon), String(opt.lat), String(opt.alt === '' ? 0 : opt.alt));
+      if (opt.sourceCrs) cmd.push('--sourceCrs', opt.sourceCrs, '--sourceAxes', opt.sourceAxes);
+      return [{ cmd, label: 'glTF → 3D Tiles archive' }];
+    },
+  },
+  {
+    id: 'nexus',
+    name: 'Nexus (nxsbuild)',
+    kind: 'mesh',
+    summary: 'A PLY, OBJ or STL mesh, or a folder of them merged, to a Nexus multiresolution mesh (.nxs, or Corto-compressed .nxz): CNR-ISTI\'s format, the one 3DHOP shows. This app streams it as 3D Tiles.',
+    homepage: 'https://github.com/cnr-isti-vclab/nexus',
+    licence: 'GPL-3.0',
+    inputs: ['ply', 'obj', 'stl'],
+    ply: 'mesh',
+    dir: true,
+    output: { format: 'nexus', path: (ctx) => path.join(ctx.outDir, `${ctx.name}.${ctx.opt.compress ? 'nxz' : 'nxs'}`), label: 'Nexus (.nxs or .nxz)' },
+    provide: {
+      env: 'NXSBUILD_BIN', path: ['nxsbuild'],
+      download: {
+        version: '2025.05',
+        'win32-x64': {
+          url: 'https://github.com/cnr-isti-vclab/nexus/releases/download/v2025.05/nexus-windows-x86_64.zip',
+          sha256: '6a90423c7bf6ee5c6cbdb581c70846a79d0a05fd7225a2e458ba43fc0053aa6f', bytes: 48061423, exe: 'nxsbuild.exe',
+        },
+      },
+    },
+    options: [
+      { key: 'compress', label: 'Compress (.nxz)', type: 'bool', default: false, help: 'a second step, nxscompress: Corto compression, several times smaller.' },
+      { key: 'colors', label: 'Keep vertex colours', type: 'bool', default: false, help: '-C: for a mesh coloured per vertex, without textures.' },
+      { key: 'noTextures', label: 'Drop textures', type: 'bool', default: false, help: '-u: no textures and no texture coordinates.' },
+      { key: 'nodeFaces', label: 'Faces per patch', type: 'int', min: 1000, max: 32768, default: 32768, advanced: true, help: '-f: smaller patches change more gradually and compress less well.' },
+      { key: 'topFaces', label: 'Faces in the top node', type: 'int', min: 256, max: 1000000, default: 4096, advanced: true, help: '-t: the size of the coarsest level.' },
+      { key: 'scaling', label: 'Decimation per level', type: 'number', min: 0.1, max: 0.9, default: 0.5, advanced: true, help: '-s: the share of faces kept from one level to the next.' },
+      { key: 'ram', label: 'Memory (MB)', type: 'int', min: 256, max: 1048576, default: 2000, advanced: true, help: '-r: what the tool may hold in memory (an approximation).' },
+    ],
+    steps(ctx) {
+      const { exe, input, outDir, tmpDir, name, opt } = ctx;
+      const nxs = path.join(opt.compress ? tmpDir : outDir, `${name}.nxs`);
+      const build = [...exe, input, '-o', nxs, '-f', String(opt.nodeFaces), '-t', String(opt.topFaces), '-s', String(opt.scaling), '-r', String(opt.ram)];
+      if (opt.colors) build.push('-C');
+      if (opt.noTextures) build.push('-u');
+      const steps = [{ cmd: build, label: 'mesh → Nexus' }];
+      // nxscompress ships beside nxsbuild in the same release
+      if (opt.compress) steps.push({ cmd: [path.join(path.dirname(exe[exe.length - 1]), path.basename(exe[exe.length - 1]).replace(/nxsbuild/i, 'nxscompress')), nxs, '-o', path.join(outDir, `${name}.nxz`)], label: 'Corto compression' });
+      return steps;
+    },
+  },
+
   // ── Gaussian splats ────────────────────────────────────────────────────────────────────────────────────────────
   {
     id: 'splat-transform',
@@ -540,6 +653,84 @@ export const TOOLS = [
       if (opt.heading) cmd.push('--heading', String(opt.heading));
       cmd.push(input);
       return [{ cmd, label: 'splats → 3D Tiles' }];
+    },
+  },
+  {
+    id: '3dgs-ply-3dtiles-converter',
+    name: '3DGS-PLY-3DTiles-Converter',
+    kind: 'splat',
+    summary: 'A 3DGS splat PLY to 3D Tiles with a level-of-detail tree of merged splats, SPZ-compressed glTF tiles: William Liu\'s converter, the companion of the splat plugin this viewer uses. It has no up-axis option: a scene whose up is Z comes out lying on its side.',
+    homepage: 'https://www.npmjs.com/package/3dgs-ply-3dtiles-converter',
+    licence: 'Apache-2.0',
+    inputs: ['ply'],
+    ply: 'splats',
+    output: tileset,
+    provide: { bundled: { package: '3dgs-ply-3dtiles-converter', script: 'bin/3dgs-ply-3dtiles-converter.js' } },
+    options: [
+      { key: 'sh', label: 'Spherical harmonics', type: 'enum', values: ['tool default', '0', '1', '2', '3'], default: 'tool default', help: '--sh: the highest degree kept while reading, simplifying and writing.' },
+      ...placement({ lon: '--coordinate', lat: '--coordinate', alt: '--coordinate' }),
+      { key: 'lodMultiplier', label: 'Detail', type: 'enum', values: ['tool default', 'low', 'medium', 'high', 'xhigh', 'max'], default: 'tool default', help: '--lod-multiplier: how early finer tiles are asked for.' },
+      { key: 'convention', label: 'PLY convention', type: 'enum', values: ['graphdeco', 'khr_native'], default: 'graphdeco', advanced: true, help: '--input-convention: how quaternions and opacity are stored. graphdeco is what 3DGS trainers write.' },
+      { key: 'opacityFilter', label: 'Drop below opacity', type: 'number', min: 0, max: 1, default: '', advanced: true, placeholder: 'tool default', help: '--opacity-filter: 0 keeps every splat.' },
+      { key: 'samplingRate', label: 'Kept per level', type: 'number', min: 0.01, max: 1, default: '', advanced: true, placeholder: 'tool default', help: '--sampling-rate-per-level: the share of splats kept from one level to the next coarser one.' },
+      { key: 'maxDepth', label: 'Deepest level', type: 'int', min: 1, max: 30, default: '', advanced: true, placeholder: 'from the input size', help: '--max-depth' },
+      { key: 'memoryBudget', label: 'Memory (GB)', type: 'number', min: 0.5, max: 1024, default: '', advanced: true, placeholder: 'tool default', help: '--memory-budget' },
+    ],
+    steps(ctx) {
+      const { exe, input, outDir, tmpDir, opt } = ctx;
+      // --no-open-inspector: without it the tool opens a viewer in the browser when it is done
+      const cmd = [...exe, '--no-open-inspector', '--tmp-dir', tmpDir];
+      if (opt.sh !== 'tool default') cmd.push('--sh', opt.sh);
+      if (opt.lon !== '' && opt.lat !== '') cmd.push('--coordinate', JSON.stringify([opt.lat, opt.lon, opt.alt === '' ? 0 : opt.alt]));
+      if (opt.lodMultiplier !== 'tool default') cmd.push('--lod-multiplier', opt.lodMultiplier);
+      if (opt.convention !== 'graphdeco') cmd.push('--input-convention', opt.convention);
+      if (opt.opacityFilter !== '') cmd.push('--opacity-filter', String(opt.opacityFilter));
+      if (opt.samplingRate !== '') cmd.push('--sampling-rate-per-level', String(opt.samplingRate));
+      if (opt.maxDepth !== '') cmd.push('--max-depth', String(opt.maxDepth));
+      if (opt.memoryBudget !== '') cmd.push('--memory-budget', String(opt.memoryBudget));
+      cmd.push(input, outDir);
+      return [{ cmd, label: 'splats → 3D Tiles' }];
+    },
+  },
+  {
+    id: 'spark-build-lod',
+    name: 'Spark build-lod',
+    kind: 'splat',
+    summary: 'A splat PLY or SPZ to a .RAD file with Spark\'s level-of-detail tree, the format SparkJS streams. Published as Rust source only: built once here with the machine\'s own Rust toolchain (cargo), a few minutes.',
+    homepage: 'https://sparkjs.dev/docs/lod-getting-started/',
+    licence: 'MIT',
+    inputs: ['ply', 'spz'],
+    ply: 'splats',
+    output: { format: 'rad', path: (ctx) => path.join(ctx.outDir, `${ctx.name}-lod.rad`), label: 'RAD (.rad)' },
+    provide: {
+      env: 'SPARK_BUILD_LOD_BIN', path: ['build-lod'],
+      cargo: {
+        version: '2.4.0',
+        url: 'https://github.com/sparkjsdev/spark/archive/refs/tags/v2.4.0.zip',
+        sha256: '90e0c1e853c8f49ae3993ebb14e09c67909c98d962fecf57ac54823b148c3225', bytes: 6837524,
+        manifest: 'rust/build-lod/Cargo.toml', bin: 'build-lod',
+      },
+    },
+    options: [
+      { key: 'method', label: 'Method', type: 'enum', values: ['quality', 'quick'], default: 'quality', help: '--quality (bhatt-lod, base 1.75, the default) or --quick (tiny-lod, base 1.5).' },
+      { key: 'maxSh', label: 'Spherical harmonics', type: 'enum', values: ['3', '2', '1', '0'], default: '3', help: '--max-sh: the highest degree kept. 3 is the tool\'s default.' },
+      { key: 'encoding', label: 'Splat encoding', type: 'enum', values: ['gsplat', 'csplat'], default: 'gsplat', advanced: true, help: '--gsplat (higher precision, the default) or --csplat (compact).' },
+      { key: 'clusterSh', label: 'Cluster the harmonics', type: 'bool', default: false, advanced: true, help: '--cluster-sh: a codebook of at most 64 K coefficient sets, on the GPU: a much smaller file.' },
+      { key: 'skipValidate', label: 'Skip validation', type: 'bool', default: false, advanced: true, help: '--skip-validate: go on when the input holds invalid splats.' },
+    ],
+    steps(ctx) {
+      const { exe, input, outDir, tmpDir, name, ext, opt } = ctx;
+      // build-lod writes <name>-lod.rad beside its input: it is given a copy in the scratch folder
+      const copy = path.join(tmpDir, `${name}.${ext}`);
+      const cmd = [...exe, opt.method === 'quick' ? '--quick' : '--quality', `--max-sh=${opt.maxSh}`, opt.encoding === 'csplat' ? '--csplat' : '--gsplat'];
+      if (opt.clusterSh) cmd.push('--cluster-sh');
+      if (opt.skipValidate) cmd.push('--skip-validate');
+      cmd.push(copy);
+      return [
+        { copy: [input, copy], label: 'copy the input to the scratch folder' },
+        { cmd, label: 'splats → RAD' },
+        { move: [path.join(tmpDir, `${name}-lod.rad`), path.join(outDir, `${name}-lod.rad`)], label: 'keep the .rad' },
+      ];
     },
   },
 ];

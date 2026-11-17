@@ -42,7 +42,7 @@ test('a tiler output folder is served; other folders, paths outside it and its r
       const list = await (await fetch(`${base}/tilers?input=${encodeURIComponent(out)}`)).json();
       assert.ok(list.tools.length >= 12 && list.tools.every((t) => t.kind && t.found && Array.isArray(t.found.missing)));
       assert.deepEqual([list.input.dir, list.input.exts], [true, ['glb', 'json']]);
-      assert.deepEqual(list.for, ['mago-3d-tiler'], 'a folder is matched by what it holds');
+      assert.deepEqual(list.for, ['mago-3d-tiler', 'rusty-tiles'], 'a folder is matched by what it holds');
 
       process.env.TILED_ALLOW_EXPORT = '';
       assert.equal((await fetch(at(out, 'tileset.json'))).status, 403, 'off unless the server was started for it');

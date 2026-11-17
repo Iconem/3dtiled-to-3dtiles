@@ -209,6 +209,9 @@ export default function TopBar({ activeHandleRef }: { activeHandleRef: React.Ref
     return { id: `agg-${u.set}`, label: `📂 ${name.length > 40 ? name.slice(0, 39) + '…' : name}${u.count ? ` (${u.count})` : ''}`,
       type: u.pointsOnly ? 'pointcloud' : 'mesh', url: u.url };
   }) : [];
+  // With the harmonics pill on, the samples that hold none are greyed: they stay clickable, and look the same.
+  const harmonicsOn = url.mode === 'stream' && canSh(url.format) && url.sh > 0 && !url.centroids;
+  const noHarmonics = (p: { sh?: number; custom?: boolean }) => harmonicsOn && !p.custom && !p.sh;
   const presets = [...uploadPresets, ...currentPresets({ ...params, toolName: url.tool, tilesetOp: url.tilesetOp as any })
     // Presets backed by a machine-local aggregate set stay hidden until the server confirms it has it.
     .filter((p) => !p.requiresSet || availableSets?.has(p.requiresSet))
@@ -522,8 +525,11 @@ export default function TopBar({ activeHandleRef }: { activeHandleRef: React.Ref
                 variant="outline"
                 disabled={!p.url}
                 onClick={() => selectPreset(p)}
-                className={cn('h-7 px-2 text-xs', url.preset === p.id ? ACTIVE_TINT.fuchsia : HOVER_TINT.fuchsia, !p.url && 'opacity-40')}
-                title={!p.url ? `${url.format} has no ${url.mode} adapter` : undefined}
+                className={cn('h-7 px-2 text-xs', url.preset === p.id ? ACTIVE_TINT.fuchsia : HOVER_TINT.fuchsia, (!p.url || noHarmonics(p)) && 'opacity-40')}
+                title={!p.url ? `${url.format} has no ${url.mode} adapter`
+                  : noHarmonics(p) ? 'This sample holds no spherical harmonics: with the harmonics pill on, it looks the same as with it off.'
+                  : harmonicsOn && p.sh ? `Holds spherical harmonics of degree ${p.sh}` : undefined}
+                data-sh={p.sh ?? 0}
               >
                 {p.label}
               </Button>

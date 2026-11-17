@@ -1,12 +1,63 @@
 ---
 title: "One-stop tiler"
-description: "The desktop app's third flow: give it raw, untiled input and it runs a third-party tiler, then opens the result. Phases 1 to 3 are built (twelve tools, Windows); the plan for the rest."
+description: "The desktop app's third flow: give it raw, untiled input and it runs a third-party tiler, then opens the result. Phases 1 to 3 are built (seventeen tools, Windows); the plan for the rest."
 ---
 
 Plan of 2026-11-16. **Phases 1 to 3 were built the same day** (see the two *Result* sections); phase 4, macOS,
 Linux and the server variant, is not started. The roadmap item is on the [future work](/docs/guide/todo-future-work)
 page; the tools are surveyed on [existing tilers](/docs/guide/existing-tilers). How to use it:
 [desktop app](/docs/guide/desktop-app#tile-raw-input), [CLI](/docs/guide/cli-usage#tile-raw-input-with-a-third-party-tiler).
+
+## Result: five more tools, and what was left untested (2026-11-17)
+
+Seventeen tools now. The five added:
+
+| Tool | Input | Output | How it gets on the machine |
+|---|---|---|---|
+| **rusty-tiles 0.4.1** `mesh` | `.glb`, `.gltf`, a folder | a 3D Tiles 1.1 archive (`.3tz`) | download, 10 MB |
+| **rusty-tiles 0.4.1** `point-cloud` | `.las`, `.laz`, a folder | a `.3tz` archive | the same download |
+| **Nexus `nxsbuild` 2025.05** | a mesh `.ply`, `.obj`, `.stl`, a folder | a Nexus file (`.nxs`, or `.nxz` with the Corto step) | download, 48 MB |
+| **3DGS-PLY-3DTiles-Converter 0.6.5** | a splat `.ply` | 3D Tiles with SPZ splats and merged levels of detail | ships with the app (an npm dependency) |
+| **Spark `build-lod` 2.4.0** | a splat `.ply`, `.spz` | a RAD file | its source, built once with `cargo` |
+
+- **Outputs that are one file** (`.3tz`, `.nxs`, `.rad`) go to the stream flow, like a COPC.
+- **A fifth delivery, for source-only tools.** Spark publishes `build-lod` as Rust source: the tagged source
+  archive is downloaded and hash-checked like a binary, then compiled with the machine's `cargo` (three minutes
+  here), and only the program is kept. On Windows the MSVC toolchain is asked for when rustup has it (the GNU one
+  failed here for want of `dlltool`). A machine without Rust is told so, with a pointer to rustup.
+- **A tool that writes beside its input** (`build-lod`) is given a copy in the scratch folder, and its file moved
+  out: two file steps the package does itself.
+- **mago 3DTiler takes more than was listed.** Its own format list (read from the program) has 23 extensions: a
+  PLY or STL mesh, COLLADA, IFC, 3MF, X3D, ASE, LightWave, DirectX too. So a PLY mesh now has two tools (mago,
+  Nexus). Obj2Tiles reads OBJ only; fanvanzh/3dtiles also turns a Shapefile into extruded buildings, which is
+  left to mago here.
+- **The samples** gained the same terrain as a GLB and as a PLY mesh.
+
+**Run through the package, then served:** rusty-tiles on the LAS (7 tiles) and on the GLB; nxsbuild on the OBJ
+and on the PLY mesh with colours and compression; the splat converter and `build-lod` on the splat PLY; mago on
+the PLY mesh and the GLB.
+
+**In the built app (a local build, 2026.11.17), what the last round had left out:**
+
+| What | Result |
+|---|---|
+| **File…** | the native dialog opened with six type entries (all, tiled datasets, raw point clouds, raw meshes, raw splats, all files); the file picked landed in the dataset field |
+| **Folder…**, and the tiler card's own **Folder…** | the folder picked landed in the field |
+| **Write tiny sample files** | the folder dialog, then five sample files written and the LAS set as the dataset |
+| **py3dtiles, on a machine without uv** (uv hidden from the app) | the app said it would download uv too, did (16 MB, hash matched), installed py3dtiles with it, ran it: 48 s in all |
+| **mago 3DTiler, nothing installed** | the app downloaded the Java 25 runtime and the 390 MB jar, both hash-checked, and ran it: 48 s in all |
+| the five new tools, and mago on a PLY mesh | all ran from the form and their output opened in the preview |
+
+The dialogs were answered by sending the path and the button press to the dialog window, as a user would type and
+click. Found there: the message after *Write tiny sample files* was wiped by the new input (fixed).
+
+**Seen and left as is:**
+
+- The 3DGS-PLY-3DTiles-Converter has no up-axis option: the Z-up sample came out lying on its side (gocesiumtiler
+  `splats` has `--input-up-axis`).
+- `build-lod` on 3 000 splats gives a blurred top level; a scene that small is not what it is for.
+- Still not verified: Cancel midway, large inputs, macOS and Linux, and most of mago's formats (OBJ, GLB, a PLY
+  mesh and LAS were run).
 
 ## Result: phases 2 and 3 (2026-11-16)
 

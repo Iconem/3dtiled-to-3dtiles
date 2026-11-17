@@ -81,11 +81,16 @@ node packages/convert/cli.js tile run <tool> <input> <outDir> [--<option> <value
 | `gocesiumtiler` | `.las`, `.laz`, `.e57`, a point `.ply`, a folder | 3D Tiles | download, 18 MB |
 | `point-tiler` | `.las`, `.laz`, `.csv`, `.txt` | 3D Tiles | download, 17 MB |
 | `py3dtiles` | `.las`, `.laz`, `.xyz`, a point `.ply` | 3D Tiles | uv, a private Python environment |
+| `rusty-tiles-points` | `.las`, `.laz`, a folder | `<outDir>/<name>.3tz` | download, 10 MB |
 | `obj2tiles` | `.obj` | 3D Tiles | download, 24 MB |
-| `mago-3d-tiler` | `.obj`, `.fbx`, `.3ds`, `.gltf`, `.glb`, `.gml`, `.kml`, `.shp`, `.geojson`, `.gpkg`, `.las`, `.laz`, a folder | 3D Tiles | download, 390 MB, and Java 25 |
+| `mago-3d-tiler` | `.obj`, `.fbx`, `.3ds`, `.gltf`, `.glb`, `.dae`, a mesh `.ply`, `.stl`, `.ifc`, `.3mf`, `.x3d`, `.ase`, `.lwo`, `.lws`, `.lxo`, `.x`, `.gml`, `.kml`, `.shp`, `.geojson`, `.gpkg`, `.las`, `.laz`, a folder | 3D Tiles | download, 390 MB, and Java 25 |
 | `fanvanzh-3dtiles` | an OSGB folder | 3D Tiles (b3dm) | download, 13 MB |
+| `rusty-tiles` | `.glb`, `.gltf`, a folder | `<outDir>/<name>.3tz` | the same download as `rusty-tiles-points` |
+| `nexus` | a mesh `.ply`, `.obj`, `.stl`, a folder | `<outDir>/<name>.nxs` (or `.nxz`) | download, 48 MB |
 | `splat-transform` | `.ply`, `.spz`, `.sog`, `.splat`, `.ksplat` (splats) | `<outDir>/lod-meta.json` (streamed SOG) | ships with the repo |
 | `gocesiumtiler-splats` | a splat `.ply` | 3D Tiles (SPZ splats) | the same download as `gocesiumtiler` |
+| `3dgs-ply-3dtiles-converter` | a splat `.ply` | 3D Tiles (SPZ splats, merged levels of detail) | ships with the repo |
+| `spark-build-lod` | a splat `.ply`, `.spz` | `<outDir>/<name>-lod.rad` | source, built with `cargo` |
 
 ```sh
 # a LAS without a CRS record, straight to 3D Tiles
@@ -96,8 +101,9 @@ node packages/convert/cli.js tile run obj2tiles mesh.obj C:\tiled\mesh --lon 2.2
 node packages/convert/cli.js tile run gocesiumtiler-splats scene.ply C:\tiled\scene --maxShDegree 3 --upAxis -y
 ```
 
-- `run` ends with one line, `TILER_RESULT {"format":…,"output":…}`. A `copc`, `potree` or `sog` output is the path
-  to give to `3dtiled serve`; a `3dtiles` output is a finished tileset, to host as it is.
+- `run` ends with one line, `TILER_RESULT {"format":…,"output":…}`. A `copc`, `potree`, `sog`, `rad`, `nexus` or
+  `package` (a `.3tz`) output is the path to give to `3dtiled serve`; a `3dtiles` output is a finished tileset
+  folder, to host as it is.
 - `--dry-run` prints the commands without running them; `--install` fetches a missing tool first.
 - Options are the tool's own (`tile list` shows them with their defaults), and are checked before the tool is called.
 - A `.ply` is read to see whether it holds points, a mesh or splats; a tool for another kind refuses it.
@@ -105,7 +111,8 @@ node packages/convert/cli.js tile run gocesiumtiler-splats scene.ply C:\tiled\sc
 - Downloaded tools live in `%LOCALAPPDATA%\3D Tiled\tools` (`~/.cache/3dtiled/tools` elsewhere), or `TILED_TOOLS_DIR`.
   A tool installed elsewhere is named by its environment variable: `PDAL_BIN`, `UNTWINE_BIN`,
   `POTREECONVERTER_BIN`, `POTREECONVERTER1_BIN`, `GOTILER_BIN`, `PTILER_BIN`, `OBJ2TILES_BIN`,
-  `MAGO_3D_TILER_JAR`, `FANVANZH_3DTILE_BIN`; a Java runtime by `TILED_JAVA` or `JAVA_HOME`.
+  `MAGO_3D_TILER_JAR`, `FANVANZH_3DTILE_BIN`, `RUSTY_TILES_BIN`, `NXSBUILD_BIN`, `SPARK_BUILD_LOD_BIN`; a Java
+  runtime by `TILED_JAVA` or `JAVA_HOME`, uv by `UV_BIN`.
 
 ### Tile workers (experimental)
 

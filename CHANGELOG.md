@@ -5,6 +5,19 @@ Format loosely follows [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+### Added — 2026-11-17 (one-stop tiler: five more tools, seventeen in all)
+- **rusty-tiles** (glTF meshes and LAS to a `.3tz` archive), **Nexus `nxsbuild`** (PLY, OBJ, STL meshes to a Nexus
+  file, which this repo streams), **3DGS-PLY-3DTiles-Converter** (splats to 3D Tiles; ships with the app) and
+  **Spark `build-lod`** (splats to RAD), in *Tile raw input* and `3dtiled tile`.
+- **A source-only tool is built on the machine**: Spark's `build-lod` comes as Rust source, so its hash-checked
+  source archive is compiled once with `cargo`. Without a Rust toolchain the app says what is needed.
+- **mago 3DTiler is offered for every format it reads** (23 extensions: also a PLY or STL mesh, COLLADA, IFC,
+  3MF, X3D), so a PLY mesh now has tools.
+- **Viewer**: with the *harmonics* pill on, the samples that hold no spherical harmonics are greyed.
+- **Samples**: `tile samples` also writes the terrain as a GLB and as a PLY mesh.
+- Tried in a built app: the native file and folder dialogs, *Write tiny sample files*, py3dtiles on a machine
+  without uv (uv is fetched first) and mago with nothing installed (its Java runtime and 390 MB program fetched).
+
 ### Added — 2026-11-16 (one-stop tiler, phases 2 and 3)
 - **Eight more tools in *Tile raw input*, twelve in all**, now for meshes too and with 3D Tiles as an output:
   gocesiumtiler 3.2 (points, and splats to 3D Tiles with SPZ), point-tiler, py3dtiles, PotreeConverter 1.7,

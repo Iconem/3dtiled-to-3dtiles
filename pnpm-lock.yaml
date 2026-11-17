@@ -410,6 +410,9 @@ importers:
 
   packages/tilers:
     dependencies:
+      3dgs-ply-3dtiles-converter:
+        specifier: 0.6.5
+        version: 0.6.5
       '@playcanvas/splat-transform':
         specifier: ^3.11.1
         version: 3.11.1(playcanvas@2.19.7)
@@ -452,6 +455,16 @@ packages:
 
   3d-tiles-tools@0.5.3:
     resolution: {integrity: sha512-UjBUkq5HGD3H7Y4fOAE54kvQVTe2tgLveZCVEyWUqgxIfzlPnOkejkORgMx1lU6n+bV6nGN91UUN0EG2PF39dg==}
+    engines: {node: '>=18.0.0'}
+    hasBin: true
+
+  3dgs-ply-3dtiles-converter@0.6.5:
+    resolution: {integrity: sha512-WDbEzXoxPa9E/rc/4d0MvfyrcEbvSGeQdew72ur1pcQK220NV8BrA6hmZ7RU/AUcC6l0xvV+qei3WDebNvKJdw==}
+    engines: {node: '>=18.0.0'}
+    hasBin: true
+
+  3dtiles-inspector@0.3.3:
+    resolution: {integrity: sha512-ZMbhDM07RIl5iQ5DAaQdRRqa0ezXvetXxjXtxPy5mYxikwmhHxe5ims+laqCH8CRvQlCIGqMO6KHbmfkjkw8yw==}
     engines: {node: '>=18.0.0'}
     hasBin: true
 
@@ -6479,6 +6492,9 @@ packages:
     peerDependencies:
       three: '>=0.128.0'
 
+  three@0.185.1:
+    resolution: {integrity: sha512-5aojFCXKwnjBRZvUnt3WFfEcvUJgkN5LlijRFN95hMy8WVkG4I0QNcJE+OuWvuJ0bOdStrbfXn0pkd6/QyiAlg==}
+
   three@0.187.0:
     resolution: {integrity: sha512-Qiu7R+Cmh8CstZsY1uJOSWnVlfo7ZtNLV7mF8Jltk3LB3AtDu9cRZlcnRKkAk8Y4z6KKw35z7Y7Urd7jWY8etA==}
 
@@ -6989,6 +7005,14 @@ snapshots:
       - bare-abort-controller
       - bare-buffer
       - react-native-b4a
+
+  3dgs-ply-3dtiles-converter@0.6.5:
+    dependencies:
+      3dtiles-inspector: 0.3.3
+
+  3dtiles-inspector@0.3.3:
+    dependencies:
+      three: 0.185.1
 
   '@adobe/spz@0.3.1': {}
 
@@ -14082,6 +14106,8 @@ snapshots:
       fflate: 0.6.10
       potpack: 1.0.2
       three: 0.187.0
+
+  three@0.185.1: {}
 
   three@0.187.0: {}
 

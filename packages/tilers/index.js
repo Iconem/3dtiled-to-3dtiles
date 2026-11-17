@@ -37,7 +37,7 @@ export function toolsDir() {
   return path.join(os.homedir(), '.cache', '3dtiled', 'tools');
 }
 
-const deliveryOf = (p) => (p.bundled ? 'bundled' : p.uv ? 'uv' : p.download ? 'download' : 'detect');
+const deliveryOf = (p) => (p.bundled ? 'bundled' : p.uv ? 'uv' : p.cargo ? 'cargo' : p.download ? 'download' : 'detect');
 
 /** The manifest without its functions: what a form needs. */
 export function listTools() {
@@ -46,10 +46,10 @@ export function listTools() {
     inputs: t.inputs, dir: t.dir ?? false, ply: t.ply ?? null,
     output: { format: t.output.format, label: t.output.label },
     delivery: deliveryOf(t.provide),
-    version: t.provide.download?.version ?? t.provide.uv?.version ?? null,
+    version: t.provide.download?.version ?? t.provide.uv?.version ?? t.provide.cargo?.version ?? null,
     needs: t.provide.needs ? { runtime: t.provide.needs.runtime, name: RUNTIMES[t.provide.needs.runtime].name, min: t.provide.needs.min ?? null } : null,
-    downloadable: !!t.provide.download?.[platformKey] || !!t.provide.uv,
-    downloadBytes: t.provide.download?.[platformKey]?.bytes ?? t.provide.uv?.approxBytes ?? null,
+    downloadable: !!t.provide.download?.[platformKey] || !!t.provide.uv || !!t.provide.cargo,
+    downloadBytes: t.provide.download?.[platformKey]?.bytes ?? t.provide.uv?.approxBytes ?? t.provide.cargo?.bytes ?? null,
     options: t.options,
   }));
 }
@@ -154,7 +154,8 @@ const require_ = createRequire(import.meta.url);
 // `exports` need not list the script), then the script inside it.
 function bundledScript({ package: name, script }) {
   let dir;
-  try { dir = path.dirname(require_.resolve(name)); } catch { return null; }
+  try { dir = path.dirname(require_.resolve(`${name}/package.json`)); }
+  catch { try { dir = path.dirname(require_.resolve(name)); } catch { return null; } }
   for (let i = 0; i < 6; i++) {
     const pkg = path.join(dir, 'package.json');
     if (isFile(pkg)) { try { if (JSON.parse(fs.readFileSync(pkg, 'utf8')).name === name) { const f = path.join(dir, script); return isFile(f) ? f : null; } } catch { /* keep walking */ } }
@@ -201,8 +202,28 @@ export function detectRuntime(id, min = null) {
 }
 
 // The folder of a downloaded tool: two tools that are one binary (`provide.dir`) share it.
-const installDir = (tool) => path.join(toolsDir(), tool.provide.dir ?? tool.id, tool.provide.download?.version ?? tool.provide.uv?.version ?? '0');
+const installDir = (tool) => path.join(toolsDir(), tool.provide.dir ?? tool.id, tool.provide.download?.version ?? tool.provide.uv?.version ?? tool.provide.cargo?.version ?? '0');
 const UV_DONE = '.installed';
+
+/**
+ * The machine's Rust build tool, for a tool published as source only: `cargo` on PATH or in ~/.cargo/bin, as an argv
+ * prefix, or null. On Windows the MSVC toolchain is asked for when rustup has it: the GNU one needs MinGW's dlltool,
+ * which a plain Rust install does not bring.
+ */
+let cargoFound;
+export function findCargo() {
+  if (cargoFound !== undefined) return cargoFound;
+  const exe = onPath('cargo') ?? [path.join(os.homedir(), '.cargo', 'bin', exeName('cargo'))].find(isFile) ?? null;
+  if (!exe) return (cargoFound = null);
+  let toolchain = null;
+  if (isWin) {
+    try {
+      const r = spawnSync(onPath('rustup') ?? path.join(path.dirname(exe), exeName('rustup')), ['toolchain', 'list'], { encoding: 'utf8', timeout: 20000, windowsHide: true });
+      toolchain = (r.stdout ?? '').split(/\r?\n/).map((l) => l.split(' ')[0]).find((l) => /-msvc$/.test(l)) ?? null;
+    } catch { /* no rustup: cargo's default toolchain */ }
+  }
+  return (cargoFound = toolchain ? [exe, `+${toolchain}`] : [exe]);
+}
 
 // The tool's own program, without its runtime: { source, file, env?, hint? } or null.
 function locateOwn(tool) {
@@ -211,6 +232,7 @@ function locateOwn(tool) {
   if (p.env && process.env[p.env]) return isFile(process.env[p.env]) ? { source: 'env', file: process.env[p.env], hint: `from ${p.env}` } : { broken: `${p.env} points to ${process.env[p.env]}, which is not a file` };
   if (dl) { const file = path.join(installDir(tool), dl.exe); if (isFile(file)) return { source: 'downloaded', file, version: p.download.version }; }
   if (p.uv) { const dir = installDir(tool), file = path.join(dir, 'bin', exeName(p.uv.bin)); if (isFile(file) && isFile(path.join(dir, UV_DONE))) return { source: 'downloaded', file, version: p.uv.version }; }
+  if (p.cargo) { const file = path.join(installDir(tool), 'bin', exeName(p.cargo.bin)); if (isFile(file)) return { source: 'built', file, version: p.cargo.version }; }
   for (const name of p.path ?? []) { const file = onPath(name); if (file) return { source: 'path', file }; }
   for (const root of p.qgis ? qgisRoots() : []) {
     for (const rel of p.qgis) { const file = path.join(root, rel); if (isFile(file)) return { source: 'qgis', file, env: osgeoEnv(root), hint: `in ${path.basename(root)}` }; }
@@ -237,7 +259,7 @@ export function detectTool(id) {
   if (own && (!rt || rt.status === 'ready')) {
     const exe = p.command ? p.command({ runtime: rt?.exe ?? [], file: own.file }) : own.exe ?? [own.file];
     const hint = [own.hint, rt ? `${RUNTIMES[rt.id].name}: ${rt.source === 'downloaded' ? 'downloaded by this app' : rt.exe[0]}` : null].filter(Boolean).join('; ');
-    return { id, status: 'ready', source: own.source, exe, version: own.version ?? null, downloadable: !!dl || !!p.uv, downloadBytes: 0, missing: [], ...(own.env ? { env: own.env } : {}), ...(hint ? { hint } : {}) };
+    return { id, status: 'ready', source: own.source, exe, version: own.version ?? null, downloadable: !!dl || !!p.uv || !!p.cargo, downloadBytes: 0, missing: [], ...(own.env ? { env: own.env } : {}), ...(hint ? { hint } : {}) };
   }
   // what is missing, and whether a download would bring it
   const parts = [];
@@ -247,12 +269,16 @@ export function detectTool(id) {
       const uv = detectRuntime('uv');
       parts.push({ name: `${tool.name} ${p.uv.version} with its own Python`, bytes: p.uv.approxBytes, ok: true });
       if (uv.status !== 'ready') parts.push({ name: `${RUNTIMES.uv.name} ${RUNTIMES.uv.download.version}`, bytes: uv.bytes ?? 0, ok: uv.downloadable });
+    } else if (p.cargo) {
+      parts.push({ name: `the source of ${tool.name} ${p.cargo.version}, built here with cargo`, bytes: p.cargo.bytes, ok: !!findCargo(),
+        why: `it is published as source only and needs the Rust toolchain to build: install it from https://rustup.rs${p.env ? `, or set ${p.env} to a built binary` : ''}` });
     } else parts.push({ name: dl ? `${tool.name} ${p.download.version}` : tool.name, bytes: dl?.bytes ?? 0, ok: !!dl });
   }
   if (rt && rt.status !== 'ready') parts.push({ name: `${RUNTIMES[rt.id].name} ${RUNTIMES[rt.id].download?.version ?? ''}`.trim(), bytes: rt.bytes ?? 0, ok: rt.downloadable, why: rt.hint });
   const downloadable = parts.every((x) => x.ok), downloadBytes = parts.reduce((n, x) => n + x.bytes, 0);
   const hint = downloadable
     ? `not installed: ${parts.map((x) => `${x.name} (${p.uv && x === parts[0] ? 'about ' : ''}${mb(x.bytes)})`).join(' and ')} can be downloaded`
+    : !own && p.cargo ? `not installed: ${parts[0].why}`
     : !own && p.qgis ? `not found: install QGIS (it ships ${tool.name}), or put it on PATH${p.env ? `, or set ${p.env}` : ''}`
     : !own ? `not found: put it on PATH${p.env ? ` or set ${p.env}` : ''}${p.download ? ` (no download is published for ${platformKey})` : ''}`
     : rt.hint;
@@ -315,7 +341,9 @@ async function fetchAsset({ name, version, dl, dir, log, fetch: fetch_ = fetch }
       await fsp.mkdir(tmp, { recursive: true });
       await fsp.rename(part, path.join(tmp, dl.exe));
     } else {
-      const files = unzip(await fsp.readFile(part)), names = Object.keys(files);
+      // some archives made on Windows name their entries with backslashes (Nexus): the same path either way
+      const files = Object.fromEntries(Object.entries(unzip(await fsp.readFile(part))).map(([n, b]) => [n.replace(/\\/g, '/'), b]).filter(([n]) => !n.endsWith('/')));
+      const names = Object.keys(files);
       // A release zip often wraps everything in one folder: drop it, so that the executable is where the manifest says.
       const top = names[0].split('/')[0], wrapped = names.every((n) => n.startsWith(top + '/'));
       for (const n of names) {
@@ -374,8 +402,8 @@ export async function installTool(id, o = {}) {
   const tool = toolById(id), log = o.log ?? (() => {});
   if (!tool) throw new Error(`unknown tool "${id}"`);
   const p = tool.provide, dl = p.download?.[platformKey];
-  if (!dl && !p.uv) throw new Error(`${tool.name} has no download for ${platformKey}: ${detectTool(id).hint ?? 'install it yourself'}`);
-  const version = p.download?.version ?? p.uv.version, dir = installDir(tool);
+  if (!dl && !p.uv && !p.cargo) throw new Error(`${tool.name} has no download for ${platformKey}: ${detectTool(id).hint ?? 'install it yourself'}`);
+  const version = p.download?.version ?? p.uv?.version ?? p.cargo.version, dir = installDir(tool);
   let downloaded = false;
   if (p.needs) downloaded = (await installRuntime(p.needs.runtime, p.needs.min, { log, fetch: o.fetch })).downloaded;
 
@@ -397,6 +425,27 @@ export async function installTool(id, o = {}) {
     if (code !== 0 || !isFile(exe)) { await fsp.rm(dir, { recursive: true, force: true }).catch(() => {}); throw new Error(`uv could not install ${p.uv.spec} (exit code ${code}). Nothing was installed.`); }
     await fsp.rm(path.join(dir, 'cache'), { recursive: true, force: true }).catch(() => {});
     await fsp.writeFile(path.join(dir, UV_DONE), `${p.uv.spec}\n`);
+    log(`  installed in ${dir}. Licence: ${tool.licence}, ${tool.homepage}`);
+    return { id, version, dir, exe, downloaded: true };
+  }
+  if (p.cargo) {
+    const cargo = findCargo();
+    if (!cargo) throw new Error(`${tool.name} is published as source only and needs the Rust toolchain to build: install it from https://rustup.rs, then run this again.`);
+    const src = `${dir}.src`, target = `${dir}.build`, exe = path.join(dir, 'bin', exeName(p.cargo.bin));
+    try {
+      // the source archive, hash-checked like a binary; its build tree stays outside the install folder
+      await fetchAsset({ name: `the source of ${tool.name}`, version, dl: { ...p.cargo, exe: p.cargo.manifest }, dir: src, log, fetch: o.fetch });
+      log(`Building ${p.cargo.bin} with ${path.basename(cargo[0])}${cargo[1] ? ` ${cargo[1]}` : ''} (a few minutes the first time: it compiles its dependencies)…`);
+      const code = await runLogged([...cargo, 'build', '--release', '--locked', '--manifest-path', path.join(src, p.cargo.manifest), '--target-dir', target], { ...process.env, CARGO_TERM_COLOR: 'never' }, log);
+      const built = path.join(target, 'release', exeName(p.cargo.bin));
+      if (code !== 0 || !isFile(built)) throw new Error(`cargo could not build ${p.cargo.bin} (exit code ${code}). Nothing was installed.`);
+      await fsp.rm(dir, { recursive: true, force: true });
+      await fsp.mkdir(path.dirname(exe), { recursive: true });
+      await fsp.copyFile(built, exe);
+    } finally {
+      await fsp.rm(src, { recursive: true, force: true }).catch(() => {});
+      await fsp.rm(target, { recursive: true, force: true }).catch(() => {});
+    }
     log(`  installed in ${dir}. Licence: ${tool.licence}, ${tool.homepage}`);
     return { id, version, dir, exe, downloaded: true };
   }
@@ -466,6 +515,8 @@ export function planRun(id, input, outDir, given = {}, found = detectTool(id)) {
 
 const quote = (a) => (/[\s"]/.test(a) ? `"${a.replaceAll('"', '\\"')}"` : a);
 export const commandLine = (cmd) => cmd.map(quote).join(' ');
+/** A step as one line: its command, or the file operation this package does itself. */
+export const stepLine = (step) => (step.cmd ? commandLine(step.cmd) : step.copy ? `copy ${commandLine(step.copy)}` : `move ${commandLine(step.move)}`);
 
 /**
  * Run a tool on an input.
@@ -485,7 +536,13 @@ export async function runTool(id, input, outDir, given = {}, o = {}) {
   try {
     for (const [i, step] of plan.steps.entries()) {
       log(`[${i + 1}/${plan.steps.length}] ${step.label}`);
-      log(`$ ${commandLine(step.cmd)}`);
+      log(`$ ${stepLine(step)}`);
+      if (step.copy) { await fsp.copyFile(step.copy[0], step.copy[1]); continue; }
+      if (step.move) {
+        if (!fs.existsSync(step.move[0])) throw new Error(`${plan.tool.name} did not write ${step.move[0]}`);
+        await fsp.rename(step.move[0], step.move[1]).catch(async () => { await fsp.copyFile(step.move[0], step.move[1]); await fsp.rm(step.move[0], { force: true }); });
+        continue;
+      }
       const code = await new Promise((resolve, reject) => {
         const child = spawn(step.cmd[0], step.cmd.slice(1), { env: { ...process.env, ...(plan.found.env ?? {}) }, stdio: o.onOutput ? ['ignore', 'pipe', 'pipe'] : ['ignore', 'inherit', 'inherit'], windowsHide: true });
         if (o.onOutput) { child.stdout.on('data', (d) => o.onOutput(String(d))); child.stderr.on('data', (d) => o.onOutput(String(d))); }
@@ -504,6 +561,6 @@ export async function runTool(id, input, outDir, given = {}, o = {}) {
   const result = { tool: id, kind: plan.tool.kind, format: plan.output.format, output: plan.output.path, outDir: outAbs, seconds: (Date.now() - t0) / 1000 };
   // What made this folder: a record for whoever finds it later, and what lets the tile-server serve it (tilers-live.js).
   await fsp.writeFile(path.join(outAbs, RUN_MARKER), JSON.stringify({ ...result, input: path.resolve(input), options: plan.options, version: plan.found.version ?? null,
-    commands: plan.steps.map((s) => commandLine(s.cmd)), finished: new Date().toISOString() }, null, 2));
+    commands: plan.steps.map(stepLine), finished: new Date().toISOString() }, null, 2));
   return result;
 }

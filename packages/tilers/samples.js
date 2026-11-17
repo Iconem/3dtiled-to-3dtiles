@@ -6,6 +6,8 @@
  *   splats.ply            3 000 Gaussian splats on a torus, in the PLY layout 3DGS trainers write, with spherical
  *                         harmonics of degree 1 (so a tool's harmonics option has something to keep). Z up, metres.
  *   mesh/mesh.obj         a 40 × 40 terrain grid (3 200 triangles) with normals and UVs, mesh.mtl and a 64 × 64 PNG.
+ *   mesh.glb              the same terrain as one binary glTF, Y up as glTF wants, the texture inside.
+ *   mesh.ply              the same terrain as a binary PLY mesh with vertex colours (no texture), Z up.
  *
  *   node packages/tilers/cli.js samples <folder>
  *
@@ -22,6 +24,8 @@ export const SAMPLES = [
   { file: 'points.las', kind: 'pointcloud', about: '20 000 points on a hill, UTM 31N: give the tools EPSG:32631' },
   { file: 'splats.ply', kind: 'splat', about: '3 000 Gaussian splats on a torus, with degree-1 harmonics' },
   { file: 'mesh/mesh.obj', kind: 'mesh', about: 'a textured terrain of 3 200 triangles, Z up, local coordinates' },
+  { file: 'mesh.glb', kind: 'mesh', about: 'the same terrain as a binary glTF, Y up' },
+  { file: 'mesh.ply', kind: 'mesh', about: 'the same terrain as a PLY mesh with vertex colours' },
 ];
 
 /**
@@ -100,8 +104,53 @@ const ramp = (t) => [Math.min(1, Math.max(0, 1.6 * t - 0.2)), Math.min(1, Math.m
   const crc = (b) => { let c = 0xffffffff; for (const x of b) c = crcTable[(c ^ x) & 0xff] ^ (c >>> 8); return (c ^ 0xffffffff) >>> 0; };
   const chunk = (type, data) => { const len = Buffer.alloc(4), td = Buffer.concat([Buffer.from(type, 'ascii'), data]), sum = Buffer.alloc(4); len.writeUInt32BE(data.length); sum.writeUInt32BE(crc(td)); return Buffer.concat([len, td, sum]); };
   const ihdr = Buffer.alloc(13); ihdr.writeUInt32BE(W, 0); ihdr.writeUInt32BE(W, 4); ihdr[8] = 8; ihdr[9] = 2;
-  fs.writeFileSync(path.join(dir, 'mesh', 'mesh.png'), Buffer.concat([Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]), chunk('IHDR', ihdr), chunk('IDAT', zlib.deflateSync(raw)), chunk('IEND', Buffer.alloc(0))]));
+  const png = Buffer.concat([Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]), chunk('IHDR', ihdr), chunk('IDAT', zlib.deflateSync(raw)), chunk('IEND', Buffer.alloc(0))]);
+  fs.writeFileSync(path.join(dir, 'mesh', 'mesh.png'), png);
+
+  // the same grid as arrays, for the two single-file meshes
+  const V = (N + 1) * (N + 1), pos = new Float32Array(V * 3), nor = new Float32Array(V * 3), uv = new Float32Array(V * 2), col = new Uint8Array(V * 3), idx = new Uint16Array(N * N * 6);
+  for (let j = 0, v = 0; j <= N; j++) for (let i = 0; i <= N; i++, v++) {
+    const x = (i / N - 0.5) * size, y = (j / N - 0.5) * size, z = hill(x, y), e = 0.05;
+    const dx = (hill(x + e, y) - hill(x - e, y)) / (2 * e), dy = (hill(x, y + e) - hill(x, y - e)) / (2 * e), l = Math.hypot(dx, dy, 1), c = ramp((z + 2) / 15);
+    pos.set([x, y, z], v * 3); nor.set([-dx / l, -dy / l, 1 / l], v * 3); uv.set([i / N, 1 - j / N], v * 2); col.set(c.map((k) => Math.round(k * 255)), v * 3);
+  }
+  for (let j = 0, t = 0; j < N; j++) for (let i = 0; i < N; i++) { const a = j * (N + 1) + i; idx.set([a, a + 1, a + N + 2, a, a + N + 2, a + N + 1], t); t += 6; }
+
+  // mesh.ply: binary, vertex colours, triangles
+  {
+    const head = `ply\nformat binary_little_endian 1.0\ncomment synthetic terrain, Z up, metres\nelement vertex ${V}\nproperty float x\nproperty float y\nproperty float z\nproperty float nx\nproperty float ny\nproperty float nz\nproperty uchar red\nproperty uchar green\nproperty uchar blue\nelement face ${N * N * 2}\nproperty list uchar int vertex_indices\nend_header\n`;
+    const vb = Buffer.alloc(V * 27), fb = Buffer.alloc(N * N * 2 * 13);
+    for (let v = 0; v < V; v++) { for (let k = 0; k < 3; k++) { vb.writeFloatLE(pos[v * 3 + k], v * 27 + k * 4); vb.writeFloatLE(nor[v * 3 + k], v * 27 + 12 + k * 4); vb[v * 27 + 24 + k] = col[v * 3 + k]; } }
+    for (let t = 0; t < N * N * 2; t++) { fb[t * 13] = 3; for (let k = 0; k < 3; k++) fb.writeInt32LE(idx[t * 3 + k], t * 13 + 1 + k * 4); }
+    fs.writeFileSync(path.join(dir, 'mesh.ply'), Buffer.concat([Buffer.from(head, 'ascii'), vb, fb]));
+  }
+
+  // mesh.glb: glTF is Y up, so (x, y, z) becomes (x, z, -y); the PNG rides in the binary chunk
+  {
+    const yup = (a) => { const o = new Float32Array(a.length); for (let v = 0; v < a.length; v += 3) o.set([a[v], a[v + 2], -a[v + 1]], v); return o; };
+    const parts = [yup(pos), yup(nor), uv, idx, png].map((a) => Buffer.from(a.buffer, a.byteOffset, a.byteLength)), views = [];
+    let at = 0;
+    const bin = Buffer.concat(parts.map((b) => { views.push({ buffer: 0, byteOffset: at, byteLength: b.length }); const pad = (4 - (b.length % 4)) % 4; at += b.length + pad; return Buffer.concat([b, Buffer.alloc(pad)]); }));
+    const p3 = yup(pos), min = [Infinity, Infinity, Infinity], max = [-Infinity, -Infinity, -Infinity];
+    for (let v = 0; v < p3.length; v += 3) for (let k = 0; k < 3; k++) { min[k] = Math.min(min[k], p3[v + k]); max[k] = Math.max(max[k], p3[v + k]); }
+    const gltf = {
+      asset: { version: '2.0', generator: '3dtiled tile samples' }, scene: 0, scenes: [{ nodes: [0] }], nodes: [{ mesh: 0, name: 'terrain' }],
+      meshes: [{ primitives: [{ attributes: { POSITION: 0, NORMAL: 1, TEXCOORD_0: 2 }, indices: 3, material: 0 }] }],
+      materials: [{ pbrMetallicRoughness: { baseColorTexture: { index: 0 }, metallicFactor: 0, roughnessFactor: 1 } }],
+      textures: [{ source: 0, sampler: 0 }], samplers: [{ magFilter: 9729, minFilter: 9987 }], images: [{ bufferView: 4, mimeType: 'image/png' }],
+      accessors: [
+        { bufferView: 0, componentType: 5126, count: V, type: 'VEC3', min, max }, { bufferView: 1, componentType: 5126, count: V, type: 'VEC3' },
+        { bufferView: 2, componentType: 5126, count: V, type: 'VEC2' }, { bufferView: 3, componentType: 5123, count: idx.length, type: 'SCALAR' },
+      ],
+      bufferViews: views.map((v, i) => (i < 3 ? { ...v, target: 34962 } : i === 3 ? { ...v, target: 34963 } : v)), buffers: [{ byteLength: bin.length }],
+    };
+    let json = Buffer.from(JSON.stringify(gltf)); json = Buffer.concat([json, Buffer.alloc((4 - (json.length % 4)) % 4, 0x20)]);
+    const head = Buffer.alloc(12), jh = Buffer.alloc(8), bh = Buffer.alloc(8);
+    head.write('glTF', 0); head.writeUInt32LE(2, 4); head.writeUInt32LE(12 + 8 + json.length + 8 + bin.length, 8);
+    jh.writeUInt32LE(json.length, 0); jh.write('JSON', 4); bh.writeUInt32LE(bin.length, 0); bh.write('BIN\0', 4);
+    fs.writeFileSync(path.join(dir, 'mesh.glb'), Buffer.concat([head, jh, json, bh, bin]));
+  }
 }
 
-return ['points.las', 'splats.ply', 'mesh/mesh.obj', 'mesh/mesh.mtl', 'mesh/mesh.png'].map((f) => path.resolve(dir, f));
+return ['points.las', 'splats.ply', 'mesh/mesh.obj', 'mesh/mesh.mtl', 'mesh/mesh.png', 'mesh.glb', 'mesh.ply'].map((f) => path.resolve(dir, f));
 }

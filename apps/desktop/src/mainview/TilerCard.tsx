@@ -4,8 +4,8 @@
  * The dataset above is RAW input here, a file or a folder: a point cloud (LAS, LAZ, E57, PTX, a point PLY), a mesh
  * (OBJ, FBX, glTF, an OSGB folder…) or Gaussian splats (PLY, SPZ, SOG, .splat, .ksplat), not a tiled source. This
  * card picks a third-party tiler for it, shows that tool's own options, runs it in a subprocess with its output and
- * Cancel, and opens what it wrote: a COPC, a Potree folder or a streamed SOG goes to the stream flow; a 3D Tiles
- * tileset is finished already and is previewed as is, served from its folder by the tile-server.
+ * Cancel, and opens what it wrote: a COPC, a Potree folder, a streamed SOG, a RAD, a Nexus file or a .3tz archive goes
+ * to the stream flow; a 3D Tiles tileset folder is finished already and is previewed as is, served by the tile-server.
  *
  * Which tools take the input is the server's answer (`GET /tilers?input=`): it looks at the path, so a folder is
  * matched by what it holds and a PLY by its header (points, a mesh or splats).
@@ -31,7 +31,7 @@ interface Tool {
   id: string; name: string; kind: 'pointcloud' | 'mesh' | 'splat'; summary: string; homepage: string; licence: string;
   inputs: string[]; dir: boolean | 'only'; ply: string | null;
   output: { format: string; label: string };
-  delivery: 'bundled' | 'download' | 'uv' | 'detect'; version: string | null; downloadable: boolean; downloadBytes: number | null;
+  delivery: 'bundled' | 'download' | 'uv' | 'cargo' | 'detect'; version: string | null; downloadable: boolean; downloadBytes: number | null;
   options: ToolOption[];
   /** `missing`: what a download would fetch (the tool, the runtime it needs); `downloadBytes`: their size. */
   found: { status: 'ready' | 'missing'; source: string | null; hint: string | null; path: string | null; missing: string[]; downloadable: boolean; downloadBytes: number };
@@ -47,7 +47,7 @@ const TILER_CLI = 'packages/tilers/cli.js';
 const extOf = (src: string) => (/\.copc\.laz$/i.test(src) ? 'copc.laz' : (src.split(/[\\/]/).pop() ?? '').split('.').pop()?.toLowerCase() ?? '');
 const nameOf = (p: string) => p.replace(/[\\/]+$/, '').split(/[\\/]/).pop() ?? p;
 const quote = (a: string) => (/[\s"]/.test(a) ? `"${a}"` : a);
-const SOURCES: Record<string, string> = { bundled: 'ships with this app', downloaded: 'downloaded by this app', path: 'found on PATH', qgis: 'found in a QGIS install', pixi: 'found in pixi', env: 'set by an environment variable' };
+const SOURCES: Record<string, string> = { bundled: 'ships with this app', downloaded: 'downloaded by this app', built: 'built from source by this app', path: 'found on PATH', qgis: 'found in a QGIS install', pixi: 'found in pixi', env: 'set by an environment variable' };
 
 /** The arguments of a run: only the options that differ from the tool's defaults, so the command stays short. */
 export function tilerArgs(tool: Tool, input: string, outDir: string, values: Record<string, string | boolean>, install: boolean): string[] {
@@ -177,8 +177,9 @@ export function TilerCard({ app, onStream }: { app: AppModel; onStream: () => vo
         const line = st.tail.find((l) => l.startsWith('TILER_SAMPLES '));
         if (st.state !== 'done' || !line) return say(`Could not write the samples: ${st.tail[st.tail.length - 1] ?? ''}`, 'err');
         const { files } = JSON.parse(line.slice('TILER_SAMPLES '.length)) as { files: string[] };
+        lastSrc.current = files[0]!;                    // this change of input is ours: keep the message below
         patchForm({ src: files[0]! });
-        return say(`Samples written to ${dir}: points.las (set as the dataset; its CRS is EPSG:32631), splats.ply and mesh/mesh.obj.`, 'ok');
+        return say(`Samples written to ${dir}: points.las (set as the dataset; its CRS is EPSG:32631), splats.ply, and the same terrain as mesh/mesh.obj, mesh.glb and mesh.ply.`, 'ok');
       }
     } catch (e) { say(`Could not write the samples: ${e instanceof Error ? e.message : e}`, 'err'); }
   }
@@ -225,7 +226,8 @@ export function TilerCard({ app, onStream }: { app: AppModel; onStream: () => vo
   function streamIt() {
     if (!result) return;
     // A file on disk is read by the converter-backed route (cache=full: converted once to the local cache).
-    patchForm({ src: result.output, format: result.format, cache: 'full' });
+    // the formats the dataset form lists by name; the others (a .3tz archive, a Nexus file) are found by their extension
+    patchForm({ src: result.output, format: ['copc', 'potree', 'sog', 'rad'].includes(result.format) ? result.format : '', cache: 'full' });
     onStream();
     app.say(`Now streaming ${result.output}. The first load converts it to the local cache.`, 'ok');
   }
@@ -305,6 +307,8 @@ export function TilerCard({ app, onStream }: { app: AppModel; onStream: () => vo
                 : willDownload
                   ? <><strong>Not installed.</strong> Running it first downloads {tool.found.missing.join(' and ')} ({tool.delivery === 'uv' ? 'about ' : ''}{(tool.found.downloadBytes / 1e6).toFixed(0)} MB in all){tool.delivery === 'uv'
                       ? <>: uv installs that pinned version from PyPI into a private environment in this app's tools folder, nothing system-wide.</>
+                      : tool.delivery === 'cargo'
+                      ? <>: its authors publish source only, so the archive is checked against a pinned SHA-256 and compiled once with this machine's Rust toolchain (a few minutes). The program is kept in this app's tools folder.</>
                       : <> from {tool.found.missing.length > 1 ? 'their' : 'its'} authors' release page, checks {tool.found.missing.length > 1 ? 'each' : 'it'} against a pinned SHA-256 and keeps {tool.found.missing.length > 1 ? 'them' : 'it'} in this app's tools folder.</>}</>
                   : <><strong>Not on this machine:</strong> {tool.found.hint}.</>}
             </span>

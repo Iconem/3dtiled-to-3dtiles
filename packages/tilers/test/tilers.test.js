@@ -8,7 +8,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import zlib from 'node:zlib';
-import { TOOLS, RUNTIMES, toolById, listTools, toolsFor, describeInput, sniffPly, resolveOptions, planRun, unzip, installTool, detectTool, detectRuntime, commandLine } from '../index.js';
+import { TOOLS, RUNTIMES, toolById, listTools, toolsFor, describeInput, sniffPly, resolveOptions, planRun, unzip, installTool, detectTool, detectRuntime, commandLine, stepLine } from '../index.js';
 
 const found = (exe = ['tool.exe']) => ({ status: 'ready', source: 'path', exe });
 const tmp = () => fs.mkdtempSync(path.join(os.tmpdir(), 'tilers-test-'));
@@ -38,8 +38,8 @@ test('the manifest: every tool says what it takes, what it writes, how it is del
     assert.ok(t.name && t.summary && t.licence && /^https:\/\//.test(t.homepage), t.id);
     assert.ok(t.inputs.length && t.output.format && t.output.label, t.id);
     assert.ok(['pointcloud', 'mesh', 'splat'].includes(t.kind), t.id);
-    assert.ok(['copc', 'potree', 'sog', '3dtiles'].includes(t.output.format), `${t.id}: an output this repo opens`);
-    assert.ok(['bundled', 'download', 'uv', 'detect'].includes(t.delivery));
+    assert.ok(['copc', 'potree', 'sog', 'rad', 'nexus', 'package', '3dtiles'].includes(t.output.format), `${t.id}: an output this repo opens`);
+    assert.ok(['bundled', 'download', 'uv', 'cargo', 'detect'].includes(t.delivery));
     assert.equal(t.inputs.includes('ply'), !!t.ply, `${t.id}: a tool that takes PLY says which kind`);
     for (const o of t.options) {
       assert.ok(o.key && o.label && o.help && ['int', 'number', 'bool', 'enum', 'text'].includes(o.type), `${t.id}.${o.key}`);
@@ -56,14 +56,21 @@ test('the manifest: every tool says what it takes, what it writes, how it is del
   }
   for (const t of TOOLS) if (t.provide.needs) assert.ok(RUNTIMES[t.provide.needs.runtime] && t.provide.command, `${t.id}: its runtime is declared`);
   for (const t of TOOLS) if (t.provide.uv) assert.match(t.provide.uv.spec, /==\d/, `${t.id}: a pinned version`);
+  for (const t of TOOLS) if (t.provide.cargo) {
+    assert.match(t.provide.cargo.url, /^https:\/\/github\.com\/[^/]+\/[^/]+\/archive\/refs\/tags\//, `${t.id}: the source of a tagged version`);
+    assert.match(t.provide.cargo.sha256, /^[0-9a-f]{64}$/); assert.ok(t.provide.cargo.manifest && t.provide.cargo.bin);
+  }
 });
 
 test('which tools take a file or a folder', () => {
-  assert.deepEqual(toolsFor('C:\\scans\\site.LAS'), ['pdal', 'untwine', 'potreeconverter', 'potreeconverter1', 'gocesiumtiler', 'point-tiler', 'py3dtiles', 'mago-3d-tiler']);
+  assert.deepEqual(toolsFor('C:\\scans\\site.LAS'), ['pdal', 'untwine', 'potreeconverter', 'potreeconverter1', 'gocesiumtiler', 'point-tiler', 'py3dtiles', 'rusty-tiles-points', 'mago-3d-tiler']);
   assert.deepEqual(toolsFor('/data/scan.e57'), ['pdal', 'gocesiumtiler']);
   assert.deepEqual(toolsFor('already.copc.laz'), [], 'a COPC is tiled already: it is streamed, not tiled again');
-  assert.deepEqual(toolsFor('model.obj'), ['obj2tiles', 'mago-3d-tiler']);
-  assert.deepEqual(toolsFor('scene.spz'), ['splat-transform']);
+  assert.deepEqual(toolsFor('model.obj'), ['obj2tiles', 'mago-3d-tiler', 'nexus']);
+  assert.deepEqual(toolsFor('model.glb'), ['mago-3d-tiler', 'rusty-tiles']);
+  assert.deepEqual(toolsFor('part.stl'), ['mago-3d-tiler', 'nexus']);
+  assert.deepEqual(toolsFor('building.ifc'), ['mago-3d-tiler']);
+  assert.deepEqual(toolsFor('scene.spz'), ['splat-transform', 'spark-build-lod']);
   assert.deepEqual(toolsFor('notes.docx'), []);
 
   // A PLY is points, a mesh or splats: its header says, and only the tools for that kind are offered.
@@ -73,16 +80,16 @@ test('which tools take a file or a folder', () => {
   const mesh = ply('mesh.ply', 'element vertex 10\nproperty float x\nelement face 20\nproperty list uchar int vertex_indices');
   assert.deepEqual([sniffPly(points), sniffPly(splats), sniffPly(mesh)], ['points', 'splats', 'mesh']);
   assert.deepEqual(toolsFor(points), ['potreeconverter1', 'gocesiumtiler', 'py3dtiles']);
-  assert.deepEqual(toolsFor(splats), ['splat-transform', 'gocesiumtiler-splats']);
-  assert.deepEqual(toolsFor(mesh), [], 'no tool here tiles a PLY mesh');
-  assert.equal(toolsFor('not-on-disk.ply').length, 5, 'a PLY that cannot be read is offered every PLY tool');
+  assert.deepEqual(toolsFor(splats), ['splat-transform', 'gocesiumtiler-splats', '3dgs-ply-3dtiles-converter', 'spark-build-lod']);
+  assert.deepEqual(toolsFor(mesh), ['mago-3d-tiler', 'nexus'], 'a PLY mesh goes to the mesh tools');
+  assert.equal(toolsFor('not-on-disk.ply').length, 9, 'a PLY that cannot be read is offered every PLY tool');
 
   // A folder is matched by what it holds.
   const scans = path.join(dir, 'scans'), osgb = path.join(dir, 'oblique');
   fs.mkdirSync(scans); fs.writeFileSync(path.join(scans, 'a.las'), ''); fs.writeFileSync(path.join(scans, 'b.laz'), '');
   fs.mkdirSync(path.join(osgb, 'Data', 'Tile_1'), { recursive: true }); fs.writeFileSync(path.join(osgb, 'metadata.xml'), ''); fs.writeFileSync(path.join(osgb, 'Data', 'Tile_1', 'Tile_1.osgb'), '');
   assert.deepEqual(describeInput(scans).exts, ['las', 'laz']);
-  assert.deepEqual(toolsFor(scans), ['untwine', 'potreeconverter', 'potreeconverter1', 'gocesiumtiler', 'mago-3d-tiler'], 'the tools that take a folder');
+  assert.deepEqual(toolsFor(scans), ['untwine', 'potreeconverter', 'potreeconverter1', 'gocesiumtiler', 'rusty-tiles-points', 'mago-3d-tiler'], 'the tools that take a folder');
   assert.deepEqual(toolsFor(osgb), ['fanvanzh-3dtiles']);
   assert.deepEqual(toolsFor(path.join(osgb, 'Data', 'Tile_1', 'Tile_1.osgb')), [], 'an OSGB tile alone is not an input: the folder is');
   assert.throws(() => planRun('pdal', scans, path.join(dir, 'out'), {}, found()), /takes one file .*not a folder/);
@@ -161,6 +168,30 @@ test('commands: each tool is called the way it documents', () => {
   const f = planRun('fanvanzh-3dtiles', osgb, out, { lon: 108.96, lat: 34.22, maxLevel: 18 }, exe);
   assert.deepEqual(f.steps[0].cmd, ['t.exe', '-f', 'osgb', '-i', osgb, '-o', out, '-c', '{"x":108.96,"y":34.22,"max_lvl":18}']);
 
+  // tools that write one file to stream: a .3tz archive, a Nexus file, a RAD
+  const glb = path.join(dir, 'model.glb');
+  const rm = planRun('rusty-tiles', glb, out, { lon: 2.29, lat: 48.86 }, exe);
+  assert.deepEqual(rm.steps[0].cmd, ['t.exe', 'mesh', '--input', glb, '--output', path.join(out, 'model.3tz'), '--profile', 'balanced', '--anchor', '2.29', '48.86', '0']);
+  assert.deepEqual([rm.output.format, rm.output.path], ['package', path.join(out, 'model.3tz')]);
+  const rp = planRun('rusty-tiles-points', las, out, { sourceCrs: 'EPSG:32631' }, exe);
+  assert.deepEqual(rp.steps[0].cmd, ['t.exe', 'point-cloud', '--input', las, '--output', path.join(out, 'scan one.3tz'), '--sourceCrs', 'EPSG:32631', '--maxPoints', '8192', '--heightOffset', '0']);
+  assert.throws(() => planRun('rusty-tiles-points', las, out, {}, exe), /sourceCrs: .* needs it/);
+  const nx = planRun('nexus', obj, out, { compress: true, colors: true }, found(['C:\\tools\\nxsbuild.exe']));
+  assert.deepEqual(nx.steps.map((x) => x.cmd), [
+    ['C:\\tools\\nxsbuild.exe', obj, '-o', path.join(out, '.tiler-tmp', 'model.nxs'), '-f', '32768', '-t', '4096', '-s', '0.5', '-r', '2000', '-C'],
+    [path.join('C:\\tools', 'nxscompress.exe'), path.join(out, '.tiler-tmp', 'model.nxs'), '-o', path.join(out, 'model.nxz')],
+  ]);
+  assert.deepEqual([nx.output.format, path.basename(nx.output.path)], ['nexus', 'model.nxz']);
+  assert.equal(path.basename(planRun('nexus', obj, out, {}, exe).output.path), 'model.nxs');
+  const wl = planRun('3dgs-ply-3dtiles-converter', ply, out, { sh: 2, lon: 2.29, lat: 48.86, alt: 60 }, found(['node', 'c.js']));
+  assert.deepEqual(wl.steps[0].cmd, ['node', 'c.js', '--no-open-inspector', '--tmp-dir', path.join(out, '.tiler-tmp'), '--sh', '2', '--coordinate', '[48.86,2.29,60]', ply, out]);
+  // a tool that writes beside its input is given a copy, and its file is moved out: steps this package does itself
+  const sp = planRun('spark-build-lod', ply, out, { method: 'quick', maxSh: 1 }, exe);
+  const copy = path.join(out, '.tiler-tmp', 'scene.ply');
+  assert.deepEqual(sp.steps.map((x) => x.cmd ?? x.copy ?? x.move), [[ply, copy], ['t.exe', '--quick', '--max-sh=1', '--gsplat', copy], [path.join(out, '.tiler-tmp', 'scene-lod.rad'), path.join(out, 'scene-lod.rad')]]);
+  assert.deepEqual([sp.output.format, stepLine(sp.steps[0]).startsWith('copy '), stepLine(sp.steps[2]).startsWith('move ')], ['rad', true, true]);
+  assert.ok(planRun('mago-3d-tiler', path.join(dir, 'm.stl'), out, {}, exe).steps[0].cmd.join(' ').includes('--inputType stl'));
+
   assert.throws(() => planRun('potreeconverter', ply, out, {}, found()), /takes \.las, \.laz, not \.ply/);
   assert.throws(() => planRun('pdal', las, out, {}, { status: 'missing', hint: 'not found: install QGIS' }), /not available: not found: install QGIS/);
   assert.throws(() => planRun('nope', las, out), /unknown tool/);
@@ -220,6 +251,27 @@ test('an asset that is the program itself (an .exe, a .jar) is put in place, has
   assert.deepEqual(fs.readdirSync(path.join(dir, 'point-tiler')), [tool.provide.download.version], 'no download file left beside it');
   // two tools that are one binary share the install
   assert.equal(toolById('gocesiumtiler').provide, toolById('gocesiumtiler-splats').provide);
+});
+
+test('an archive whose entries are named with backslashes unpacks to the same paths', async (t) => {
+  const dir = tmp(); process.env.TILED_TOOLS_DIR = dir;
+  const tool = toolById('nexus'), key = `${process.platform}-${process.arch}`, real = tool.provide.download[key];
+  if (!real) return;
+  const archive = zip({ 'nexus_portable\\nxsbuild.exe': 'MZ build', 'nexus_portable\\nxscompress.exe': 'MZ compress', 'nexus_portable\\plugins\\a.dll': 'dll' });
+  tool.provide.download[key] = { ...real, sha256: createHash('sha256').update(archive).digest('hex'), bytes: archive.length };
+  t.after(() => { tool.provide.download[key] = real; });
+  const r = await installTool('nexus', { fetch: async () => new Response(archive) });
+  assert.equal(fs.readFileSync(r.exe, 'utf8'), 'MZ build');
+  assert.ok(fs.existsSync(path.join(r.dir, 'nxscompress.exe')) && fs.existsSync(path.join(r.dir, 'plugins', 'a.dll')));
+});
+
+test('a tool published as source only is offered when the machine can build it, and says what it needs otherwise', async () => {
+  const dir = tmp(); process.env.TILED_TOOLS_DIR = dir;
+  const d = detectTool('spark-build-lod');
+  assert.equal(d.status, 'missing');
+  if (d.downloadable) assert.match(d.hint, /built here with cargo/);
+  else assert.match(d.hint, /needs the Rust toolchain to build: install it from https:\/\/rustup\.rs/);
+  assert.equal(listTools().find((x) => x.id === 'spark-build-lod').delivery, 'cargo');
 });
 
 test('a matching download is unpacked where detection finds it, without its wrapping folder', async (t) => {

@@ -64,6 +64,11 @@ export interface Asset {
   type?: AssetType;
   /** Extra query appended to the stream URL (`&up=y`: the server's knobs a preset needs), stream mode only. */
   query?: string;
+  /**
+   * Splats: the spherical-harmonics degree the source holds (1 to 3), as its first tile came back when asked with
+   * `sh=3` (measured 2026-11-16). Absent: base colour only, so the harmonics pill changes nothing on it.
+   */
+  sh?: number;
 }
 
 export interface FormatMeta {
@@ -149,20 +154,20 @@ export const FORMATS: FormatMeta[] = [
   { fmt: 'sog', icon: '⬢', label: 'SOG', type: 'splat', octree: false, stream: true, assets: [
     // Real sources: PlayCanvas's own SOG example assets (code.playcanvas.com) — see README's SOG
     // section (`fetch-sog.mjs` originally mirrored these here; now streamed straight from PlayCanvas).
-    { id: 'skatepark', label: 'Skatepark', src: 'https://code.playcanvas.com/examples_data/example_skatepark_02/lod-meta.json', out: 'output/sog/skatepark-3dtiles-from-sog' },
+    { id: 'skatepark', sh: 3, label: 'Skatepark', src: 'https://code.playcanvas.com/examples_data/example_skatepark_02/lod-meta.json', out: 'output/sog/skatepark-3dtiles-from-sog' },
     { id: 'roman', label: 'Roman Parish', src: 'https://code.playcanvas.com/examples_data/example_roman_parish_02/lod-meta.json', out: 'output/sog/roman-parish-3dtiles-from-sog' },
-    { id: 'arrival-jaffa', label: 'Arrival jaffa3 (.lod) ⬀', src: 'https://ugc.arrival.space/71585765/14ae36863868a5f74fbc29389e156bc5f18e0d7a612af78c492cd84cfa4a9c44_jaffa3_1777965648677_LOD/lod-meta.json' },
+    { id: 'arrival-jaffa', sh: 3, label: 'Arrival jaffa3 (.lod) ⬀', src: 'https://ugc.arrival.space/71585765/14ae36863868a5f74fbc29389e156bc5f18e0d7a612af78c492cd84cfa4a9c44_jaffa3_1777965648677_LOD/lod-meta.json' },
     // Remote, stream-only community captures (splat-transform-authored streamed-SOG, CloudFront-hosted).
-    { id: 'grace-cathedral-ext', label: 'Grace Cathedral SF ext (Vincent Woo) ⬀', src: 'https://d28zzqy0iyovbz.cloudfront.net/b8b1fd14/v1/lod-meta.json' },
-    { id: 'cathedral-interior', label: 'Cathedral Interior ⬀', src: 'https://d28zzqy0iyovbz.cloudfront.net/02d5f4eb/v3/lod-meta.json' },
-    { id: 'vysehrad-prague', label: 'Vyšehrad Basilica & parks, Prague (D. Dworschak, 83M) ⬀', src: 'https://d28zzqy0iyovbz.cloudfront.net/1b7afbf6/v1/lod-meta.json' },
+    { id: 'grace-cathedral-ext', sh: 3, label: 'Grace Cathedral SF ext (Vincent Woo) ⬀', src: 'https://d28zzqy0iyovbz.cloudfront.net/b8b1fd14/v1/lod-meta.json' },
+    { id: 'cathedral-interior', sh: 3, label: 'Cathedral Interior ⬀', src: 'https://d28zzqy0iyovbz.cloudfront.net/02d5f4eb/v3/lod-meta.json' },
+    { id: 'vysehrad-prague', sh: 3, label: 'Vyšehrad Basilica & parks, Prague (D. Dworschak, 83M) ⬀', src: 'https://d28zzqy0iyovbz.cloudfront.net/1b7afbf6/v1/lod-meta.json' },
     // A bundle's up axis is read off the data and then confirmed by eye (seen 2026-11-13: Lublin Y-up; Jastrzębia
     // Góra and Itaka Y-down, i.e. upside down with &up=y). Dittrichova: Y-down from the data, to be confirmed by eye.
     { id: 'jastrzebia-gora-sog', label: 'Jastrzębia Góra 4×2 km (A. Shramko, CC BY, 106M) ⬀', src: 'https://d28zzqy0iyovbz.cloudfront.net/221ee167/v1/lod-meta.json', query: '&up=-y' },
     // The scene of PlayCanvas' slide at the MSF splat-compression town hall (2026-11-03): 259 M gaussians at LOD 0, 518 M over 13 levels.
     { id: 'lublin-sog', label: 'Lublin, Poland (A. Shramko, CC BY, 259M) ⬀', src: 'https://d28zzqy0iyovbz.cloudfront.net/2f1ddf5f/v1/lod-meta.json', query: '&up=y' },
     { id: 'itaka-stadium-sog', label: 'Itaka Stadium, Opole (A. Shramko, CC BY, 212M) ⬀', src: 'https://d28zzqy0iyovbz.cloudfront.net/7b43aca7/v1/lod-meta.json', query: '&up=-y' },
-    { id: 'dittrichova-hrobka', label: 'Dittrichova hrobka, Krásná Lípa (D. Dworschak, 54M) ⬀', src: 'https://d28zzqy0iyovbz.cloudfront.net/6c09cd54/v1/lod-meta.json', query: '&up=-y' },
+    { id: 'dittrichova-hrobka', sh: 3, label: 'Dittrichova hrobka, Krásná Lípa (D. Dworschak, 54M) ⬀', src: 'https://d28zzqy0iyovbz.cloudfront.net/6c09cd54/v1/lod-meta.json', query: '&up=-y' },
   ] },
   { fmt: 'lcc', icon: '◆', label: 'LCC', type: 'splat', octree: false, stream: true, assets: [
     // Real public .lcc downloads (found via XGRIDS' own sample-data page,
@@ -192,7 +197,7 @@ export const FORMATS: FormatMeta[] = [
     // XGRIDS LCC2: a *.lcc2 JSON manifest (a tree of nodes with boxes) over chunk files, bundled .sog, .spz or .ply.
     // Tunis is the scene PlayCanvas hosts for its `streamed-lcc2` engine example: 84 M splats, 8 LODs, 140 chunks,
     // 1.4 GB, streamed one chunk read per group of tiles (lcc2-live.js). Local frame, no EPSG.
-    { id: 'tunis-lcc2', label: 'Tunis (XGRIDS PortalCam, 84M, 1.4 GB) ⬀', src: 'https://code.playcanvas.com/examples_data/tunis_01/03-19-195651.lcc2' },
+    { id: 'tunis-lcc2', sh: 3, label: 'Tunis (XGRIDS PortalCam, 84M, 1.4 GB) ⬀', src: 'https://code.playcanvas.com/examples_data/tunis_01/03-19-195651.lcc2' },
     // The LCC2 samples of Spark's radix viewer, on its GCS bucket: XGRIDS' own two LCC2 scenes from the
     // 3dgs-unreal-example content pack (byte for byte the Content.zip ones, .sog chunks), and the LCC v1 samples
     // above converted by radix's to-lcc2 tool to one chunk type each, .spz, .ply or .sog (the docs page says how
@@ -201,13 +206,13 @@ export const FORMATS: FormatMeta[] = [
     { id: 'radix-statues-lcc2', label: 'Unreal statues (XGRIDS, 1.5M, 7 LODs, .sog, 19 MB) ⬀', src: 'https://storage.googleapis.com/forge-dev-public/asundqui/radix/261012/lcc2/lcc2-1/LCC2.lcc2' },
     { id: 'radix-showroom2-spz', label: 'Showroom (XGRIDS PortalCam, radix, 11.6M, .spz, 182 MB) ⬀', src: 'https://storage.googleapis.com/forge-dev-public/asundqui/radix/261012/lcc2/showroom2-spz/showroom2-spz.lcc2' },
     { id: 'radix-unreal-ply', label: 'Unreal example scene (XGRIDS, radix, 3.4M, .ply, 199 MB) ⬀', src: 'https://storage.googleapis.com/forge-dev-public/asundqui/radix/261012/lcc2/unreal-ply/unreal-ply.lcc2' },
-    { id: 'radix-sutro-spz', label: 'Sutro Tower (radix, 3.8M, .spz, 119 MB) ⬀', src: 'https://storage.googleapis.com/forge-dev-public/asundqui/radix/261012/lcc2/sutro-spz/sutro-spz.lcc2' },
-    { id: 'radix-bicycle-sog', label: 'Bicycle, Mip-NeRF 360 (radix, 11.9M, .sog, 250 MB) ⬀', src: 'https://storage.googleapis.com/forge-dev-public/asundqui/radix/261012/lcc2/bicycle-sog/bicycle-sog.lcc2' },
+    { id: 'radix-sutro-spz', sh: 3, label: 'Sutro Tower (radix, 3.8M, .spz, 119 MB) ⬀', src: 'https://storage.googleapis.com/forge-dev-public/asundqui/radix/261012/lcc2/sutro-spz/sutro-spz.lcc2' },
+    { id: 'radix-bicycle-sog', sh: 3, label: 'Bicycle, Mip-NeRF 360 (radix, 11.9M, .sog, 250 MB) ⬀', src: 'https://storage.googleapis.com/forge-dev-public/asundqui/radix/261012/lcc2/bicycle-sog/bicycle-sog.lcc2' },
   ] },
   { fmt: 'rad', icon: '✦', label: 'RAD', type: 'splat', octree: false, stream: true, assets: [
     // Real sources: the exact files this repo's own README setup instructions curl down as
     // coit.rad/tastier500k.rad (wlt-ai-cdn.art — William Liu's own CDN, the RAD/BhattLod format author).
-    { id: 'coit', label: 'Coit', src: 'https://wlt-ai-cdn.art/spark-2.0/rad/coit-40m-sh1-lod.rad', out: 'output/rad/coit-3dtiles-from-rad' },
+    { id: 'coit', sh: 1, label: 'Coit', src: 'https://wlt-ai-cdn.art/spark-2.0/rad/coit-40m-sh1-lod.rad', out: 'output/rad/coit-3dtiles-from-rad' },
     { id: 'poland-rad', label: 'Poland village (Teleportour, 106M, 2.75 GB) ⬀', src: 'https://wlt-ai-cdn.art/spark-2.0/rad/poland-lod.rad' },
     { id: 'cave-rad', label: 'Cave (World Labs, 73M, 1.46 GB) ⬀', src: 'https://wlt-ai-cdn.art/spark-2.0/rad/cave-lod.rad' },
     { id: 'tastier', label: 'Tastier', src: 'https://wlt-ai-cdn.art/tastier_rad_500/0524c1a1-abf2-4969-ae40-9981ee836536_500k-lod.rad', out: 'output/rad/tastier500k-3dtiles-from-rad' },

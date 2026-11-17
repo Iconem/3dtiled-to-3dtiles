@@ -12,7 +12,7 @@ tools — studied here for format handling, tree/geometric-error strategy, and p
 
 ## Run from the desktop app
 
-Twelve of the tools below can be run from the desktop app's [*Tile raw input*](/docs/guide/desktop-app#tile-raw-input)
+Seventeen of the tools below can be run from the desktop app's [*Tile raw input*](/docs/guide/desktop-app#tile-raw-input)
 flow, or from `3dtiled tile`: the app finds the tool or fetches its official release, shows its options and opens
 what it wrote.
 
@@ -20,12 +20,34 @@ what it wrote.
 |---|---|
 | Point clouds → COPC | PDAL `writers.copc`, untwine |
 | Point clouds → Potree | PotreeConverter 2.1.5, PotreeConverter 1.7 |
-| Point clouds → 3D Tiles | gocesiumtiler 3.2, point-tiler 0.0.12, py3dtiles 12.1, mago 3DTiler 1.17 |
-| Meshes → 3D Tiles | Obj2Tiles 1.10, mago 3DTiler 1.17, fanvanzh/3dtiles 0.4 (OSGB) |
-| Splats | PlayCanvas splat-transform (streamed SOG), gocesiumtiler `splats` (3D Tiles with SPZ) |
+| Point clouds → 3D Tiles | gocesiumtiler 3.2, point-tiler 0.0.12, py3dtiles 12.1, mago 3DTiler 1.17, rusty-tiles 0.4 (`.3tz`) |
+| Meshes → 3D Tiles | Obj2Tiles 1.10, mago 3DTiler 1.17, fanvanzh/3dtiles 0.4 (OSGB), rusty-tiles 0.4 (glTF, `.3tz`) |
+| Meshes → Nexus | Nexus `nxsbuild` 2025.05 |
+| Splats | PlayCanvas splat-transform (streamed SOG), gocesiumtiler `splats` and 3DGS-PLY-3DTiles-Converter 0.6.5 (3D Tiles with SPZ), Spark `build-lod` 2.4.0 (RAD, built from source) |
 
-Not run by the app: potree23dtiles, ept-tools and schwarzwald (no released binary), Spark `build-lod` (a Rust
-build), the Kitware VTK writer, and the commercial suites.
+Not run by the app: potree23dtiles, ept-tools and schwarzwald (no released binary), entwine (it writes EPT, which
+this repo does not read), the Kitware VTK writer, and the commercial suites.
+
+### Other open-source tilers, by stars
+
+A search of GitHub on 2026-11-17 for tilers of raw point clouds, meshes or splats, beyond the ones above. Stars
+are GitHub's that day.
+
+| Tool | Stars | What it does | Why the app does not run it |
+|---|---|---|---|
+| [PrincessGod/objTo3d-tiles](https://github.com/PrincessGod/objTo3d-tiles) | 841 | OBJ → b3dm, i3dm or a batched tileset (Node) | no levels of detail: one tile per model; last commit 2023 |
+| [visgl/loaders.gl](https://github.com/visgl/loaders.gl) `tile-converter` | 860 | I3S ↔ 3D Tiles | converts between tiled formats, not raw input; this repo streams I3S itself |
+| [connormanning/entwine](https://github.com/connormanning/entwine) | 535 | LAS/LAZ → EPT octree | EPT is not read here; untwine (same authors) writes COPC |
+| [Geodan/pg2b3dm](https://github.com/Geodan/pg2b3dm) | 498 | PostGIS geometries → 3D Tiles | its input is a database, not a file |
+| [Oslandia/py3dtilers](https://github.com/Oslandia/py3dtilers) | 246 | OBJ, CityGML databases, GeoJSON, IFC → 3D Tiles (Python) | candidate: installable with uv like py3dtiles; mago 3DTiler covers its file inputs |
+| [xuzhusheng/gltf-to-3d-tiles](https://github.com/xuzhusheng/gltf-to-3d-tiles) | 194 | glTF → b3dm or a tileset (Python) | candidate; mago 3DTiler and rusty-tiles take glTF |
+| [LAStools](https://github.com/LAStools/LAStools) `lascopcindex` | 1 077 | LAS/LAZ → COPC | `lascopcindex` is among LAStools' closed, licensed tools, not its open-source part |
+| [graphdeco-inria/hierarchical-3d-gaussians](https://github.com/graphdeco-inria/hierarchical-3d-gaussians), [city-super/Octree-GS](https://github.com/city-super/Octree-GS) | 1 481, 865 | splats with levels of detail | research training pipelines: the hierarchy is trained from the photos, not built from a finished PLY, and has its own viewer |
+| [francescofugazzi/3dgsconverter](https://github.com/francescofugazzi/3dgsconverter) | 607 | converts and cleans splat PLYs | no tiling |
+
+The largest projects by stars in this field are viewers and editors (CesiumJS, 3DTilesRendererJS, SuperSplat,
+Spark, CloudCompare), not tilers; among tilers, fanvanzh/3dtiles (2 326), splat-transform (1 441), PDAL (1 434)
+and PotreeConverter (824) lead, and the app runs all four.
 
 ## Point-cloud tilers
 

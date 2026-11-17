@@ -3,12 +3,13 @@
   "version": "0.1.0",
   "private": true,
   "type": "module",
-  "description": "One-stop tiler: finds, fetches and runs third-party tilers (PDAL, untwine, PotreeConverter, gocesiumtiler, py3dtiles, Obj2Tiles, mago 3DTiler, splat-transform…) on raw input, for output this repo opens",
+  "description": "One-stop tiler: finds, fetches and runs third-party tilers (PDAL, untwine, PotreeConverter, gocesiumtiler, py3dtiles, Obj2Tiles, mago 3DTiler, Nexus, rusty-tiles, splat-transform, Spark build-lod…) on raw input, for output this repo opens",
   "main": "index.js",
   "bin": {
     "3dtiled-tile": "cli.js"
   },
   "dependencies": {
-    "@playcanvas/splat-transform": "^3.11.1"
+    "@playcanvas/splat-transform": "^3.11.1",
+    "3dgs-ply-3dtiles-converter": "0.6.5"
   }
 }
