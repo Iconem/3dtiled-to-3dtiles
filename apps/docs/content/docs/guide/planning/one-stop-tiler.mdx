@@ -58,6 +58,12 @@ build itself was also run with an environment holding only the Windows folders o
 `cargo` that fails (a Rust install without the C++ build tools), the package falls back to the fetched toolchain.
 winget was not used: it installs rustup system-wide, and the default toolchain it brings still needs Visual Studio.
 
+**In the built app** (a local build, 2026.11.17): the PostGIS address typed in the dataset field (the form says
+*a PostgreSQL database*, pg2b3dm is offered, its tileset opens in the preview), the Shapefile, the GeoJSON, a text
+cloud through PDAL with the *Columns* option, an `.xyz` through PotreeConverter 1.7, a `.splat` through
+splat-transform and a compressed PLY through `build-lod` all ran from the form. The Rust toolchain was fetched
+through the command line only, not from the form.
+
 **Weighed and not added** (the [table of other tilers](/docs/guide/existing-tilers#other-open-source-tilers-by-stars)
 has each one's reason): py3dtilers (py3dtiles is the maintained one, and is in), gltf-to-3d-tiles, ept-tools,
 schwarzwald, potree23dtiles, the terrain builders. `pdal_wrench build_vpc` is the one candidate left.
