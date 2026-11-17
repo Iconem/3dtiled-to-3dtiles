@@ -2,12 +2,12 @@
  * Launcher view — builds a tileset URL, exercises it against the locally-spawned tile-server, and
  * keeps a small library of datasets you care about.
  *
- * Three tabs, one job each:
- *   Build    — a dataset, then two flows: live-stream (a paste-ready URL) or export to disk. Everything
- *              else is folded under Advanced.
- *   Library  — bookmarks, with a cached structural check (tiles/depth/leaves from /stats), and a
- *              history of what was served or exported.
- *   Samples  — a real dataset for every format the middleware reads, one click into Build.
+ * Four tabs, one job each:
+ *   Stream live — a tiled dataset as a paste-ready URL, converted on demand.
+ *   Export      — the same dataset (one card, shown above both tabs) written to a folder.
+ *   Tile raw input — a third-party tiler run on input that is not tiled yet; it has its own input field.
+ *   Library     — the samples (folded), bookmarks with a cached structural check (tiles/depth/leaves from
+ *                 /stats), and a history of what was served or exported.
  *
  * This file is the shell: header, tabs, footer, the preview overlay, and the state the tabs share
  * (the dataset form, the library, the status line). The tabs are in their own files.
@@ -16,13 +16,13 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { Button } from '@/components/ui/button';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { cn } from '@/lib/utils';
-import { BuildTab } from './BuildTab';
+import { ExportCard } from './ExportCard';
 import { LINKS } from './catalog';
 import { RELEASE_URL, setServerWorkers, base, buildLabel, docsUrl, fitWindowForPreview, fitWindowToContent, openExternal, pickerAvailable, pickerRpc, resetFit, staticPort, tilePort, viewerUrl } from './host';
 import { LibraryTab } from './LibraryTab';
 import { TilerCard } from './TilerCard';
 import { loadLibrary, noteServed, parseLibrary, saveLocal, serialize, type DatasetOptions, type Library } from './library';
-import { SamplesTab } from './SamplesTab';
+import { DatasetCard, StreamTab } from './StreamTab';
 import { THEMES, nextTheme, useTheme, type Theme } from './theme';
 import { buildUrlFrom, EMPTY_FORM, nameFor, previewUrl, typeOfFormat, viewerLink } from './urls';
 import type { Kind, Message } from './components/bits';
@@ -75,16 +75,16 @@ interface Overlay {
 }
 
 const TAB_TITLES = {
-  build: 'A tiled dataset (COPC, Potree, SOG, RAD, LCC, I3S…): stream it as 3D Tiles, or export it to a folder',
+  stream: 'A tiled dataset (COPC, Potree, SOG, RAD, LCC, I3S…) as a 3D Tiles URL, converted on demand while this app runs: nothing is written to disk',
+  export: 'The same dataset written to a folder as 3D Tiles: crawl the stream, or run the offline converter',
   tile: 'A raw point cloud, mesh or splat file that is not tiled yet (or a PostGIS table): run a third-party tiler on it',
-  library: 'Bookmarks and exports',
-  samples: 'Public datasets to try',
+  library: 'Samples to try, bookmarks, and what you served or exported',
 } as const;
+const TAB_LABELS = { stream: 'Stream live', export: 'Export to a folder', tile: 'Tile raw input', library: 'Library' } as const;
 
 export function App() {
   const [theme, cycleTheme] = useTheme();
-  const [tab, setTab] = useState('build');
-  const [flow, setFlow] = useState('stream');            // the Build tab's flow: stream or export
+  const [tab, setTab] = useState('stream');
   const [libCompact, setLibCompact] = useState(() => localStorage.getItem(LIB_VIEW_KEY) !== 'detailed');
   const setLibView = (c: boolean) => { setLibCompact(c); localStorage.setItem(LIB_VIEW_KEY, c ? 'compact' : 'detailed'); };
   // Auto unless this machine chose otherwise: the server is told at start and on every change.
@@ -133,7 +133,7 @@ export function App() {
   }, []);
 
   // ── window sizing ─────────────────────────────────────────────────────────────────────────────
-  // Panels differ hugely in height (Build is short, Samples is a 20-row catalogue), and the Advanced
+  // Panels differ hugely in height (Stream live is short, the Library's samples are a 20-row catalogue), and the Advanced
   // folds open and close: re-measure after every commit, and when the column's size changes on its
   // own (fonts, the log tail). The host is only asked when the measurement changed.
   useEffect(() => {
@@ -259,10 +259,10 @@ export function App() {
         <Tabs value={tab} onValueChange={(v) => setTab(String(v))} className="gap-0">
           <div className="mb-3.5 flex items-center gap-3">
           <TabsList id="tabs" className="h-auto gap-0.5 self-start rounded-md p-[3px]">
-            {(['build', 'tile', 'library', 'samples'] as const).map((name) => (
+            {(['stream', 'export', 'tile', 'library'] as const).map((name) => (
               <TabsTrigger key={name} value={name} data-tab={name} title={TAB_TITLES[name]}
                 className="h-[30px] flex-none gap-[7px] rounded-sm border-0 px-3.5 text-[13px] font-medium text-muted-foreground hover:text-foreground data-active:bg-background data-active:text-foreground data-active:shadow-xs dark:data-active:border-0 dark:data-active:bg-background">
-                {name === 'build' ? 'Build' : name === 'tile' ? 'Tile raw input' : name === 'library' ? 'Library' : 'Samples'}
+                {TAB_LABELS[name]}
                 {name === 'library' && <span id="lib-count" className="rounded-full bg-background px-1.5 py-[3px] text-[11px] leading-none text-muted-foreground">{lib.bookmarks.length}</span>}
               </TabsTrigger>
             ))}
@@ -277,11 +277,13 @@ export function App() {
             </Tabs>
           )}
           </div>
+          {/* One dataset for the two tabs that take a tiled source: it stays what it was when you go from one to the other. */}
+          <div id="dataset" hidden={tab !== 'stream' && tab !== 'export'}><DatasetCard app={app} /></div>
           {/* Kept mounted: an export carries on while you switch tabs. */}
-          <TabsContent value="build" id="panel-build" keepMounted><BuildTab app={app} message={message} flow={flow} setFlow={setFlow} /></TabsContent>
-          <TabsContent value="tile" id="panel-tile" keepMounted><TilerCard app={app} onStream={() => { setFlow('stream'); setTab('build'); }} /></TabsContent>
+          <TabsContent value="stream" id="panel-stream" keepMounted><StreamTab app={app} message={message} /></TabsContent>
+          <TabsContent value="export" id="panel-export" keepMounted><ExportCard app={app} /></TabsContent>
+          <TabsContent value="tile" id="panel-tile" keepMounted><TilerCard app={app} onStream={() => setTab('stream')} /></TabsContent>
           <TabsContent value="library" id="panel-library" keepMounted><LibraryTab app={app} /></TabsContent>
-          <TabsContent value="samples" id="panel-samples" keepMounted><SamplesTab app={app} /></TabsContent>
         </Tabs>
 
         <footer className="mt-auto flex flex-wrap items-center gap-x-3 gap-y-1 border-t border-border pt-3 text-xs text-muted-foreground">

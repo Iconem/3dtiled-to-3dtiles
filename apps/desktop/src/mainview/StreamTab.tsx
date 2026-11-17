@@ -1,22 +1,16 @@
 /**
- * Build — a tiled dataset, then two flows, each in its own tab: live-stream (a paste-ready URL) or export to disk.
- * Raw input that is not tiled yet has its own top-level tab (TilerCard), with its own input field.
+ * The tiled dataset (DatasetCard), shared by the Stream live and Export tabs, and the Stream live tab itself: a
+ * paste-ready URL. Raw input that is not tiled yet has its own top-level tab (TilerCard), with its own input field.
  */
 import { useState } from 'react';
 import { Button } from '@/components/ui/button';
-import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import type { AppModel } from './App';
 import { Card } from './components/Card';
 import { Actions, Advanced, Choice, Code, Field, FieldLabel, Hint, Result, TextInput, UrlBar, type Message } from './components/bits';
-import { ExportCard } from './ExportCard';
-import { base, pickDataset, pickerAvailable, viewerUrl } from './host';
+import { base, pickDataset, pickerAvailable, readClipboard, viewerUrl } from './host';
 import { newId } from './library';
 import { nameFor, PLACEMENT, typeOfFormat } from './urls';
 
-const FLOWS = [
-  ['stream', 'Stream live', 'A tileset URL converted on demand while this app runs: nothing is written to disk'],
-  ['export', 'Export to a folder', 'Files on disk: crawl the stream, or run the offline converter'],
-] as const;
 /** How many threads the app's server builds tiles on: one setting, for the tiles it streams and the exports it runs. */
 export const WORKERS = [
   { value: 'auto', label: 'Auto, up to 8 threads (default)' },
@@ -45,21 +39,21 @@ const PLACEMENT_FIELDS: Record<(typeof PLACEMENT)[number], { label: React.ReactN
 
 // ── native file picker ──────────────────────────────────────────────────────────────────────────
 //
-// Tree formats are a FOLDER (Potree's cloud.js directory, a streamed-SOG LOD folder, an unpacked
-// 3D Tiles tree); single-file formats are a FILE (.copc.laz, .rad, .lcc, .3tz). Hence two buttons
-// rather than one dialog that has to guess — on Windows a single dialog cannot offer both.
+// One file dialog, no folder dialog: a dataset that is a folder (Potree, a streamed SOG, an unpacked 3D Tiles tree,
+// an OSGB tree) is opened by its entry file (cloud.js, metadata.json, lod-meta.json, tileset.json, metadata.xml),
+// and most datasets are a URL anyway, hence Paste first. A folder path can still be typed or pasted.
 // A label for the Windows dialog's type list (`label=ext,ext;…`, see pickWindows). Tiled sources only: raw input
 // is picked in the "Tile raw input" tab.
-const DATASET_FILE_TYPES = 'Tiled datasets=laz,rad,lcc,lcc2,json,js,zip,3tz,slpk,nxs,nxz,glb,b3dm';
+const DATASET_FILE_TYPES = 'Tiled datasets=laz,rad,lcc,lcc2,json,js,xml,osgb,zip,3tz,slpk,nxs,nxz,glb,b3dm';
 
-export function BuildTab({ app, message, flow, setFlow }: { app: AppModel; message: Message | null; flow: string; setFlow: (flow: string) => void }) {
-  const { form, patchForm, url, say } = app;
-  const [checking, setChecking] = useState(false);
+/** The dataset and its options: one card, shown above both the Stream live and the Export tab. */
+export function DatasetCard({ app }: { app: AppModel }) {
+  const { form, patchForm, say } = app;
 
-  async function browse(directory: boolean) {
+  async function browse() {
     if (!pickerAvailable()) return say('The native picker needs the desktop app — paste a path instead.', 'err');
     try {
-      const picked = await pickDataset({ directory, allowedFileTypes: directory ? '*' : DATASET_FILE_TYPES });
+      const picked = await pickDataset({ directory: false, allowedFileTypes: DATASET_FILE_TYPES });
       const path = picked?.[0];
       if (!path) return;                                   // user cancelled — not an error
       patchForm({ src: path });
@@ -68,6 +62,61 @@ export function BuildTab({ app, message, flow, setFlow }: { app: AppModel; messa
       say(`File picker failed: ${e}`, 'err');
     }
   }
+
+  /** The clipboard's first line becomes the dataset: the host reads it, as a webview asks for a permission first. */
+  async function paste() {
+    try {
+      const text = pickerAvailable() ? await readClipboard() : await navigator.clipboard.readText();
+      // Windows "Copy as path" wraps the path in quotes
+      const first = text.split(/\r?\n/).map((l) => l.trim()).find(Boolean)?.replace(/^"(.*)"$/, '$1') ?? '';
+      if (!first) return say('The clipboard holds no text.', 'err');
+      patchForm({ src: first });
+      say(`Pasted ${first}`, 'ok');
+    } catch (e) {
+      say(`Could not read the clipboard (${e}): paste in the field with Ctrl+V.`, 'err');
+    }
+  }
+
+  return (
+      <Card>
+        <Field label="Dataset — URL or local path">
+          <UrlBar>
+            <TextInput id="src" value={form.src} onChange={(e) => patchForm({ src: e.target.value })} placeholder="https://…/cloud.js   or   C:\data\scan.copc.laz" className="flex-1" />
+            <Button id="paste-src" title="Replace the field with the dataset URL or path in the clipboard" onClick={paste}>Paste</Button>
+            {/* Outside the Electrobun host (e.g. the bundle rendered in a plain browser for verification) the
+                native dialog cannot exist — hide the button rather than offering an action that always fails. */}
+            {pickerAvailable() && <Button id="browse-file" title="Pick a dataset file: .copc.laz, .rad, .lcc, .3tz, .slpk, .nxs…, or the entry file of a dataset that is a folder (Potree cloud.js or metadata.json, a streamed SOG's lod-meta.json, tileset.json, an OSGB metadata.xml). A raw file that is not tiled yet goes to the Tile raw input tab" onClick={browse}>File…</Button>}
+          </UrlBar>
+        </Field>
+
+        <Advanced summary="Advanced" hint="format, materialization, placement on the globe">
+          <div className="mt-3.5 grid grid-cols-2 gap-3 max-[560px]:grid-cols-1">
+            <Field label="Format"><Choice id="format" value={form.format} onChange={(v) => patchForm({ format: v })} options={FORMATS} /></Field>
+            <Field label="Materialization"><Choice id="cache" value={form.cache} onChange={(v) => patchForm({ cache: v })} options={CACHES} /></Field>
+          </div>
+          {/* Only for a source that carries no georeference, so it stays folded: most sources place themselves. */}
+          <Advanced id="manual-georef-local-tileset" summary="Manual georeference of a local tileset" hint="longitude, latitude, altitude, heading">
+            <div className="mt-3.5 grid grid-cols-4 gap-3 max-[560px]:grid-cols-2">
+              {PLACEMENT.map((k) => (
+                <Field key={k} label={PLACEMENT_FIELDS[k].label}>
+                  <TextInput id={k} value={form[k]} onChange={(e) => patchForm({ [k]: e.target.value })} placeholder={PLACEMENT_FIELDS[k].placeholder} />
+                </Field>
+              ))}
+            </div>
+            <Hint className="mt-3">
+              For sources with no georeference: applied as a root ENU transform in the tileset
+              itself, so every client gets it. Sources that carry their own georeference ignore these.
+            </Hint>
+          </Advanced>
+        </Advanced>
+      </Card>
+  );
+}
+
+/** Stream live: a tileset URL converted on demand while this app runs. */
+export function StreamTab({ app, message }: { app: AppModel; message: Message | null }) {
+  const { form, url, say } = app;
+  const [checking, setChecking] = useState(false);
 
   const needUrl = () => { if (!url) say('Enter a dataset path or URL first.', 'err'); return !url; };
 
@@ -123,53 +172,6 @@ export function BuildTab({ app, message, flow, setFlow }: { app: AppModel; messa
 
   return (
     <section>
-      <Card>
-        <Field label="Dataset — local path or URL">
-          <UrlBar>
-            <TextInput id="src" value={form.src} onChange={(e) => patchForm({ src: e.target.value })} placeholder="C:\data\scan.copc.laz   or   https://…/cloud.js" className="flex-1" />
-            {/* Outside the Electrobun host (e.g. the bundle rendered in a plain browser for verification) the
-                native dialog cannot exist — hide the buttons rather than offering an action that always fails. */}
-            {pickerAvailable() && <>
-              <Button id="browse-file" title="Pick a single-file dataset (.copc.laz, .rad, .lcc, .3tz, .slpk, .nxs…). A raw file that is not tiled yet goes to the Tile raw input tab" onClick={() => browse(false)}>File…</Button>
-              <Button id="browse-dir" title="Pick a dataset folder (Potree cloud.js dir, streamed-SOG LOD dir, unpacked 3D Tiles, an OSGB tree to stream)" onClick={() => browse(true)}>Folder…</Button>
-            </>}
-          </UrlBar>
-        </Field>
-
-        <Advanced summary="Advanced" hint="format, materialization, placement on the globe">
-          <div className="mt-3.5 grid grid-cols-2 gap-3 max-[560px]:grid-cols-1">
-            <Field label="Format"><Choice id="format" value={form.format} onChange={(v) => patchForm({ format: v })} options={FORMATS} /></Field>
-            <Field label="Materialization"><Choice id="cache" value={form.cache} onChange={(v) => patchForm({ cache: v })} options={CACHES} /></Field>
-          </div>
-          {/* Only for a source that carries no georeference, so it stays folded: most sources place themselves. */}
-          <Advanced id="manual-georef-local-tileset" summary="Manual georeference of a local tileset" hint="longitude, latitude, altitude, heading">
-            <div className="mt-3.5 grid grid-cols-4 gap-3 max-[560px]:grid-cols-2">
-              {PLACEMENT.map((k) => (
-                <Field key={k} label={PLACEMENT_FIELDS[k].label}>
-                  <TextInput id={k} value={form[k]} onChange={(e) => patchForm({ [k]: e.target.value })} placeholder={PLACEMENT_FIELDS[k].placeholder} />
-                </Field>
-              ))}
-            </div>
-            <Hint className="mt-3">
-              For sources with no georeference: applied as a root ENU transform in the tileset
-              itself, so every client gets it. Sources that carry their own georeference ignore these.
-            </Hint>
-          </Advanced>
-        </Advanced>
-      </Card>
-
-      {/* The two things to do with a dataset, apart: a URL that converts on demand, or files on disk. Both stay
-          mounted, so an export carries on while the stream tab is open. */}
-      <Tabs id="flows" value={flow} onValueChange={(v) => setFlow(String(v))} className="gap-0">
-        <TabsList id="flow-tabs" className="mb-3 h-auto gap-0.5 self-start rounded-md p-[3px]">
-          {FLOWS.map(([name, label, sub]) => (
-            <TabsTrigger key={name} value={name} data-flow={name} title={sub}
-              className="h-[30px] flex-none rounded-sm border-0 px-3.5 text-[13px] font-medium text-muted-foreground hover:text-foreground data-active:bg-background data-active:text-foreground data-active:shadow-xs dark:data-active:border-0 dark:data-active:bg-background">
-              {label}
-            </TabsTrigger>
-          ))}
-        </TabsList>
-        <TabsContent value="stream" id="flow-stream" keepMounted>
         <Card>
           <FieldLabel className="mb-[9px] text-[13.5px] leading-normal text-foreground">Live-stream <span className="text-xs font-normal text-muted-foreground">— a URL for Cesium for Unreal/Unity, QGIS or CesiumJS, converted on demand while this app runs</span></FieldLabel>
           <UrlBar>
@@ -200,9 +202,6 @@ export function BuildTab({ app, message, flow, setFlow }: { app: AppModel; messa
             </Actions>
           </Advanced>
         </Card>
-        </TabsContent>
-        <TabsContent value="export" id="flow-export" keepMounted><ExportCard app={app} /></TabsContent>
-      </Tabs>
     </section>
   );
 }

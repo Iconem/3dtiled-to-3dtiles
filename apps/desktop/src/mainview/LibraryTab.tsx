@@ -1,5 +1,5 @@
 /**
- * Library — bookmarks, with a cached structural check (tiles/depth/leaves from /stats), and a
+ * Library — the samples (folded), bookmarks, with a cached structural check (tiles/depth/leaves from /stats), and a
  * history of what was served or exported.
  */
 import { useRef, useState, type ReactNode } from 'react';
@@ -10,6 +10,7 @@ import type { AppModel } from './App';
 import { Card, CardHead, CardHeadActions } from './components/Card';
 import { Chip, FieldLabel, Hint } from './components/bits';
 import { base, pickerRpc } from './host';
+import { SamplesCard } from './SamplesCard';
 import { newId, parseLibrary, serialize, type DatasetOptions, type HistoryEntry, type LibraryEntry } from './library';
 import { buildUrlFrom, iconOf, kindOf, mb, typeOfFormat } from './urls';
 
@@ -55,7 +56,7 @@ export function LibraryTab({ app }: { app: AppModel }) {
   const [refreshing, setRefreshing] = useState<string | null>(null);
 
 
-  const openBtn = (e: DatasetOptions) => <Button size="sm" variant="ghost" onClick={() => { app.loadIntoBuilder(e); app.showTab('build'); }}>Open</Button>;
+  const openBtn = (e: DatasetOptions) => <Button size="sm" variant="ghost" onClick={() => { app.loadIntoBuilder(e); app.showTab('stream'); }}>Open</Button>;
   const copyBtn = (e: DatasetOptions) => <Button size="sm" variant="ghost" onClick={async () => {
     try { await navigator.clipboard.writeText(buildUrlFrom(e)); say('Copied.', 'ok'); } catch { /* ignore */ }
   }}>Copy</Button>;
@@ -108,6 +109,7 @@ export function LibraryTab({ app }: { app: AppModel }) {
 
   return (
     <section>
+      <SamplesCard app={app} />
       <Card>
         <CardHead>
           <FieldLabel>Bookmarks</FieldLabel>
@@ -122,7 +124,7 @@ export function LibraryTab({ app }: { app: AppModel }) {
           links or signed URLs in either: treat it as private.
         </Hint>
         <div id="lib-list" className={listClass}>
-          {!lib.bookmarks.length && <Hint>Nothing bookmarked yet — enter a dataset and press Bookmark, or start from Samples.</Hint>}
+          {!lib.bookmarks.length && <Hint>Nothing bookmarked yet — enter a dataset and press Bookmark, or start from Samples above.</Hint>}
           {lib.bookmarks.map((e) => {
             const s = e.stats;
             const n = s?.tiles.toLocaleString('en-US');

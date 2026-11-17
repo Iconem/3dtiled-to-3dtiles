@@ -26,6 +26,11 @@ export interface DesktopRPC {
        * trusting `devicePixelRatio`.
        *
        */
+      /** The clipboard's text ('' when it holds none), for the dataset field's Paste button. */
+      readClipboard: {
+        params: {};
+        response: string;
+      };
       /** Open a page in the default browser. */
       openExternal: {
         params: { url: string };

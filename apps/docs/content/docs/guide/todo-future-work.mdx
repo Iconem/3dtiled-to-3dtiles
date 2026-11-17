@@ -187,6 +187,9 @@ evaluated before assuming this would be a novel effort.
   `main` in four commits over 29 hours with no pull request. Reported on
   [#605](https://github.com/blackboardsh/electrobun/issues/605#issuecomment-6875378103) on 2026-11-14. Move past 2.0.2 once a release carries the fix, and test
   it the same way first.
+- [ ] **Send the splat-transform patch upstream.** `patches/@playcanvas__splat-transform@3.11.1.patch` lets the
+  `lod-meta.json` writer take a `.spz`, `.sog`, `.splat` or `.ksplat` as a level, where it only took PLY files.
+  When released, drop the patch.
 - [ ] **Send the glTF-Transform fast path upstream.** `patches/@gltf-transform__core@4.4.0.patch` copies a lone vertex
   accessor whole instead of component by component (`VertexLayout.SEPARATE`): seven times faster on megabyte tiles,
   same bytes ([what it does and why](/docs/guide/gltf-transform#the-writer-patch)). Opened

@@ -1,12 +1,12 @@
 /**
- * Tile raw input — a top-level tab, next to Build (which takes sources that are tiled already).
+ * Tile raw input — a top-level tab, next to Stream live and Export (which take sources that are tiled already).
  *
  * Its own input field holds RAW input, a file or a folder (or a PostgreSQL address): a point cloud (LAS, LAZ, E57,
  * PTX, a point PLY), a mesh (OBJ, FBX, glTF, an OSGB folder…) or Gaussian splats (PLY, SPZ, SOG, .splat, .ksplat),
- * not a tiled source. The Build tab's dataset is another field: only "Stream it" writes to it. This
+ * not a tiled source. The dataset of the Stream live and Export tabs is another field: only "Stream it" writes to it. This
  * card picks a third-party tiler for the input, shows that tool's own options, runs it in a subprocess with its output and
  * Cancel, and opens what it wrote: a COPC, a Potree folder, a streamed SOG, a RAD, a Nexus file or a .3tz archive goes
- * to the Build tab's stream flow; a 3D Tiles tileset folder is finished already and is previewed as is, served by the tile-server.
+ * to the Stream live tab; a 3D Tiles tileset folder is finished already and is previewed as is, served by the tile-server.
  *
  * Which tools take the input is the server's answer (`GET /tilers?input=`): it looks at the path, so a folder is
  * matched by what it holds and a PLY by its header (points, a mesh or splats).
@@ -161,7 +161,7 @@ export function TilerCard({ app, onStream }: { app: AppModel; onStream: () => vo
 
   async function start() {
     if (!src) return say('Enter the raw file above first.', 'err');
-    if (!tool) return say(`No tool takes ${what}. Tiled sources (COPC, Potree, SOG…) go to the Build tab.`, 'err');
+    if (!tool) return say(`No tool takes ${what}. Tiled sources (COPC, Potree, SOG…) go to the Stream live or Export tab.`, 'err');
     if (blocked) return say(`${tool.name} is not on this machine: ${tool.found.hint}`, 'err');
     if (!outDir.trim()) return say('Pick an empty output folder.', 'err');
     if (!host || !pickerRpc) return say('Running a tiler needs the desktop app. The command below does the same from a terminal.', 'err');
@@ -238,7 +238,7 @@ export function TilerCard({ app, onStream }: { app: AppModel; onStream: () => vo
     }
   }
 
-  /** What the tiler wrote becomes the Build tab's dataset, and that tab opens on its stream flow. */
+  /** What the tiler wrote becomes the dataset, and the Stream live tab opens. */
   function streamIt() {
     if (!result) return;
     // A file on disk is read by the converter-backed route (cache=full: converted once to the local cache).
@@ -305,7 +305,7 @@ export function TilerCard({ app, onStream }: { app: AppModel; onStream: () => vo
           {src ? <>No tool here takes <strong>{what}</strong>. </> : <>Enter a raw file or folder above (<em>File…</em> or <em>Folder…</em>). </>}
           {(Object.keys(KINDS) as Tool['kind'][]).map((k) => <span key={k} id={`tiler-inputs-${k}`}><strong>{KINDS[k]}:</strong> {[...new Set(tools.filter((t) => t.kind === k).flatMap((t) => t.inputs))].filter((e) => e !== 'postgres').map((e) => `.${e}`).join(', ')}. </span>)}
           {tools.some((t) => t.inputs.includes('postgres')) && <span id="tiler-inputs-db"><strong>PostGIS table:</strong> postgresql://user@host:5432/database. </span>}
-          A source that is already tiled (COPC, Potree, streamed SOG, 3D Tiles…) goes to the <em>Build</em> tab.
+          A source that is already tiled (COPC, Potree, streamed SOG, 3D Tiles…) goes to the <em>Stream live</em> or <em>Export</em> tab.
           {!src && host && <> Nothing at hand? <button id="tiler-samples" type="button" onClick={makeSamples} className="cursor-pointer underline">Write tiny sample files</button> (a LAS, a splat PLY, a textured OBJ, 1.3 MB) into a folder you pick.</>}
         </Hint>
       )}

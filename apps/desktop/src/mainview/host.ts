@@ -35,6 +35,9 @@ export const pickerAvailable = () => Boolean(pickerRpc && (globalThis as { __ele
 export const pickDataset = (params: { directory: boolean; allowedFileTypes?: string }) =>
   pickerRpc!.request.pickDataset(params, { maxRequestTime: Infinity });
 
+/** The clipboard's text, read by the host: a webview would first ask for a permission. */
+export const readClipboard = () => pickerRpc!.request.readClipboard({});
+
 const params = new URLSearchParams(location.search);
 export const tilePort = params.get('tilePort');
 export const staticPort = params.get('staticPort');

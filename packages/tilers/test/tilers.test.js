@@ -327,7 +327,17 @@ test('a database input: the address is parsed, its password kept out of every de
   assert.throws(() => planRun('obj2tiles', address, out, {}, found()), /not a database/);
 });
 
-test('splat-transform: a format other than PLY is first written out as a PLY, and an LCC keeps its own levels', () => {
+test('splat-transform: the patched tool reads a format other than PLY in place as level 0', () => {
+  const dir = tmp(), out = path.join(dir, 'out'), script = path.join(dir, 'pkg', 'bin', 'cli.mjs');
+  fs.mkdirSync(path.join(dir, 'pkg', 'dist'), { recursive: true });
+  fs.writeFileSync(path.join(dir, 'pkg', 'dist', 'cli.mjs'), '// 3dtiled patch: …');
+  const spz = path.resolve('C:\\s\\scene.spz'), t1 = path.join(out, '.tiler-tmp', 'lod1.ply');
+  const steps = planRun('splat-transform', spz, out, { levels: 2 }, found(['node', script])).steps;
+  assert.deepEqual(steps.map((x) => x.cmd.slice(2, 6)), [['-w', spz, '--decimate', '50%'], ['-w', spz, '-l', '0']]);
+  assert.equal(steps[1].cmd[6], t1);
+});
+
+test('splat-transform, stock: a format other than PLY is first written out as a PLY, and an LCC keeps its own levels', () => {
   const out = path.join(tmp(), 'out'), exe = found(['node', 'cli.mjs']);
   const spz = planRun('splat-transform', 'C:\\s\\scene.spz', out, { levels: 2 }, exe).steps;
   assert.equal(spz.length, 3);

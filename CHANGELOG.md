@@ -5,6 +5,16 @@ Format loosely follows [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+### Changed — 2026-11-17 (desktop app: four tabs; splat-transform reads every format in place)
+- **Tabs are now Stream live, Export to a folder, Tile raw input and Library.** The two flows of the former Build
+  tab are tabs of their own; the dataset card is shown above both and keeps its content from one to the other.
+- **Samples are a fold at the top of the Library**, closed by default, no longer a tab.
+- **Dataset field: a Paste button, no Folder button.** *Paste* takes the dataset from the clipboard. A dataset
+  that is a folder is opened by its entry file (`cloud.js`, `metadata.json`, `lod-meta.json`, `tileset.json`,
+  `metadata.xml`), which the file dialog now lists; a folder path can still be typed.
+- **splat-transform no longer copies a `.spz`, `.sog`, `.splat` or `.ksplat` to a PLY first**: a small patch of
+  the tool (`patches/`) lets its level writer read them in place. One step fewer, the same output.
+
 ### Changed — 2026-11-17 (desktop app: *Tile raw input* is a tab of its own)
 - **Tile raw input moved out of the Build tab**: it is now a top-level tab, next to Build, Library and Samples, with
   its own input field and its own **File…** and **Folder…** buttons. The Build tab's dataset takes tiled sources

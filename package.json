@@ -33,7 +33,8 @@
       "webgpu"
     ],
     "patchedDependencies": {
-      "@gltf-transform/core@4.4.0": "patches/@gltf-transform__core@4.4.0.patch"
+      "@gltf-transform/core@4.4.0": "patches/@gltf-transform__core@4.4.0.patch",
+      "@playcanvas/splat-transform@3.11.1": "patches/@playcanvas__splat-transform@3.11.1.patch"
     }
   }
 }

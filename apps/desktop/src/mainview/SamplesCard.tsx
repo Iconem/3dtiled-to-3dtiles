@@ -1,22 +1,22 @@
 /**
- * Samples — a real dataset for every format the middleware reads, one click into Build.
+ * Samples — a real dataset for every format the middleware reads, one click into Stream live. A fold at the top of
+ * the Library, closed until asked for.
  */
 import { Button } from '@/components/ui/button';
 import type { AppModel } from './App';
 import { CATALOG, type Sample } from './catalog';
 import { Card } from './components/Card';
-import { Chip, FieldLabel, Hint } from './components/bits';
+import { Advanced, Chip, Hint } from './components/bits';
 import { newId } from './library';
 
-export function SamplesTab({ app }: { app: AppModel }) {
-  const load = (s: Sample) => { app.loadIntoBuilder({ src: s.src, format: s.format, cache: 'none' }); app.showTab('build'); };
+export function SamplesCard({ app }: { app: AppModel }) {
+  const load = (s: Sample) => { app.loadIntoBuilder({ src: s.src, format: s.format, cache: 'none' }); app.showTab('stream'); };
   const save = (s: Sample) => app.updateLib((l) => { l.bookmarks.push({ id: newId(), name: s.label, src: s.src, format: s.format, cache: 'none', addedAt: Date.now() }); });
   return (
-    <section>
       <Card>
-        <FieldLabel className="mb-[9px]">Every format this middleware reads</FieldLabel>
-        <Hint>
-          Real, publicly-hosted datasets — one click loads one into <em>Build</em> with the
+        <Advanced id="samples" summary="Samples" hint="a public dataset for every format this middleware reads" className="mt-0 border-t-0 pt-0">
+        <Hint className="mt-3">
+          Real, publicly-hosted datasets — one click loads one into <em>Stream live</em> with the
           right format already selected. Third-party sources are credited; none of this data
           is ours unless it says Iconem.
         </Hint>
@@ -41,7 +41,7 @@ export function SamplesTab({ app }: { app: AppModel }) {
             </div>
           ))}
         </div>
+        </Advanced>
       </Card>
-    </section>
   );
 }

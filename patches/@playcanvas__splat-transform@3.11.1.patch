@@ -1,0 +1,31 @@
+diff --git a/dist/cli.mjs b/dist/cli.mjs
+index 60877d8ad895fa9d482a9346435b8436ca8b7db7..0c20585f5489038e580c5c7b2a12d0da9202cef0 100644
+--- a/dist/cli.mjs
++++ b/dist/cli.mjs
+@@ -55427,18 +55427,23 @@ const main = async () => {
+                 // PLY inputs grouped by --tag-lod tag (env = -1, untagged = level 0);
+                 // each input's own actions applied before grouping.
+                 const tagged = inputArgs.map((a) => {
+-                    const ply = !isHttpUrl(a.filename) && getInputFormat(resolveInput(a.filename).classifyName) === 'ply';
++                    // 3dtiled patch: a level may be any single-scene local file the tool reads, not only a PLY
++                    const fmt = isHttpUrl(a.filename) ? null : getInputFormat(resolveInput(a.filename).classifyName);
++                    const ply = ['ply', 'splat', 'spz', 'ksplat', 'sog'].includes(fmt);
+                     const lods = a.processActions.filter((act) => act.kind === 'lod');
+                     const tag = lods.length > 0 ? lods[lods.length - 1].value : 0;
+                     const rest = stripLodTags(a.processActions);
+-                    return { arg: a, ply, tag, rest };
++                    return { arg: a, ply, fmt, tag, rest };
+                 });
+                 if (!tagged.every((t) => t.ply)) {
+                     throw new Error('lod-meta.json output requires a single streamed-SOG/LCC/LCC2 input, or local PLY input(s) (optionally --tag-lod tagged).');
+                 }
+                 const opened = await Promise.all(tagged.map(async (t) => {
+                     const { filename: inFile, fileSystem } = resolveInput(t.arg.filename);
+-                    const src = await processSourceBridged(await readPly(await fileSystem.createSource(inFile), pool), t.rest, pool, processOptions);
++                    const raw = t.fmt === 'ply'
++                        ? await readPly(await fileSystem.createSource(inFile), pool)
++                        : (await readFile({ filename: inFile, inputFormat: t.fmt, options: { ...options, lodSelect: [] }, params: [], fileSystem }))[0];
++                    const src = await processSourceBridged(raw, t.rest, pool, processOptions);
+                     return { src, tag: t.tag };
+                 }));
+                 const mains = opened.filter((o) => o.tag >= 0);

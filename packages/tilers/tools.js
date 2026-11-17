@@ -46,9 +46,22 @@
  * archive) go to the stream flow; `3dtiles` is a finished tileset folder, opened as is. `output.path(ctx)` is the file or folder to hand over, and `output.proof(ctx)`
  * (default: the path) the file whose presence says the run produced something.
  */
+import fs from 'node:fs';
 import path from 'node:path';
 
 const pct = (v) => `${v}%`;
+
+// splat-transform merges levels of detail from PLY files only. This repo patches it (patches/@playcanvas__splat-transform@…)
+// to read any single-scene file there; an install without the patch (the package fetched from npm alone) is the stock tool.
+const mergesAnyFormat = new Map();
+function splatTransformMergesAnyFormat(script) {
+  if (!mergesAnyFormat.has(script)) {
+    let patched = false;
+    try { patched = fs.readFileSync(path.join(path.dirname(script), '..', 'dist', 'cli.mjs'), 'utf8').includes('3dtiled patch'); } catch { /* not found: treat as stock */ }
+    mergesAnyFormat.set(script, patched);
+  }
+  return mergesAnyFormat.get(script);
+}
 const epsg = (v) => String(v).trim().replace(/^epsg:/i, '');
 const tileset = { format: '3dtiles', path: (ctx) => path.join(ctx.outDir, 'tileset.json'), label: '3D Tiles (tileset.json)' };
 
@@ -736,8 +749,9 @@ export const TOOLS = [
       // An .lcc scene carries its own levels: the tool writes them out as they are.
       if (ext === 'lcc') return [{ cmd: [...exe, '-w', input, path.join(outDir, 'lod-meta.json'), ...chunks], label: 'the scene\'s own levels → streamed SOG' }];
       const steps = [], levels = [input];
-      // The levels are merged from PLY files only: any other format is first written out as one.
-      if (ext !== 'ply') {
+      // Level 0 is the input itself, read in place. Only the stock tool, which merges from PLY files only, needs
+      // another format written out as a PLY first.
+      if (ext !== 'ply' && !splatTransformMergesAnyFormat(String(exe[exe.length - 1]))) {
         levels[0] = path.join(tmpDir, 'lod0.ply');
         steps.push({ cmd: [...exe, '-w', input, levels[0]], label: `.${ext} → PLY` });
       }

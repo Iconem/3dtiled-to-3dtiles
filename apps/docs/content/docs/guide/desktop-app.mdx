@@ -7,8 +7,8 @@ The desktop companion (`apps/desktop`) is the **run-the-middleware-on-device** a
 `packages/tile-server` locally, then turns a dataset on your disk — or a public URL — into a live OGC
 3D Tiles endpoint you can paste into Cesium for Unreal/Unity, QGIS, or CesiumJS.
 
-Enter a dataset, then choose one of two flows: **Live-stream** gives a URL to copy, and **Export to
-disk** writes a finished folder. Input that is not tiled yet has its own tab, [*Tile raw input*](#tile-raw-input). Everything else (format, materialization, placement, export method, CLI
+Enter a dataset, then pick a tab: **Stream live** gives a URL to copy, and **Export to a folder**
+writes a finished folder. Input that is not tiled yet has its own tab, [*Tile raw input*](#tile-raw-input). Everything else (format, materialization, placement, export method, CLI
 command) is folded under *Advanced*.
 
 The **Library** tab holds your bookmarks, and a history of what you served or exported: a URL you copied,
@@ -125,16 +125,19 @@ If a 3dtiled server is already listening on a candidate port (e.g. you have `pnp
 
 ## The four tabs
 
-*Build* holds a tiled dataset and two flows, *Stream live* and *Export to a folder*. *Tile raw input* has its own
-input field, for files that are not tiled yet. *Library* and *Samples* list what you kept and what you can try.
+*Stream live* and *Export to a folder* share one tiled dataset, in a card shown above both: it stays what it was
+when you go from one to the other. *Tile raw input* has its own input field, for files that are not tiled yet.
+*Library* lists what you kept, with the samples folded at its top.
 
-### Build
+### Stream live
 
-- **File… / Folder…** open the **native OS picker** over RPC to the main process. It has to be the
+- **Paste** replaces the dataset field with the clipboard's first line: most datasets are a URL. The main
+  process reads the clipboard, as a webview would first ask for a permission.
+- **File…** opens the **native OS picker** over RPC to the main process. It has to be the
   main process: a webview `<input type=file>` yields a sandboxed `File` with no real path, and the
-  middleware needs an actual filesystem path. Two buttons rather than one because tree formats are a
-  *folder* (Potree's `cloud.js` directory, a streamed-SOG LOD folder) and single-file formats are a
-  *file* (`.copc.laz`, `.rad`, `.lcc`) — a single Windows dialog cannot offer both.
+  middleware needs an actual filesystem path. There is no folder dialog: a dataset that is a folder is
+  opened by its entry file (Potree's `cloud.js` or `metadata.json`, a streamed SOG's `lod-meta.json`,
+  `tileset.json`, an OSGB tree's `metadata.xml`). A folder path can still be typed or pasted.
 - Builds the URL against `/tiles/tileset.json`, the front door that dispatches to `/stream` for
   `cache=none|hierarchy` and `/convert` for `cache=full` — so the UI never re-encodes that routing rule.
 - **Place a local dataset on the globe** applies `&lon/&lat/&alt/&heading` as a root ENU transform *in
@@ -154,7 +157,7 @@ input field, for files that are not tiled yet. *Library* and *Samples* list what
 
 ### Export to a folder
 
-The **Export to a folder** card below the URL writes a finished, static OGC 3D Tiles tree for that URL
+The **Export to a folder** tab writes a finished, static OGC 3D Tiles tree for the dataset above it
 into a local folder: the far end of the [materialization continuum](/docs/guide/architecture-caching),
 after `cache=none | hierarchy | full`. Any web server, S3 bucket or Cesium for Unreal can host the
 folder without this app. Pick an **empty** folder with **Folder…**, optionally a **max depth** (blank =
@@ -203,7 +206,7 @@ every level), and press **Export**.
     depends on the server.
   - The CLI option needs the desktop host. When the view is opened in a plain browser, it's
     disabled with a note.
-- **What gets written.** It works on the URL, not the source format, so every input the Build tab
+- **What gets written.** It works on the URL, not the source format, so every input the dataset field
   accepts is exported the same way: a local or remote raw dataset through `/stream` or `/convert`, as
   well as mosaics and proxied hosts.
   - Every tileset JSON (the root and each external tileset) is rewritten with **relative** uris.
@@ -283,12 +286,12 @@ viewer (48 and 42 tiles). The same exporter is on the CLI as
 
 ### Tile raw input
 
-A tab of its own, next to *Build*, for input that is **not tiled yet**: a point cloud, a mesh or Gaussian splats, as
+A tab of its own, next to *Stream live* and *Export to a folder*, for input that is **not tiled yet**: a point cloud, a mesh or Gaussian splats, as
 a **file or a folder**, or a table of a PostGIS database. It runs a third-party tiler on it, then opens the result. The app writes no tiler: it finds,
 fetches and calls the official ones ([plan and results](/docs/guide/planning/one-stop-tiler)).
 
 Pick the input with the tab's own **File…** or **Folder…** (the file dialog lists the types by family), or paste a
-path. This field is not the Build tab's dataset: that one only takes sources that are tiled already, and its
+path. This field is not the dataset of the two other tabs: that one only takes sources that are tiled already, and its
 dialog only lists those.
 
 | Input | Tools offered | Result |
@@ -344,8 +347,8 @@ dialog only lists those.
 - **Run** starts the tool in a subprocess, as *Run in: CLI subprocess* does for an export: its output is shown as
   it comes, and **Cancel** stops it and what it started.
 - **When the run ends:**
-  - a COPC, a Potree folder, a streamed SOG, a RAD, a Nexus file or a `.3tz` archive: **Stream it** puts what was written in the Build tab's dataset field (with
-    `cache=full`: a file on disk is converted once to the local cache) and opens that tab on *Stream live*;
+  - a COPC, a Potree folder, a streamed SOG, a RAD, a Nexus file or a `.3tz` archive: **Stream it** puts what was written in the dataset field (with
+    `cache=full`: a file on disk is converted once to the local cache) and opens the *Stream live* tab;
   - a 3D Tiles tileset is finished already: **Preview in Cesium**, **Preview in 3DTRjs** and **Copy URL** open it
     as it is, served from its folder by the app's tile server. The folder can be hosted on any web server.
 - **Nothing at hand?** With an empty input field, *Write tiny sample files* puts a 20 000-point LAS, a
@@ -359,7 +362,7 @@ QGIS lookup are Windows'; on macOS and Linux a tool on `PATH` is found.
 ### Library
 
 Datasets you want to keep: local paths and remote URLs, each stored as its **source plus options**
-rather than a built URL, so an entry can be re-opened into Build and edited (and so a future change
+rather than a built URL, so an entry can be re-opened into *Stream live* and edited (and so a future change
 to URL building doesn't strand the library).
 
 **Refresh stats** walks every saved entry through `/stats` and caches tiles / depth / leaves on the
@@ -378,9 +381,9 @@ which is also the seam along which it would move to a real file if it ever needs
 
 ### Samples
 
-One or more real, publicly-hosted datasets per source format — COPC, Potree, streamed SOG, LCC, RAD,
-I3S — with the origin credited on each row. **Load** drops one into Build with the right format
-already selected; **Save** adds it to the library. The URLs are copied from the viewer app's own
+A fold at the top of the Library, closed until you open it. One or more real, publicly-hosted datasets per source
+format — COPC, Potree, streamed SOG, LCC, RAD, I3S — with the origin credited on each row. **Load** drops one into
+*Stream live* with the right format already selected; **Save** adds it to the library. The URLs are copied from the viewer app's own
 `FORMATS` preset table, so the desktop app demonstrates exactly the sources the rest of the project
 is tested against.
 

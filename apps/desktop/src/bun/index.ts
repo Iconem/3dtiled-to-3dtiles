@@ -279,10 +279,11 @@ const rpc = defineElectrobunRPC<DesktopRPC, "bun">("bun", {
 			 * for vs the viewport the view reports), not from devicePixelRatio, which reports 1 under
 			 * Windows DPI virtualization — see the note on the RPC schema.
 			 *
-			 * Never below the default, so switching from the long Samples tab back to the short Build
+			 * Never below the default, so switching from the long Library tab back to the short Stream live
 			 * tab does not collapse a window the user is using, and an under-estimate can never clip content. Capped so a 30-row catalogue cannot open a
 			 * window taller than the screen.
 			 */
+			readClipboard: () => Utils.clipboardReadText() ?? "",
 			openFolder: ({ path }) => Utils.openPath(path),
 			openExternal: ({ url }) => /^https?:\/\//.test(url) && Utils.openExternal(url),
 
