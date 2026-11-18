@@ -74,6 +74,12 @@ export function DatasetCard({ app }: { app: AppModel }) {
     patchForm(typed ? { format: '' } : { src: text, format: '' });
   }
 
+  /** Typed or Ctrl+V: a format chosen for the dataset before is dropped when the new name plainly says another. */
+  function typed(src: string) {
+    const says = guessFormat(src);
+    patchForm(says && form.format && says !== form.format && says !== guessFormat(form.src) ? { src, format: '' } : { src });
+  }
+
   async function browse() {
     try {
       const picked = await pickDataset({ directory: false, allowedFileTypes: DATASET_FILE_TYPES });
@@ -107,7 +113,7 @@ export function DatasetCard({ app }: { app: AppModel }) {
   return (
     <Card id="dataset-card">
       <UrlBar>
-        <TextInput id="src" aria-label="Dataset: a URL or a path on this machine" value={form.src} onChange={(e) => patchForm({ src: e.target.value })} placeholder="Dataset URL or path: https://…/cloud.js, C:\data\scan.copc.laz" className="flex-1" />
+        <TextInput id="src" aria-label="Dataset: a URL or a path on this machine" value={form.src} onChange={(e) => typed(e.target.value)} placeholder="Dataset URL or path: https://…/cloud.js, C:\data\scan.copc.laz" className="flex-1" />
         <Tip text="Replace the field with the dataset URL or path in the clipboard. Ctrl+Z in the field gives back what it held"><Button id="paste-src" onClick={paste}>Paste</Button></Tip>
         {/* Outside the Electrobun host (the bundle rendered in a plain browser) the native dialog cannot exist. */}
         {pickerAvailable() && <Tip text="Pick a dataset file: .copc.laz, .rad, .lcc, .3tz, .slpk, .nxs…, or the entry file of a dataset that is a folder (cloud.js, metadata.json, lod-meta.json, tileset.json, metadata.xml)"><Button id="browse-file" onClick={browse}>File…</Button></Tip>}

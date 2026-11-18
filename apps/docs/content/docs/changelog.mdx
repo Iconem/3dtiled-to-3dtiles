@@ -16,6 +16,8 @@ Format loosely follows [Keep a Changelog](https://keepachangelog.com/).
 - **Dataset bar**: Ctrl+Z after *Paste* or *File…* gives back the previous dataset; the star is filled once the
   dataset is in the Library, and a second click takes it out; **Threads** (tile threads) is next to the format, as
   well as in Settings; the formats gain VPC, LCC2 and Nexus.
+  A format chosen for one dataset is dropped when another is typed whose name plainly says a different one (a sample's
+  *Nexus* no longer sticks to a `.copc.laz` typed after it).
 - **Export, offline converter**: the options shown are those the converter of the dataset's format reads (tiling for
   COPC and Potree; splats per tile, up axis and harmonics for streamed SOG; error scale, error layer, splat scale and
   harmonics for RAD; harmonics for LCC2; the DAG mode and error scale for Nexus; none for I3S), and they no longer
