@@ -19,7 +19,7 @@ folder*. Those two take a dataset that is tiled already. This one takes what is 
 mesh or Gaussian splats, as a **file or a folder**, or a table of a PostGIS database. It runs a third-party tiler on
 it, then opens the result.
 
-The app writes no tiler. It finds, fetches and calls the official ones: 20 tools
+The app writes no tiler. It finds, fetches and calls the official ones: 21 tools
 ([plan and results](/docs/guide/planning/one-stop-tiler), [what each tool is](/docs/guide/existing-tilers)).
 
 <AppScreen light={tileLight} dark={tileDark} alt="The Tile raw input tab with a LAS file as input and PDAL chosen" caption="A LAS file as input: the tab says what it holds, offers the tools that take it, and shows the options of the chosen one." />
@@ -51,9 +51,9 @@ The tool is one searchable list, grouped into **point cloud tilers**, **mesh til
 line gives the tool, what it writes, and whether it is ready or how much it downloads. The (i) next to the list says
 what the chosen tool is and reads.
 
-Without an input, the list holds all 20 tools, to look at their options before having a file:
+Without an input, the list holds every tool, to look at their options before having a file:
 
-<AppScreen light={tileToolsLight} dark={tileToolsDark} alt="The tool list open without an input: all 20 tools in three groups" caption="No input yet: every tool, by group. Type in the search field to narrow the list by tool name or by output format." />
+<AppScreen light={tileToolsLight} dark={tileToolsDark} alt="The tool list open without an input: every tool, in three groups" caption="No input yet: every tool, by group. Type in the search field to narrow the list by tool name or by output format." />
 
 With an input, it holds only the tools that take it. A tool already on the machine is offered first, so nothing is
 downloaded unless you pick a tool that needs it:
@@ -65,6 +65,7 @@ downloaded unless you pick a tool that needs it:
 | Input | Tools offered | Result |
 |---|---|---|
 | **Point cloud** `.las`, `.laz` (a file, or a folder of them) | PDAL, untwine | a COPC file |
+| **A folder of COPC, LAZ or LAS tiles** | `pdal_wrench build_vpc` (QGIS ships it) | a virtual point cloud (`.vpc`): an index of the files, written in seconds; a folder of COPC tiles then streams as one dataset |
 | | PotreeConverter 2, PotreeConverter 1.7 | a Potree 2 or Potree 1.x folder |
 | | gocesiumtiler, point-tiler, py3dtiles, mago 3DTiler | 3D Tiles |
 | | rusty-tiles `point-cloud` | a 3D Tiles archive (`.3tz`) |
@@ -153,5 +154,7 @@ terrain as a textured OBJ, a GLB and a PLY mesh (1.5 MB, synthetic) in a folder 
 ## The same from a terminal
 
 `node packages/convert/cli.js tile run <tool> <input> <outDir>`
-([CLI usage](/docs/guide/cli-usage#tile-raw-input-with-a-third-party-tiler)). Windows first: the downloads and the
-QGIS lookup are Windows'; on macOS and Linux a tool on `PATH` is found.
+([CLI usage](/docs/guide/cli-usage#tile-raw-input-with-a-third-party-tiler)). The downloads exist for Windows, Linux
+and macOS where the tool's project publishes a build
+([which tool on which system](/docs/guide/planning/one-stop-tiler#result-linux-and-macos-and-pdal_wrench-build_vpc-2026-11-19));
+Linux was run, macOS was not.

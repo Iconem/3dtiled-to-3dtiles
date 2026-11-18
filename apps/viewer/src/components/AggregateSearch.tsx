@@ -57,7 +57,7 @@ const cellLabel = (d: DatasetMarker) => (d.cell ? ` · cell ${d.cell.key || '(ro
 
 /** Short names for the server sets a mosaic can be made of (the pills); unknown sets show their id. */
 const SOURCE_LABELS: Record<string, string> = {
-  flai: 'flai open LiDAR', vexcel: 'Vexcel', 'esri-3d': 'Esri Living Atlas', openheritage3d: 'Open Heritage 3D',
+  flai: 'flai open LiDAR', vexcel: 'Vexcel', 'esri-3d': 'Esri Living Atlas', openheritage3d: 'Open Heritage 3D', funes: 'funes.world',
   aerometrex: 'Aerometrex', cities: 'City & national 3D Tiles', open: 'RESOURCES.md', opendata: 'RESOURCES.md',
   iconem: 'Iconem', 'iconem-public': 'Iconem', 'iconem-open': 'Iconem', angkor: 'Iconem — Angkor',
 };

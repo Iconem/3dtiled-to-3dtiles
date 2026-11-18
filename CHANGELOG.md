@@ -5,6 +5,20 @@ Format loosely follows [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+### Added — 2026-11-19 (one-stop tiler on Linux and macOS, `pdal_wrench build_vpc`, a funes.world set)
+- **Tile raw input on Linux and macOS**: the tool downloads are per platform (Linux x64 and arm64, macOS arm64 and
+  x64) where the project publishes a build, each with its pinned SHA-256; `.tar.gz` releases are unpacked by the
+  package itself; QGIS is looked for in `/Applications` and in a distribution's QGIS folders. Run on Linux x64 in a
+  container (gocesiumtiler, rusty-tiles, Obj2Tiles, py3dtiles, mago 3DTiler, Nexus); macOS and arm64 were not run.
+  [Which tool on which system](https://jo-chemla.github.io/3dtiled-to-3dtiles/docs/guide/planning/one-stop-tiler/).
+- **`pdal_wrench build_vpc`**, the 21st tool: a folder of COPC, LAZ or LAS tiles to one virtual point cloud
+  (`.vpc`). The tile server reads a `.vpc` that is a local file, and the files it names, where it reads local
+  files at all (the desktop app), so *Stream it* opens the folder as one dataset.
+- **Aggregate set `funes`**: funes.world's Gaussian splats as streamed SOG (one scene, Pompeii; CC BY-NC 4.0, so
+  the set is non-commercial). Entries are added by hand: the site's `robots.txt` disallows the API that names a
+  model's files.
+- LCC version 1 harmonics are parked until a *Quality* scene is available to check against.
+
 ### Added — 2026-11-18 (browser extract reads Draco and writes SOG; a funes.world sample)
 - **Crop and extract in the browser** reads Draco-compressed tiles (they were skipped and counted) and writes SOG,
   so it now offers the four splat outputs of the tile server.

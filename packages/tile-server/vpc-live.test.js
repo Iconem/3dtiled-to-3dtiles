@@ -30,7 +30,16 @@ test('hrefs: relative ones resolve against the .vpc, local paths are not readabl
   assert.equal(resolveHref('https://other.example/c.copc.laz', BASE).url, 'https://other.example/c.copc.laz');
   assert.equal(resolveHref('C:\\data\\d.copc.laz', BASE).reason, 'local path');
   assert.equal(resolveHref('\\\\nas\\share\\d.copc.laz', BASE).reason, 'local path');
-  assert.match(resolveHref('file:///data/e.copc.laz', BASE).reason, /unsupported scheme \(file\)/);
+  assert.equal(resolveHref('file:///data/e.copc.laz', BASE).reason, 'local path');
+  // a .vpc of this machine, on a server that reads its own disk: its files are read too. Never for a remote .vpc.
+  const saved = process.env.TILED_LOCAL_SOURCES;
+  try {
+    process.env.TILED_LOCAL_SOURCES = '1';
+    assert.equal(resolveHref('./..\\tiles\\a.copc.laz', 'file:///C:/out/set/index.vpc').url, 'file:///C:/out/tiles/a.copc.laz');
+    assert.equal(resolveHref('C:\\data\\d.copc.laz', BASE).reason, 'local path');
+    process.env.TILED_LOCAL_SOURCES = '0';
+    assert.equal(resolveHref('./a.copc.laz', 'file:///C:/out/index.vpc').reason, 'local path');
+  } finally { if (saved === undefined) delete process.env.TILED_LOCAL_SOURCES; else process.env.TILED_LOCAL_SOURCES = saved; }
   assert.match(resolveHref('s3://bucket/e.copc.laz', BASE).reason, /unsupported scheme \(s3\)/);
   assert.equal(resolveHref('./a.copc.laz', null).reason, 'local path');
   assert.equal(resolveHref('./a.copc.laz', 'C:/data/index.vpc').reason, 'local path');

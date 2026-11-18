@@ -35,6 +35,7 @@ export const RUN_MARKER = '.3dtiled-tiler.json';
 export function toolsDir() {
   if (process.env.TILED_TOOLS_DIR) return process.env.TILED_TOOLS_DIR;
   if (isWin && process.env.LOCALAPPDATA) return path.join(process.env.LOCALAPPDATA, '3D Tiled', 'tools');
+  if (process.platform === 'darwin') return path.join(os.homedir(), 'Library', 'Application Support', '3D Tiled', 'tools');
   return path.join(os.homedir(), '.cache', '3dtiled', 'tools');
 }
 
@@ -148,10 +149,16 @@ const versionKey = (name) => (name.match(/\d+/g) || []).map((n) => n.padStart(4,
 /**
  * QGIS and OSGeo4W installs on this machine, newest first: QGIS ships PDAL and untwine, so a user who has QGIS has
  * both tools already. Windows layout: `C:\Program Files\QGIS <version>` and `C:\OSGeo4W*`, each an OSGeo4W tree
- * (`bin`, `apps/qgis`, `share`).
+ * (`bin`, `apps/qgis`, `share`). macOS: the `Contents/MacOS` of each `/Applications/QGIS*.app`. Linux: the folders a
+ * distribution's QGIS package keeps its helper programs in (`pdal` itself is a package of its own, on PATH).
  */
 export function qgisRoots(env = process.env) {
-  if (!isWin) return [];
+  if (process.platform === 'darwin') {
+    let apps = []; try { apps = fs.readdirSync('/Applications').filter((n) => /^QGIS.*\.app$/i.test(n)); } catch { /* unreadable */ }
+    apps.sort((a, b) => (versionKey(b) < versionKey(a) ? -1 : 1));
+    return apps.map((n) => path.join('/Applications', n, 'Contents', 'MacOS'));
+  }
+  if (!isWin) return ['/usr/lib/qgis', '/usr/libexec/qgis', '/usr/lib64/qgis', `/usr/lib/${process.arch === 'arm64' ? 'aarch64' : 'x86_64'}-linux-gnu/qgis`].filter((d) => fs.existsSync(d));
   const roots = [];
   for (const base of [env.ProgramFiles, env['ProgramFiles(x86)'], env.ProgramW6432].filter(Boolean)) {
     let names = []; try { names = fs.readdirSync(base); } catch { /* no such folder */ }
@@ -166,6 +173,7 @@ export function qgisRoots(env = process.env) {
 
 // An executable inside a QGIS / OSGeo4W tree needs that tree's DLLs and data: its `bin` on PATH, PROJ and GDAL data.
 function osgeoEnv(root) {
+  if (!isWin) return undefined;      // a macOS bundle and a Linux package find their own libraries
   const share = path.join(root, 'share');
   return { PATH: [path.join(root, 'bin'), path.join(root, 'apps', 'qgis', 'bin'), process.env.PATH || process.env.Path || ''].join(path.delimiter),
            PROJ_DATA: path.join(share, 'proj'), PROJ_LIB: path.join(share, 'proj'), GDAL_DATA: path.join(share, 'gdal') };
@@ -259,7 +267,9 @@ function locateOwn(tool) {
   if (p.cargo) { const file = path.join(installDir(tool), 'bin', exeName(p.cargo.bin)); if (isFile(file)) return { source: 'built', file, version: p.cargo.version }; }
   for (const name of p.path ?? []) { const file = onPath(name); if (file) return { source: 'path', file }; }
   for (const root of p.qgis ? qgisRoots() : []) {
-    for (const rel of p.qgis) { const file = path.join(root, rel); if (isFile(file)) return { source: 'qgis', file, env: osgeoEnv(root), hint: `in ${path.basename(root)}` }; }
+    // the manifest gives the Windows layout; elsewhere the program is `bin/<name>` or `<name>` under the root
+    const rels = isWin ? p.qgis : [...new Set(p.qgis.map((r) => path.basename(r, '.exe')))].flatMap((n) => [path.join('bin', n), n]);
+    for (const rel of rels) { const file = path.join(root, rel); if (isFile(file)) return { source: 'qgis', file, env: osgeoEnv(root), hint: `in ${isWin ? path.basename(root) : root}` }; }
   }
   if (p.pixi) { const file = path.join(os.homedir(), '.pixi', 'bin', exeName(p.pixi)); if (isFile(file)) return { source: 'pixi', file }; }
   return null;
@@ -338,8 +348,34 @@ export function unzip(buf) {
 }
 
 /**
+ * The entries of a tar archive (what macOS and Linux releases are packed as): files with their mode, and symbolic
+ * links. Names longer than 100 bytes come three ways (the ustar prefix, a GNU `L` entry, a pax `path` record): all
+ * are read. Other entry kinds (folders, hard links, devices) are left out: folders are made as files need them.
+ * @returns {{name:string, data?:Buffer, mode?:number, link?:string}[]}
+ */
+export function untar(buf) {
+  const out = [];
+  const str = (a, b) => { const s = buf.subarray(a, b), z = s.indexOf(0); return s.subarray(0, z < 0 ? s.length : z).toString('utf8'); };
+  let p = 0, long = null;
+  while (p + 512 <= buf.length && buf[p] !== 0) {
+    const h = p, size = parseInt(str(h + 124, h + 136).trim() || '0', 8), type = buf[h + 156] ? String.fromCharCode(buf[h + 156]) : '0';
+    if (!Number.isFinite(size)) throw new Error('not a tar archive this package reads');
+    const data = buf.subarray(h + 512, h + 512 + size);
+    p = h + 512 + Math.ceil(size / 512) * 512;
+    if (type === 'L') { long = data.toString('utf8').replace(/\0[\s\S]*$/, ''); continue; }
+    if (type === 'x') { const m = /(?:^|\n)\d+ path=([^\n]*)\n/.exec(data.toString('utf8')); if (m) long = m[1]; continue; }
+    if (type === 'g') continue;
+    const prefix = str(h + 345, h + 500), name = (long ?? (prefix ? `${prefix}/` : '') + str(h, h + 100)).replace(/^\.\//, '');
+    long = null;
+    if (type === '0' || type === '7') out.push({ name, data, mode: parseInt(str(h + 100, h + 108).trim() || '644', 8) & 0o777 });
+    else if (type === '2') out.push({ name, link: str(h + 157, h + 257) });
+  }
+  return out;
+}
+
+/**
  * One release asset → `dir`: downloaded to a file beside it while its SHA-256 is computed, compared with the pinned
- * one, then unpacked (a zip) or put in place (a program that is the asset itself). `dir` is written under a temporary
+ * one, then unpacked (a zip or a gzipped tar) or put in place (a program that is the asset itself). `dir` is written under a temporary
  * name and renamed at the end, so an interrupted install leaves nothing that looks installed.
  */
 async function fetchAsset({ name, version, dl, dir, log, fetch: fetch_ = fetch }) {
@@ -366,19 +402,30 @@ async function fetchAsset({ name, version, dl, dir, log, fetch: fetch_ = fetch }
     if (dl.archive === 'file') {
       await fsp.mkdir(tmp, { recursive: true });
       await fsp.rename(part, path.join(tmp, dl.exe));
+      if (!isWin) await fsp.chmod(path.join(tmp, dl.exe), 0o755).catch(() => {});
     } else {
+      const tar = /\.(tar\.gz|tgz)$/i.test(new URL(dl.url).pathname);
       // some archives made on Windows name their entries with backslashes (Nexus): the same path either way
-      const files = Object.fromEntries(Object.entries(unzip(await fsp.readFile(part))).map(([n, b]) => [n.replace(/\\/g, '/'), b]).filter(([n]) => !n.endsWith('/')));
-      const names = Object.keys(files);
-      // A release zip often wraps everything in one folder: drop it, so that the executable is where the manifest says.
+      const entries = tar ? untar(zlib.gunzipSync(await fsp.readFile(part)))
+        : Object.entries(unzip(await fsp.readFile(part))).map(([n, data]) => ({ name: n.replace(/\\/g, '/'), data })).filter((e) => !e.name.endsWith('/'));
+      if (!entries.length) throw new Error('the archive is empty');
+      const names = entries.map((e) => e.name);
+      // A release archive often wraps everything in one folder: drop it, so that the executable is where the manifest says.
       const top = names[0].split('/')[0], wrapped = names.every((n) => n.startsWith(top + '/'));
-      for (const n of names) {
-        const rel = wrapped ? n.slice(top.length + 1) : n;
+      for (const e of entries) {
+        const n = e.name, rel = wrapped ? n.slice(top.length + 1) : n;
         if (!rel || rel.split('/').includes('..') || path.isAbsolute(rel)) throw new Error(`unsafe path in the archive: ${n}`);
         const dest = path.join(tmp, rel);
         await fsp.mkdir(path.dirname(dest), { recursive: true });
-        await fsp.writeFile(dest, files[n]);
-        if (!isWin) await fsp.chmod(dest, 0o755).catch(() => {});
+        if (e.link !== undefined) {
+          // a link stays inside the install folder, or is left out (a Windows account may not make links either)
+          const to = path.resolve(path.dirname(dest), e.link);
+          if (!path.isAbsolute(e.link) && (to + path.sep).startsWith(tmp + path.sep)) await fsp.symlink(e.link, dest).catch(() => {});
+          continue;
+        }
+        await fsp.writeFile(dest, e.data);
+        // a zip made on Windows carries no modes: everything runnable, as before; a tar says which files are programs
+        if (!isWin) await fsp.chmod(dest, e.mode ?? 0o755).catch(() => {});
       }
       if (!isFile(path.join(tmp, dl.exe))) throw new Error(`${dl.exe} is not in the archive (${names.slice(0, 5).join(', ')}…)`);
       count = names.length;
@@ -590,7 +637,7 @@ export function planRun(id, input, outDir, given = {}, found = detectTool(id)) {
 const quote = (a) => (/[\s"]/.test(a) ? `"${a.replaceAll('"', '\\"')}"` : a);
 export const commandLine = (cmd) => cmd.map(quote).join(' ');
 /** A step as one line: its command, or the file operation this package does itself. */
-export const stepLine = (step) => (step.cmd ? commandLine(step.cmd) : step.copy ? `copy ${commandLine(step.copy)}` : `move ${commandLine(step.move)}`);
+export const stepLine = (step) => (step.cmd ? commandLine(step.cmd) : step.copy ? `copy ${commandLine(step.copy)}` : step.write ? `write ${commandLine([step.write[0]])}` : `move ${commandLine(step.move)}`);
 
 /**
  * Run a tool on an input.
@@ -612,6 +659,7 @@ export async function runTool(id, input, outDir, given = {}, o = {}) {
       log(`[${i + 1}/${plan.steps.length}] ${step.label}`);
       log(`$ ${stepLine(step)}`);
       if (step.copy) { await fsp.copyFile(step.copy[0], step.copy[1]); continue; }
+      if (step.write) { await fsp.writeFile(step.write[0], step.write[1]); continue; }
       if (step.move) {
         if (!fs.existsSync(step.move[0])) throw new Error(`${plan.tool.name} did not write ${step.move[0]}`);
         await fsp.rename(step.move[0], step.move[1]).catch(async () => { await fsp.copyFile(step.move[0], step.move[1]); await fsp.rm(step.move[0], { force: true }); });

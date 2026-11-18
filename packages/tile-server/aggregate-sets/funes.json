@@ -1,0 +1,25 @@
+{
+  "label": "funes.world — Gaussian splats of built heritage (streamed SOG, via /stream)",
+  "provider": "funes.world",
+  "attribution": "© funes.world and its contributors, CC BY-NC 4.0",
+  "source": "https://funes.world — an archive of photogrammetry of human-made places (2,432 entities in November 2026). Most are single-file meshes; the ones re-made as Gaussian splats are published as streamed SOG (lod-meta.json, written by splat-transform) on cdn.funes.world. Entries are added by hand: the site's robots.txt disallows /api/, the only place that names a model's files, so the catalogue is not crawled.",
+  "note": "CC BY-NC 4.0 on every entry: the set as a whole is non-commercial too. Scenes are in a local frame: each is placed at its entity's coordinates, Y-up as read off the data; heading and scale are not known, so a scene sits at its site but is not aligned to the imagery.",
+  "built": "2026-11-19",
+  "entries": [
+    {
+      "format": "sog",
+      "name": "Pompeii",
+      "project": "funes.world",
+      "scene": "Pompeii, Italy",
+      "country": "ITA",
+      "date": "2025-08-19",
+      "licence": "CC BY-NC",
+      "author": "Fengze Cao, Yixuan Xie",
+      "page": "https://funes.world/entities/pompeii",
+      "lon": 14.4886761,
+      "lat": 40.7513570697598,
+      "url": "https://cdn.funes.world/model3d-lod_cf5c57a1-fd58-4b93-858d-d9e8778bd54a/lod-meta.json",
+      "params": { "up": "y" }
+    }
+  ]
+}

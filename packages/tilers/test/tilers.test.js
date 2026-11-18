@@ -8,7 +8,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import zlib from 'node:zlib';
-import { TOOLS, RUNTIMES, RUST_BUILD, toolById, listTools, toolsFor, describeInput, parseDb, sniffPly, resolveOptions, planRun, unzip, installTool, detectTool, detectRuntime, commandLine, stepLine } from '../index.js';
+import { TOOLS, RUNTIMES, RUST_BUILD, toolById, listTools, toolsFor, describeInput, parseDb, sniffPly, resolveOptions, planRun, unzip, untar, installTool, detectTool, detectRuntime, commandLine, stepLine } from '../index.js';
 
 const found = (exe = ['tool.exe']) => ({ status: 'ready', source: 'path', exe });
 const tmp = () => fs.mkdtempSync(path.join(os.tmpdir(), 'tilers-test-'));
@@ -38,7 +38,7 @@ test('the manifest: every tool says what it takes, what it writes, how it is del
     assert.ok(t.name && t.summary && t.licence && /^https:\/\//.test(t.homepage), t.id);
     assert.ok(t.inputs.length && t.output.format && t.output.label, t.id);
     assert.ok(['pointcloud', 'mesh', 'splat'].includes(t.kind), t.id);
-    assert.ok(['copc', 'potree', 'sog', 'rad', 'nexus', 'package', '3dtiles'].includes(t.output.format), `${t.id}: an output this repo opens`);
+    assert.ok(['copc', 'potree', 'vpc', 'sog', 'rad', 'nexus', 'package', '3dtiles'].includes(t.output.format), `${t.id}: an output this repo opens`);
     assert.ok(['bundled', 'download', 'uv', 'cargo', 'detect'].includes(t.delivery));
     assert.equal(t.inputs.includes('ply'), !!t.ply, `${t.id}: a tool that takes PLY says which kind`);
     for (const o of t.options) {
@@ -53,6 +53,15 @@ test('the manifest: every tool says what it takes, what it writes, how it is del
     if (key === 'version') continue;
     assert.match(dl.url, /^https:\/\/github\.com\/[^/]+\/[^/]+\/releases\/download\//, 'a release asset of the project itself');
     assert.match(dl.sha256, /^[0-9a-f]{64}$/); assert.ok(dl.bytes > 0 && dl.exe);
+    assert.match(key, /^(win32-x64|linux-x64|linux-arm64|darwin-arm64|darwin-x64)$/, 'a platform Node names');
+    assert.equal(/\.exe$/.test(dl.exe), key === 'win32-x64' && !/\.jar$/.test(dl.exe), `${dl.url}: only a Windows program ends in .exe`);
+    assert.ok(dl.archive === 'file' || /\.(zip|tar\.gz|tgz)$/.test(dl.url), `${dl.url}: an archive this package unpacks`);
+  }
+  // what runs everywhere: the runtimes, and every tool whose project publishes a build for Linux
+  for (const key of ['linux-x64', 'linux-arm64', 'darwin-arm64', 'darwin-x64']) {
+    for (const r of Object.values(RUNTIMES)) assert.ok(r.download[key], `${r.id} for ${key}`);
+    assert.ok(RUST_BUILD[key]?.host && !RUST_BUILD[key].libsFrom, `a Rust toolchain for ${key}`);
+    for (const id of ['point-tiler', 'obj2tiles', 'mago-3d-tiler', 'pg2b3dm']) assert.ok(toolById(id).provide.download[key], `${id} for ${key}`);
   }
   for (const t of TOOLS) if (t.provide.needs) assert.ok(RUNTIMES[t.provide.needs.runtime] && t.provide.command, `${t.id}: its runtime is declared`);
   for (const t of TOOLS) if (t.provide.uv) assert.match(t.provide.uv.spec, /==\d/, `${t.id}: a pinned version`);
@@ -96,7 +105,7 @@ test('which tools take a file or a folder', () => {
   fs.mkdirSync(scans); fs.writeFileSync(path.join(scans, 'a.las'), ''); fs.writeFileSync(path.join(scans, 'b.laz'), '');
   fs.mkdirSync(path.join(osgb, 'Data', 'Tile_1'), { recursive: true }); fs.writeFileSync(path.join(osgb, 'metadata.xml'), ''); fs.writeFileSync(path.join(osgb, 'Data', 'Tile_1', 'Tile_1.osgb'), '');
   assert.deepEqual(describeInput(scans).exts, ['las', 'laz']);
-  assert.deepEqual(toolsFor(scans), ['untwine', 'potreeconverter', 'potreeconverter1', 'gocesiumtiler', 'rusty-tiles-points', 'mago-3d-tiler'], 'the tools that take a folder');
+  assert.deepEqual(toolsFor(scans), ['untwine', 'pdal-wrench-vpc', 'potreeconverter', 'potreeconverter1', 'gocesiumtiler', 'rusty-tiles-points', 'mago-3d-tiler'], 'the tools that take a folder');
   assert.deepEqual(toolsFor(osgb), ['fanvanzh-3dtiles']);
   // a folder is not a point cloud because it holds a text file
   const notes = path.join(dir, 'notes'); fs.mkdirSync(notes); fs.writeFileSync(path.join(notes, 'readme.txt'), '');
@@ -188,10 +197,10 @@ test('commands: each tool is called the way it documents', () => {
   const rp = planRun('rusty-tiles-points', las, out, { sourceCrs: 'EPSG:32631' }, exe);
   assert.deepEqual(rp.steps[0].cmd, ['t.exe', 'point-cloud', '--force', '--input', las, '--output', path.join(out, 'scan one.3tz'), '--sourceCrs', 'EPSG:32631', '--maxPoints', '8192', '--heightOffset', '0']);
   assert.throws(() => planRun('rusty-tiles-points', las, out, {}, exe), /sourceCrs: .* needs it/);
-  const nx = planRun('nexus', obj, out, { compress: true, colors: true }, found(['C:\\tools\\nxsbuild.exe']));
+  const nx = planRun('nexus', obj, out, { compress: true, colors: true }, found([path.join(os.tmpdir(), 'tools', 'nxsbuild.exe')]));
   assert.deepEqual(nx.steps.map((x) => x.cmd), [
-    ['C:\\tools\\nxsbuild.exe', obj, '-o', path.join(out, '.tiler-tmp', 'model.nxs'), '-f', '32768', '-t', '4096', '-s', '0.5', '-r', '2000', '-C'],
-    [path.join('C:\\tools', 'nxscompress.exe'), path.join(out, '.tiler-tmp', 'model.nxs'), '-o', path.join(out, 'model.nxz')],
+    [path.join(os.tmpdir(), 'tools', 'nxsbuild.exe'), obj, '-o', path.join(out, '.tiler-tmp', 'model.nxs'), '-f', '32768', '-t', '4096', '-s', '0.5', '-r', '2000', '-C'],
+    [path.join(os.tmpdir(), 'tools', 'nxscompress.exe'), path.join(out, '.tiler-tmp', 'model.nxs'), '-o', path.join(out, 'model.nxz')],
   ]);
   assert.deepEqual([nx.output.format, path.basename(nx.output.path)], ['nexus', 'model.nxz']);
   assert.equal(path.basename(planRun('nexus', obj, out, {}, exe).output.path), 'model.nxs');
@@ -270,7 +279,7 @@ test('an archive whose entries are named with backslashes unpacks to the same pa
   const tool = toolById('nexus'), key = `${process.platform}-${process.arch}`, real = tool.provide.download[key];
   if (!real) return;
   const archive = zip({ 'nexus_portable\\nxsbuild.exe': 'MZ build', 'nexus_portable\\nxscompress.exe': 'MZ compress', 'nexus_portable\\plugins\\a.dll': 'dll' });
-  tool.provide.download[key] = { ...real, sha256: createHash('sha256').update(archive).digest('hex'), bytes: archive.length };
+  tool.provide.download[key] = { ...real, url: 'https://github.com/cnr-isti-vclab/nexus/releases/download/v1/nexus.zip', exe: 'nxsbuild.exe', sha256: createHash('sha256').update(archive).digest('hex'), bytes: archive.length };
   t.after(() => { tool.provide.download[key] = real; });
   const r = await installTool('nexus', { fetch: async () => new Response(archive) });
   assert.equal(fs.readFileSync(r.exe, 'utf8'), 'MZ build');
@@ -374,6 +383,59 @@ test('a matching download is unpacked where detection finds it, without its wrap
   assert.deepEqual([d.status, d.source, d.exe[0]], ['ready', 'downloaded', r.exe]);
   assert.equal((await installTool('potreeconverter', { fetch: async () => { throw new Error('not fetched twice'); } })).downloaded, false);
   assert.deepEqual(fs.readdirSync(path.join(dir, 'potreeconverter')), [tool.provide.download.version], 'no temporary folder left');
+});
+
+/** A tar of `entries` ({ name, text?, link?, mode? }), ustar headers; a name over 100 bytes goes in a GNU `L` entry. */
+function tar(entries) {
+  const blocks = [];
+  const header = (name, size, type, mode, link = '') => {
+    const h = Buffer.alloc(512);
+    h.write(name.slice(0, 100), 0); h.write(mode.toString(8).padStart(7, '0'), 100); h.write('0000000', 108); h.write('0000000', 116);
+    h.write(size.toString(8).padStart(11, '0'), 124); h.write('00000000000', 136); h.fill(' ', 148, 156); h.write(type, 156); h.write(link, 157); h.write('ustar', 257);
+    let sum = 0; for (const b of h) sum += b;
+    h.write(sum.toString(8).padStart(6, '0') + '\0 ', 148);
+    return h;
+  };
+  const body = (buf) => Buffer.concat([buf, Buffer.alloc((512 - (buf.length % 512)) % 512)]);
+  for (const e of entries) {
+    if (e.name.length > 100) { const n = Buffer.from(e.name + '\0'); blocks.push(header('././@LongLink', n.length, 'L', 0o644), body(n)); }
+    if (e.link !== undefined) blocks.push(header(e.name, 0, '2', 0o777, e.link));
+    else { const d = Buffer.from(e.text); blocks.push(header(e.name, d.length, '0', e.mode ?? 0o644), body(d)); }
+  }
+  return Buffer.concat([...blocks, Buffer.alloc(1024)]);
+}
+
+test('untar: files with their mode, links, long names; a .tar.gz asset is unpacked like a zip', async (t) => {
+  const long = `top/${'d'.repeat(60)}/${'e'.repeat(60)}/file.txt`;
+  const archive = tar([{ name: 'top/bin/tool', text: '#!/bin/sh', mode: 0o755 }, { name: 'top/LICENSE', text: 'MIT' }, { name: 'top/legal', link: 'LICENSE' }, { name: long, text: 'deep' }, { name: 'top/out', link: '../../outside' }]);
+  const entries = untar(archive);
+  assert.deepEqual(entries.map((e) => e.name), ['top/bin/tool', 'top/LICENSE', 'top/legal', long, 'top/out']);
+  assert.deepEqual([entries[0].mode, entries[1].mode, entries[2].link, entries[3].data.toString()], [0o755, 0o644, 'LICENSE', 'deep']);
+  // as a release asset: gzipped, its wrapping folder dropped, a link that leaves the folder left out
+  const dir = tmp(); process.env.TILED_TOOLS_DIR = dir;
+  const tool = toolById('gocesiumtiler'), key = `${process.platform}-${process.arch}`, real = tool.provide.download[key];
+  if (!real) return;
+  const gz = zlib.gzipSync(archive), exe = process.platform === 'win32' ? 'bin/tool' : 'bin/tool';
+  tool.provide.download[key] = { url: 'https://github.com/x/y/releases/download/v1/tool-linux.tar.gz', sha256: createHash('sha256').update(gz).digest('hex'), bytes: gz.length, exe };
+  t.after(() => { tool.provide.download[key] = real; });
+  const r = await installTool('gocesiumtiler', { fetch: async () => new Response(gz) });
+  assert.equal(fs.readFileSync(r.exe, 'utf8'), '#!/bin/sh');
+  assert.equal(fs.readFileSync(path.join(r.dir, 'd'.repeat(60), 'e'.repeat(60), 'file.txt'), 'utf8'), 'deep');
+  assert.equal(fs.existsSync(path.join(r.dir, 'out')), false, 'a link out of the folder is not made');
+  if (process.platform !== 'win32') { assert.ok(fs.statSync(r.exe).mode & 0o100, 'the program can be run'); assert.equal(fs.readlinkSync(path.join(r.dir, 'legal')), 'LICENSE'); }
+});
+
+test('pdal_wrench build_vpc: a folder of files becomes a list, then one .vpc', () => {
+  const dir = tmp(), tiles = path.join(dir, 'tiles'), out = path.join(dir, 'out');
+  fs.mkdirSync(tiles); for (const f of ['b.copc.laz', 'a.las', 'notes.txt']) fs.writeFileSync(path.join(tiles, f), '');
+  assert.deepEqual(toolsFor(tiles).includes('pdal-wrench-vpc'), true);
+  const p = planRun('pdal-wrench-vpc', tiles, out, { boundary: true }, found(['pdal_wrench']));
+  const list = path.join(out, '.tiler-tmp', 'files.txt');
+  assert.deepEqual(p.steps[0].write, [list, [path.join(tiles, 'a.las'), path.join(tiles, 'b.copc.laz')].join('\n') + '\n']);
+  assert.deepEqual(p.steps[1].cmd, ['pdal_wrench', 'build_vpc', `--output=${path.join(out, 'tiles.vpc')}`, `--input-file-list=${list}`, '--boundary']);
+  assert.equal(stepLine(p.steps[0]), `write ${commandLine([list])}`);
+  assert.deepEqual([p.output.format, p.output.path], ['vpc', path.join(out, 'tiles.vpc')]);
+  assert.throws(() => planRun('pdal-wrench-vpc', path.join(tiles, 'a.las'), out, {}, found()), /takes a folder/);
 });
 
 test('unzip: files only, deflated or stored; an archive that reaches outside its folder is refused', async () => {

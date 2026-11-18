@@ -32,6 +32,9 @@
  * template and the rows of cells that exist, instead of one STAC item per tile. Same route, same mosaic.
  */
 import { gunzipSync } from 'node:zlib';
+import path from 'node:path';
+import { pathToFileURL } from 'node:url';
+import { localSourcesAllowed } from '../core/source-fetch.js';
 import { fetchSource, fetchSourceRange, crsToEcef, epsgOfCrs, ensureCrs, llhToEcef } from '../core/index.js';
 import { isGridVpc, parseGridVpc } from './vpc-grid.js';
 
@@ -40,6 +43,9 @@ const CURVED_MIN_EXTENT = 20000;
 const EARTH_R = 6378137;
 
 const isHttp = (s) => /^https?:\/\//i.test(s);
+// A .vpc on this machine (a `file:` URL): read only where the server reads its own disk at all (the desktop app,
+// TILED_LOCAL_SOURCES=1), and only then may its items be files of this machine too.
+const isLocal = (s) => /^file:\/\//i.test(s) && localSourcesAllowed();
 const pathOf = (href) => String(href).split(/[?#]/)[0];
 
 // ── hrefs ────────────────────────────────────────────────────────────────────────────────────────
@@ -47,15 +53,18 @@ const pathOf = (href) => String(href).split(/[?#]/)[0];
 /**
  * An asset href → an absolute http(s) URL, or `{ reason }` when this server cannot read it. Relative
  * hrefs resolve against the .vpc's own URL (PDAL writes `./tile.copc.laz`, with either slash). A drive
- * letter, a UNC path, `file://`, `s3://` … name a file on the machine that wrote the VPC.
+ * letter, a UNC path, `file://`, `s3://` … name a file on the machine that wrote the VPC: read only when the
+ * .vpc itself is a file of this machine (`base` is a `file:` URL this server may read), never for a remote one.
  */
 export function resolveHref(href, base) {
   if (typeof href !== 'string' || !href.trim()) return { reason: 'no data href' };
   const h = href.trim();
   if (isHttp(h)) return { url: h };
-  if (/^[a-z]:[\\/]/i.test(h) || h.startsWith('\\\\')) return { reason: 'local path' };
+  const here = !!base && isLocal(base);
+  if (/^[a-z]:[\\/]/i.test(h) || h.startsWith('\\\\') || (here && h.startsWith('/'))) return here ? { url: pathToFileURL(h).href } : { reason: 'local path' };
+  if (/^file:\/\//i.test(h)) return here ? { url: h } : { reason: 'local path' };
   if (/^[a-z][a-z0-9+.-]*:\/\//i.test(h)) return { reason: `unsupported scheme (${h.slice(0, h.indexOf(':'))})` };
-  if (!base || !isHttp(base)) return { reason: 'local path' };
+  if (!base || !(isHttp(base) || here)) return { reason: 'local path' };
   try { return { url: new URL(h.replace(/\\/g, '/'), base).href }; }
   catch { return { reason: 'unreadable href' }; }
 }
@@ -539,7 +548,9 @@ export function parseVpcBytes(bytes, url = '') {
  * named `.laz`, the 589-byte COPC check.
  */
 export function vpcSet(url, { ttlMs = DEFAULT_TTL_MS, sniff = 'auto' } = {}) {
-  if (!isHttp(url)) return Promise.reject(Object.assign(new Error('?vpc= / ?url= needs an absolute http(s) URL of a .vpc file'), { status: 400 }));
+  // a path of this machine (what a tiler run hands over) is read as a `file:` URL, where the server reads its disk
+  if (typeof url === 'string' && path.isAbsolute(url) && !/^[a-z][a-z0-9+.-]*:\/\//i.test(url)) url = pathToFileURL(url).href;
+  if (!isHttp(url) && !isLocal(url)) return Promise.reject(Object.assign(new Error('?vpc= / ?url= needs an absolute http(s) URL of a .vpc file (or, on a server that reads its own disk, a path)'), { status: 400 }));
   const key = `${sniff} ${url}`;
   const hit = cache.get(key);
   if (hit && Date.now() - hit.at < (hit.failed ? Math.min(ttlMs, 60_000) : ttlMs)) return hit.promise;

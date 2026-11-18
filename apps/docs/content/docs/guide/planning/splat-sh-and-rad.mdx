@@ -59,7 +59,9 @@ left out: its host now answers 403, and it was removed from the samples.
   decoded too), once per chunk; cutting further tiles from a decoded chunk costs about the same as without. A decoded chunk with harmonics holds up to 45 more columns,
   so the server keeps a quarter as many of them (6 by default).
 - Reproduce with `node scripts/measure-splat-sh.mjs <format> <url>` against a running tile server.
-- **Left:** LCC (no *Quality* scene at hand to check the unpacking against: the public sample is *Portable*), the
+- **Parked (2026-11-19):** LCC version 1 harmonics, until a *Quality* scene is at hand to check the unpacking
+  against (the public samples are *Portable*, without a `Shcoef.bin`).
+- **Left:** the
   look against each format's own viewer by eye, frame time in the viewer, CesiumJS and Cesium for Unreal. The
   offline `--sh` flag was run on the small streamed-SOG test scene only (its tiles declare the coefficients); for
   RAD and LCC2 it is wired and not run.

@@ -264,8 +264,8 @@ export function TilerCard({ app, onStream }: { app: AppModel; onStream: () => vo
     // A file on disk streams as a URL does: the server reads it by ranges, and nothing is converted ahead (cache=none).
     // A .3tz archive has no live adapter: it goes through the converter-backed route, unpacked once to the local cache.
     // the formats the dataset form lists by name; the others (a .3tz archive, a Nexus file) are found by their extension
-    const live = ['copc', 'potree', 'sog', 'rad', 'nexus'].includes(result.format);
-    patchForm({ src: result.output, format: ['copc', 'potree', 'sog', 'rad'].includes(result.format) ? result.format : '', cache: live ? 'none' : 'full' });
+    const live = ['copc', 'potree', 'vpc', 'sog', 'rad', 'nexus'].includes(result.format);
+    patchForm({ src: result.output, format: ['copc', 'potree', 'vpc', 'sog', 'rad'].includes(result.format) ? result.format : '', cache: live ? 'none' : 'full' });
     onStream();
     app.say(live ? `Now streaming ${result.output}: tiles are built from the file as they are asked for.` : `Now streaming ${result.output}. The first load converts it to the local cache.`, 'ok');
   }

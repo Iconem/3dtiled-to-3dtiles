@@ -69,7 +69,7 @@ try {
     if (flags.has('install') && detectTool(id).status !== 'ready') await installTool(id, { log: (l) => console.log(l) });
     if (flags.has('dry-run')) {
       const plan = planRun(id, input, outDir, opts);
-      out({ steps: plan.steps.map((s) => s.cmd ?? s.copy ?? s.move), output: plan.output, options: plan.options }, plan.steps.map((s) => `$ ${stepLine(s)}`).join('\n') + `\n→ ${plan.output.path} (${plan.output.format})`);
+      out({ steps: plan.steps.map((s) => s.cmd ?? s.copy ?? s.move ?? ['write', s.write[0]]), output: plan.output, options: plan.options }, plan.steps.map((s) => `$ ${stepLine(s)}`).join('\n') + `\n→ ${plan.output.path} (${plan.output.format})`);
     } else {
       const r = await runTool(id, input, outDir, opts, { overwrite: flags.has('overwrite') });
       console.log(`Done in ${r.seconds < 60 ? r.seconds.toFixed(1) + ' s' : (r.seconds / 60).toFixed(1) + ' min'} → ${r.output}`);

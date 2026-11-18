@@ -3,10 +3,53 @@ title: "One-stop tiler"
 description: "The desktop app's Tile raw input tab: give it raw, untiled input and it runs a third-party tiler, then opens the result. Phases 1 to 3 are built (twenty tools, Windows); the plan for the rest."
 ---
 
-Plan of 2026-11-16. **Phases 1 to 3 were built the same day** (see the two *Result* sections); phase 4, macOS,
-Linux and the server variant, is not started. The roadmap item is on the [future work](/docs/guide/todo-future-work)
+Plan of 2026-11-16. **Phases 1 to 3 were built the same day** (see the *Result* sections). Of phase 4, **Linux and
+macOS** were added on 2026-11-19 (the first *Result* section below); the server variant is not started. The roadmap item is on the [future work](/docs/guide/todo-future-work)
 page; the tools are surveyed on [existing tilers](/docs/guide/existing-tilers). How to use it:
 [desktop app](/docs/guide/desktop-tile-raw-input), [CLI](/docs/guide/cli-usage#tile-raw-input-with-a-third-party-tiler).
+
+## Result: Linux and macOS, and `pdal_wrench build_vpc` (2026-11-19)
+
+Twenty-one tools now, and the downloads are no longer Windows only.
+
+**Platforms.** Each download entry is per platform (`win32-x64`, `linux-x64`, `linux-arm64`, `darwin-arm64`,
+`darwin-x64`), with its own pinned SHA-256. What upstream publishes:
+
+| Tool | Linux x64 / arm64 | macOS arm64 / x64 |
+|---|---|---|
+| Java runtime (Temurin 25), uv | yes | yes |
+| gocesiumtiler 3.2 | yes | arm64 only |
+| rusty-tiles 0.4.1 | yes | arm64 only |
+| point-tiler 0.0.12 | yes (needs glibc 2.38: Ubuntu 24.04, not Debian 12) | yes |
+| Obj2Tiles 1.10.2, pg2b3dm 2.28, mago 3DTiler 1.17 (a jar) | yes | yes |
+| Nexus 2025.05 | yes (needs the system's `libGL.so.1`) | no build of `nxsbuild` |
+| py3dtiles (through uv), the two bundled splat tools | yes | yes |
+| PotreeConverter 2 and 1.7, fanvanzh/3dtiles | no release: `PATH` or its environment variable | the same |
+| PDAL, untwine, `pdal_wrench` | found on `PATH`, or beside a distribution's QGIS (`/usr/lib/qgis`…) | found on `PATH`, or in `/Applications/QGIS*.app` |
+| Spark `build-lod` | built from source: needs a C compiler (`cc`) | the same (Xcode's command line tools) |
+
+Releases for macOS and Linux are `.tar.gz` archives: the package unpacks them itself (files with their modes,
+symbolic links kept inside the install folder, long names), as it does zips. Downloaded tools go to
+`~/Library/Application Support/3D Tiled/tools` on macOS and `~/.cache/3dtiled/tools` on Linux.
+
+**Tried, on Linux x64** (a `node:22-bookworm` container, each tool installed by the package, then run on the tiny
+samples): gocesiumtiler, rusty-tiles (points and mesh), Obj2Tiles, py3dtiles with its fetched uv and Python, mago
+3DTiler with its fetched Java runtime, Nexus once `libgl1` was installed. The package's tests pass there too.
+
+**Not tried:**
+
+- **macOS, and arm64 on either system**: nothing was run. The entries are the checksums GitHub publishes for each
+  asset, and the path of the program inside each archive was read off the archive itself. An unsigned binary may
+  need allowing in *Privacy & Security* the first time.
+- pg2b3dm (it needs a database), the QGIS lookups on macOS and Linux, and a Rust toolchain fetched for a build.
+- splat-transform's levels of detail need a GPU: in a container without one, the run stops with *Unable to
+  retrieve a WebGPU adapter*, also with *Device: cpu*.
+
+**`pdal_wrench build_vpc`** (QGIS ships it): a folder of LAS, LAZ or COPC files becomes one virtual point cloud
+(`.vpc`), an index of the files and not a copy. Tried on two COPC tiles cut from the sample cloud: the `.vpc` is
+written in 0.1 s, and *Stream it* opens both tiles as one dataset. For that the tile server now reads a `.vpc`
+that is a file of this machine, and the files it names, where it reads local files at all (the desktop app; never
+for a remote `.vpc`). LAS and LAZ files are indexed too, but only COPC files stream.
 
 ## Result: every input each tool reads, pg2b3dm, and a Rust toolchain fetched when needed (2026-11-17)
 
@@ -89,7 +132,8 @@ through the command line only, not from the form.
 
 **Weighed and not added** (the [table of other tilers](/docs/guide/existing-tilers#other-open-source-tilers-by-stars)
 has each one's reason): py3dtilers (py3dtiles is the maintained one, and is in), gltf-to-3d-tiles, ept-tools,
-schwarzwald, potree23dtiles, the terrain builders. `pdal_wrench build_vpc` is the one candidate left.
+schwarzwald, potree23dtiles, the terrain builders. `pdal_wrench build_vpc`, the one candidate left then, was added
+on 2026-11-19.
 
 **The tab of its own, in a built app** (a local build, 2026.11.17, later the same day): a LAS through PDAL, the two `.ksplat` runs and the `.lcc` run were typed in the tab's own input field and run from it; *Stream it* opened the Build tab on a stream URL that answered 200 each time, and the `.ksplat` and `.lcc` results were displayed in 3DTRjs. The `.lcc` form still shows the level and decimation options, which that input ignores.
 
@@ -240,7 +284,7 @@ Fourteen runs, all twelve tools, on the same tiny inputs:
 
 **Not verified:**
 
-- macOS and Linux: every download entry is Windows'.
+- macOS and Linux: every download entry is Windows' (no longer: see the result of 2026-11-19).
 - Large inputs, and Cancel midway through a long run.
 - E57, PTX, XYZ, CSV, FBX, glTF, CityGML, KML, Shapefile, GeoJSON and GeoPackage inputs: the tools list them, none
   was run. A folder input was run with gocesiumtiler only.
@@ -379,7 +423,8 @@ to allow it. macOS and Linux come after, with the same manifests.
    Obj2Tiles, fanvanzh/3dtiles.
 3. **Runtimes** (**done**): py3dtiles in a private `uv` environment, mago 3DTiler on a Java runtime fetched next
    to it.
-4. **macOS and Linux**, then the server variant (the same manifests, Docker images where they exist).
+4. **macOS and Linux** (**done** for the downloads and lookups, 2026-11-19; macOS itself not run), then the server
+   variant (the same manifests, Docker images where they exist): not started.
 
 ## Open questions
 

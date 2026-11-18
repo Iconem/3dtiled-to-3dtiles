@@ -7,7 +7,9 @@
  * its authors ship it:
  *   bundled   it is a dependency of this repo, run with our own Node (splat-transform)
  *   download  one release asset per platform, fetched from the authors' release page and checked against the
- *             SHA-256 pinned here, so a moved or replaced asset fails loudly. `archive: 'file'` is an asset that is
+ *             SHA-256 pinned here, so a moved or replaced asset fails loudly. One entry per `<platform>-<arch>` of
+ *             Node (win32-x64, linux-x64, linux-arm64, darwin-arm64, darwin-x64), where upstream publishes a build;
+ *             a `.zip`, or a `.tar.gz`/`.tgz` (unpacked by this package: files, folders, symbolic links). `archive: 'file'` is an asset that is
  *             the program itself (an .exe, a .jar) rather than a zip.
  *   needs     a runtime the tool runs on (RUNTIMES below): a Java runtime for a .jar. Looked for on the machine,
  *             else downloaded the same way, next to the tool, never installed system-wide.
@@ -85,6 +87,22 @@ export const RUNTIMES = {
         url: 'https://github.com/adoptium/temurin25-binaries/releases/download/jdk-25.0.5%2B8/OpenJDK25U-jre_x64_windows_hotspot_25.0.5_8.zip',
         sha256: 'da78d54a2fcdbba1e92d5e3f07dd30236f96297891c4a21a781c3f38f5c0beae', bytes: 58589419, exe: 'bin/java.exe',
       },
+      'linux-x64': {
+        url: 'https://github.com/adoptium/temurin25-binaries/releases/download/jdk-25.0.5%2B8/OpenJDK25U-jre_x64_linux_hotspot_25.0.5_8.tar.gz',
+        sha256: '6fac98f0c8202efc3135a9e9e42aa61963ec42d1c5cbb40caf231e7b14a24ef6', bytes: 61736206, exe: 'bin/java',
+      },
+      'linux-arm64': {
+        url: 'https://github.com/adoptium/temurin25-binaries/releases/download/jdk-25.0.5%2B8/OpenJDK25U-jre_aarch64_linux_hotspot_25.0.5_8.tar.gz',
+        sha256: '963931723891302ebb2687178532c3d793d71e2577cd058061c7efb396140a86', bytes: 60517419, exe: 'bin/java',
+      },
+      'darwin-arm64': {
+        url: 'https://github.com/adoptium/temurin25-binaries/releases/download/jdk-25.0.5%2B8/OpenJDK25U-jre_aarch64_mac_hotspot_25.0.5_8.tar.gz',
+        sha256: '72ebd76b502c849e88dea39afae51baf5f82f2b5b1b6389c28ea707b20451bce', bytes: 56298727, exe: 'Contents/Home/bin/java',
+      },
+      'darwin-x64': {
+        url: 'https://github.com/adoptium/temurin25-binaries/releases/download/jdk-25.0.5%2B8/OpenJDK25U-jre_x64_mac_hotspot_25.0.5_8.tar.gz',
+        sha256: '806902c796c670969b7b27df73b8f0fe0924a61bd65083aa53064115e49cab2d', bytes: 42207761, exe: 'Contents/Home/bin/java',
+      },
     },
   },
   uv: {
@@ -95,6 +113,22 @@ export const RUNTIMES = {
       'win32-x64': {
         url: 'https://github.com/astral-sh/uv/releases/download/0.13.8/uv-x86_64-pc-windows-msvc.zip',
         sha256: '529e78a9cec6cd7e3e014f7ecd8bda0c113969d4ed0f2efeedb85c30943325b8', bytes: 15529884, exe: 'uv.exe',
+      },
+      'linux-x64': {
+        url: 'https://github.com/astral-sh/uv/releases/download/0.13.8/uv-x86_64-unknown-linux-gnu.tar.gz',
+        sha256: '5acfd9177cfecf0bf87578f059728215ccc884388988f55f7a65041b57387d91', bytes: 16855069, exe: 'uv',
+      },
+      'linux-arm64': {
+        url: 'https://github.com/astral-sh/uv/releases/download/0.13.8/uv-aarch64-unknown-linux-gnu.tar.gz',
+        sha256: '74f2f5c6024d397481db228db8fc25eed420db192243f88438c118e7e013e585', bytes: 16065638, exe: 'uv',
+      },
+      'darwin-arm64': {
+        url: 'https://github.com/astral-sh/uv/releases/download/0.13.8/uv-aarch64-apple-darwin.tar.gz',
+        sha256: '6b71028a6b904f2ae3340ef52e595512de807d06c0a20eaef2f692581b246558', bytes: 14375545, exe: 'uv',
+      },
+      'darwin-x64': {
+        url: 'https://github.com/astral-sh/uv/releases/download/0.13.8/uv-x86_64-apple-darwin.tar.gz',
+        sha256: 'a04c2ffeac28b2003a2c13caf538ab425fcd7def3e4a41571f4a8fb370a66af3', bytes: 17208261, exe: 'uv',
       },
     },
   },
@@ -115,6 +149,28 @@ export const RUST_BUILD = {
     sha256: '88d8258dcf6ae4f7a80c7d1088e1f36fa7025a1cfd1343731b4ee6f385121fc0', bytes: 13551616, exe: 'rustup-init.exe', archive: 'file',
     host: 'x86_64-pc-windows-gnullvm', libsFrom: 'x86_64-pc-windows-gnu', toolchainBytes: 135264892,
   },
+  // macOS and Linux: the host's own toolchain, which links with the machine's C compiler (`cc`: Xcode's command
+  // line tools, or gcc). Without one the build fails at its link step and says so.
+  'linux-x64': {
+    url: 'https://static.rust-lang.org/rustup/archive/1.28.2/x86_64-unknown-linux-gnu/rustup-init',
+    sha256: '20a06e644b0d9bd2fbdbfd52d42540bdde820ea7df86e92e533c073da0cdd43c', bytes: 20889000, exe: 'rustup-init', archive: 'file',
+    host: 'x86_64-unknown-linux-gnu', toolchainBytes: 110e6,
+  },
+  'linux-arm64': {
+    url: 'https://static.rust-lang.org/rustup/archive/1.28.2/aarch64-unknown-linux-gnu/rustup-init',
+    sha256: 'e3853c5a252fca15252d07cb23a1bdd9377a8c6f3efa01531109281ae47f841c', bytes: 19321944, exe: 'rustup-init', archive: 'file',
+    host: 'aarch64-unknown-linux-gnu', toolchainBytes: 110e6,
+  },
+  'darwin-arm64': {
+    url: 'https://static.rust-lang.org/rustup/archive/1.28.2/aarch64-apple-darwin/rustup-init',
+    sha256: '20ef5516c31b1ac2290084199ba77dbbcaa1406c45c1d978ca68558ef5964ef5', bytes: 11174016, exe: 'rustup-init', archive: 'file',
+    host: 'aarch64-apple-darwin', toolchainBytes: 110e6,
+  },
+  'darwin-x64': {
+    url: 'https://static.rust-lang.org/rustup/archive/1.28.2/x86_64-apple-darwin/rustup-init',
+    sha256: '9c331076f62b4d0edeae63d9d1c9442d5fe39b37b05025ec8d41c5ed35486496', bytes: 12887404, exe: 'rustup-init', archive: 'file',
+    host: 'x86_64-apple-darwin', toolchainBytes: 110e6,
+  },
 };
 
 // gocesiumtiler 3 (`gotiler`) is one binary with two commands, so two tools here share one install.
@@ -125,6 +181,18 @@ const GOTILER = {
     'win32-x64': {
       url: 'https://github.com/mfbonfigli/gocesiumtiler/releases/download/v3.2.0/gotiler-windows-amd64-v3.2.0.zip',
       sha256: 'b8761025f85fe0de35eb1978a1c4f4cd1e49f72bacfcd76b060c5e24dd0f16f2', bytes: 18260085, exe: 'gotiler.exe',
+    },
+    'linux-x64': {
+      url: 'https://github.com/mfbonfigli/gocesiumtiler/releases/download/v3.2.0/gotiler-linux-amd64-v3.2.0.tar.gz',
+      sha256: '662fbe85811a3aa56580077c89ea597654e59f88ac07b149a65f346c4d97771f', bytes: 18735802, exe: 'gotiler',
+    },
+    'linux-arm64': {
+      url: 'https://github.com/mfbonfigli/gocesiumtiler/releases/download/v3.2.0/gotiler-linux-arm64-v3.2.0.tar.gz',
+      sha256: 'a83979c769d06b52754cdedbc53ae52319a54355e0f4f53dd09025e92f6eec9e', bytes: 17309781, exe: 'gotiler',
+    },
+    'darwin-arm64': {
+      url: 'https://github.com/mfbonfigli/gocesiumtiler/releases/download/v3.2.0/gotiler-darwin-arm64-v3.2.0.tar.gz',
+      sha256: '73bd476b34343ddc00d0a40f29d37b61b2a9d2326ea89ff9c83a1bc095af85ae', bytes: 16586146, exe: 'gotiler',
     },
   },
 };
@@ -137,6 +205,18 @@ const RUSTY = {
     'win32-x64': {
       url: 'https://github.com/BenDyson-Arch/rusty-tiles/releases/download/v0.4.1/rusty-tiles-0.4.1-x86_64-pc-windows-msvc.zip',
       sha256: '3fe6c62f017188935d86e38b8011b40a6b76cdebc7d1843f0f25f42abba26233', bytes: 9695576, exe: 'rusty-tiles.exe',
+    },
+    'linux-x64': {
+      url: 'https://github.com/BenDyson-Arch/rusty-tiles/releases/download/v0.4.1/rusty-tiles-0.4.1-x86_64-unknown-linux-gnu.tgz',
+      sha256: 'e834b6e647fe6ca285cd863436257b1c3479ea741dbe42e402df0a6208f79213', bytes: 11073684, exe: 'rusty-tiles',
+    },
+    'linux-arm64': {
+      url: 'https://github.com/BenDyson-Arch/rusty-tiles/releases/download/v0.4.1/rusty-tiles-0.4.1-aarch64-unknown-linux-gnu.tgz',
+      sha256: '18585267f33ae016b4ff45f0f468983387ed1e0dc45a382286dad49172c7e7d8', bytes: 10709480, exe: 'rusty-tiles',
+    },
+    'darwin-arm64': {
+      url: 'https://github.com/BenDyson-Arch/rusty-tiles/releases/download/v0.4.1/rusty-tiles-0.4.1-aarch64-apple-darwin.tgz',
+      sha256: '274e2f283cc0e9758cd9c3a0400eed3a447d45d7609897963c33a85e5296828a', bytes: 10070766, exe: 'rusty-tiles',
     },
   },
 };
@@ -204,6 +284,37 @@ export const TOOLS = [
       if (opt.cube) cmd.push('--cube');
       if (opt.stats) cmd.push('--stats');
       return [{ cmd, label: 'points → COPC' }];
+    },
+  },
+  {
+    id: 'pdal-wrench-vpc',
+    name: 'pdal_wrench build_vpc',
+    kind: 'pointcloud',
+    summary: 'A folder of LAS, LAZ or COPC files to one virtual point cloud (.vpc): an index of the files (extent, CRS, point count of each), not a copy, so it takes seconds. A folder of COPC tiles then opens as one dataset; LAS and LAZ files are indexed too, but only COPC files stream.',
+    homepage: 'https://github.com/PDAL/wrench#build_vpc',
+    licence: 'MIT',
+    inputs: ['las', 'laz'],
+    dir: 'only',
+    dirInputs: ['copc.laz', 'laz', 'las'],
+    output: { format: 'vpc', path: (ctx) => path.join(ctx.outDir, `${ctx.name}.vpc`), label: 'virtual point cloud (.vpc)' },
+    provide: { env: 'PDAL_WRENCH_BIN', path: ['pdal_wrench'], qgis: ['apps/qgis/pdal_wrench.exe', 'bin/pdal_wrench.exe'] },
+    options: [
+      { key: 'boundary', label: 'Boundary polygons', type: 'bool', default: false, help: '--boundary: the outline of each file\'s points instead of its box. Reads every point.' },
+      { key: 'stats', label: 'Statistics', type: 'bool', default: false, advanced: true, help: '--stats: per-dimension statistics of each file. Reads every point.' },
+      { key: 'overview', label: 'Overview point cloud', type: 'bool', default: false, advanced: true, help: '--overview: a thinned copy of all the files as one COPC next to the index, shown when zoomed out.' },
+      { key: 'threads', label: 'Threads', type: 'int', min: 1, max: 64, default: '', advanced: true, help: '--threads: empty leaves the tool\'s default.' },
+    ],
+    steps(ctx) {
+      const { exe, input, outDir, tmpDir, name, opt } = ctx;
+      // the files of the folder itself, by name: the tool takes a list, not a folder
+      let files = []; try { files = fs.readdirSync(input).filter((f) => /\.la[sz]$/i.test(f)).sort().map((f) => path.join(input, f)); } catch { /* planned for a folder that is not there */ }
+      const list = path.join(tmpDir, 'files.txt');
+      const cmd = [...exe, 'build_vpc', `--output=${path.join(outDir, `${name}.vpc`)}`, `--input-file-list=${list}`];
+      if (opt.boundary) cmd.push('--boundary');
+      if (opt.stats) cmd.push('--stats');
+      if (opt.overview) cmd.push('--overview');
+      if (opt.threads) cmd.push(`--threads=${opt.threads}`);
+      return [{ write: [list, files.join('\n') + '\n'], label: `list the ${files.length} files` }, { cmd, label: 'files → virtual point cloud' }];
     },
   },
   {
@@ -347,6 +458,22 @@ export const TOOLS = [
           url: 'https://github.com/MIERUNE/point-tiler/releases/download/v0.0.12/ptiler-v0.0.12-x86_64-pc-windows-msvc.exe',
           sha256: '2e328616c9231f6989fd74cbbb5f0d0e0487c9a4cc991b087ba2c8db9366785c', bytes: 17476608, exe: 'ptiler.exe', archive: 'file',
         },
+        'linux-x64': {
+          url: 'https://github.com/MIERUNE/point-tiler/releases/download/v0.0.12/ptiler-v0.0.12-x86_64-unknown-linux-gnu',
+          sha256: 'fe82510e13c1b755883b9c00e4d4082ac453fd6c019c8df17d685565d26d75cd', bytes: 15184040, exe: 'ptiler', archive: 'file',
+        },
+        'linux-arm64': {
+          url: 'https://github.com/MIERUNE/point-tiler/releases/download/v0.0.12/ptiler-v0.0.12-aarch64-unknown-linux-gnu',
+          sha256: '0547eee374bcddf2d49299768eb117b7ab64bfd21d6d4b86ee0a4bc5e9d4facd', bytes: 14557008, exe: 'ptiler', archive: 'file',
+        },
+        'darwin-arm64': {
+          url: 'https://github.com/MIERUNE/point-tiler/releases/download/v0.0.12/ptiler-v0.0.12-aarch64-apple-darwin',
+          sha256: 'a3e198a354e3ef8eb0154506487c49aaf7e0c695076e06a3e52bc2fc57ec7a0f', bytes: 13880672, exe: 'ptiler', archive: 'file',
+        },
+        'darwin-x64': {
+          url: 'https://github.com/MIERUNE/point-tiler/releases/download/v0.0.12/ptiler-v0.0.12-x86_64-apple-darwin',
+          sha256: 'a5798f51889f95ea3e1f32559c645453242369864503d111c8983b2c91345327', bytes: 14139624, exe: 'ptiler', archive: 'file',
+        },
       },
     },
     options: [
@@ -443,6 +570,22 @@ export const TOOLS = [
           url: 'https://github.com/OpenDroneMap/Obj2Tiles/releases/download/v1.10.2/Obj2Tiles-Win64.zip',
           sha256: 'f1ada6c4713ed0913fdba8c4c17a1652ab2ce4a5571163f940364c5b61e8e47b', bytes: 23715330, exe: 'Obj2Tiles.exe',
         },
+        'linux-x64': {
+          url: 'https://github.com/OpenDroneMap/Obj2Tiles/releases/download/v1.10.2/Obj2Tiles-Linux64.zip',
+          sha256: '039a6fcf34bb29bf887ae5e8da6bc74044f731c75aaffe8a59dc8dca0fd9a2e3', bytes: 12494615, exe: 'Obj2Tiles',
+        },
+        'linux-arm64': {
+          url: 'https://github.com/OpenDroneMap/Obj2Tiles/releases/download/v1.10.2/Obj2Tiles-LinuxArm64.zip',
+          sha256: 'ff73e5bfdc728972f54df2104a56f388ed3db6c66642204ced15219a62f66b36', bytes: 12037034, exe: 'Obj2Tiles',
+        },
+        'darwin-arm64': {
+          url: 'https://github.com/OpenDroneMap/Obj2Tiles/releases/download/v1.10.2/Obj2Tiles-OsxArm64.zip',
+          sha256: 'c6170fde67959ea6005adaf71ceab63fde3f6abac4b035cbb1aa30edcf7cebf4', bytes: 11351374, exe: 'Obj2Tiles',
+        },
+        'darwin-x64': {
+          url: 'https://github.com/OpenDroneMap/Obj2Tiles/releases/download/v1.10.2/Obj2Tiles-Osx64.zip',
+          sha256: '7e0fd7ee742ac4027a7f1911b4d0963f77b5ff294bbd936728927cc1ad06ff4e', bytes: 12225524, exe: 'Obj2Tiles',
+        },
       },
     },
     options: [
@@ -492,6 +635,22 @@ export const TOOLS = [
       download: {
         version: '1.17.0',
         'win32-x64': {
+          url: 'https://github.com/Gaia3D/mago-3d-tiler/releases/download/v1.17.0/mago-3d-tiler-1.17.0.jar',
+          sha256: '8d63857835bc4d7b1bb747be5a3ae762ee2c1dfd781b44ebcc22f0b692a67481', bytes: 390525435, exe: 'mago-3d-tiler-1.17.0.jar', archive: 'file',
+        },
+        'linux-x64': {
+          url: 'https://github.com/Gaia3D/mago-3d-tiler/releases/download/v1.17.0/mago-3d-tiler-1.17.0.jar',
+          sha256: '8d63857835bc4d7b1bb747be5a3ae762ee2c1dfd781b44ebcc22f0b692a67481', bytes: 390525435, exe: 'mago-3d-tiler-1.17.0.jar', archive: 'file',
+        },
+        'linux-arm64': {
+          url: 'https://github.com/Gaia3D/mago-3d-tiler/releases/download/v1.17.0/mago-3d-tiler-1.17.0.jar',
+          sha256: '8d63857835bc4d7b1bb747be5a3ae762ee2c1dfd781b44ebcc22f0b692a67481', bytes: 390525435, exe: 'mago-3d-tiler-1.17.0.jar', archive: 'file',
+        },
+        'darwin-arm64': {
+          url: 'https://github.com/Gaia3D/mago-3d-tiler/releases/download/v1.17.0/mago-3d-tiler-1.17.0.jar',
+          sha256: '8d63857835bc4d7b1bb747be5a3ae762ee2c1dfd781b44ebcc22f0b692a67481', bytes: 390525435, exe: 'mago-3d-tiler-1.17.0.jar', archive: 'file',
+        },
+        'darwin-x64': {
           url: 'https://github.com/Gaia3D/mago-3d-tiler/releases/download/v1.17.0/mago-3d-tiler-1.17.0.jar',
           sha256: '8d63857835bc4d7b1bb747be5a3ae762ee2c1dfd781b44ebcc22f0b692a67481', bytes: 390525435, exe: 'mago-3d-tiler-1.17.0.jar', archive: 'file',
         },
@@ -596,6 +755,22 @@ export const TOOLS = [
           url: 'https://github.com/Geodan/pg2b3dm/releases/download/v2.28.0/pg2b3dm-win-x64.zip',
           sha256: '44532bc6ff3e9894203a6dd8ac2995fce61d68e659191a2f3d1501aba324011c', bytes: 31076953, exe: 'pg2b3dm.exe',
         },
+        'linux-x64': {
+          url: 'https://github.com/Geodan/pg2b3dm/releases/download/v2.28.0/pg2b3dm-linux-x64.zip',
+          sha256: 'f001004968096b33e1face6757d4f705643fcb81cf9acec7bd27c3137828196c', bytes: 30763286, exe: 'pg2b3dm',
+        },
+        'linux-arm64': {
+          url: 'https://github.com/Geodan/pg2b3dm/releases/download/v2.28.0/pg2b3dm-linux-arm64.zip',
+          sha256: 'd220b001b3c0bff0498d920b0148c3acdcb72d93f09bc8e81cfad3dc20d602ef', bytes: 29537911, exe: 'pg2b3dm',
+        },
+        'darwin-arm64': {
+          url: 'https://github.com/Geodan/pg2b3dm/releases/download/v2.28.0/pg2b3dm-osx-arm64.zip',
+          sha256: '71a79badd454fc8ee9231ae499310281e73994231373477e634266fe6564ad43', bytes: 29769994, exe: 'pg2b3dm',
+        },
+        'darwin-x64': {
+          url: 'https://github.com/Geodan/pg2b3dm/releases/download/v2.28.0/pg2b3dm-osx-x64.zip',
+          sha256: '2b6ec59e30c276180819c0e4cc32dfa10960483ad809d188a88239a065205c49', bytes: 31142599, exe: 'pg2b3dm',
+        },
       },
     },
     options: [
@@ -698,6 +873,14 @@ export const TOOLS = [
         'win32-x64': {
           url: 'https://github.com/cnr-isti-vclab/nexus/releases/download/v2025.05/nexus-windows-x86_64.zip',
           sha256: '6a90423c7bf6ee5c6cbdb581c70846a79d0a05fd7225a2e458ba43fc0053aa6f', bytes: 48061423, exe: 'nxsbuild.exe',
+        },
+        'linux-x64': {
+          url: 'https://github.com/cnr-isti-vclab/nexus/releases/download/v2025.05/nexus-linux-x86_64.tar.gz',
+          sha256: 'f2b115d74101b591ada4cafc9d8e03f53b21517448fc72998f988c77a6faf151', bytes: 28838366, exe: 'usr/bin/nxsbuild',
+        },
+        'linux-arm64': {
+          url: 'https://github.com/cnr-isti-vclab/nexus/releases/download/v2025.05/nexus-linux-aarch64.tar.gz',
+          sha256: 'dba6e75feb6e9e6480a191cb4c7a49cdeb02b2dde027d8bb120f70845fc2c835', bytes: 29221109, exe: 'usr/bin/nxsbuild',
         },
       },
     },
