@@ -1,7 +1,7 @@
 /**
- * Library — the samples (folded), bookmarks with a cached structural check (tiles/depth/leaves from /stats), and a
- * history of what was served or exported. One table per list: a row opens its dataset in Stream live, and the rest of
- * what can be done with it is in the row's menu.
+ * Library — the samples, bookmarks with a cached structural check (tiles/depth/leaves from /stats), and a history of
+ * what was served or exported: three sections that fold, the samples closed until asked for. One table per list: a row
+ * opens its dataset in Stream live, and the rest of what can be done with it is in the row's menu.
  */
 import { MoreHorizontalIcon } from 'lucide-react';
 import { useRef, useState, type ReactNode } from 'react';
@@ -10,8 +10,8 @@ import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSepara
 import { Table, TableBody, TableCell, TableRow } from '@/components/ui/table';
 import { Textarea } from '@/components/ui/textarea';
 import type { AppModel } from './App';
-import { Card, CardHead, CardHeadActions, CardTitle } from './components/Card';
-import { Chip } from './components/bits';
+import { Card } from './components/Card';
+import { Chip, FoldCard, Tip } from './components/bits';
 import { base, pickerRpc } from './host';
 import { newId, parseLibrary, serialize, type DatasetOptions, type HistoryEntry, type LibraryEntry } from './library';
 import { SamplesCard } from './SamplesCard';
@@ -25,11 +25,11 @@ function Row({ e, detail, detailClass, detailTitle, onOpen, menu }: {
   return (
     <TableRow>
       <TableCell className="w-full max-w-0 py-1.5 pl-0">
-        <div className="flex min-w-0 items-center gap-2" title={e.src}>
+        <Tip text={e.src}><div className="flex min-w-0 items-center gap-2">
           <span className="truncate font-medium">{e.name}</span>
           {format && <Chip>{format}</Chip>}
-        </div>
-        <div className={`truncate text-xs ${detailClass ?? 'text-muted-foreground'}`} title={detailTitle}>{detail}</div>
+        </div></Tip>
+        <Tip text={detailTitle} side="bottom"><div className={`truncate text-xs ${detailClass ?? 'text-muted-foreground'}`}>{detail}</div></Tip>
       </TableCell>
       <TableCell className="py-1.5 pr-0 text-right whitespace-nowrap">
         <Button size="sm" onClick={onOpen}>Open</Button>
@@ -104,20 +104,16 @@ export function LibraryTab({ app }: { app: AppModel }) {
   return (
     <section>
       <SamplesCard app={app} />
-      <Card>
-        <CardHead>
-          <CardTitle>Bookmarks</CardTitle>
-          <CardHeadActions>
-            <Button id="lib-refresh" size="sm" variant="ghost" disabled={refreshing != null || !lib.bookmarks.length} title="Count tiles, depth and leaves of every bookmark" onClick={refreshStats}>{refreshing ?? 'Check all'}</Button>
-            <DropdownMenu>
-              <DropdownMenuTrigger render={<Button id="lib-menu" size="sm" variant="ghost" aria-label="Import and export" className="px-1.5" />}><MoreHorizontalIcon className="size-4" /></DropdownMenuTrigger>
-              <DropdownMenuContent align="end" className="min-w-52">
-                <DropdownMenuItem id="lib-export" onClick={exportJson}>Export as JSON</DropdownMenuItem>
-                <DropdownMenuItem id="lib-import" onClick={importJson}>Import from JSON…</DropdownMenuItem>
-              </DropdownMenuContent>
-            </DropdownMenu>
-          </CardHeadActions>
-        </CardHead>
+      <FoldCard id="bookmarks" title="Bookmarks" count={lib.bookmarks.length} actions={<>
+        <Tip text="Count tiles, depth and leaves of every bookmark"><Button id="lib-refresh" size="sm" variant="ghost" disabled={refreshing != null || !lib.bookmarks.length} onClick={refreshStats}>{refreshing ?? 'Check all'}</Button></Tip>
+        <DropdownMenu>
+          <Tip text="Import and export"><DropdownMenuTrigger render={<Button id="lib-menu" size="sm" variant="ghost" aria-label="Import and export" className="px-1.5" />}><MoreHorizontalIcon className="size-4" /></DropdownMenuTrigger></Tip>
+          <DropdownMenuContent align="end" className="min-w-52">
+            <DropdownMenuItem id="lib-export" onClick={exportJson}>Export as JSON</DropdownMenuItem>
+            <DropdownMenuItem id="lib-import" onClick={importJson}>Import from JSON…</DropdownMenuItem>
+          </DropdownMenuContent>
+        </DropdownMenu>
+      </>}>
         <div id="lib-list">
           {!lib.bookmarks.length && empty('Nothing bookmarked yet: the star next to a dataset adds it here.')}
           <Table><TableBody>
@@ -139,24 +135,20 @@ export function LibraryTab({ app }: { app: AppModel }) {
             })}
           </TableBody></Table>
         </div>
-        <div hidden={!io.open} className="mt-3">
-          <Textarea id="lib-io" ref={ioRef} value={io.value} onChange={(ev) => setIo({ open: true, value: ev.target.value })} spellCheck={false}
-            placeholder="Paste exported JSON here, then press Import."
-            className="min-h-32 w-full resize-y bg-muted/50 font-mono text-xs dark:bg-muted/50" />
-          <div className="mt-2 flex items-center gap-2">
-            <Button size="sm" variant="default" onClick={importJson}>Import</Button>
-            <Button size="sm" variant="ghost" onClick={() => setIo({ open: false, value: '' })}>Close</Button>
-            <span className="text-xs text-muted-foreground">The JSON carries any share link or signed URL you used: keep it private.</span>
-          </div>
+      </FoldCard>
+      {io.open && <Card id="lib-io-card">
+        <Textarea id="lib-io" ref={ioRef} value={io.value} onChange={(ev) => setIo({ open: true, value: ev.target.value })} spellCheck={false}
+          placeholder="Paste exported JSON here, then press Import."
+          className="min-h-32 w-full resize-y bg-muted/50 font-mono text-xs dark:bg-muted/50" />
+        <div className="mt-2 flex items-center gap-2">
+          <Button size="sm" variant="default" onClick={importJson}>Import</Button>
+          <Button size="sm" variant="ghost" onClick={() => setIo({ open: false, value: '' })}>Close</Button>
+          <span className="text-xs text-muted-foreground">The JSON carries any share link or signed URL you used: keep it private.</span>
         </div>
-      </Card>
-      <Card>
-        <CardHead>
-          <CardTitle>History</CardTitle>
-          <CardHeadActions>
-            <Button id="hist-clear" size="sm" variant="ghost" disabled={!lib.history.length} onClick={() => updateLib((l) => { l.history = []; })}>Clear</Button>
-          </CardHeadActions>
-        </CardHead>
+      </Card>}
+      <FoldCard id="history" title="History" count={lib.history.length} actions={
+        <Button id="hist-clear" size="sm" variant="ghost" disabled={!lib.history.length} onClick={() => updateLib((l) => { l.history = []; })}>Clear</Button>
+      }>
         <div id="hist-list">
           {!lib.history.length && empty('Nothing yet: a URL you copy, preview or test, and every export, shows up here.')}
           <Table><TableBody>
@@ -178,7 +170,7 @@ export function LibraryTab({ app }: { app: AppModel }) {
             })}
           </TableBody></Table>
         </div>
-      </Card>
+      </FoldCard>
     </section>
   );
 }

@@ -45,7 +45,7 @@ const sepIdx = rawArgv.indexOf('--');
 const argv = sepIdx >= 0 ? rawArgv.slice(0, sepIdx) : rawArgv;
 const extraArgs = sepIdx >= 0 ? rawArgv.slice(sepIdx + 1) : [];
 
-const VALUE_FLAGS = new Set(['workers', 'verify', 'hierarchy-errors', 'max-depth', 'pack', 'format', 'scale', 'ge-scale', 'ge-layer', 'tiling', 'splat-budget', 'up', 'port', 'lon', 'lat', 'alt', 'heading', 'place-scale', 'dag']);
+const VALUE_FLAGS = new Set(['workers', 'verify', 'hierarchy-errors', 'max-depth', 'pack', 'format', 'scale', 'ge-scale', 'ge-layer', 'tiling', 'splat-budget', 'up', 'sh', 'port', 'lon', 'lat', 'alt', 'heading', 'place-scale', 'dag']);
 function flag(name) { const i = argv.indexOf(`--${name}`); return i >= 0 ? argv[i + 1] : undefined; }
 // --workers auto|<n>: build tiles on worker threads, in every converter that has a tile loop (same as TILED_WORKERS)
 if (flag('workers') != null) { const { setTileWorkers } = await import('3dtiles-convert-core'); setTileWorkers(flag('workers')); }

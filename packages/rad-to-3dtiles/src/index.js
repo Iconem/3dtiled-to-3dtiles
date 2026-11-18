@@ -416,6 +416,7 @@ async function _encodeChunkGlb(buf, chunk, payloadBase) {
 export async function convert(radPath, outDir, opts = {}) {
   if (!radPath || !outDir) throw new Error('Usage: rad-to-3dtiles <input.rad> <outDir> [--scale=N] [--ge-scale=N] [--ge-layer=N] [--ge-basis=spatial|featuresize] [--opacity-filter=N] [--max-scale-mult=N]');
   Object.assign(OPTS, opts);   // per-call options (defaults preserved for any omitted)
+  if (opts.scale != null && opts.scaleMult == null) OPTS.scaleMult = Number(opts.scale) > 0 ? Number(opts.scale) : 1;   // --scale
   await ensureDir(path.join(outDir, 'tiles'));
 
   console.log(`Loading .RAD: ${radPath}`);

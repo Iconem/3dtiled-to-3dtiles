@@ -42,7 +42,7 @@ export interface DesktopRPC {
         response: boolean;
       };
       fitWindow: {
-        params: { cssWidth: number; cssHeight: number; viewportWidth: number; viewportHeight: number };
+        params: { cssWidth: number; cssHeight: number; viewportWidth: number; viewportHeight: number; restore?: boolean };
         response: { width: number; height: number };
       };
       /**

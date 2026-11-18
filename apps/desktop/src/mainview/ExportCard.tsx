@@ -21,14 +21,15 @@ import { Button } from '@/components/ui/button';
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from '@/components/ui/dropdown-menu';
 import type { AppModel } from './App';
 import { Card, CardTitle } from './components/Card';
-import { Actions, Advanced, Check, Choice, Code, CopyButton, Field, FieldLabel, Info, LogFold, Result, Segmented, StepProgress, TextInput, UrlBar, type Kind, type Message } from './components/bits';
+import { Actions, Advanced, Check, Choice, Code, CopyButton, Field, FieldLabel, Info, LogFold, Result, Segmented, StepProgress, TextInput, Tip, UrlBar, type Kind, type Message } from './components/bits';
 import { base, pickDataset, pickerAvailable, pickerRpc } from './host';
 import { noteExported, type DatasetOptions, type HistoryEntry } from './library';
-import { DEFAULT_EXPORT, DOC_LINKS, exportCli, exportCliArgs, exportRequest, mb, nameFor, stepsFromCliOutput, typeOfFormat, viewerLink, type ExportRequest, type ExportSettings, type Steps } from './urls';
+import { CONVERT_OPTIONS, DEFAULT_EXPORT, DOC_LINKS, exportCli, exportCliArgs, exportRequest, formatOf, mb, nameFor, stepsFromCliOutput, typeOfFormat, viewerLink, type ConvertOption, type ExportRequest, type ExportSettings, type Steps } from './urls';
 
-const METHODS = [
+const METHODS = (noConverter: string) => [
   { value: 'crawl', label: 'Copy the stream', title: 'Downloads the tileset URL as this app serves it: works for every source' },
-  { value: 'convert', label: 'Offline converter', title: 'Runs the per-format converter on the source itself: faster for the formats it covers, with their own options' },
+  { value: 'convert', label: 'Offline converter', disabled: !!noConverter,
+    title: noConverter ? `${noConverter} has no offline converter: copy the stream` : 'Runs the per-format converter on the source itself: faster for the formats it covers, with their own options' },
 ];
 const RUNNERS = (noCli: boolean) => [
   { value: 'server', label: 'In the tile-server' },
@@ -45,6 +46,9 @@ const HIERARCHY_ERRORS = [
   { value: 'warn', label: 'Warn, and export the rest' },
 ];
 const TILINGS = [{ value: '', label: 'default' }, { value: 'implicit', label: 'implicit' }, { value: 'explicit', label: 'explicit' }];
+const HARMONICS = [{ value: '', label: 'none' }, { value: '1', label: 'degree 1' }, { value: '2', label: 'degree 2' }, { value: '3', label: 'degree 3' }];
+const UPS = [{ value: '', label: 'z' }, { value: 'y', label: 'y' }, { value: '-y', label: '-y' }];
+const DAGS = [{ value: '', label: 'levels' }, { value: 'paths', label: 'paths' }];
 
 interface Job {
   running: boolean;
@@ -62,7 +66,7 @@ interface Job {
 const IDLE: Job = { running: false, cancellable: false, steps: null, done: false, preview: '', log: null, logOpen: false };
 
 export function ExportCard({ app }: { app: AppModel }) {
-  const { form, url } = app;
+  const { url } = app;
   const [s, setS] = useState<ExportSettings>(DEFAULT_EXPORT);
   const [status, setStatus] = useState<Message | null>(null);
   const [job, setJob] = useState<Job>(IDLE);
@@ -80,13 +84,19 @@ export function ExportCard({ app }: { app: AppModel }) {
   const follow = useRef(true);
 
   const cli = !pickerAvailable();
-  const convert = s.method === 'convert';
+  // The offline converter is per format: its options are that format's, and some formats have none.
+  const fmt = formatOf(app.dataset());
+  const reads: readonly ConvertOption[] | undefined = fmt ? CONVERT_OPTIONS[fmt] : undefined;
+  const noConverter = fmt && !reads ? fmt.toUpperCase() : '';
+  const method = noConverter ? 'crawl' : s.method;
+  const convert = method === 'convert';
+  const has = (o: ConvertOption) => !!reads?.includes(o);
   // The CLI runner lives in the main process; a plain browser (verification bundle) has no host.
   const runner = cli && s.runner === 'cli' ? 'server' : s.runner;
   // A crawl in a CLI subprocess reads tiles the server builds, so the subprocess has no say on their threads.
-  const workersNa = runner === 'cli' && s.method === 'crawl';
-  const req = exportRequest(app.dataset(), { ...s, runner, workers: workersNa ? '' : app.workers });
-  const live = viewerLink(url, typeOfFormat(form.format));
+  const workersNa = runner === 'cli' && method === 'crawl';
+  const req = exportRequest(app.dataset(), { ...s, method, runner, workers: workersNa ? '' : app.workers });
+  const live = viewerLink(url, typeOfFormat(fmt));
 
   // A server started without TILED_ALLOW_EXPORT (e.g. an adopted `pnpm dev` one) can't export; say so
   // up front rather than on the first click.
@@ -254,7 +264,7 @@ export function ExportCard({ app }: { app: AppModel }) {
     catch { exportSay(unrealUrl(), 'info'); }
   }
   // The exported files, served back by the tile-server exactly as a static host would serve them.
-  const previewExported = () => { if (job.preview) app.previewIn('cesium', job.preview, typeOfFormat(form.format), 'Exported copy'); };
+  const previewExported = () => { if (job.preview) app.previewIn('cesium', job.preview, typeOfFormat(fmt), 'Exported copy'); };
 
   return (
     <Card id="export-card">
@@ -275,35 +285,40 @@ export function ExportCard({ app }: { app: AppModel }) {
         <Button id="export-browse" onClick={browseOut}>Folder…</Button>
         {/* One slot: the Export call to action becomes Cancel while a run is on. */}
         {job.running
-          ? <Button id="export-cancel" variant="outline" disabled={!job.cancellable} onClick={cancel} title={job.cancellable ? 'Stop this export; the folder keeps a partial copy' : 'The offline converter runs in-process and cannot be interrupted'}
-              className="border-destructive/60 text-destructive hover:bg-destructive/10 hover:text-destructive focus-visible:ring-destructive/30">Cancel</Button>
+          ? <Tip text={job.cancellable ? 'Stop this export; the folder keeps a partial copy' : 'The offline converter runs in-process and cannot be interrupted'}>
+              <span><Button id="export-cancel" variant="outline" disabled={!job.cancellable} onClick={cancel}
+                className="border-destructive/60 text-destructive hover:bg-destructive/10 hover:text-destructive focus-visible:ring-destructive/30">Cancel</Button></span>
+            </Tip>
           : <Button id="export-start" variant="default" disabled={disabled} onClick={start}>Export</Button>}
       </UrlBar>
 
-      {/* The method, then only the options that method has. */}
-      <div className="mt-3 flex flex-wrap items-end gap-x-3 gap-y-2">
-        <Field label="Method" className="flex-none">
-          <Segmented id="export-method" value={s.method} onChange={(v) => patch({ method: v as ExportSettings['method'] })} options={METHODS} disabled={job.running} />
+      {/* The method on its own line, so that it stays where it is; under it, only the options that method has, and for
+          the offline converter only those of the dataset's format. */}
+      <Field label="Method" className="mt-3 flex-none items-start">
+        <Segmented id="export-method" value={method} onChange={(v) => patch({ method: v as ExportSettings['method'] })} options={METHODS(noConverter)} disabled={job.running} />
+      </Field>
+      {!convert && <div id="export-crawl-opts" className="mt-3 flex flex-wrap items-end gap-x-3 gap-y-2">
+        <Field compact label="Max depth" title="How many levels of the tree to copy. Empty: all of them">
+          <TextInput id="export-depth" value={s.depth} onChange={(e) => patch({ depth: e.target.value })} placeholder="all" />
         </Field>
-        {!convert && <>
-          <Field compact label="Max depth" title="How many levels of the tree to copy. Empty: all of them">
-            <TextInput id="export-depth" value={s.depth} onChange={(e) => patch({ depth: e.target.value })} placeholder="all" />
-          </Field>
-          <span id="export-crawl-opts">
-            <Check id="export-keep-implicit" checked={s.keepImplicit} onChange={(v) => patch({ keepImplicit: v })}
-              title="Copy the subtree files and templated tiles as they are, instead of expanding the tree into explicit children. Smaller JSON; needs a client with implicit tiling (CesiumJS, 3DTRjs, Cesium for Unreal).">
-              Keep implicit tiling
-            </Check>
-          </span>
-        </>}
-        {convert && <div id="export-convert-opts" className="flex flex-1 flex-wrap items-end gap-x-3 gap-y-2">
-          <Field compact label="Tiling"><Choice id="conv-tiling" value={s.convTiling} onChange={(v) => patch({ convTiling: v })} options={TILINGS} /></Field>
-          <Field compact label="Scale"><TextInput id="conv-scale" value={s.convScale} onChange={(e) => patch({ convScale: e.target.value })} placeholder="1" /></Field>
-          <Field compact label="Error scale" title="Multiplies every geometric error"><TextInput id="conv-ge-scale" value={s.convGeScale} onChange={(e) => patch({ convGeScale: e.target.value })} placeholder="1" /></Field>
-          <Field compact label="Error layer" title="GE layer"><TextInput id="conv-ge-layer" value={s.convGeLayer} onChange={(e) => patch({ convGeLayer: e.target.value })} placeholder="none" /></Field>
-          <Check id="conv-centroids" checked={s.convCentroids} onChange={(v) => patch({ convCentroids: v })} title="Splat formats only: write the splat centres as a point cloud">Splat centres only</Check>
-        </div>}
-      </div>
+        <Check id="export-keep-implicit" checked={s.keepImplicit} onChange={(v) => patch({ keepImplicit: v })}
+          title="Copy the subtree files and templated tiles as they are, instead of expanding the tree into explicit children. Smaller JSON; needs a client with implicit tiling (CesiumJS, 3DTRjs, Cesium for Unreal).">
+          Keep implicit tiling
+        </Check>
+      </div>}
+      {convert && <div id="export-convert-opts" data-format={fmt} className="mt-3 flex flex-wrap items-end gap-x-3 gap-y-2">
+        {has('tiling') && <Field compact label="Tiling" title="How the octree is written: implicit (subtree files, small JSON) or explicit (every tile listed)"><Choice id="conv-tiling" value={s.convTiling} onChange={(v) => patch({ convTiling: v })} options={TILINGS} /></Field>}
+        {has('splatBudget') && <Field compact label="Splats per tile" title="Leaves are merged up to this many splats a tile. 0: one tile per leaf run"><TextInput id="conv-splat-budget" value={s.convSplatBudget} onChange={(e) => patch({ convSplatBudget: e.target.value })} placeholder="100000" /></Field>}
+        {has('up') && <Field compact label="Up axis" title="The scene's own up axis: trained scenes are often -y"><Choice id="conv-up" value={s.convUp} onChange={(v) => patch({ convUp: v })} options={UPS} /></Field>}
+        {has('dag') && <Field compact label="DAG as a tree" title="How the Nexus graph becomes a tree: by levels, or one path per node"><Choice id="conv-dag" value={s.convDag} onChange={(v) => patch({ convDag: v })} options={DAGS} /></Field>}
+        {has('scale') && <Field compact label="Splat scale" title="Multiplies the size of every splat"><TextInput id="conv-scale" value={s.convScale} onChange={(e) => patch({ convScale: e.target.value })} placeholder="1" /></Field>}
+        {has('geScale') && <Field compact label="Error scale" title="Multiplies every geometric error"><TextInput id="conv-ge-scale" value={s.convGeScale} onChange={(e) => patch({ convGeScale: e.target.value })} placeholder="default" /></Field>}
+        {has('geLayer') && <Field compact label="Error layer" title="Stretches the geometric error per depth: leaf error + (error - leaf error) x this"><TextInput id="conv-ge-layer" value={s.convGeLayer} onChange={(e) => patch({ convGeLayer: e.target.value })} placeholder="1" /></Field>}
+        {has('sh') && <Field compact label="Harmonics" title="Keep spherical harmonics (view-dependent colour) up to this degree, capped by what the source holds: 9, 24 or 45 more bytes a splat"><Choice id="conv-sh" value={s.convSh} onChange={(v) => patch({ convSh: v })} options={HARMONICS} /></Field>}
+        {has('centroidsOnly') && <Check id="conv-centroids" checked={s.convCentroids} onChange={(v) => patch({ convCentroids: v })} title="Write the splat centres as a point cloud, for a viewer that draws no splats">Splat centres only</Check>}
+        {!reads && <p id="conv-none" className="m-0 flex h-9 items-center text-xs text-muted-foreground">The converter finds the format in the file. Choose the format above to see its options.</p>}
+        {reads?.length === 0 && <p id="conv-none" className="m-0 flex h-9 items-center text-xs text-muted-foreground">The {fmt.toUpperCase()} converter has no options.</p>}
+      </div>}
 
       {job.steps ? <StepProgress id="export-progress" steps={job.steps} /> : <div id="export-progress" hidden />}
       <Result id="export-status" message={status} />

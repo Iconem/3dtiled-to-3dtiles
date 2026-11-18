@@ -5,6 +5,32 @@ Format loosely follows [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+### Changed — 2026-11-18 (desktop app: second pass on the redesigned window)
+- **Tabs** are drawn as a browser's: a rule across the window, the open tab underlined.
+- **The window keeps its size**: it no longer resizes when a tab, a tool or a fold changes what is shown. Only a
+  preview enlarges it, and gives the size back.
+- **Tooltips** are the app's own (shadcn on Base UI), no `title` attribute is left.
+- **Dataset bar**: Ctrl+Z after *Paste* or *File…* gives back the previous dataset; the star is filled once the
+  dataset is in the Library, and a second click takes it out; **Threads** (tile threads) is next to the format, as
+  well as in Settings; the formats gain VPC, LCC2 and Nexus.
+- **Export, offline converter**: the options shown are those the converter of the dataset's format reads (tiling for
+  COPC and Potree; splats per tile, up axis and harmonics for streamed SOG; error scale, error layer, splat scale and
+  harmonics for RAD; harmonics for LCC2; the DAG mode and error scale for Nexus; none for I3S), and they no longer
+  move the method buttons. A format without an offline converter (3MX, OSGB, GeoSplats, VPC) disables that method.
+  Before, the same five fields were shown for every format, whether its converter read them or not.
+- **Tile raw input**: the tool is one searchable list grouped into point cloud, mesh and splat tilers, also shown
+  without an input (all 20 tools); attributes (PotreeConverter 2 and 1.7, gocesiumtiler) are chips to pick, type or
+  paste.
+- **Library**: *Samples*, *Bookmarks* and *History* fold and remember it; 12 more samples (29), with VPC, LCC2, OSGB
+  and Nexus groups.
+
+### Fixed — 2026-11-18
+- **RAD offline converter**: `--scale` (and the export form's *Splat scale*) was read by the standalone script only;
+  run through `3dtiled` or the app it had no effect.
+- **PotreeConverter 2 attributes**: a name that holds a space (`return number`) could not be given; a list with
+  commas is now split on commas.
+- `3dtiled … --sh N`: the value was also counted as a positional argument.
+
 ### Changed — 2026-11-18 (desktop app: the window redesigned, same features)
 - **Controls instead of text.** Explanations moved behind an (i) or into tooltips; with every fold open a tab shows
   about a third of the words it did (Stream live: 229 then, 51 now).

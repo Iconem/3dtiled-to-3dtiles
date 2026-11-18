@@ -37,7 +37,7 @@ export function viewerLink(tilesetUrl: string, type = 'mesh'): string {
   return `${viewerUrl}/?mode=stream&format=3dtiles&renderer=3dtrjs&type=${type}&load=${encodeURIComponent(tilesetUrl)}`;
 }
 
-export const typeOfFormat = (format: string) => (['copc', 'potree'].includes(format) ? 'pointcloud' : ['sog', 'lcc', 'rad', 'geosplats'].includes(format) ? 'splat' : 'mesh');
+export const typeOfFormat = (format: string) => (['copc', 'potree', 'vpc'].includes(format) ? 'pointcloud' : ['sog', 'lcc', 'lcc2', 'rad', 'geosplats'].includes(format) ? 'splat' : 'mesh');
 export const kindOf = (fmt: string) => CATALOG.find((g) => g.format === fmt)?.kind ?? 'mesh';
 export const iconOf = (fmt: string) => CATALOG.find((g) => g.format === fmt)?.icon ?? '◱';
 
@@ -49,13 +49,16 @@ export function guessFormat(src: string): string {
   const name = src.trim().split('?')[0]!.replace(/[\\/]+$/, '').toLowerCase();
   if (!name) return '';
   if (/\.copc\.laz$/.test(name)) return 'copc';
+  if (/\.vpc(\.gz)?$/.test(name) || /\.gridvpc(\.json)?(\.gz)?$/.test(name)) return 'vpc';
+  if (/\.lcc2$/.test(name)) return 'lcc2';
+  if (/\.nx[sz]$/.test(name)) return 'nexus';
   if (/(^|[\\/])(cloud\.js|metadata\.json)$/.test(name) || /hierarchy\.bin$/.test(name)) return 'potree';
   if (/(^|[\\/])lod-meta\.json$/.test(name)) return 'sog';
   if (/\.lcc$/.test(name)) return 'lcc';
   if (/\.rad$/.test(name)) return 'rad';
   if (/\.slpk$/.test(name) || /sceneserver/.test(name)) return 'i3s';
-  if (/\.3mx$/.test(name)) return 'threemx';
-  if (/\.osgb$/.test(name) || /(^|[\\/])metadata\.xml$/.test(name)) return 'osgb';
+  if (/\.3mxb?$/.test(name)) return 'threemx';
+  if (/\.osgb$/.test(name) || /(^|[\\/])metadata\.xml$/.test(name) || /_osgb\.zip$/.test(name) || /grididx_osgb\.csv$/.test(name)) return 'osgb';
   return '';
 }
 
@@ -99,24 +102,53 @@ export interface ExportSettings {
   convGeScale: string;
   convGeLayer: string;
   convCentroids: boolean;
+  /** Splats: the highest degree of spherical harmonics kept, '' for none. */
+  convSh: string;
+  /** Streamed SOG: the scene's up axis ('' is z) and the splats merged into one tile ('' is the converter's 100 000). */
+  convUp: string;
+  convSplatBudget: string;
+  /** Nexus: how its DAG becomes a tree ('' is levels). */
+  convDag: string;
 }
+
+/**
+ * What the offline converter of each format reads (packages/convert, and the `convert()` of each *-to-3dtiles
+ * package): the export form shows these and no others. A format that is not listed has no offline converter (3MX,
+ * OSGB, GeoSplats, a VPC): it is exported by copying the stream.
+ */
+export const CONVERT_OPTIONS: Record<string, readonly ConvertOption[]> = {
+  copc: ['tiling'], potree: ['tiling'],
+  rad: ['scale', 'geScale', 'geLayer', 'sh', 'centroidsOnly'],
+  sog: ['splatBudget', 'up', 'sh', 'centroidsOnly'],
+  lcc: ['centroidsOnly'], lcc2: ['sh', 'centroidsOnly'],
+  nexus: ['dag', 'geScale'],
+  i3s: [],
+};
+export type ConvertOption = 'tiling' | 'scale' | 'geScale' | 'geLayer' | 'sh' | 'up' | 'splatBudget' | 'dag' | 'centroidsOnly';
+/** The format the form goes by: the one chosen, else what the name says, else '' (the converter looks in the file). */
+export const formatOf = (f: DatasetOptions) => f.format || guessFormat(f.src);
 
 export const DEFAULT_EXPORT: ExportSettings = {
   outDir: '', method: 'crawl', runner: 'server', depth: '', verify: 'sample', hierarchyErrors: 'error', workers: 'auto',
   keepImplicit: true, pack3tz: false, pack3dtiles: false,
   convTiling: '', convScale: '', convGeScale: '', convGeLayer: '', convCentroids: false,
+  convSh: '', convUp: '', convSplatBudget: '', convDag: '',
 };
 
 /** What `POST /export` takes, built from the dataset form and the export card. */
 export function exportRequest(f: DatasetOptions, s: ExportSettings) {
   const depth = s.depth.trim();
   const pack = [s.pack3tz && '3tz', s.pack3dtiles && '3dtiles'].filter(Boolean) as string[];
+  // only what this format's converter reads: an option typed for another dataset does not follow to this one
+  const reads = new Set<ConvertOption>(CONVERT_OPTIONS[formatOf(f)] ?? []);
   const options: Record<string, unknown> = {};
-  if (s.convTiling) options['tiling'] = s.convTiling;
-  for (const [v, key] of [[s.convScale, 'scale'], [s.convGeScale, 'geScale'], [s.convGeLayer, 'geLayer']] as const) {
-    if (v.trim() !== '') options[key] = Number(v.trim());
+  for (const [v, key] of [[s.convTiling, 'tiling'], [s.convUp, 'up'], [s.convDag, 'dag']] as const) {
+    if (v && reads.has(key)) options[key] = v;
   }
-  if (s.convCentroids) options['centroidsOnly'] = true;
+  for (const [v, key] of [[s.convScale, 'scale'], [s.convGeScale, 'geScale'], [s.convGeLayer, 'geLayer'], [s.convSh, 'sh'], [s.convSplatBudget, 'splatBudget']] as const) {
+    if (v.trim() !== '' && reads.has(key)) options[key] = Number(v.trim());
+  }
+  if (s.convCentroids && reads.has('centroidsOnly')) options['centroidsOnly'] = true;
   return {
     method: s.method,
     url: buildUrlFrom(f), src: f.src, format: f.format, outDir: s.outDir.trim(),
@@ -152,7 +184,7 @@ export function exportCliArgs(r: ExportRequest): { args: string[]; then?: string
   const args = ['packages/convert/cli.js', r.src || '<source>', out];
   if (r.format) args.push('--format', r.format);
   if (o['tiling']) args.push('--tiling', String(o['tiling']));
-  for (const [key, fl] of [['scale', '--scale'], ['geScale', '--ge-scale'], ['geLayer', '--ge-layer']] as const) {
+  for (const [key, fl] of [['scale', '--scale'], ['geScale', '--ge-scale'], ['geLayer', '--ge-layer'], ['sh', '--sh'], ['splatBudget', '--splat-budget'], ['up', '--up'], ['dag', '--dag']] as const) {
     if (o[key] != null) args.push(fl, String(o[key]));
   }
   if (o['centroidsOnly']) args.push('--centroids-only');

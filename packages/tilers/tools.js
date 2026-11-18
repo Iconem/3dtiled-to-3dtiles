@@ -233,13 +233,13 @@ export const TOOLS = [
     options: [
       { key: 'method', label: 'Sampling', type: 'enum', values: ['poisson', 'poisson_average', 'random'], default: 'poisson', help: '--method: how the points of coarser levels are picked. poisson is the tool\'s default; random is the fastest.' },
       { key: 'encoding', label: 'Encoding', type: 'enum', values: ['UNCOMPRESSED', 'BROTLI'], default: 'UNCOMPRESSED', help: '--encoding: BROTLI makes octree.bin several times smaller and is slower to write. UNCOMPRESSED is what the tool does by default.' },
-      { key: 'attributes', label: 'Attributes', type: 'text', default: '', advanced: true, placeholder: 'rgb intensity classification', help: '--attributes: the attributes to keep, separated by spaces. Empty keeps them all.' },
+      { key: 'attributes', label: 'Attributes', type: 'text', default: '', advanced: true, placeholder: 'rgb, intensity, classification', choices: ['rgb', 'intensity', 'classification', 'return number', 'number of returns', 'scan angle rank', 'user data', 'point source id', 'gps-time'], sep: ',', help: '--attributes: the attributes to keep, separated by commas (some names hold a space: "return number"). Empty keeps them all.' },
     ],
     steps(ctx) {
       const { exe, input, outDir, opt } = ctx;
       const cmd = [...exe, input, '-o', outDir, '--method', opt.method];
       if (opt.encoding !== 'UNCOMPRESSED') cmd.push('--encoding', opt.encoding);
-      const attributes = opt.attributes.split(/[\s,]+/).filter(Boolean);
+      const attributes = (opt.attributes.includes(',') ? opt.attributes.split(',') : opt.attributes.split(/\s+/)).map((a) => a.trim()).filter(Boolean);
       if (attributes.length) cmd.push('--attributes', ...attributes);
       return [{ cmd, label: 'points → Potree 2' }];
     },
@@ -271,7 +271,7 @@ export const TOOLS = [
     },
     options: [
       { key: 'format', label: 'Node files', type: 'enum', values: ['BINARY', 'LAZ', 'LAS'], default: 'BINARY', help: '--output-format: how each node is stored. BINARY is the tool\'s default; LAZ is much smaller.' },
-      { key: 'attributes', label: 'Attributes', type: 'text', default: '', placeholder: 'RGB INTENSITY CLASSIFICATION', help: '--output-attributes: any of RGB, INTENSITY, CLASSIFICATION, NORMAL, separated by spaces. Empty: RGB, the tool\'s default.' },
+      { key: 'attributes', label: 'Attributes', type: 'text', default: '', placeholder: 'RGB INTENSITY CLASSIFICATION', choices: ['RGB', 'INTENSITY', 'CLASSIFICATION', 'NORMAL'], sep: ' ', help: '--output-attributes: any of RGB, INTENSITY, CLASSIFICATION, NORMAL, separated by spaces. Empty: RGB, the tool\'s default.' },
       { key: 'projection', label: 'Projection (proj4)', type: 'text', default: '', placeholder: '+proj=utm +zone=31 +datum=WGS84 +units=m +no_defs', help: '--projection: the cloud\'s CRS as a proj4 string, written into cloud.js so that the result is georeferenced.' },
       { key: 'spacing', label: 'Root spacing', type: 'number', min: 0.000001, max: 100000, default: '', advanced: true, placeholder: 'auto', help: '--spacing: distance between points at the root level; it halves at each level. Empty: derived from the bounding box.' },
       { key: 'levels', label: 'Levels', type: 'int', min: 0, max: 30, default: '', advanced: true, placeholder: 'auto', help: '--levels: how many levels are generated. Empty: as many as the points need.' },
@@ -310,7 +310,7 @@ export const TOOLS = [
       { key: 'refine', label: 'Refinement', type: 'enum', values: ['add', 'replace'], default: 'add', help: '--refine-mode: add (children add points to their parent) or replace.' },
       ...placement({ lon: '--longitude', lat: '--latitude', alt: '--height' }).map((o) => ({ ...o, advanced: true, help: `${o.help} Only with CRS "local".` })),
       { key: 'compression', label: 'Compression', type: 'enum', values: ['meshopt', 'none'], default: 'meshopt', advanced: true, help: '--compression: meshopt (EXT_meshopt_compression, version 1.1 only) or none.' },
-      { key: 'attributes', label: 'Attributes', type: 'text', default: '', advanced: true, placeholder: 'intensity,classification', help: '--attributes: per-point attributes to keep, comma-separated; "none" for none. Empty: intensity and classification, the tool\'s default.' },
+      { key: 'attributes', label: 'Attributes', type: 'text', default: '', advanced: true, placeholder: 'intensity,classification', choices: ['intensity', 'classification', 'none'], sep: ',', help: '--attributes: per-point attributes to keep, comma-separated; "none" for none. Empty: intensity and classification, the tool\'s default.' },
       { key: 'zOffset', label: 'Z offset (m)', type: 'number', min: -10000, max: 10000, default: 0, advanced: true, help: '--z-offset: added to every point\'s height.' },
       { key: 'eightBit', label: '8-bit colours', type: 'bool', default: false, advanced: true, help: '--8-bit: the input stores colours on 8 bits instead of 16.' },
       { key: 'join', label: 'Merge a folder into one tileset', type: 'bool', default: true, advanced: true, help: '--join: for a folder input, one tileset for all files (they must share a CRS). Off: one tileset per file, in sub-folders.' },

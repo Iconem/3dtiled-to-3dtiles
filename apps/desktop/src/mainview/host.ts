@@ -72,43 +72,15 @@ export function openExternal(url: string) {
 
 // ── window sizing ───────────────────────────────────────────────────────────────────────────────
 //
-// Only the view can measure the content; only the host can resize the window. The conversion between
-// them is the subtle part on Windows, so the measurements are logged — `hutch electrobun dev` prints
-// them, which is how the CSS-px-vs-frame-px mismatch was pinned down in the first place.
-let lastFit = '';
-
-/** Forget the last size sent, so the next measurement is sent even if it is the same. */
-export const resetFit = () => { lastFit = ''; };
-
-/**
- * Ask the host for a window the size of the content column. `el` is the column, whose last child is
- * the footer; `overlayOpen` skips the request while a preview asked for its own size.
- */
-export function fitWindowToContent(el: HTMLElement | null, overlayOpen: boolean) {
-  if (!pickerAvailable()) return;                 // no host to resize (plain-browser preview)
-  if (overlayOpen) return;                        // a preview asked for its own size
-  if (!el) return;
-  const rect = el.getBoundingClientRect();
-  const cssWidth = Math.ceil(rect.width + 24);    // the content, centred, + breathing room
-  // What the content needs, not scrollHeight: the column is as tall as the window, and asking for that plus a margin
-  // would grow the window at every call.
-  const footer = el.querySelector('footer');
-  if (!footer) return;
-  const above = [...el.children].filter((c) => c !== footer && c.getClientRects().length).map((c) => c.getBoundingClientRect().bottom);
-  if (!above.length) return;
-  const cssHeight = Math.ceil(Math.max(...above) + window.scrollY + footer.getBoundingClientRect().height + 30);
-  const key = `${cssWidth}x${cssHeight}`;
-  if (key === lastFit) return;                    // don't spam the host on every tab switch
-  lastFit = key;
-  console.log(`[fit] css=${cssWidth}x${cssHeight} innerWidth=${window.innerWidth} `
-    + `innerHeight=${window.innerHeight} dpr=${window.devicePixelRatio} scrollW=${document.documentElement.scrollWidth}`);
-  pickerRpc!.request.fitWindow({
-    cssWidth, cssHeight,
-    viewportWidth: window.innerWidth, viewportHeight: window.innerHeight,
-  }).catch(() => { /* host declined — the layout still works, it just may need scrolling */ });
-}
+// The window keeps its size whatever the page shows (a taller tab scrolls): only a preview asks the host for more
+// room, and gives it back when it closes.
 
 /** 3D needs more room than the launcher's form; closing the preview gives it back. */
 export function fitWindowForPreview() {
   pickerRpc?.request.fitWindow({ cssWidth: 1280, cssHeight: 800, viewportWidth: window.innerWidth, viewportHeight: window.innerHeight }).catch(() => {});
+}
+
+/** The size the window had before the preview. */
+export function restoreWindow() {
+  pickerRpc?.request.fitWindow({ cssWidth: 0, cssHeight: 0, viewportWidth: window.innerWidth, viewportHeight: window.innerHeight, restore: true }).catch(() => {});
 }

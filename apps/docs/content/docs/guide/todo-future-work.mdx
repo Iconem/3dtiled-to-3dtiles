@@ -301,6 +301,13 @@ flowchart LR
   a tileset in place, whereas the point here is to end at a *stateless URL* against the middleware —
   placement as a request parameter, not a saved file.
 
+  **Asked for on 2026-11-18:** the inspector's way of doing it, a tileset aligned on a 3DTilesRendererJS globe with
+  gizmos or controls and the transform burnt into its root, for tiled meshes and point clouds as well as tiled
+  splats. Two places it can apply: on the **output** (the root transform of an exported folder), or on a **3D Tiles
+  input piped through the middleware** (the placement parameters above). The same tool belongs in the demo viewer,
+  next to its other tools (crop and extract, the hierarchy explorer); where exactly is still to be decided. The
+  desktop app's *Place on globe* popover is the type-the-numbers version of it.
+
   Two design notes for whenever this is picked up:
   - The gizmo must compose **on top of** the adapter's own up-axis flip (SOG's RX(−90°), RAD's
     RX(180°), LCC's `[East, −Up, North]`), not replace it, or every format regresses to Y-up/Z-up

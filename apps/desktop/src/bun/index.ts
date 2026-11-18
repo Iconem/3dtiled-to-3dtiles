@@ -246,6 +246,9 @@ async function pickWindows(directory: boolean, allowedFileTypes: string): Promis
 	return picked ? [picked] : [];
 }
 
+/** The window's size before a preview grew it; null while no preview is open. */
+let beforePreview: { width: number; height: number } | null = null;
+
 /** Window bounds, and the ceiling we will not grow past. */
 const WIN = { x: 100, y: 40, width: 800, height: 940, maxWidth: 1600, maxHeight: 1200 };
 
@@ -314,7 +317,19 @@ const rpc = defineElectrobunRPC<DesktopRPC, "bun">("bun", {
 				return true;
 			},
 
-			fitWindow: ({ cssWidth, cssHeight, viewportWidth, viewportHeight }) => {
+			// Asked by a preview only: room for 3D, then (restore) the size the window had before it.
+			fitWindow: ({ cssWidth, cssHeight, viewportWidth, viewportHeight, restore }) => {
+				if (restore) {
+					const b = beforePreview ?? { width: WIN.width, height: WIN.height };
+					beforePreview = null;
+					mainWindow.setSize(b.width, b.height);
+					return b;
+				}
+				try {
+					const w = mainWindow as unknown as { getFrame?: () => { width: number; height: number }; getSize?: () => { width: number; height: number } };
+					const f = w.getFrame?.() ?? w.getSize?.();
+					if (f && f.width > 0 && f.height > 0) beforePreview ??= { width: f.width, height: f.height };
+				} catch { /* the default size is given back instead */ }
 				const sx = viewportWidth > 0 ? WIN.width / viewportWidth : 1;
 				const sy = viewportHeight > 0 ? WIN.height / viewportHeight : 1;
 				const width = Math.min(WIN.maxWidth, Math.max(WIN.width, Math.ceil(cssWidth * sx)));

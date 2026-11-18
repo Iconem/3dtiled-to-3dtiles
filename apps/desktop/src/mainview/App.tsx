@@ -21,11 +21,12 @@ import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, Di
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger } from '@/components/ui/dropdown-menu';
 import { Toaster } from '@/components/ui/sonner';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
+import { TooltipProvider } from '@/components/ui/tooltip';
 import { cn } from '@/lib/utils';
-import { Choice, Field, Segmented } from './components/bits';
+import { Choice, Field, Segmented, Tip } from './components/bits';
 import { ExportCard } from './ExportCard';
 import { LINKS } from './catalog';
-import { RELEASE_URL, setServerWorkers, base, buildLabel, docsUrl, fitWindowForPreview, fitWindowToContent, openExternal, pickerAvailable, pickerRpc, resetFit, staticPort, tilePort, viewerUrl } from './host';
+import { RELEASE_URL, setServerWorkers, base, buildLabel, docsUrl, fitWindowForPreview, openExternal, pickerAvailable, pickerRpc, restoreWindow, staticPort, tilePort, viewerUrl } from './host';
 import { LibraryTab } from './LibraryTab';
 import { TilerCard } from './TilerCard';
 import { loadLibrary, noteServed, parseLibrary, saveLocal, serialize, type DatasetOptions, type Library } from './library';
@@ -92,7 +93,6 @@ export function App() {
   const [update, setUpdate] = useState<{ title: string; applying: boolean } | null>(null);
   const [lib, setLibState] = useState<Library>(loadLibrary);
   const libRef = useRef(lib);
-  const containerRef = useRef<HTMLDivElement>(null);
   const overlayRef = useRef(overlay);
   overlayRef.current = overlay;
 
@@ -126,21 +126,8 @@ export function App() {
     setForm({ src: e.src, format: e.format ?? '', cache: e.cache ?? 'none', lon: e.lon ?? '', lat: e.lat ?? '', alt: e.alt ?? '', heading: e.heading ?? '' });
   }, []);
 
-  // ── window sizing ─────────────────────────────────────────────────────────────────────────────
-  // Panels differ hugely in height (Stream live is short, the Library's samples are a 20-row catalogue), and the Advanced
-  // folds open and close: re-measure after every commit, and when the column's size changes on its
-  // own (fonts, the log tail). The host is only asked when the measurement changed.
-  useEffect(() => {
-    const id = requestAnimationFrame(() => fitWindowToContent(containerRef.current, overlayRef.current != null));
-    return () => cancelAnimationFrame(id);
-  });
-  useEffect(() => {
-    const el = containerRef.current;
-    if (!el) return;
-    const ro = new ResizeObserver(() => requestAnimationFrame(() => fitWindowToContent(el, overlayRef.current != null)));
-    ro.observe(el);
-    return () => ro.disconnect();
-  }, []);
+  // The window keeps the size it has, whatever the tab or the tool shows: a taller page scrolls. Only a preview asks
+  // for more room, and gives it back when it closes.
 
   // ── preview over the launcher ─────────────────────────────────────────────────────────────────
   //
@@ -160,7 +147,7 @@ export function App() {
   }, [showInOverlay]);
   const closeOverlay = () => {
     setOverlay(null);          // the iframe unmounts, which frees the renderer's GPU memory
-    resetFit();
+    restoreWindow();
   };
 
   // ── boot ──────────────────────────────────────────────────────────────────────────────────────
@@ -223,22 +210,22 @@ export function App() {
   ];
 
   return (
-    <>
+    <TooltipProvider delay={400}>
       <Toaster theme={theme} position="bottom-center" />
       {/* Centred, in a window that opens at about this width (WIN in bun/index.ts). Measured on Windows at 150%:
           a 1680 px window, a 1106 CSS px viewport at devicePixelRatio 1.5, so the page sees the real window. Older
           Electrobun builds reported a viewport wider than the frame, which clipped centred content: check any
           change here in the real app, as a plain browser cannot show that.
           A column at least as tall as the window, so the footer sits at the bottom of a short tab. */}
-      <div ref={containerRef} className="mx-auto flex min-h-screen max-w-[720px] flex-col px-6 pt-5 pb-3">
+      <div className="mx-auto flex min-h-screen max-w-[720px] flex-col px-6 pt-5 pb-3">
         <header className="mb-4 flex items-center gap-2">
           <h1 className="m-0 text-lg font-semibold tracking-tight">3D Tiled</h1>
-          <div id="status" title={status.title} className="ml-2 flex items-center gap-1.5 text-xs text-muted-foreground"><span className={cn('size-2 rounded-full', status.dot)} />{status.text}</div>
+          <Tip text={status.title} side="bottom"><div id="status" className="ml-2 flex items-center gap-1.5 text-xs text-muted-foreground"><span className={cn('size-2 rounded-full', status.dot)} />{status.text}</div></Tip>
           <span className="flex-1" />
-          <Button id="update" variant="default" hidden={!update} disabled={update?.applying} title={update?.title} onClick={applyUpdate}>Update ready: restart</Button>
+          <Tip text={update?.title} side="bottom"><Button id="update" variant="default" hidden={!update} disabled={update?.applying} onClick={applyUpdate}>Update ready: restart</Button></Tip>
 
           <DropdownMenu>
-            <DropdownMenuTrigger render={<Button id="help" size="icon" variant="ghost" title="Help and links" aria-label="Help and links" />}><CircleHelpIcon /></DropdownMenuTrigger>
+            <Tip text="Help and links" side="bottom"><DropdownMenuTrigger render={<Button id="help" size="icon" variant="ghost" aria-label="Help and links" />}><CircleHelpIcon /></DropdownMenuTrigger></Tip>
             <DropdownMenuContent align="end" className="min-w-52">
               {docsUrl && <DropdownMenuItem id="link-docs" onClick={() => openExternal(docsUrl)}>Documentation</DropdownMenuItem>}
               {links.map(([id, href, label]) => href && <DropdownMenuItem key={id} id={id} onClick={() => openExternal(href)}>{label}</DropdownMenuItem>)}
@@ -249,7 +236,7 @@ export function App() {
           </DropdownMenu>
 
           <Dialog>
-            <DialogTrigger render={<Button id="settings" size="icon" variant="ghost" title="Settings" aria-label="Settings" />}><SettingsIcon /></DialogTrigger>
+            <Tip text="Settings" side="bottom"><DialogTrigger render={<Button id="settings" size="icon" variant="ghost" aria-label="Settings" />}><SettingsIcon /></DialogTrigger></Tip>
             <DialogContent className="max-w-md">
               <DialogHeader>
                 <DialogTitle>Settings</DialogTitle>
@@ -266,13 +253,16 @@ export function App() {
         </header>
 
         <Tabs value={tab} onValueChange={(v) => setTab(String(v))} className="gap-0">
-          <TabsList id="tabs" className="mb-3 h-auto gap-0.5 self-start rounded-md p-0.5">
+          {/* Tabs as a browser draws them: a rule across the window, the open tab underlined on it. */}
+          <TabsList id="tabs" variant="line" className="mb-4 h-auto w-full justify-start gap-1 rounded-none border-b border-border p-0">
             {(['stream', 'export', 'tile', 'library'] as const).map((name) => (
-              <TabsTrigger key={name} value={name} data-tab={name} title={TAB_TITLES[name]}
-                className="h-8 flex-none gap-2 rounded-sm border-0 px-3 text-sm font-medium text-muted-foreground hover:text-foreground data-active:bg-background data-active:text-foreground data-active:shadow-xs dark:data-active:border-0 dark:data-active:bg-background">
-                {TAB_LABELS[name]}
-                {name === 'library' && lib.bookmarks.length > 0 && <span id="lib-count" className="text-xs text-muted-foreground">{lib.bookmarks.length}</span>}
-              </TabsTrigger>
+              <Tip key={name} text={TAB_TITLES[name]} side="bottom">
+                <TabsTrigger value={name} data-tab={name}
+                  className="-mb-px h-10 flex-none gap-2 rounded-none border-0 border-b-2 border-transparent px-4 text-sm font-medium text-muted-foreground after:hidden hover:text-foreground data-active:border-foreground data-active:text-foreground dark:data-active:border-foreground">
+                  {TAB_LABELS[name]}
+                  {name === 'library' && lib.bookmarks.length > 0 && <span id="lib-count" className="text-xs text-muted-foreground">{lib.bookmarks.length}</span>}
+                </TabsTrigger>
+              </Tip>
             ))}
           </TabsList>
           {/* One dataset for the two tabs that take a tiled source: it stays what it was when you go from one to the other. */}
@@ -285,7 +275,7 @@ export function App() {
         </Tabs>
 
         <footer className="mt-auto pt-3 text-xs text-muted-foreground">
-          {version && <a id="version" href={RELEASE_URL} target="_blank" rel="noreferrer" title={`${version.title}. Opens the release on GitHub.`} className={footLink}>{version.label}</a>}
+          {version && <Tip text={`${version.title}. Opens the release on GitHub.`}><a id="version" href={RELEASE_URL} target="_blank" rel="noreferrer" className={footLink}>{version.label}</a></Tip>}
         </footer>
       </div>
 
@@ -310,7 +300,7 @@ export function App() {
           <iframe id="overlay-frame" title="Preview" allow="fullscreen; clipboard-write" src={overlay.url} className="w-full flex-1 border-0 bg-black" />
         </div>
       )}
-    </>
+    </TooltipProvider>
   );
 }
 

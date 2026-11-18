@@ -127,24 +127,29 @@ If a 3dtiled server is already listening on a candidate port (e.g. you have `pnp
 
 *Stream live* and *Export to a folder* share one tiled dataset, in a card shown above both: it stays what it was
 when you go from one to the other. *Tile raw input* has its own input field, for files that are not tiled yet.
-*Library* lists what you kept, with the samples folded at its top.
+*Library* lists what you kept, with the samples folded at its top. The tabs are drawn as a browser draws them: a
+rule across the window, the open tab underlined on it.
 
 ### How the window is laid out
 
 The window shows controls, not explanations. Since 2026-11-18:
 
-- **An explanation is behind an (i)** next to the title or the label it explains, or in a tooltip. Nothing on the
-  page is a paragraph.
+- **An explanation is behind an (i)** next to the title or the label it explains, or in a tooltip (the app's own,
+  not the system's). Nothing on the page is a paragraph.
 - **A choice between two or three things is a row of buttons**, all visible (stream or convert once, the export
   method, the renderer of a preview). Longer lists stay selects.
 - **What is rarely needed is in a menu**: *More* on the stream card (test the endpoint, hierarchy graph, API
   playground), the row menu of a library entry, *Copy* after an export.
 - **A passing message is a toast**; what a run says (progress, how it ended, the tool's output) stays in its card.
-- **The dataset bar**: the field, **Paste**, **File…**, a star that bookmarks it. Under it, the **format** (what the
-  name says, or the one you choose; a pasted or picked dataset starts from detection again), **Place on the globe**
-  (a popover with longitude, latitude, altitude and heading), and how it is served: *Stream*, *Index first*
+- **The dataset bar**: the field, **Paste**, **File…**, a star that bookmarks it (filled once the dataset is in the
+  Library; a second click takes it out). After **Paste** or **File…**, Ctrl+Z in the field gives back what it held.
+  Under it, the **format** (what the name says, or the one you choose; a pasted or picked dataset starts from
+  detection again), **Place on globe** (a popover with longitude, latitude, altitude and heading), **Threads** (the
+  tile threads, for streaming and for exports alike), and how it is served: *Stream*, *Index first*
   (`cache=hierarchy`) or *Convert once* (`cache=full`).
-- **Settings** (the gear): theme and tile threads, which apply to streaming and to exports alike. **Help** (the
+- **The window keeps its size.** A tab or a tool with more to show scrolls; only a preview makes the window larger,
+  and closing it gives the size back.
+- **Settings** (the gear): theme and tile threads (the same setting as *Threads* in the dataset bar). **Help** (the
   question mark): the documentation, the web viewer, the hierarchy explorer, the source, and the two local servers.
 - Three text sizes and one accent; green, amber and red only say how something went.
 
@@ -164,7 +169,7 @@ The window shows controls, not explanations. Since 2026-11-18:
   started with `TILED_LOCAL_SOURCES=1`.
 - Builds the URL against `/tiles/tileset.json`, the front door that dispatches to `/stream` for
   `cache=none|hierarchy` and `/convert` for `cache=full` — so the UI never re-encodes that routing rule.
-- **Place on the globe** applies `&lon/&lat/&alt/&heading` as a root ENU transform *in
+- **Place on globe** applies `&lon/&lat/&alt/&heading` as a root ENU transform *in
   the tileset*, so every client gets the placement — not just the preview. Sources carrying their own
   georeference ignore them.
 - **Test the endpoint** (under *More*) fetches the tileset and reports asset version, geometric error, bounding-volume
@@ -245,7 +250,7 @@ every level), and press **Export**.
 - **Failures.** Files that fail after three attempts are listed in `export-report.json`, along with
   counts, bytes, timings and the source URL. Their uris stay in place, so the tileset remains
   structurally valid.
-- **Tile threads (experimental).** In Settings, **Tile threads** runs the decode and encode of tiles on worker
+- **Tile threads (experimental).** **Threads**, in the dataset bar and in Settings, runs the decode and encode of tiles on worker
   threads for that export: about 3 to 4 times faster on 8 cores for COPC and Potree, less for splats and meshes, the same tiles, around 50 MB more memory per
   worker. A tile the workers have no memory for is built on one thread instead. Off by default.
 - **Checked at the end.** Both methods check the finished folder, on by default. **Check the result** under *More options*
@@ -364,7 +369,12 @@ dialog only lists those.
   the tab's input field and give the table under the tool. A password can be part of the address
   (`user:password@host`): it is passed to the tool through its environment, never on a command line, in the log
   or in the run's record. Without one, `PGPASSWORD` or the machine's pgpass file is used.
+- **The tool is one searchable list**, grouped into point cloud, mesh and splat tilers, each line with what it
+  writes and whether it is ready or how much it downloads. With an input it lists the tools that take it; without
+  one it lists them all, to look at their options. The (i) next to it says what the chosen tool is and reads.
 - **A tool already on the machine is offered first**, so nothing is downloaded unless you pick a tool that needs it.
+- **A list of attributes is a row of chips** (PotreeConverter 2 and 1.7, gocesiumtiler): pick them from the list,
+  type one that is not in it and press Enter, or paste a whole list (`rgb, intensity, classification`).
 - **The options are the tool's own**, with its defaults; the rarer ones are under *More options*, next to the equivalent
   command line. A cloud or a mesh without a georeference takes a CRS or a longitude and latitude there. Another
   input starts from the defaults again: the CRS typed for one file is not carried to the next.
@@ -407,8 +417,9 @@ which is also the seam along which it would move to a real file if it ever needs
 
 ### Samples
 
-A fold at the top of the Library, closed until you open it. One or more real, publicly-hosted datasets per source
-format — COPC, Potree, streamed SOG, LCC, RAD, I3S — with the origin in each button's tooltip. A click drops one into
+A section at the top of the Library, closed until you open it; *Bookmarks* and *History* fold the same way, and
+each remembers whether it was open. One or more real, publicly-hosted datasets per source format (COPC, Potree, VPC,
+streamed SOG, LCC, LCC2, RAD, I3S, OSGB, Nexus: 29 in all), with the origin in each button's tooltip. A click drops one into
 *Stream live* with the right format already selected; the star next to the dataset then bookmarks it. The URLs are copied from the viewer app's own
 `FORMATS` preset table, so the desktop app demonstrates exactly the sources the rest of the project
 is tested against.

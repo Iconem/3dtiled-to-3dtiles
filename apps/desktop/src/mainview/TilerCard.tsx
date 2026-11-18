@@ -19,16 +19,19 @@
  */
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { Button } from '@/components/ui/button';
+import { Combobox, ComboboxCollection, ComboboxContent, ComboboxEmpty, ComboboxGroup, ComboboxItem, ComboboxLabel, ComboboxList, ComboboxSearch, ComboboxTrigger } from '@/components/ui/combobox';
 import { cn } from '@/lib/utils';
 import type { AppModel } from './App';
 import { Card, CardTitle } from './components/Card';
-import { Actions, Advanced, Check, Chip, Choice, Code, CopyButton, Field, FieldLabel, Info, LogFold, Result, TextInput, UrlBar, type Kind, type Message } from './components/bits';
+import { Actions, Advanced, Check, Chip, Choice, Code, CopyButton, Field, FieldLabel, Info, LogFold, MultiCombo, Result, TextInput, Tip, UrlBar, type Kind, type Message } from './components/bits';
 import { PreviewControl } from './StreamTab';
 import { base, openExternal, pickDataset, pickerAvailable, pickerRpc } from './host';
 
 interface ToolOption {
   key: string; label: string; type: 'int' | 'number' | 'bool' | 'enum' | 'text';
   values?: string[]; default: string | number | boolean; min?: number; max?: number; advanced?: boolean; help: string; placeholder?: string;
+  /** A text option that is a list of names (attributes to keep): the known ones, and what joins them. */
+  choices?: string[]; sep?: string;
 }
 interface Tool {
   id: string; name: string; kind: 'pointcloud' | 'mesh' | 'splat'; summary: string; homepage: string; licence: string;
@@ -42,6 +45,7 @@ interface Tool {
 interface InputInfo { exists: boolean; dir: boolean; ext: string; exts: string[]; ply: 'points' | 'splats' | 'mesh' | null; db?: boolean }
 interface TilerResult { tool: string; kind?: string; format: string; output: string; outDir: string; seconds: number }
 const KINDS: Record<Tool['kind'], string> = { pointcloud: 'Point cloud', mesh: 'Mesh', splat: 'Splats' };
+const TILER_GROUPS: Record<Tool['kind'], string> = { pointcloud: 'Point cloud tilers', mesh: 'Mesh tilers', splat: 'Splat tilers' };
 const PLY: Record<string, string> = { points: 'a point cloud', splats: 'Gaussian splats', mesh: 'a mesh' };
 /** The folder's key in /tilers/files/<key>/…: its path, UTF-8, base64url (tilers-live.js `outputKey`). */
 const outputKey = (dir: string) => btoa(String.fromCharCode(...new TextEncoder().encode(dir))).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
@@ -141,7 +145,11 @@ export function TilerCard({ app, onStream }: { app: AppModel; onStream: () => vo
   const ext = extOf(src);
   const known = info?.src === src ? info : null;
   const fitting = useMemo(() => (tools ?? []).filter((t) => (known ? known.ids.includes(t.id) : t.dir !== 'only' && t.inputs.includes(ext))), [tools, ext, known]);
-  const tool = fitting.find((t) => t.id === toolId) ?? fitting.find((t) => t.found.status === 'ready') ?? fitting[0] ?? null;
+  // With an input: the tools that take it, one chosen for you. Without: every tool, to look at, none chosen.
+  const offered = src ? fitting : (tools ?? []);
+  const tool = offered.find((t) => t.id === toolId) ?? (src ? fitting.find((t) => t.found.status === 'ready') ?? fitting[0] : null) ?? null;
+  const groups = useMemo(() => (Object.keys(TILER_GROUPS) as Tool['kind'][])
+    .map((k) => ({ value: TILER_GROUPS[k], items: offered.filter((t) => t.kind === k) })).filter((g) => g.items.length), [offered]);
   useEffect(() => { if (tool && tool.id !== toolId) setToolId(tool.id); }, [tool, toolId]);
   const vals = (tool && values[tool.id]) || {};
   const setVal = (key: string, v: string | boolean) => tool && setValues((all) => ({ ...all, [tool.id]: { ...(all[tool.id] ?? {}), [key]: v } }));
@@ -281,6 +289,12 @@ export function TilerCard({ app, onStream }: { app: AppModel; onStream: () => vo
         <Choice id={`tiler-${o.key}`} value={String(v ?? o.default)} onChange={(c) => setVal(o.key, c)} options={(o.values ?? []).map((x) => ({ value: x, label: x }))} />
       </Field>
     );
+    // a list of names: chips to pick, and a pasted or typed list is taken as it is
+    if (o.type === 'text' && o.choices) return (
+      <Field key={o.key} label={o.label} info={o.help}>
+        <MultiCombo id={`tiler-${o.key}`} value={String(v ?? '')} onChange={(c) => setVal(o.key, c)} choices={o.choices} sep={o.sep} placeholder={o.placeholder} />
+      </Field>
+    );
     return (
       <Field key={o.key} label={o.label} info={o.help}>
         <TextInput id={`tiler-${o.key}`} value={String(v ?? (o.type === 'text' ? '' : o.default))} onChange={(e) => setVal(o.key, e.target.value)} placeholder={o.placeholder ?? String(o.default)} />
@@ -290,11 +304,12 @@ export function TilerCard({ app, onStream }: { app: AppModel; onStream: () => vo
   const basic = tool?.options.filter((o) => !o.advanced) ?? [], advanced = tool?.options.filter((o) => o.advanced) ?? [];
   const grid = (list: ToolOption[]) => (
     <>
-      <div className="mt-3 grid grid-cols-2 gap-3 max-sm:grid-cols-1">{list.filter((o) => o.type !== 'bool').map(field)}</div>
+      <div className="mt-3 grid grid-cols-2 items-start gap-3 max-sm:grid-cols-1">{list.filter((o) => o.type !== 'bool').map(field)}</div>
       {list.some((o) => o.type === 'bool') && <div className="mt-1 flex flex-wrap items-center gap-x-4">{list.filter((o) => o.type === 'bool').map(field)}</div>}
     </>
   );
   const state = (t: Tool) => (t.found.status === 'ready' ? 'Ready' : t.found.downloadable ? `Download, ${(t.found.downloadBytes / 1e6).toFixed(0)} MB` : 'Not installed');
+  const stateClass = (t: Tool) => (t.found.status === 'ready' ? 'text-muted-foreground' : t.found.downloadable ? 'text-foreground' : 'text-warning');
   const accepted = (k: Tool['kind']) => [...new Set((tools ?? []).filter((t) => t.kind === k).flatMap((t) => t.inputs))].filter((e) => e !== 'postgres').map((e) => `.${e}`).join(' ');
 
   return (
@@ -309,11 +324,73 @@ export function TilerCard({ app, onStream }: { app: AppModel; onStream: () => vo
       <UrlBar>
         <TextInput id="tiler-src" aria-label="Raw input: a file, a folder, or a PostgreSQL address" value={input} onChange={(e) => setInput(e.target.value)} disabled={running} placeholder="Raw file or folder: C:\data\scan.laz, C:\data\model.obj, postgresql://user@host/db" className="flex-1" />
         {host && <>
-          <Button id="tiler-browse-file" disabled={running} title="Pick a raw file: a point cloud, a mesh, vectors or splats" onClick={() => browseIn(false)}>File…</Button>
-          <Button id="tiler-browse-dir" disabled={running} title="Pick a folder of raw files: LAS or LAZ files, an OSGB tree, meshes" onClick={() => browseIn(true)}>Folder…</Button>
+          <Tip text="Pick a raw file: a point cloud, a mesh, vectors or splats"><Button id="tiler-browse-file" disabled={running} onClick={() => browseIn(false)}>File…</Button></Tip>
+          <Tip text="Pick a folder of raw files: LAS or LAZ files, an OSGB tree, meshes"><Button id="tiler-browse-dir" disabled={running} onClick={() => browseIn(true)}>Folder…</Button></Tip>
         </>}
       </UrlBar>
       {unavailable && <Result id="tiler-unavailable" message={{ msg: unavailable, kind: 'err' }} />}
+
+      {/* The tool: one searchable list, grouped by what the tool tiles. With an input it holds the tools that take it. */}
+      {tools && (
+        <>
+          <div className="mt-3 flex items-center gap-2">
+            <FieldLabel>Tool</FieldLabel>
+            {src && tool && <Chip id="tiler-input" data-dir={known?.input.dir ? 'true' : 'false'} data-ply={known?.input.ply ?? ''}>Input: {what}</Chip>}
+          </div>
+          <div className="mt-1.5 flex items-center gap-2">
+            <Combobox items={groups} value={tool} onValueChange={(t) => { if (t) setToolId((t as Tool).id); }}
+              itemToStringLabel={(t: Tool) => `${t.name} ${t.output.label} ${KINDS[t.kind]}`} isItemEqualToValue={(x: Tool, y: Tool) => x?.id === y?.id} disabled={running || !offered.length}>
+              <ComboboxTrigger id="tiler-tool" data-value={tool?.id ?? ''} aria-label="Tool" className="min-w-0 flex-1">
+                {tool
+                  ? <span className="flex min-w-0 flex-1 items-center gap-2">
+                      <span className="truncate font-medium">{tool.name}</span>
+                      <span className="truncate text-xs text-muted-foreground">→ {tool.output.label}</span>
+                      <span className={cn('ml-auto flex-none text-xs', stateClass(tool))}>{state(tool)}</span>
+                    </span>
+                  : <span className="text-muted-foreground">{offered.length ? `Choose one of ${offered.length} tools` : 'No tool takes this input'}</span>}
+              </ComboboxTrigger>
+              <ComboboxContent>
+                <ComboboxSearch id="tiler-tool-search" placeholder="Search: a tool, an output format…" />
+                <ComboboxEmpty>No tool matches.</ComboboxEmpty>
+                <ComboboxList>
+                  {(group: { value: string; items: Tool[] }) => (
+                    <ComboboxGroup key={group.value} items={group.items}>
+                      <ComboboxLabel>{group.value}</ComboboxLabel>
+                      <ComboboxCollection>
+                        {(t: Tool) => (
+                          <ComboboxItem key={t.id} value={t} data-tool={t.id}>
+                            <span className="truncate font-medium">{t.name}</span>
+                            <span className="truncate text-xs text-muted-foreground">→ {t.output.label}</span>
+                            <span className={cn('ml-auto flex-none text-xs', stateClass(t))}>{state(t)}</span>
+                          </ComboboxItem>
+                        )}
+                      </ComboboxCollection>
+                    </ComboboxGroup>
+                  )}
+                </ComboboxList>
+              </ComboboxContent>
+            </Combobox>
+            {tool && (
+                <Info label={`About ${tool.name}`}>
+                <p className="m-0">{tool.summary}</p>
+                <p className="m-0">Takes {tool.inputs.filter((e) => e !== 'postgres').map((e) => `.${e}`).join(' ') || 'a PostgreSQL address'}{tool.dir ? (tool.dir === 'only' ? ' in a folder' : ', or a folder of them') : ''}.</p>
+                <p className="m-0"><a href={tool.homepage} onClick={(e) => { e.preventDefault(); openExternal(tool.homepage); }} className="underline">Project page</a>, {tool.licence} licence{tool.version ? `, version ${tool.version}` : ''}.</p>
+                <p className="m-0">
+                  {tool.found.status === 'ready'
+                    ? <>On this machine: {SOURCES[tool.found.source ?? ''] ?? tool.found.source}{tool.found.hint ? ` (${tool.found.hint})` : ''}.</>
+                    : tool.found.downloadable
+                      ? <><strong>Not installed.</strong> Running it first downloads {tool.found.missing.join(' and ')} ({(tool.found.downloadBytes / 1e6).toFixed(0)} MB){tool.delivery === 'uv'
+                          ? <>: uv installs that pinned version from PyPI into a private environment in this app's tools folder, nothing system-wide.</>
+                          : tool.delivery === 'cargo'
+                          ? <>: its authors publish source only, so the archive is checked against a pinned SHA-256 and compiled once (a few minutes), with this machine's Rust toolchain or one this app fetches for the build and removes afterwards.</>
+                          : <> from the authors' release page, checked against a pinned SHA-256 and kept in this app's tools folder.</>}</>
+                      : <><strong>Not on this machine:</strong> {tool.found.hint}.</>}
+                </p>
+              </Info>
+            )}
+          </div>
+        </>
+      )}
 
       {/* Nothing to run yet: what this tab takes. */}
       {tools && !tool && (
@@ -324,48 +401,12 @@ export function TilerCard({ app, onStream }: { app: AppModel; onStream: () => vo
             {(Object.keys(KINDS) as Tool['kind'][]).map((k) => <div key={k} id={`tiler-inputs-${k}`} className="contents"><dt className="font-medium text-foreground">{KINDS[k]}</dt><dd className="m-0">{accepted(k)}</dd></div>)}
             {tools.some((t) => t.inputs.includes('postgres')) && <div id="tiler-inputs-db" className="contents"><dt className="font-medium text-foreground">PostGIS table</dt><dd className="m-0">postgresql://user@host:5432/database</dd></div>}
           </dl>
-          {!src && host && <Button id="tiler-samples" size="sm" className="mt-3" title="A LAS, a splat PLY and a textured OBJ, 1.3 MB, written into a folder you pick" onClick={makeSamples}>Write sample files to try</Button>}
+          {!src && host && <Tip text="A LAS, a splat PLY and a textured OBJ, 1.3 MB, written into a folder you pick"><Button id="tiler-samples" size="sm" className="mt-3" onClick={makeSamples}>Write sample files to try</Button></Tip>}
         </div>
       )}
 
       {tool && (
         <>
-          {/* What the input is, then the tools that take it: one row each, the chosen one marked. */}
-          <div className="mt-3 flex items-center gap-2">
-            <FieldLabel>Tool</FieldLabel>
-            <Chip id="tiler-input" data-dir={known?.input.dir ? 'true' : 'false'} data-ply={known?.input.ply ?? ''}>Input: {what}</Chip>
-          </div>
-          <div id="tiler-tool" role="radiogroup" aria-label="Tool" data-value={tool.id} className="mt-1.5 flex flex-col overflow-hidden rounded-md border border-input">
-            {fitting.map((t) => {
-              const on = t.id === tool.id;
-              return (
-                <div key={t.id} className={cn('flex items-center gap-2 border-b border-border px-3 last:border-b-0', on && 'bg-accent/60')}>
-                  <button type="button" role="radio" aria-checked={on} data-tool={t.id} disabled={running} onClick={() => setToolId(t.id)}
-                    className="flex min-w-0 flex-1 cursor-pointer items-center gap-2.5 border-0 bg-transparent py-2 text-left text-sm text-foreground outline-none focus-visible:ring-2 focus-visible:ring-ring/60 disabled:cursor-default">
-                    <span className={cn('size-3.5 flex-none rounded-full border border-muted-foreground', on && 'border-4 border-foreground')} />
-                    <span className="truncate font-medium">{t.name}</span>
-                    <span className="truncate text-xs text-muted-foreground">→ {t.output.label}</span>
-                  </button>
-                  <span className={cn('flex-none text-xs', t.found.status === 'ready' ? 'text-muted-foreground' : t.found.downloadable ? 'text-foreground' : 'text-warning')} title={t.found.status === 'ready' ? (SOURCES[t.found.source ?? ''] ?? t.found.source ?? '') : t.found.hint ?? ''}>{state(t)}</span>
-                  <Info label={`About ${t.name}`}>
-                    <p className="m-0">{t.summary}</p>
-                    <p className="m-0"><a href={t.homepage} onClick={(e) => { e.preventDefault(); openExternal(t.homepage); }} className="underline">Project page</a>, {t.licence} licence{t.version ? `, version ${t.version}` : ''}.</p>
-                    <p className="m-0">
-                      {t.found.status === 'ready'
-                        ? <>On this machine: {SOURCES[t.found.source ?? ''] ?? t.found.source}{t.found.hint ? ` (${t.found.hint})` : ''}.</>
-                        : t.found.downloadable
-                          ? <><strong>Not installed.</strong> Running it first downloads {t.found.missing.join(' and ')} ({(t.found.downloadBytes / 1e6).toFixed(0)} MB){t.delivery === 'uv'
-                              ? <>: uv installs that pinned version from PyPI into a private environment in this app's tools folder, nothing system-wide.</>
-                              : t.delivery === 'cargo'
-                              ? <>: its authors publish source only, so the archive is checked against a pinned SHA-256 and compiled once (a few minutes), with this machine's Rust toolchain or one this app fetches for the build and removes afterwards.</>
-                              : <> from the authors' release page, checked against a pinned SHA-256 and kept in this app's tools folder.</>}</>
-                          : <><strong>Not on this machine:</strong> {t.found.hint}.</>}
-                    </p>
-                  </Info>
-                </div>
-              );
-            })}
-          </div>
           <span id="tiler-found" data-status={tool.found.status} hidden>{state(tool)}</span>
 
           {basic.length > 0 && grid(basic)}
