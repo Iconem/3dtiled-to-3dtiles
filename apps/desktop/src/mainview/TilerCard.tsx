@@ -352,7 +352,7 @@ export function TilerCard({ app, onStream }: { app: AppModel; onStream: () => vo
               <ComboboxContent>
                 <ComboboxSearch id="tiler-tool-search" placeholder="Search: a tool, an output format…" />
                 <ComboboxEmpty>No tool matches.</ComboboxEmpty>
-                <ComboboxList>
+                <ComboboxList className="max-h-[min(27rem,calc(var(--available-height)-2.5rem))]">
                   {(group: { value: string; items: Tool[] }) => (
                     <ComboboxGroup key={group.value} items={group.items}>
                       <ComboboxLabel>{group.value}</ComboboxLabel>

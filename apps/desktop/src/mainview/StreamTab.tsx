@@ -118,7 +118,7 @@ export function DatasetCard({ app }: { app: AppModel }) {
         {/* Outside the Electrobun host (the bundle rendered in a plain browser) the native dialog cannot exist. */}
         {pickerAvailable() && <Tip text="Pick a dataset file: .copc.laz, .rad, .lcc, .3tz, .slpk, .nxs…, or the entry file of a dataset that is a folder (cloud.js, metadata.json, lod-meta.json, tileset.json, metadata.xml)"><Button id="browse-file" onClick={browse}>File…</Button></Tip>}
         <Tip text={saved ? 'In the Library. Click to take it out' : 'Bookmark this dataset in the Library'}>
-          <Button id="save" size="icon" className="size-9" data-saved={saved ? 'true' : 'false'} aria-pressed={!!saved} aria-label="Bookmark this dataset" disabled={!form.src.trim()} onClick={bookmark}><StarIcon className={cn('size-4', saved && 'fill-current')} /></Button>
+          <Button id="save" size="icon" className={cn('size-9', saved && 'text-foreground')} data-saved={saved ? 'true' : 'false'} aria-pressed={!!saved} aria-label="Bookmark this dataset" disabled={!form.src.trim()} onClick={bookmark}><StarIcon className={cn('size-4', saved && 'fill-current')} /></Button>
         </Tip>
       </UrlBar>
 
@@ -139,26 +139,6 @@ export function DatasetCard({ app }: { app: AppModel }) {
           </DropdownMenuContent>
         </DropdownMenu>
 
-        <Popover>
-          <Tip text="Where the dataset goes on the globe, for one that carries no georeference">
-            <PopoverTrigger render={<Button id="place" variant="ghost" className="gap-1.5 px-2" />}>
-              <MapPinIcon className="size-3.5" />
-              <span className={placed ? 'text-foreground' : undefined}>{placed ? `${form.lon.trim()}, ${form.lat.trim()}` : 'Place on globe'}</span>
-            </PopoverTrigger>
-          </Tip>
-          <PopoverContent id="manual-georef-local-tileset" align="start" className="w-80 gap-3">
-            <div className="grid grid-cols-2 gap-3">
-              {PLACEMENT.map((k) => (
-                <Field key={k} label={PLACEMENT_FIELDS[k].label}>
-                  <TextInput id={k} value={form[k]} onChange={(e) => patchForm({ [k]: e.target.value })} placeholder={PLACEMENT_FIELDS[k].placeholder} />
-                </Field>
-              ))}
-            </div>
-            <p className="m-0 text-xs text-muted-foreground">Written in the tileset as a root transform, so every client gets it. A dataset with its own georeference ignores these.</p>
-            {placed && <Button id="place-clear" size="sm" variant="ghost" className="self-start" onClick={() => patchForm({ lon: '', lat: '', alt: '', heading: '' })}>Clear</Button>}
-          </PopoverContent>
-        </Popover>
-
         {/* Tile threads: the server's one setting, for the tiles it streams and the exports it runs (also in Settings). */}
         <DropdownMenu>
           <Tip text={WORKERS_TITLE}>
@@ -178,6 +158,26 @@ export function DatasetCard({ app }: { app: AppModel }) {
 
         <span className="flex-1" />
         <Segmented id="cache" value={form.cache} onChange={(v) => patchForm({ cache: v })} options={MODES} className="h-8" />
+
+        <Popover>
+          <Tip text="Where the dataset goes on the globe, for one that carries no georeference">
+            <PopoverTrigger render={<Button id="place" variant="ghost" className="gap-1.5 px-2" />}>
+              <MapPinIcon className="size-3.5" />
+              <span className={placed ? 'text-foreground' : undefined}>{placed ? `${form.lon.trim()}, ${form.lat.trim()}` : 'Place on globe'}</span>
+            </PopoverTrigger>
+          </Tip>
+          <PopoverContent id="manual-georef-local-tileset" align="end" className="w-80 gap-3">
+            <div className="grid grid-cols-2 gap-3">
+              {PLACEMENT.map((k) => (
+                <Field key={k} label={PLACEMENT_FIELDS[k].label}>
+                  <TextInput id={k} value={form[k]} onChange={(e) => patchForm({ [k]: e.target.value })} placeholder={PLACEMENT_FIELDS[k].placeholder} />
+                </Field>
+              ))}
+            </div>
+            <p className="m-0 text-xs text-muted-foreground">Written in the tileset as a root transform, so every client gets it. A dataset with its own georeference ignores these.</p>
+            {placed && <Button id="place-clear" size="sm" variant="ghost" className="self-start" onClick={() => patchForm({ lon: '', lat: '', alt: '', heading: '' })}>Clear</Button>}
+          </PopoverContent>
+        </Popover>
       </div>
     </Card>
   );

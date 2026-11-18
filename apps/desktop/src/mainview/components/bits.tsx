@@ -189,6 +189,11 @@ export function FoldCard({ id, title, count, hint, defaultOpen = true, actions, 
 /**
  * Several values out of a list, shown as chips, kept as one string joined by `sep`: what a tool takes as
  * `--attributes a,b`. A value that is not in the list can be typed (Enter adds it), and a whole list can be pasted.
+ *
+ * The chips select as the recipients of a mail do: each is one word. A click selects one, Shift+click a run;
+ * with the caret at the start of the field, Left and Right step through them and Shift extends the run; Ctrl+A
+ * takes them all. Ctrl+C copies the run (the whole list when none is selected) joined as the tool takes it,
+ * Ctrl+X cuts it, Backspace or Delete removes it.
  */
 export function MultiCombo({ id, value, onChange, choices, sep = ',', placeholder, disabled }: {
   id?: string; value: string; onChange: (v: string) => void; choices: string[]; sep?: string; placeholder?: string; disabled?: boolean;
@@ -204,19 +209,70 @@ export function MultiCombo({ id, value, onChange, choices, sep = ',', placeholde
   const typed = query.trim();
   const items = typed && !known.some((k) => k.toLowerCase() === typed.toLowerCase()) ? [...known, typed] : known;
   const set = (list: string[]) => { onChange([...new Set(list)].join(sep === ',' ? ',' : sep)); setQuery(''); };
+  // the list as one string, as the tool takes it
+  const [copied, setCopied] = useState(false);
+  // the run of chips selected: from the one it started at to the one the keys or the mouse last reached
+  const [run, setRun] = useState<{ from: number; to: number } | null>(null);
+  const lo = run ? Math.min(run.from, run.to) : -1, hi = run ? Math.max(run.from, run.to) : -1;
+  const inRun = (i: number) => !!run && i >= lo && i <= hi && i < selected.length;
+  const picked = run ? selected.filter((_, i) => inRun(i)) : selected;
+  const copy = async (list: string[] = selected) => { try { await navigator.clipboard.writeText(list.join(sep === ',' ? ', ' : sep)); } catch { return; } setCopied(true); setTimeout(() => setCopied(false), 1500); };
+  const dropRun = () => { set(selected.filter((_, i) => !inRun(i))); setRun(null); };
+  function chipKeys(e: React.KeyboardEvent<HTMLInputElement>) {
+    const el = e.currentTarget, n = selected.length, mod = e.ctrlKey || e.metaKey, k = e.key;
+    const atStart = el.selectionStart === 0 && el.selectionEnd === 0;
+    const mine = () => { e.preventDefault(); (e as unknown as { preventBaseUIHandler?: () => void }).preventBaseUIHandler?.(); };
+    if (!n) return;
+    if (k === 'ArrowLeft' && (run || atStart)) {
+      mine();
+      const to = run ? Math.max(0, run.to - 1) : n - 1;
+      setRun(e.shiftKey && run ? { from: run.from, to } : { from: to, to });
+    } else if (k === 'ArrowRight' && run) {
+      mine();
+      const to = run.to + 1;
+      // past the last chip the caret is back in the field: a run that Shift extends stays, a single one ends
+      if (to >= n) { if (!e.shiftKey || run.from >= n - 1 && run.to >= n - 1) setRun(e.shiftKey && run.from < n - 1 ? { from: run.from, to: n - 1 } : null); }
+      else setRun(e.shiftKey ? { from: run.from, to } : { from: to, to });
+    } else if (k === 'Home' && (run || atStart) && !query) { mine(); setRun(e.shiftKey && run ? { from: run.from, to: 0 } : { from: 0, to: 0 }); }
+    else if (k === 'End' && run) { mine(); setRun(e.shiftKey ? { from: run.from, to: n - 1 } : null); }
+    else if (mod && k.toLowerCase() === 'a' && !query) { mine(); setRun({ from: 0, to: n - 1 }); }
+    else if (mod && k.toLowerCase() === 'c' && (run || !query)) { mine(); void copy(picked); }
+    else if (mod && k.toLowerCase() === 'x' && run) { mine(); void copy(picked); dropRun(); }
+    else if ((k === 'Backspace' || k === 'Delete') && run) { mine(); dropRun(); }
+    else if (k === 'Escape' && run) { mine(); setRun(null); }
+    else if (run && !mod && k.length === 1) setRun(null);   // typing goes to the field
+  }
   return (
     <Combobox multiple items={items} value={selected} onValueChange={(v) => set(v as string[])} inputValue={query} onInputValueChange={setQuery} open={open} onOpenChange={setOpen}
       onItemHighlighted={(item) => { highlighted.current = item as string | undefined; }} disabled={disabled}>
-      <ComboboxChips ref={anchor} data-value={value}>
-        {selected.map((v) => <ComboboxChip key={v} aria-label={v}>{v}</ComboboxChip>)}
-        <ComboboxChipsInput id={id} placeholder={selected.length ? '' : placeholder}
+      <div className="flex items-start gap-2">
+      <ComboboxChips ref={anchor} data-value={value} className="min-w-0 flex-1">
+        {selected.map((v, i) => (
+          <ComboboxChip key={v} aria-label={v} data-chip={v} data-selected={inRun(i) ? 'true' : undefined}
+            className={cn('cursor-default select-none', inRun(i) && 'bg-primary text-primary-foreground [&_button]:text-primary-foreground/70')}
+            onMouseDown={(e) => {
+              if ((e.target as HTMLElement).closest('button')) return;   // the chip's own remove button
+              e.preventDefault(); e.stopPropagation();
+              setRun(e.shiftKey && run ? { from: run.from, to: i } : { from: i, to: i });
+              const field = (e.currentTarget.parentElement as HTMLElement).querySelector('input'); field?.focus(); field?.setSelectionRange(0, 0);
+            }}>{v}</ComboboxChip>
+        ))}
+        <ComboboxChipsInput id={id} placeholder={selected.length ? '' : placeholder} onBlur={() => setRun(null)}
           onPaste={(e) => { const list = split(e.clipboardData.getData('text')); if (list.length > 1) { e.preventDefault(); set([...selected, ...list]); } }}
           onKeyDown={(e) => {
+            chipKeys(e);
+            if (e.defaultPrevented) return;
             // Escape closes the list; with the list closed it would empty the field, which nobody expects of a form
             if (e.key === 'Escape' && !open) (e as unknown as { preventBaseUIHandler?: () => void }).preventBaseUIHandler?.();
             if (e.key === 'Enter' && typed && !highlighted.current) { e.preventDefault(); set([...selected, ...split(typed)]); }
           }} />
       </ComboboxChips>
+      <Tip text="Copy the list as one string. In the field: Ctrl+C copies it, or the chips selected with Shift+arrows or a click">
+        <Button data-copy-list data-copied={copied ? 'true' : 'false'} size="icon" className="size-9 flex-none" disabled={disabled || !selected.length} aria-label="Copy the list" onClick={() => void copy()}>
+          {copied ? <CheckIcon className="size-4" /> : <CopyIcon className="size-4" />}
+        </Button>
+      </Tip>
+      </div>
       <ComboboxContent anchor={anchor}>
         <ComboboxEmpty>Type a name, then Enter.</ComboboxEmpty>
         <ComboboxList>

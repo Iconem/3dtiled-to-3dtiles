@@ -3,6 +3,18 @@ title: "Desktop app"
 description: "3D Tiled desktop companion — runs the tile-server on-device and turns a local dataset into a paste-ready 3D Tiles URL."
 ---
 
+import streamLight from './img/desktop/stream-light.png';
+import streamDark from './img/desktop/stream-dark.png';
+import exportLight from './img/desktop/export-light.png';
+import exportDark from './img/desktop/export-dark.png';
+import tileLight from './img/desktop/tile-light.png';
+import tileDark from './img/desktop/tile-dark.png';
+import libraryLight from './img/desktop/library-light.png';
+import libraryDark from './img/desktop/library-dark.png';
+import librarySamplesLight from './img/desktop/library-samples-light.png';
+import librarySamplesDark from './img/desktop/library-samples-dark.png';
+import previewShot from './img/desktop/preview.jpg';
+
 The desktop companion (`apps/desktop`) is the **run-the-middleware-on-device** app: it starts
 `packages/tile-server` locally, then turns a dataset on your disk — or a public URL — into a live OGC
 3D Tiles endpoint you can paste into Cesium for Unreal/Unity, QGIS, or CesiumJS.
@@ -15,6 +27,8 @@ The **Library** tab holds your bookmarks, and a history of what you served or ex
 previewed or tested, and every export with its folder and how it ended. Both live in
 `%LOCALAPPDATA%\3D Tiled\library.json`, survive updates, and are exported and imported together as JSON.
 That JSON holds any share links or signed URLs you used, so treat it as private.
+
+<AppScreen light={streamLight} dark={streamDark} alt="The desktop app on its Stream live tab, with a COPC URL as dataset" caption="The window: four tabs, the dataset bar, and the URL to copy. The screens on this page follow the theme you read the docs in." />
 
 Nothing is uploaded. The conversion happens on your machine, streamed on demand (`cache=none`) or
 cached to the local disk cache (`cache=full`). It is [`3dtiled serve`](/docs/guide/cli-usage) with a
@@ -144,9 +158,9 @@ The window shows controls, not explanations. Since 2026-11-18:
 - **The dataset bar**: the field, **Paste**, **File…**, a star that bookmarks it (filled once the dataset is in the
   Library; a second click takes it out). After **Paste** or **File…**, Ctrl+Z in the field gives back what it held.
   Under it, the **format** (what the name says, or the one you choose; a pasted or picked dataset starts from
-  detection again), **Place on globe** (a popover with longitude, latitude, altitude and heading), **Threads** (the
-  tile threads, for streaming and for exports alike), and how it is served: *Stream*, *Index first*
-  (`cache=hierarchy`) or *Convert once* (`cache=full`).
+  detection again) and **Threads** (the tile threads, for streaming and for exports alike) on the left; on the
+  right, how it is served (*Stream*, *Index first* (`cache=hierarchy`) or *Convert once* (`cache=full`)), then
+  **Place on globe** (a popover with longitude, latitude, altitude and heading).
 - **The window keeps its size.** A tab or a tool with more to show scrolls; only a preview makes the window larger,
   and closing it gives the size back.
 - **Settings** (the gear): theme and tile threads (the same setting as *Threads* in the dataset bar). **Help** (the
@@ -184,7 +198,14 @@ The window shows controls, not explanations. Since 2026-11-18:
   app's multi-tileset one when a viewer is reachable, otherwise the tile-server's own single-tileset
   page.
 
+<figure className="not-prose my-6">
+  <img src={previewShot.src} width={previewShot.width} height={previewShot.height} alt="A COPC point cloud previewed in Cesium inside the app" loading="lazy" className="mx-auto h-auto max-w-full rounded-lg border border-fd-border shadow-sm" />
+  <figcaption className="mt-2 text-center text-sm text-fd-muted-foreground">Preview in Cesium: the window grows for it, and gets its size back when you close it.</figcaption>
+</figure>
+
 ### Export to a folder
+
+<AppScreen light={exportLight} dark={exportDark} alt="The Export to a folder tab with the offline converter chosen for a COPC" caption="Export with the offline converter: under the method, the options the converter of this format reads." />
 
 The **Export to a folder** tab writes a finished, static OGC 3D Tiles tree for the dataset above it
 into a local folder: the far end of the [materialization continuum](/docs/guide/architecture-caching),
@@ -315,87 +336,18 @@ viewer (48 and 42 tiles). The same exporter is on the CLI as
 
 ### Tile raw input
 
-A tab of its own, next to *Stream live* and *Export to a folder*, for input that is **not tiled yet**: a point cloud, a mesh or Gaussian splats, as
-a **file or a folder**, or a table of a PostGIS database. It runs a third-party tiler on it, then opens the result. The app writes no tiler: it finds,
-fetches and calls the official ones ([plan and results](/docs/guide/planning/one-stop-tiler)).
+A tab of its own for input that is **not tiled yet**: a point cloud, a mesh or Gaussian splats, as a file or a
+folder, or a table of a PostGIS database. It runs one of 20 third-party tilers on it (PDAL, PotreeConverter,
+gocesiumtiler, Obj2Tiles, splat-transform…), then streams or previews the result. Its input field is not the dataset
+of the two other tabs.
 
-Pick the input with the tab's own **File…** or **Folder…** (the file dialog lists the types by family), or paste a
-path. This field is not the dataset of the two other tabs: that one only takes sources that are tiled already, and its
-dialog only lists those.
+It has a page of its own: **[Tile raw input](/docs/guide/desktop-tile-raw-input)**.
 
-| Input | Tools offered | Result |
-|---|---|---|
-| **Point cloud** `.las`, `.laz` (a file, or a folder of them) | PDAL, untwine | a COPC file |
-| | PotreeConverter 2, PotreeConverter 1.7 | a Potree 2 or Potree 1.x folder |
-| | gocesiumtiler, point-tiler, py3dtiles, mago 3DTiler | 3D Tiles |
-| | rusty-tiles `point-cloud` | a 3D Tiles archive (`.3tz`) |
-| `.e57` | PDAL, gocesiumtiler | COPC, or 3D Tiles |
-| a point `.ply` | PDAL, PotreeConverter 1.7, gocesiumtiler, py3dtiles | COPC, Potree 1.x, or 3D Tiles |
-| text: `.csv`, `.txt`, `.xyz`, `.pts` | PDAL (`.csv`, `.txt`, `.pts`), PotreeConverter 1.7 (`.xyz`, `.txt`, `.pts`), point-tiler (`.csv`, `.txt`), py3dtiles (`.xyz`) | COPC, Potree 1.x, or 3D Tiles |
-| `.ptx`, `.pcd`, `.bpf` | PDAL | COPC |
-| **Mesh** `.obj` | Obj2Tiles, mago 3DTiler | 3D Tiles |
-| | Nexus `nxsbuild` | a Nexus file (`.nxs`, or `.nxz` compressed) |
-| a mesh `.ply`, `.stl` | mago 3DTiler, Nexus `nxsbuild` | 3D Tiles, or a Nexus file |
-| `.glb`, `.gltf` | mago 3DTiler, rusty-tiles `mesh` | 3D Tiles, or a 3D Tiles archive (`.3tz`) |
-| `.fbx`, `.3ds`, `.dae`, `.ifc`, `.3mf`, `.x3d`, CityGML, KML | mago 3DTiler | 3D Tiles |
-| an OSGB folder (`metadata.xml` and `Data/`) | 3dtile (fanvanzh/3dtiles) | 3D Tiles |
-| **Footprints and vectors**: a Shapefile | 3dtile `shape` (footprints extruded by a height field), mago 3DTiler | 3D Tiles |
-| GeoJSON, GeoPackage | rusty-tiles `vector` (features as drawn), mago 3DTiler | a 3D Tiles archive (`.3tz`), or 3D Tiles |
-| **A PostGIS table**: `postgresql://user@host:5432/database` typed as the dataset | pg2b3dm | 3D Tiles |
-| **Splats** `.ply` (plain or compressed), `.spz`, `.sog`, `.splat`, `.ksplat`, an XGRIDS `.lcc` | PlayCanvas splat-transform | a streamed SOG with levels of detail |
-| a splat `.ply` | gocesiumtiler `splats`, 3DGS-PLY-3DTiles-Converter | 3D Tiles with SPZ splats, harmonics kept on request |
-| a splat `.ply` (plain or compressed), `.spz`, `.splat`, `.ksplat` | Spark `build-lod` | a RAD file |
-
-- **A `.ply` can be points, a mesh or splats.** The app reads its header and offers only the tools for what it
-  holds; the line under the tool says which it found. A folder is matched by the files in it.
-- **Where a tool comes from** is written under its name:
-  - splat-transform and 3DGS-PLY-3DTiles-Converter **ship with the app**;
-  - PDAL and untwine are **looked for on the machine**: `PATH`, a QGIS or OSGeo4W install (QGIS ships both), pixi,
-    or the `PDAL_BIN` and `UNTWINE_BIN` environment variables;
-  - the others are **downloaded the first time** from their authors' GitHub release, checked against a SHA-256
-    pinned in this repo, and kept in `%LOCALAPPDATA%\3D Tiled\tools` (13 to 24 MB each; mago 3DTiler is 390 MB);
-  - mago 3DTiler is a Java program and needs **Java 25**: a `java` of that version on the machine is used, else a
-    Temurin runtime (59 MB) is downloaded next to it, the same way. Nothing is installed system-wide;
-  - py3dtiles is a Python program: [uv](https://docs.astral.sh/uv/) installs a pinned version from PyPI into a
-    **private environment with its own Python**, in the tools folder (about 270 MB on disk). On a machine
-    without uv, uv itself is downloaded first (16 MB, pinned SHA-256), into the tools folder too;
-  - Spark `build-lod` is published as **source only**: its source archive is downloaded, checked against a pinned
-    SHA-256 and compiled once (about three minutes). The machine's own Rust toolchain (`cargo`) is used when it
-    can build it. **Without one, the app fetches a Rust toolchain itself**: rustup's installer (pinned SHA-256)
-    puts a pinned Rust (150 MB to download) in the tools folder, the program is built, and the toolchain is
-    removed. It needs neither Visual Studio's build tools nor an administrator, and leaves `PATH` alone.
-  The button reads *Download and run* when a download will happen, and the text above it says what and how much.
-- **A database instead of a file.** pg2b3dm tiles a PostGIS table: type `postgresql://user@host:5432/database` in
-  the tab's input field and give the table under the tool. A password can be part of the address
-  (`user:password@host`): it is passed to the tool through its environment, never on a command line, in the log
-  or in the run's record. Without one, `PGPASSWORD` or the machine's pgpass file is used.
-- **The tool is one searchable list**, grouped into point cloud, mesh and splat tilers, each line with what it
-  writes and whether it is ready or how much it downloads. With an input it lists the tools that take it; without
-  one it lists them all, to look at their options. The (i) next to it says what the chosen tool is and reads.
-- **A tool already on the machine is offered first**, so nothing is downloaded unless you pick a tool that needs it.
-- **A list of attributes is a row of chips** (PotreeConverter 2 and 1.7, gocesiumtiler): pick them from the list,
-  type one that is not in it and press Enter, or paste a whole list (`rgb, intensity, classification`).
-- **The options are the tool's own**, with its defaults; the rarer ones are under *More options*, next to the equivalent
-  command line. A cloud or a mesh without a georeference takes a CRS or a longitude and latitude there. Another
-  input starts from the defaults again: the CRS typed for one file is not carried to the next.
-- **Run** starts the tool in a subprocess, as *Run in: CLI subprocess* does for an export: its output is shown as
-  it comes, and **Cancel** stops it and what it started.
-- **When the run ends:**
-  - a COPC, a Potree folder, a streamed SOG, a RAD, a Nexus file or a `.3tz` archive: **Stream it** puts what was written in the dataset field and opens the *Stream live* tab. The file is
-    streamed as a URL would be (`cache=none`): the server reads it by byte ranges and builds each tile when it is
-    asked for, so nothing is converted or copied first. Only a `.3tz` archive goes through `cache=full`, unpacked once
-    to the local cache;
-  - a 3D Tiles tileset is finished already: **Preview** (in Cesium or 3DTRjs) and **Copy URL** open it
-    as it is, served from its folder by the app's tile server. The folder can be hosted on any web server.
-- **Nothing at hand?** With an empty input field, *Write tiny sample files* puts a 20 000-point LAS, a
-  3 000-splat PLY and the same small terrain as a textured OBJ, a GLB and a PLY mesh (1.5 MB, synthetic) in a
-  folder you pick.
-
-The same from a terminal: `node packages/convert/cli.js tile run <tool> <input> <outDir>`
-([CLI usage](/docs/guide/cli-usage#tile-raw-input-with-a-third-party-tiler)). Windows first: the downloads and the
-QGIS lookup are Windows'; on macOS and Linux a tool on `PATH` is found.
+<AppScreen light={tileLight} dark={tileDark} alt="The Tile raw input tab with a LAS file as input and PDAL chosen" />
 
 ### Library
+
+<AppScreen light={libraryLight} dark={libraryDark} alt="The Library tab: Samples folded, three bookmarks and the history" caption="Bookmarks and history; Samples is folded until you open it." />
 
 Datasets you want to keep: local paths and remote URLs, each stored as its **source plus options**
 rather than a built URL, so an entry can be re-opened into *Stream live* and edited (and so a future change
@@ -423,6 +375,8 @@ streamed SOG, LCC, LCC2, RAD, I3S, OSGB, Nexus: 29 in all), with the origin in e
 *Stream live* with the right format already selected; the star next to the dataset then bookmarks it. The URLs are copied from the viewer app's own
 `FORMATS` preset table, so the desktop app demonstrates exactly the sources the rest of the project
 is tested against.
+
+<AppScreen light={librarySamplesLight} dark={librarySamplesDark} alt="The Samples section of the Library open, with its groups by format" />
 
 The row icons are **generated format glyphs, not thumbnails**. A real preview would mean loading each
 tileset in a hidden Cesium view, which is far too expensive for a list; the glyph encodes the one

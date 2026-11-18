@@ -2,6 +2,7 @@ import defaultMdxComponents from 'fumadocs-ui/mdx';
 import type { MDXComponents } from 'mdx/types';
 import { Mermaid } from './mermaid';
 import { GltfLayers } from './gltf-layers';
+import { AppScreen } from './app-screen';
 import { InlineTOC } from 'fumadocs-ui/components/inline-toc';
 
 export function getMDXComponents(components?: MDXComponents) {
@@ -10,6 +11,7 @@ export function getMDXComponents(components?: MDXComponents) {
     Mermaid,
     GltfLayers,
     InlineTOC,
+    AppScreen,
     ...components,
   } satisfies MDXComponents;
 }

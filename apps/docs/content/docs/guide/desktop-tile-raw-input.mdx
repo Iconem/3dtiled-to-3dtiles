@@ -1,0 +1,157 @@
+---
+title: "Tile raw input"
+description: "The desktop app's tab for input that is not tiled yet: it runs a third-party tiler on a point cloud, a mesh or Gaussian splats, then streams or previews the result."
+---
+
+import tileLight from './img/desktop/tile-light.png';
+import tileDark from './img/desktop/tile-dark.png';
+import tileToolsLight from './img/desktop/tile-tools-light.png';
+import tileToolsDark from './img/desktop/tile-tools-dark.png';
+import tileToolsInputLight from './img/desktop/tile-tools-input-light.png';
+import tileToolsInputDark from './img/desktop/tile-tools-input-dark.png';
+import tileAttributesLight from './img/desktop/tile-attributes-light.png';
+import tileAttributesDark from './img/desktop/tile-attributes-dark.png';
+import tileDoneLight from './img/desktop/tile-done-light.png';
+import tileDoneDark from './img/desktop/tile-done-dark.png';
+
+*Tile raw input* is a tab of the [desktop app](/docs/guide/desktop-app), next to *Stream live* and *Export to a
+folder*. Those two take a dataset that is tiled already. This one takes what is **not tiled yet**: a point cloud, a
+mesh or Gaussian splats, as a **file or a folder**, or a table of a PostGIS database. It runs a third-party tiler on
+it, then opens the result.
+
+The app writes no tiler. It finds, fetches and calls the official ones: 20 tools
+([plan and results](/docs/guide/planning/one-stop-tiler), [what each tool is](/docs/guide/existing-tilers)).
+
+<AppScreen light={tileLight} dark={tileDark} alt="The Tile raw input tab with a LAS file as input and PDAL chosen" caption="A LAS file as input: the tab says what it holds, offers the tools that take it, and shows the options of the chosen one." />
+
+In short:
+
+1. Give the **input**: a file, a folder, or a database address.
+2. Choose the **tool**. Those already on the machine come first.
+3. Set its **options**, or keep the defaults, and the **output folder**.
+4. **Run**. When it ends, **Stream it** or **Preview** the result.
+
+## The input
+
+Pick the input with the tab's own **File…** or **Folder…** (the file dialog lists the types by family), or paste a
+path. This field is not the dataset of the two other tabs: that one only takes sources that are tiled already, and
+its dialog only lists those.
+
+**A `.ply` can be points, a mesh or splats.** The app reads its header and offers only the tools for what it
+holds; the line under the tool says which it found. A folder is matched by the files in it.
+
+**A database instead of a file.** pg2b3dm tiles a PostGIS table: type `postgresql://user@host:5432/database` in
+the tab's input field and give the table under the tool. A password can be part of the address
+(`user:password@host`): it is passed to the tool through its environment, never on a command line, in the log
+or in the run's record. Without one, `PGPASSWORD` or the machine's pgpass file is used.
+
+## The tool
+
+The tool is one searchable list, grouped into **point cloud tilers**, **mesh tilers** and **splat tilers**. Each
+line gives the tool, what it writes, and whether it is ready or how much it downloads. The (i) next to the list says
+what the chosen tool is and reads.
+
+Without an input, the list holds all 20 tools, to look at their options before having a file:
+
+<AppScreen light={tileToolsLight} dark={tileToolsDark} alt="The tool list open without an input: all 20 tools in three groups" caption="No input yet: every tool, by group. Type in the search field to narrow the list by tool name or by output format." />
+
+With an input, it holds only the tools that take it. A tool already on the machine is offered first, so nothing is
+downloaded unless you pick a tool that needs it:
+
+<AppScreen light={tileToolsInputLight} dark={tileToolsInputDark} alt="The tool list open with a LAS file as input: the point cloud tilers only" caption="A LAS file: the point cloud tilers that read it." />
+
+### What takes what
+
+| Input | Tools offered | Result |
+|---|---|---|
+| **Point cloud** `.las`, `.laz` (a file, or a folder of them) | PDAL, untwine | a COPC file |
+| | PotreeConverter 2, PotreeConverter 1.7 | a Potree 2 or Potree 1.x folder |
+| | gocesiumtiler, point-tiler, py3dtiles, mago 3DTiler | 3D Tiles |
+| | rusty-tiles `point-cloud` | a 3D Tiles archive (`.3tz`) |
+| `.e57` | PDAL, gocesiumtiler | COPC, or 3D Tiles |
+| a point `.ply` | PDAL, PotreeConverter 1.7, gocesiumtiler, py3dtiles | COPC, Potree 1.x, or 3D Tiles |
+| text: `.csv`, `.txt`, `.xyz`, `.pts` | PDAL (`.csv`, `.txt`, `.pts`), PotreeConverter 1.7 (`.xyz`, `.txt`, `.pts`), point-tiler (`.csv`, `.txt`), py3dtiles (`.xyz`) | COPC, Potree 1.x, or 3D Tiles |
+| `.ptx`, `.pcd`, `.bpf` | PDAL | COPC |
+| **Mesh** `.obj` | Obj2Tiles, mago 3DTiler | 3D Tiles |
+| | Nexus `nxsbuild` | a Nexus file (`.nxs`, or `.nxz` compressed) |
+| a mesh `.ply`, `.stl` | mago 3DTiler, Nexus `nxsbuild` | 3D Tiles, or a Nexus file |
+| `.glb`, `.gltf` | mago 3DTiler, rusty-tiles `mesh` | 3D Tiles, or a 3D Tiles archive (`.3tz`) |
+| `.fbx`, `.3ds`, `.dae`, `.ifc`, `.3mf`, `.x3d`, CityGML, KML | mago 3DTiler | 3D Tiles |
+| an OSGB folder (`metadata.xml` and `Data/`) | 3dtile (fanvanzh/3dtiles) | 3D Tiles |
+| **Footprints and vectors**: a Shapefile | 3dtile `shape` (footprints extruded by a height field), mago 3DTiler | 3D Tiles |
+| GeoJSON, GeoPackage | rusty-tiles `vector` (features as drawn), mago 3DTiler | a 3D Tiles archive (`.3tz`), or 3D Tiles |
+| **A PostGIS table**: `postgresql://user@host:5432/database` typed as the dataset | pg2b3dm | 3D Tiles |
+| **Splats** `.ply` (plain or compressed), `.spz`, `.sog`, `.splat`, `.ksplat`, an XGRIDS `.lcc` | PlayCanvas splat-transform | a streamed SOG with levels of detail |
+| a splat `.ply` | gocesiumtiler `splats`, 3DGS-PLY-3DTiles-Converter | 3D Tiles with SPZ splats, harmonics kept on request |
+| a splat `.ply` (plain or compressed), `.spz`, `.splat`, `.ksplat` | Spark `build-lod` | a RAD file |
+
+### Where a tool comes from
+
+It is written on the tool's line, and the button reads *Download and run* when a download will happen.
+
+- splat-transform and 3DGS-PLY-3DTiles-Converter **ship with the app**;
+- PDAL and untwine are **looked for on the machine**: `PATH`, a QGIS or OSGeo4W install (QGIS ships both), pixi,
+  or the `PDAL_BIN` and `UNTWINE_BIN` environment variables;
+- the others are **downloaded the first time** from their authors' GitHub release, checked against a SHA-256
+  pinned in this repo, and kept in `%LOCALAPPDATA%\3D Tiled\tools` (13 to 24 MB each; mago 3DTiler is 390 MB);
+- mago 3DTiler is a Java program and needs **Java 25**: a `java` of that version on the machine is used, else a
+  Temurin runtime (59 MB) is downloaded next to it, the same way. Nothing is installed system-wide;
+- py3dtiles is a Python program: [uv](https://docs.astral.sh/uv/) installs a pinned version from PyPI into a
+  **private environment with its own Python**, in the tools folder (about 270 MB on disk). On a machine
+  without uv, uv itself is downloaded first (16 MB, pinned SHA-256), into the tools folder too;
+- Spark `build-lod` is published as **source only**: its source archive is downloaded, checked against a pinned
+  SHA-256 and compiled once (about three minutes). The machine's own Rust toolchain (`cargo`) is used when it
+  can build it. **Without one, the app fetches a Rust toolchain itself**: rustup's installer (pinned SHA-256)
+  puts a pinned Rust (150 MB to download) in the tools folder, the program is built, and the toolchain is
+  removed. It needs neither Visual Studio's build tools nor an administrator, and leaves `PATH` alone.
+
+## The options
+
+The options are the tool's own, with its defaults. The rarer ones are under *More options*, next to the equivalent
+command line. A cloud or a mesh without a georeference takes a CRS or a longitude and latitude there. Another input
+starts from the defaults again: the CRS typed for one file is not carried to the next.
+
+### A list of attributes
+
+PotreeConverter 2, PotreeConverter 1.7 and gocesiumtiler take a list of attributes to keep. It is a row of chips:
+
+- **pick** them from the list;
+- **type** one that is not in it and press Enter;
+- **paste** a whole list (`rgb, intensity, classification`);
+- **copy** the list back as one string, with the button next to the row or Ctrl+C in the field.
+
+The chips select as the recipients of a mail do, each one a word:
+
+- a **click** selects a chip, **Shift+click** a run of them;
+- with the caret at the start of the field, **Left** and **Right** step through the chips and **Shift** extends
+  the run; **Ctrl+A** takes them all;
+- **Ctrl+C** copies the run (`rgb, intensity`), **Ctrl+X** cuts it, **Backspace** or **Delete** removes it.
+
+<AppScreen light={tileAttributesLight} dark={tileAttributesDark} alt="PotreeConverter 2 with three attributes chosen as chips and the list of attributes open" caption="PotreeConverter 2: three attributes chosen, the list open to pick more." />
+
+## The run, and what comes after
+
+**Run** starts the tool in a subprocess, as *Run in: CLI subprocess* does for an export. Its output is shown as it
+comes, and **Cancel** stops it and what it started.
+
+When the run ends:
+
+- a COPC, a Potree folder, a streamed SOG, a RAD, a Nexus file or a `.3tz` archive: **Stream it** puts what was written in the dataset field and opens the *Stream live* tab. The file is
+  streamed as a URL would be (`cache=none`): the server reads it by byte ranges and builds each tile when it is
+  asked for, so nothing is converted or copied first. Only a `.3tz` archive goes through `cache=full`, unpacked once
+  to the local cache;
+- a 3D Tiles tileset is finished already: **Preview** (in Cesium or 3DTRjs) and **Copy URL** open it
+  as it is, served from its folder by the app's tile server. The folder can be hosted on any web server.
+
+<AppScreen light={tileDoneLight} dark={tileDoneDark} alt="The end of a PDAL run: the COPC file written and the Stream it button" caption="A PDAL run that ended: the file written, the tool output, and Stream it." />
+
+## Nothing at hand?
+
+With an empty input field, *Write tiny sample files* puts a 20 000-point LAS, a 3 000-splat PLY and the same small
+terrain as a textured OBJ, a GLB and a PLY mesh (1.5 MB, synthetic) in a folder you pick.
+
+## The same from a terminal
+
+`node packages/convert/cli.js tile run <tool> <input> <outDir>`
+([CLI usage](/docs/guide/cli-usage#tile-raw-input-with-a-third-party-tiler)). Windows first: the downloads and the
+QGIS lookup are Windows'; on macOS and Linux a tool on `PATH` is found.

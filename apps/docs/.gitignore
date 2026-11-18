@@ -24,3 +24,7 @@ yarn-error.log*
 .env*.local
 .vercel
 next-env.d.ts
+
+# docs screenshots: on the docs-media release, pulled by scripts/docs-media.mjs (media-screenshots.lock)
+/content/docs/guide/img/
+/.cache/

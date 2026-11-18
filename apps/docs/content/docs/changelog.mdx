@@ -8,6 +8,22 @@ Format loosely follows [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+### Changed — 2026-11-18 (desktop app: third pass, and its docs get screens)
+- **Tabs**: the underline of the open tab lies on the rule (it sat one pixel off it), and shows in the dark theme,
+  where it did not.
+- **Dataset bar**: the star of a bookmarked dataset is drawn in the text colour instead of grey; *Place on globe*
+  is last in its row, after *Stream / Index first / Convert once*.
+- **Tile raw input**: the tool list is half as tall again; a list of attributes can be copied back as one string
+  (a button next to the chips, or Ctrl+C in the field). The chips select as the recipients of a mail do: a click
+  or Shift+click, Left and Right with Shift to extend, Ctrl+A; Ctrl+C copies the run, Ctrl+X cuts it, Backspace
+  removes it.
+- **Docs**: [Tile raw input](/docs/guide/desktop-tile-raw-input) has
+  a page of its own, and it and the desktop app page show the app's screens, light or dark with the docs' theme.
+- **Docs media are not in git**: the screenshots are a content-addressed archive on the `docs-media` release,
+  named by `apps/docs/media-screenshots.lock` and pulled before the docs dev server and build
+  (`apps/docs/scripts/docs-media.mjs pull|push|status`, the scheme of blender_ogc3dtiles and terrain-viewer). After
+  a retake: `pnpm --filter docs media push`, then commit the lock.
+
 ### Changed — 2026-11-18 (desktop app: second pass on the redesigned window)
 - **Tabs** are drawn as a browser's: a rule across the window, the open tab underlined.
 - **The window keeps its size**: it no longer resizes when a tab, a tool or a fold changes what is shown. Only a

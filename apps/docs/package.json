@@ -10,8 +10,9 @@
     "postinstall": "fumadocs-mdx",
     "lint": "eslint",
     "sync:changelog": "node scripts/sync-changelog.mjs",
-    "predev": "node scripts/sync-changelog.mjs",
-    "prebuild": "node scripts/sync-changelog.mjs"
+    "media": "node scripts/docs-media.mjs",
+    "predev": "node scripts/sync-changelog.mjs && node scripts/docs-media.mjs pull",
+    "prebuild": "node scripts/sync-changelog.mjs && node scripts/docs-media.mjs pull --strict"
   },
   "dependencies": {
     "@scalar/api-reference-react": "^0.9.53",

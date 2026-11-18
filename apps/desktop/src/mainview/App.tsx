@@ -254,11 +254,11 @@ export function App() {
 
         <Tabs value={tab} onValueChange={(v) => setTab(String(v))} className="gap-0">
           {/* Tabs as a browser draws them: a rule across the window, the open tab underlined on it. */}
-          <TabsList id="tabs" variant="line" className="mb-4 h-auto w-full justify-start gap-1 rounded-none border-b border-border p-0">
+          <TabsList id="tabs" variant="line" className="mb-4 w-full items-end justify-start gap-1 rounded-none border-b border-border p-0 group-data-horizontal/tabs:h-auto">
             {(['stream', 'export', 'tile', 'library'] as const).map((name) => (
               <Tip key={name} text={TAB_TITLES[name]} side="bottom">
                 <TabsTrigger value={name} data-tab={name}
-                  className="-mb-px h-10 flex-none gap-2 rounded-none border-0 border-b-2 border-transparent px-4 text-sm font-medium text-muted-foreground after:hidden hover:text-foreground data-active:border-foreground data-active:text-foreground dark:data-active:border-foreground">
+                  className="h-10 flex-none gap-2 rounded-none border-0 px-4 text-sm font-medium text-muted-foreground hover:text-foreground data-active:text-foreground group-data-horizontal/tabs:after:-bottom-px">
                   {TAB_LABELS[name]}
                   {name === 'library' && lib.bookmarks.length > 0 && <span id="lib-count" className="text-xs text-muted-foreground">{lib.bookmarks.length}</span>}
                 </TabsTrigger>
