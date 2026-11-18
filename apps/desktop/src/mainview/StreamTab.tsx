@@ -100,7 +100,7 @@ export function DatasetCard({ app }: { app: AppModel }) {
           <DropdownMenuContent className="min-w-48">
             {/* "auto" stands for the empty format: a menu item needs a value */}
             <DropdownMenuRadioGroup value={form.format || 'auto'} onValueChange={(v) => patchForm({ format: v === 'auto' ? '' : String(v) })}>
-              {FORMATS.map((f) => <DropdownMenuRadioItem key={f.value} value={f.value || 'auto'} data-format={f.value || 'auto'}>{f.label}</DropdownMenuRadioItem>)}
+              {FORMATS.map((f) => <DropdownMenuRadioItem key={f.value} value={f.value || 'auto'} data-format={f.value || 'auto'} closeOnClick>{f.label}</DropdownMenuRadioItem>)}
             </DropdownMenuRadioGroup>
           </DropdownMenuContent>
         </DropdownMenu>
