@@ -8,6 +8,21 @@ Format loosely follows [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+### Changed — 2026-11-18 (desktop app: the window redesigned, same features)
+- **Controls instead of text.** Explanations moved behind an (i) or into tooltips; with every fold open a tab shows
+  about a third of the words it did (Stream live: 229 then, 51 now).
+- **Dataset bar**: the field, Paste, File…, a star to bookmark; under it the format (detected, or chosen from a
+  menu), *Place on the globe* (a popover) and *Stream / Index first / Convert once*. A pasted or picked dataset no
+  longer keeps the format of the one before.
+- **Stream live**: the URL is a field with its copy button, one *Preview* with its renderer next to it, and a
+  *More* menu (test the endpoint, hierarchy graph, API playground).
+- **Export**: the method is a two-way choice that shows only its own options; the rest is under *More options*.
+- **Tile raw input**: the tools are rows to pick from, with their state (ready, download size) and an (i); fields
+  show the value a run will use; the output folder defaults to one next to the input.
+- **Library**: a table with a row menu; samples are one button each, grouped by format. The rows/cards switch is gone.
+- **Settings** (theme, tile threads) and **Help** (links) are two buttons in the header; passing messages are toasts.
+- Three text sizes; shadcn components on Base UI (dropdown menu, popover, dialog, toggle group, table, sonner).
+
 ### Added — 2026-11-18 (a local file streams live; large-scene options for splat-transform; two samples)
 - **A file on disk now streams with `cache=none`**, like a URL: the tile-server reads it by byte ranges through
   the same adapters (COPC, Potree, streamed SOG, LCC, LCC2, RAD), so nothing is converted or copied first. A

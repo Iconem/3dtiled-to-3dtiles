@@ -16,22 +16,27 @@
  *             still reads the tileset URL, which the server serves).
  */
 import { useEffect, useLayoutEffect, useRef, useState } from 'react';
+import { ChevronDownIcon } from 'lucide-react';
 import { Button } from '@/components/ui/button';
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from '@/components/ui/dropdown-menu';
 import type { AppModel } from './App';
-import { Card } from './components/Card';
-import { Actions, Advanced, Check, Choice, Code, Field, FieldLabel, Hint, Result, StepProgress, TextInput, UrlBar, type Kind, type Message } from './components/bits';
-import { WORKERS, WORKERS_TITLE } from './StreamTab';
+import { Card, CardTitle } from './components/Card';
+import { Actions, Advanced, Check, Choice, Code, CopyButton, Field, FieldLabel, Info, LogFold, Result, Segmented, StepProgress, TextInput, UrlBar, type Kind, type Message } from './components/bits';
 import { base, pickDataset, pickerAvailable, pickerRpc } from './host';
 import { noteExported, type DatasetOptions, type HistoryEntry } from './library';
 import { DEFAULT_EXPORT, DOC_LINKS, exportCli, exportCliArgs, exportRequest, mb, nameFor, stepsFromCliOutput, typeOfFormat, viewerLink, type ExportRequest, type ExportSettings, type Steps } from './urls';
 
 const METHODS = [
-  { value: 'crawl', label: 'Crawl the tileset URL above — any source' },
-  { value: 'convert', label: 'Offline converter — raw source, per format' },
+  { value: 'crawl', label: 'Copy the stream', title: 'Downloads the tileset URL as this app serves it: works for every source' },
+  { value: 'convert', label: 'Offline converter', title: 'Runs the per-format converter on the source itself: faster for the formats it covers, with their own options' },
+];
+const RUNNERS = (noCli: boolean) => [
+  { value: 'server', label: 'In the tile-server' },
+  { value: 'cli', label: 'As a separate process', disabled: noCli, title: noCli ? 'Needs the desktop app' : undefined },
 ];
 const VERIFY = [
-  { value: 'sample', label: 'Counts, and a sample of tiles read in full' },
-  { value: 'counts', label: "Counts only: every tile's header, and the source's total" },
+  { value: 'sample', label: 'Counts, and a sample of tiles' },
+  { value: 'counts', label: 'Counts only' },
   { value: 'full', label: 'Every tile read in full' },
   { value: 'off', label: 'Off' },
 ];
@@ -39,7 +44,7 @@ const HIERARCHY_ERRORS = [
   { value: 'error', label: 'Stop the export' },
   { value: 'warn', label: 'Warn, and export the rest' },
 ];
-const TILINGS = [{ value: '', label: 'converter default' }, { value: 'implicit', label: 'implicit' }, { value: 'explicit', label: 'explicit' }];
+const TILINGS = [{ value: '', label: 'default' }, { value: 'implicit', label: 'implicit' }, { value: 'explicit', label: 'explicit' }];
 
 interface Job {
   running: boolean;
@@ -237,7 +242,7 @@ export function ExportCard({ app }: { app: AppModel }) {
     else exportSay(dir, 'info');
   }
   async function copyPath() {
-    try { await navigator.clipboard.writeText(s.outDir.trim()); exportSay('Folder path copied.', 'ok'); } catch { /* shown already */ }
+    try { await navigator.clipboard.writeText(s.outDir.trim()); app.say('Folder path copied.', 'ok'); } catch { /* shown already */ }
   }
   /** The exported tileset as Cesium for Unreal's "URL" source wants it: file:///C:/exports/site/tileset.json, spaces escaped. */
   const unrealUrl = () => {
@@ -245,100 +250,101 @@ export function ExportCard({ app }: { app: AppModel }) {
     return encodeURI(`file://${dir.startsWith('/') ? '' : '/'}${dir}/tileset.json`);
   };
   async function copyUnreal() {
-    try { await navigator.clipboard.writeText(unrealUrl()); exportSay(`Copied ${unrealUrl()} — paste it as the tileset URL in Cesium for Unreal (source: URL).`, 'ok'); }
+    try { await navigator.clipboard.writeText(unrealUrl()); app.say('Copied. Paste it as the tileset URL in Cesium for Unreal (source: URL).', 'ok'); }
     catch { exportSay(unrealUrl(), 'info'); }
-  }
-  async function copyCli() {
-    try { await navigator.clipboard.writeText(exportCli(req)); exportSay('Command copied.', 'ok'); } catch { /* visible anyway */ }
   }
   // The exported files, served back by the tile-server exactly as a static host would serve them.
   const previewExported = () => { if (job.preview) app.previewIn('cesium', job.preview, typeOfFormat(form.format), 'Exported copy'); };
 
-  const compact = 'h-9';
   return (
     <Card id="export-card">
-      <FieldLabel className="mb-[9px] text-[13.5px] leading-normal text-foreground">Export to disk <span className="text-xs font-normal text-muted-foreground">— a finished 3D Tiles folder that any web server, S3 bucket or Cesium for Unreal can host without this app</span></FieldLabel>
+      <div className="mb-3 flex items-center gap-1.5">
+        <CardTitle>Export to a folder</CardTitle>
+        <Info label="About exports">
+          <p className="m-0">Writes a finished, static 3D Tiles folder that any web server, S3 bucket or Cesium for Unreal can host <strong>without this app</strong>.</p>
+          <p className="m-0 flex flex-wrap gap-x-3 [&_a]:underline">
+            <a id="export-doc" href={DOC_LINKS.exportDoc} target="_blank" rel="noreferrer">Export docs</a>
+            <a id="export-cli-doc" href={DOC_LINKS.cliDoc} target="_blank" rel="noreferrer">CLI docs</a>
+            <a id="export-mw" href={DOC_LINKS.middleware} target="_blank" rel="noreferrer">Middleware home</a>
+            <a id="export-live" href={live || '#'} hidden={!live} target="_blank" rel="noreferrer">Live tileset in the demo viewer</a>
+          </p>
+        </Info>
+      </div>
       <UrlBar>
-        <TextInput id="export-dir" value={s.outDir} onChange={(e) => patch({ outDir: e.target.value })} placeholder="C:\exports\my-site   (an empty folder)" className="flex-1" />
+        <TextInput id="export-dir" aria-label="Output folder" value={s.outDir} onChange={(e) => patch({ outDir: e.target.value })} placeholder="Output folder, empty: C:\exports\my-site" className="flex-1" />
         <Button id="export-browse" onClick={browseOut}>Folder…</Button>
-        {/* One slot: the Export call to action becomes Cancel while a run is on (red, outlined, so it reads as the stop it is). */}
+        {/* One slot: the Export call to action becomes Cancel while a run is on. */}
         {job.running
           ? <Button id="export-cancel" variant="outline" disabled={!job.cancellable} onClick={cancel} title={job.cancellable ? 'Stop this export; the folder keeps a partial copy' : 'The offline converter runs in-process and cannot be interrupted'}
               className="border-destructive/60 text-destructive hover:bg-destructive/10 hover:text-destructive focus-visible:ring-destructive/30">Cancel</Button>
           : <Button id="export-start" variant="default" disabled={disabled} onClick={start}>Export</Button>}
       </UrlBar>
+
+      {/* The method, then only the options that method has. */}
+      <div className="mt-3 flex flex-wrap items-end gap-x-3 gap-y-2">
+        <Field label="Method" className="flex-none">
+          <Segmented id="export-method" value={s.method} onChange={(v) => patch({ method: v as ExportSettings['method'] })} options={METHODS} disabled={job.running} />
+        </Field>
+        {!convert && <>
+          <Field compact label="Max depth" title="How many levels of the tree to copy. Empty: all of them">
+            <TextInput id="export-depth" value={s.depth} onChange={(e) => patch({ depth: e.target.value })} placeholder="all" />
+          </Field>
+          <span id="export-crawl-opts">
+            <Check id="export-keep-implicit" checked={s.keepImplicit} onChange={(v) => patch({ keepImplicit: v })}
+              title="Copy the subtree files and templated tiles as they are, instead of expanding the tree into explicit children. Smaller JSON; needs a client with implicit tiling (CesiumJS, 3DTRjs, Cesium for Unreal).">
+              Keep implicit tiling
+            </Check>
+          </span>
+        </>}
+        {convert && <div id="export-convert-opts" className="flex flex-1 flex-wrap items-end gap-x-3 gap-y-2">
+          <Field compact label="Tiling"><Choice id="conv-tiling" value={s.convTiling} onChange={(v) => patch({ convTiling: v })} options={TILINGS} /></Field>
+          <Field compact label="Scale"><TextInput id="conv-scale" value={s.convScale} onChange={(e) => patch({ convScale: e.target.value })} placeholder="1" /></Field>
+          <Field compact label="Error scale" title="Multiplies every geometric error"><TextInput id="conv-ge-scale" value={s.convGeScale} onChange={(e) => patch({ convGeScale: e.target.value })} placeholder="1" /></Field>
+          <Field compact label="Error layer" title="GE layer"><TextInput id="conv-ge-layer" value={s.convGeLayer} onChange={(e) => patch({ convGeLayer: e.target.value })} placeholder="none" /></Field>
+          <Check id="conv-centroids" checked={s.convCentroids} onChange={(v) => patch({ convCentroids: v })} title="Splat formats only: write the splat centres as a point cloud">Splat centres only</Check>
+        </div>}
+      </div>
+
       {job.steps ? <StepProgress id="export-progress" steps={job.steps} /> : <div id="export-progress" hidden />}
       <Result id="export-status" message={status} />
-      <details id="export-log-wrap" hidden={job.log == null} open={job.logOpen} onToggle={(e) => setJob((j) => ({ ...j, logOpen: (e.target as HTMLDetailsElement).open }))} className="mt-2.5">
-        <summary className="cursor-pointer text-[12.5px] text-foreground select-none">CLI output <span className="text-xs font-normal text-muted-foreground">(last 200 lines)</span></summary>
-        <pre id="export-log" ref={logEl} className="mt-2 mb-0 max-h-[220px] overflow-auto rounded-md border border-border bg-muted/50 px-2.5 py-2 font-mono text-[11.5px] leading-[1.45] break-all whitespace-pre-wrap">{job.log?.join('\n')}</pre>
-      </details>
+      <LogFold wrapId="export-log-wrap" id="export-log" label="Output of the command, last 200 lines" lines={job.log} open={job.logOpen} onOpenChange={(o) => setJob((j) => ({ ...j, logOpen: o }))} logRef={logEl} />
       <Actions id="export-done" hidden={!job.done}>
-        <Button id="export-open" onClick={openFolder}>Open folder</Button>
-        <Button id="export-preview" hidden={!job.preview} onClick={previewExported}>Preview exported copy</Button>
-        <Button id="export-copy-unreal" onClick={copyUnreal} title="file:///… URL of the exported tileset.json, for Cesium for Unreal's URL source">Copy file:// URL for Unreal</Button>
-        <Button id="export-copy" variant="ghost" onClick={copyPath}>Copy folder path</Button>
+        <Button id="export-open" variant="default" onClick={openFolder}>Open folder</Button>
+        <Button id="export-preview" hidden={!job.preview} onClick={previewExported}>Preview the copy</Button>
+        <DropdownMenu>
+          <DropdownMenuTrigger render={<Button id="export-copy-menu" className="gap-1.5" />}>Copy<ChevronDownIcon className="size-3.5" /></DropdownMenuTrigger>
+          <DropdownMenuContent className="min-w-56">
+            <DropdownMenuItem id="export-copy-unreal" onClick={copyUnreal}>file:// URL, for Cesium for Unreal</DropdownMenuItem>
+            <DropdownMenuItem id="export-copy" onClick={copyPath}>Folder path</DropdownMenuItem>
+          </DropdownMenuContent>
+        </DropdownMenu>
       </Actions>
-      <Advanced summary="Advanced" hint="method, depth, packing, CLI">
-        {/* Two fields a row: each label stays on one line and a select shows its whole value. */}
-        <div className="mt-3.5 grid grid-cols-2 gap-3 max-[560px]:grid-cols-1">
-          <Field label="Check the result"><Choice id="export-verify" value={s.verify} onChange={(v) => patch({ verify: v })} options={VERIFY} /></Field>
-          <Field label={<>Tile threads <span className="text-xs font-normal text-muted-foreground">(experimental)</span></>} title={WORKERS_TITLE}>
-            <Choice id="export-workers" value={workersNa ? '' : app.workers} onChange={app.setWorkers} options={WORKERS} disabled={job.running || workersNa}
-              title={workersNa ? 'A crawl run as a CLI subprocess reads tiles the tile-server builds: choose "Run in: tile-server", or the offline converter' : undefined} />
+
+      <Advanced>
+        <div className="mt-3 grid grid-cols-2 gap-3 max-sm:grid-cols-1">
+          <Field label="Check the result" info={<p className="m-0"><strong>Counts</strong> reads every tile's header and compares the total with the source's. <strong>A sample</strong> also reads some tiles in full; <strong>every tile</strong> reads them all.</p>}>
+            <Choice id="export-verify" value={s.verify} onChange={(v) => patch({ verify: v })} options={VERIFY} />
           </Field>
-          <Field label="Method"><Choice id="export-method" value={s.method} onChange={(v) => patch({ method: v as ExportSettings['method'] })} options={METHODS} /></Field>
-          <Field label={<>Max depth <span className="text-xs font-normal text-muted-foreground">(crawl; blank = all)</span></>}>
-            <TextInput id="export-depth" value={s.depth} onChange={(e) => patch({ depth: e.target.value })} placeholder="all levels" disabled={convert} />
-          </Field>
-          <Field label="If part of the hierarchy can't be read" title="A subtree, external tileset or Potree .hrc still unread after three tries. The tree below it goes missing.">
+          <Field label="If part of the tree cannot be read" title="A subtree, external tileset or Potree .hrc still unread after three tries. The tree below it goes missing.">
             <Choice id="export-hierarchy-errors" value={s.hierarchyErrors} onChange={(v) => patch({ hierarchyErrors: v })} options={HIERARCHY_ERRORS} />
           </Field>
-          <Field label="Run in">
-            <Choice id="export-runner" value={runner} onChange={(v) => patch({ runner: v as ExportSettings['runner'] })} disabled={job.running}
-              title={cli ? 'CLI subprocess needs the desktop app' : undefined}
-              options={[{ value: 'server', label: 'tile-server (default)' }, { value: 'cli', label: 'CLI subprocess', disabled: cli }]} />
+          <Field label="Run" className="col-span-2 max-sm:col-span-1" info={<>
+            <p className="m-0"><strong>In the tile-server</strong>: already running, reports structured progress, and serves the result back for the preview.</p>
+            <p id="export-runner-hint" className="m-0"><strong>As a separate process</strong>: the command below on its own, so a crash or a memory blow-up cannot take the server down. Prefer it for very large conversions. With the offline converter it does not need the server at all.</p>
+          </>}>
+            <Segmented id="export-runner" value={runner} onChange={(v) => patch({ runner: v as ExportSettings['runner'] })} disabled={job.running} options={RUNNERS(cli)} />
           </Field>
         </div>
-        <Hint id="export-runner-hint" className="mt-3">
-          <strong>tile-server</strong> (default): already running with every adapter loaded,
-          reports structured progress, keeps going while you switch tabs, and serves the result
-          back for the preview buttons.
-          <strong> CLI subprocess</strong>: the exact command below in its own process — a crash
-          or memory blow-up cannot take the tile-server down; same code, progress parsed from its
-          output. With the offline converter it does not need the server at all (a crawl still
-          reads the tileset URL the server serves). Prefer it for very large conversions.
-          {cli && <span id="export-runner-na"> Needs the desktop app — not available in a plain browser.</span>}
-        </Hint>
-        <div id="export-crawl-opts" hidden={convert} className="my-2 flex flex-wrap items-end gap-x-4 gap-y-1.5">
-          <Check id="export-keep-implicit" checked={s.keepImplicit} onChange={(v) => patch({ keepImplicit: v })}
-            title="Copy the subtree files and templated tiles as they are, instead of expanding the tree into explicit children. Smaller JSON; needs a client with implicit tiling (CesiumJS, 3DTRjs, Cesium for Unreal).">
-            keep implicit tiling
-          </Check>
-        </div>
-        <div id="export-convert-opts" hidden={!convert} className="my-2 flex flex-wrap items-end gap-x-4 gap-y-1.5">
-          <Field compact label="Tiling"><Choice id="conv-tiling" value={s.convTiling} onChange={(v) => patch({ convTiling: v })} options={TILINGS} className={compact} /></Field>
-          <Field compact label="Scale"><TextInput id="conv-scale" value={s.convScale} onChange={(e) => patch({ convScale: e.target.value })} placeholder="1" /></Field>
-          <Field compact label="GE scale"><TextInput id="conv-ge-scale" value={s.convGeScale} onChange={(e) => patch({ convGeScale: e.target.value })} placeholder="1" /></Field>
-          <Field compact label="GE layer"><TextInput id="conv-ge-layer" value={s.convGeLayer} onChange={(e) => patch({ convGeLayer: e.target.value })} placeholder="—" /></Field>
-          <Check id="conv-centroids" checked={s.convCentroids} onChange={(v) => patch({ convCentroids: v })} title="Splat formats only: write the splat centres as a point cloud">splat centroids only</Check>
-        </div>
-        <div className="my-2 flex flex-wrap items-end gap-x-4 gap-y-1.5">
-          <span className="text-xs text-muted-foreground">Also pack as</span>
+        <div className="mt-3 flex flex-wrap items-center gap-x-4">
+          <FieldLabel>Also pack as</FieldLabel>
           <Check id="pack-3tz" checked={s.pack3tz} onChange={(v) => patch({ pack3tz: v })}>.3tz</Check>
           <Check id="pack-3dtiles" checked={s.pack3dtiles} onChange={(v) => patch({ pack3dtiles: v })}>.3dtiles</Check>
         </div>
-        <FieldLabel className="mt-3.5 mb-[9px]">Equivalent CLI <span className="text-xs font-normal">(from the repo root)</span></FieldLabel>
+        <FieldLabel className="mt-3 mb-1.5">Same thing from a terminal, at the repo root</FieldLabel>
         <UrlBar>
-          <Code id="export-cli" wrap>{exportCli(req)}</Code>
-          <Button id="export-cli-copy" onClick={copyCli}>Copy</Button>
+          <Code id="export-cli">{exportCli(req)}</Code>
+          <CopyButton id="export-cli-copy" text={exportCli(req)} title="Copy the command" />
         </UrlBar>
-        <div className="mt-2.5 flex flex-wrap gap-x-3.5 gap-y-1 text-[12.5px] [&_a]:rounded [&_a]:underline [&_a]:focus-visible:ring-2 [&_a]:focus-visible:ring-ring/60 [&_a]:focus-visible:outline-none">
-          <a id="export-doc" href={DOC_LINKS.exportDoc} target="_blank" rel="noreferrer">Export docs</a>
-          <a id="export-cli-doc" href={DOC_LINKS.cliDoc} target="_blank" rel="noreferrer">CLI docs</a>
-          <a id="export-mw" href={DOC_LINKS.middleware} target="_blank" rel="noreferrer">Middleware home</a>
-          <a id="export-live" href={live || '#'} hidden={!live} target="_blank" rel="noreferrer">Open the live tileset in the demo viewer</a>
-        </div>
       </Advanced>
     </Card>
   );

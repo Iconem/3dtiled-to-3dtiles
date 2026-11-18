@@ -41,6 +41,24 @@ export const typeOfFormat = (format: string) => (['copc', 'potree'].includes(for
 export const kindOf = (fmt: string) => CATALOG.find((g) => g.format === fmt)?.kind ?? 'mesh';
 export const iconOf = (fmt: string) => CATALOG.find((g) => g.format === fmt)?.icon ?? '◱';
 
+/**
+ * The format a dataset's name says, for the format chip and the preview's renderer type: '' when the name does not
+ * tell. The server detects on its own (and looks further than the name); this is only what the window shows.
+ */
+export function guessFormat(src: string): string {
+  const name = src.trim().split('?')[0]!.replace(/[\\/]+$/, '').toLowerCase();
+  if (!name) return '';
+  if (/\.copc\.laz$/.test(name)) return 'copc';
+  if (/(^|[\\/])(cloud\.js|metadata\.json)$/.test(name) || /hierarchy\.bin$/.test(name)) return 'potree';
+  if (/(^|[\\/])lod-meta\.json$/.test(name)) return 'sog';
+  if (/\.lcc$/.test(name)) return 'lcc';
+  if (/\.rad$/.test(name)) return 'rad';
+  if (/\.slpk$/.test(name) || /sceneserver/.test(name)) return 'i3s';
+  if (/\.3mx$/.test(name)) return 'threemx';
+  if (/\.osgb$/.test(name) || /(^|[\\/])metadata\.xml$/.test(name)) return 'osgb';
+  return '';
+}
+
 /** Short display name from a path or URL — the entry file name is the same for every dataset. */
 export function nameFor(src: string): string {
   const clean = src.split('?')[0]!.replace(/[\\/]+$/, '');

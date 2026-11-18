@@ -1,8 +1,13 @@
 import { cn } from '@/lib/utils';
 
-/** A card of this window: the theme's radius, a hairline border, and 18 px of padding. */
+/** A card of this window: the theme's radius, a hairline border, and 16 px of padding. */
 export const Card = ({ className, ...rest }: React.ComponentProps<'div'>) => (
-  <div className={cn('mb-3.5 rounded-lg border border-border bg-card p-[18px] text-card-foreground shadow-xs', className)} {...rest} />
+  <div className={cn('mb-3 rounded-lg border border-border bg-card p-4 text-card-foreground shadow-xs', className)} {...rest} />
+);
+
+/** A card's title: what it is, in a few words. */
+export const CardTitle = ({ className, ...rest }: React.ComponentProps<'h2'>) => (
+  <h2 className={cn('m-0 text-sm font-medium text-foreground', className)} {...rest} />
 );
 
 /** A card's title line with its actions to the right. */

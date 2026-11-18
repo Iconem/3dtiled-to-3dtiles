@@ -21,7 +21,7 @@ const apply = (theme: Theme) => {
 
 export const nextTheme = (theme: Theme): Theme => THEMES[(THEMES.indexOf(theme) + 1) % THEMES.length]!;
 
-export function useTheme(): [Theme, () => void] {
+export function useTheme(): [Theme, () => void, (t: Theme) => void] {
   const [theme, setTheme] = useState<Theme>(stored);
   useEffect(() => {
     apply(theme);
@@ -36,5 +36,6 @@ export function useTheme(): [Theme, () => void] {
       return n;
     });
   }, []);
-  return [theme, cycle];
+  const choose = useCallback((t: Theme) => { localStorage.setItem(THEME_KEY, t); setTheme(t); }, []);
+  return [theme, cycle, choose];
 }

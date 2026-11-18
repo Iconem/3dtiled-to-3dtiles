@@ -9,23 +9,30 @@
  *   Library     — the samples (folded), bookmarks with a cached structural check (tiles/depth/leaves from
  *                 /stats), and a history of what was served or exported.
  *
- * This file is the shell: header, tabs, footer, the preview overlay, and the state the tabs share
- * (the dataset form, the library, the status line). The tabs are in their own files.
+ * This file is the shell: header (status, help, settings), tabs, the preview overlay, and the state the tabs share
+ * (the dataset form, the library). The tabs are in their own files. A passing message is a toast; what a run says
+ * stays in its card.
  */
+import { CircleHelpIcon, SettingsIcon } from 'lucide-react';
 import { useCallback, useEffect, useRef, useState } from 'react';
+import { toast } from 'sonner';
 import { Button } from '@/components/ui/button';
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog';
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger } from '@/components/ui/dropdown-menu';
+import { Toaster } from '@/components/ui/sonner';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { cn } from '@/lib/utils';
+import { Choice, Field, Segmented } from './components/bits';
 import { ExportCard } from './ExportCard';
 import { LINKS } from './catalog';
 import { RELEASE_URL, setServerWorkers, base, buildLabel, docsUrl, fitWindowForPreview, fitWindowToContent, openExternal, pickerAvailable, pickerRpc, resetFit, staticPort, tilePort, viewerUrl } from './host';
 import { LibraryTab } from './LibraryTab';
 import { TilerCard } from './TilerCard';
 import { loadLibrary, noteServed, parseLibrary, saveLocal, serialize, type DatasetOptions, type Library } from './library';
-import { DatasetCard, StreamTab } from './StreamTab';
-import { THEMES, nextTheme, useTheme, type Theme } from './theme';
+import { DatasetCard, StreamTab, WORKERS, WORKERS_TITLE } from './StreamTab';
+import { THEMES, useTheme, type Theme } from './theme';
 import { buildUrlFrom, EMPTY_FORM, nameFor, previewUrl, typeOfFormat, viewerLink } from './urls';
-import type { Kind, Message } from './components/bits';
+import type { Kind } from './components/bits';
 
 export type Renderer = 'cesium' | '3dtrjs';
 
@@ -50,21 +57,11 @@ export interface AppModel {
   /** Tile worker threads of the app's server ('' = one, 'auto', or a count): one setting for streaming and exports. */
   workers: string;
   setWorkers: (v: string) => void;
-  /** The library's lists as one-line rows (true) or cards. */
-  libCompact: boolean;
 }
 
-// The choices this machine keeps: the library's view, and how many threads the server builds tiles on.
-const LIB_VIEW_KEY = '3dtiled-desktop-library-view';
+// The choice this machine keeps: how many threads the server builds tiles on.
 const WORKERS_KEY = '3dtiled-desktop-tile-workers';
-const segTab = 'h-6 flex-none rounded-sm border-0 px-[9px] text-xs font-medium text-muted-foreground shadow-none hover:text-foreground data-active:bg-background data-active:text-foreground data-active:shadow-xs dark:data-active:border-0 dark:data-active:bg-background';
-
 const footLink = 'rounded text-muted-foreground no-underline hover:text-foreground hover:underline focus-visible:ring-2 focus-visible:ring-ring/60 focus-visible:outline-none';
-const THEME_ICONS: Record<Theme, React.ReactNode> = {
-  system: <><rect x="3" y="4" width="18" height="12" rx="2" /><path d="M8 20h8M12 16v4" /></>,
-  light: <><circle cx="12" cy="12" r="4" /><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4" /></>,
-  dark: <path d="M20 14.5A8.5 8.5 0 0 1 9.5 4a8.5 8.5 0 1 0 10.5 10.5Z" />,
-};
 
 interface Overlay {
   url: string;
@@ -75,24 +72,21 @@ interface Overlay {
 }
 
 const TAB_TITLES = {
-  stream: 'A tiled dataset (COPC, Potree, SOG, RAD, LCC, I3S…) as a 3D Tiles URL, converted on demand while this app runs: nothing is written to disk',
-  export: 'The same dataset written to a folder as 3D Tiles: crawl the stream, or run the offline converter',
-  tile: 'A raw point cloud, mesh or splat file that is not tiled yet (or a PostGIS table): run a third-party tiler on it',
-  library: 'Samples to try, bookmarks, and what you served or exported',
+  stream: 'A tiled dataset (COPC, Potree, SOG, RAD, LCC, I3S…) as a 3D Tiles URL, converted on demand',
+  export: 'The same dataset written to a folder as 3D Tiles',
+  tile: 'A raw point cloud, mesh or splat file that is not tiled yet: run a tiler on it',
+  library: 'Samples, bookmarks, and what you served or exported',
 } as const;
-const TAB_LABELS = { stream: 'Stream live', export: 'Export to a folder', tile: 'Tile raw input', library: 'Library' } as const;
+const TAB_LABELS = { stream: 'Stream live', export: 'Export', tile: 'Tile raw input', library: 'Library' } as const;
 
 export function App() {
-  const [theme, cycleTheme] = useTheme();
+  const [theme, , setTheme] = useTheme();
   const [tab, setTab] = useState('stream');
-  const [libCompact, setLibCompact] = useState(() => localStorage.getItem(LIB_VIEW_KEY) !== 'detailed');
-  const setLibView = (c: boolean) => { setLibCompact(c); localStorage.setItem(LIB_VIEW_KEY, c ? 'compact' : 'detailed'); };
   // Auto unless this machine chose otherwise: the server is told at start and on every change.
   const [workers, setWorkersState] = useState(() => localStorage.getItem(WORKERS_KEY) ?? 'auto');
   const setWorkers = (v: string) => { setWorkersState(v); localStorage.setItem(WORKERS_KEY, v); };
   useEffect(() => { void setServerWorkers(workers); }, [workers]);
   const [form, setForm] = useState(EMPTY_FORM);
-  const [message, setMessage] = useState<Message | null>(null);
   const [overlay, setOverlay] = useState<Overlay | null>(null);
   const [version, setVersion] = useState<{ label: string; title: string } | null>(null);
   const [update, setUpdate] = useState<{ title: string; applying: boolean } | null>(null);
@@ -102,7 +96,7 @@ export function App() {
   const overlayRef = useRef(overlay);
   overlayRef.current = overlay;
 
-  const say = useCallback((msg: string, kind: Kind = 'info') => setMessage({ msg, kind }), []);
+  const say = useCallback((msg: string, kind: Kind = 'info') => { if (kind === 'ok') toast.success(msg); else if (kind === 'err') toast.error(msg, { duration: 8000 }); else toast(msg); }, []);
   const patchForm = useCallback((p: Partial<Required<DatasetOptions>>) => setForm((f) => ({ ...f, ...p })), []);
   const url = buildUrlFrom(form);
 
@@ -201,9 +195,8 @@ export function App() {
     void pickerRpc?.request.applyUpdate({});
   };
 
-  const app: AppModel = { form, patchForm, dataset, url, lib, updateLib, replaceLib, say, showTab: setTab, previewIn, openTool, loadIntoBuilder, noteServedNow, workers, setWorkers, libCompact };
+  const app: AppModel = { form, patchForm, dataset, url, lib, updateLib, replaceLib, say, showTab: setTab, previewIn, openTool, loadIntoBuilder, noteServedNow, workers, setWorkers };
 
-  const themeTitle = `Theme: ${theme}. Click for ${nextTheme(theme)}.`;
   // The pill says what the server does now, not what the ports said at start: it is probed every 10 s.
   const [serverUp, setServerUp] = useState<boolean | null>(null);
   useEffect(() => {
@@ -218,10 +211,10 @@ export function App() {
     return () => { stop = true; clearInterval(t); };
   }, []);
   const status = !tilePort
-    ? { text: 'starting the tile-server…', cls: 'border-warning/35 bg-warning/10 text-warning' }
+    ? { text: 'Starting…', title: 'The tile-server is starting', dot: 'bg-warning' }
     : serverUp === false
-      ? { text: `tile-server not answering on :${tilePort}`, cls: 'border-destructive/40 bg-destructive/10 text-destructive' }
-      : { text: `tile-server ${serverUp ? 'running' : 'ready'} on :${tilePort}`, cls: 'border-success/35 bg-success/10 text-success' };
+      ? { text: 'Server not answering', title: `The tile-server does not answer on port ${tilePort}`, dot: 'bg-destructive' }
+      : { text: 'Running', title: `The tile-server is ${serverUp ? 'running' : 'ready'} on port ${tilePort}: nothing is uploaded, the conversion happens on this machine`, dot: 'bg-success' };
   const links: [string, string, string][] = [
     ['link-viewer', viewerUrl, 'Web viewer'],
     ['link-explorer', viewerUrl ? `${viewerUrl}/hierarchy` : (base ? `${base}/hierarchy` : ''), 'Hierarchy explorer'],
@@ -231,72 +224,68 @@ export function App() {
 
   return (
     <>
+      <Toaster theme={theme} position="bottom-center" />
       {/* Centred, in a window that opens at about this width (WIN in bun/index.ts). Measured on Windows at 150%:
           a 1680 px window, a 1106 CSS px viewport at devicePixelRatio 1.5, so the page sees the real window. Older
           Electrobun builds reported a viewport wider than the frame, which clipped centred content: check any
           change here in the real app, as a plain browser cannot show that.
           A column at least as tall as the window, so the footer sits at the bottom of a short tab. */}
-      <div ref={containerRef} className="mx-auto flex min-h-screen max-w-[720px] flex-col px-[26px] pt-6 pb-3.5">
-        <header className="mb-2 flex flex-wrap items-center gap-3">
-          <h1 className="m-0 text-lg font-semibold tracking-[-0.02em]">3D&nbsp;Tiled <span className="ml-2 text-[13px] font-normal text-muted-foreground">local middleware</span></h1>
-          <div id="status" className={cn('ml-auto rounded-full border px-2.5 py-[5px] text-[11.5px] leading-none font-medium whitespace-nowrap', status.cls)}>{status.text}</div>
+      <div ref={containerRef} className="mx-auto flex min-h-screen max-w-[720px] flex-col px-6 pt-5 pb-3">
+        <header className="mb-4 flex items-center gap-2">
+          <h1 className="m-0 text-lg font-semibold tracking-tight">3D Tiled</h1>
+          <div id="status" title={status.title} className="ml-2 flex items-center gap-1.5 text-xs text-muted-foreground"><span className={cn('size-2 rounded-full', status.dot)} />{status.text}</div>
+          <span className="flex-1" />
           <Button id="update" variant="default" hidden={!update} disabled={update?.applying} title={update?.title} onClick={applyUpdate}>Update ready: restart</Button>
-          {docsUrl && (
-            <Button id="link-docs" size="icon" type="button" title="Documentation" aria-label="Documentation" onClick={() => openExternal(docsUrl)}>
-              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M12 7v14" /><path d="M3 18a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1h5a4 4 0 0 1 4 4 4 4 0 0 1 4-4h5a1 1 0 0 1 1 1v13a1 1 0 0 1-1 1h-6a3 3 0 0 0-3 3 3 3 0 0 0-3-3z" /></svg>
-            </Button>
-          )}
-          <Button id="theme" size="icon" type="button" title={themeTitle} aria-label={themeTitle} onClick={cycleTheme}>
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">{THEME_ICONS[theme]}</svg>
-          </Button>
+
+          <DropdownMenu>
+            <DropdownMenuTrigger render={<Button id="help" size="icon" variant="ghost" title="Help and links" aria-label="Help and links" />}><CircleHelpIcon /></DropdownMenuTrigger>
+            <DropdownMenuContent align="end" className="min-w-52">
+              {docsUrl && <DropdownMenuItem id="link-docs" onClick={() => openExternal(docsUrl)}>Documentation</DropdownMenuItem>}
+              {links.map(([id, href, label]) => href && <DropdownMenuItem key={id} id={id} onClick={() => openExternal(href)}>{label}</DropdownMenuItem>)}
+              <DropdownMenuSeparator />
+              {tilePort && <DropdownMenuItem id="port-tiles" onClick={() => openExternal(`${base}/`)}>{`Tile-server home (port ${tilePort})`}</DropdownMenuItem>}
+              {staticPort && <DropdownMenuItem id="port-preview" onClick={() => openExternal(`http://127.0.0.1:${staticPort}/`)}>{`Preview server (port ${staticPort})`}</DropdownMenuItem>}
+            </DropdownMenuContent>
+          </DropdownMenu>
+
+          <Dialog>
+            <DialogTrigger render={<Button id="settings" size="icon" variant="ghost" title="Settings" aria-label="Settings" />}><SettingsIcon /></DialogTrigger>
+            <DialogContent className="max-w-md">
+              <DialogHeader>
+                <DialogTitle>Settings</DialogTitle>
+                <DialogDescription>Kept on this machine.</DialogDescription>
+              </DialogHeader>
+              <Field label="Theme">
+                <Segmented id="theme" value={theme} onChange={(v) => setTheme(v as Theme)} options={THEMES.map((t) => ({ value: t, label: t[0]!.toUpperCase() + t.slice(1) }))} />
+              </Field>
+              <Field label="Tile threads" info={<p className="m-0">{WORKERS_TITLE}</p>}>
+                <Choice id="stream-workers" value={workers} onChange={setWorkers} options={WORKERS} />
+              </Field>
+            </DialogContent>
+          </Dialog>
         </header>
 
-        <p className="mt-2.5 mb-5 text-[13.5px] text-muted-foreground">
-          Turn a tiled dataset, on this machine or at a URL, into <strong className="font-medium text-foreground">OGC 3D Tiles</strong>.
-          Nothing is uploaded: the conversion happens here.
-        </p>
-
         <Tabs value={tab} onValueChange={(v) => setTab(String(v))} className="gap-0">
-          <div className="mb-3.5 flex items-center gap-3">
-          <TabsList id="tabs" className="h-auto gap-0.5 self-start rounded-md p-[3px]">
+          <TabsList id="tabs" className="mb-3 h-auto gap-0.5 self-start rounded-md p-0.5">
             {(['stream', 'export', 'tile', 'library'] as const).map((name) => (
               <TabsTrigger key={name} value={name} data-tab={name} title={TAB_TITLES[name]}
-                className="h-[30px] flex-none gap-[7px] rounded-sm border-0 px-3.5 text-[13px] font-medium text-muted-foreground hover:text-foreground data-active:bg-background data-active:text-foreground data-active:shadow-xs dark:data-active:border-0 dark:data-active:bg-background">
+                className="h-8 flex-none gap-2 rounded-sm border-0 px-3 text-sm font-medium text-muted-foreground hover:text-foreground data-active:bg-background data-active:text-foreground data-active:shadow-xs dark:data-active:border-0 dark:data-active:bg-background">
                 {TAB_LABELS[name]}
-                {name === 'library' && <span id="lib-count" className="rounded-full bg-background px-1.5 py-[3px] text-[11px] leading-none text-muted-foreground">{lib.bookmarks.length}</span>}
+                {name === 'library' && lib.bookmarks.length > 0 && <span id="lib-count" className="text-xs text-muted-foreground">{lib.bookmarks.length}</span>}
               </TabsTrigger>
             ))}
           </TabsList>
-          {/* Rows or cards: for both of the library's lists, so it sits with the tabs, not in one of the lists. */}
-          {tab === 'library' && (
-            <Tabs value={libCompact ? 'rows' : 'cards'} onValueChange={(v) => setLibView(v === 'rows')} className="ml-auto gap-0">
-              <TabsList aria-label="Library view" className="h-auto gap-0.5 rounded-md p-0.5">
-                <TabsTrigger id="lib-view-rows" value="rows" title="One line per entry: its title and buttons" className={segTab}>Rows</TabsTrigger>
-                <TabsTrigger id="lib-view-cards" value="cards" title="Cards with the source, options and stats" className={segTab}>Cards</TabsTrigger>
-              </TabsList>
-            </Tabs>
-          )}
-          </div>
           {/* One dataset for the two tabs that take a tiled source: it stays what it was when you go from one to the other. */}
           <div id="dataset" hidden={tab !== 'stream' && tab !== 'export'}><DatasetCard app={app} /></div>
           {/* Kept mounted: an export carries on while you switch tabs. */}
-          <TabsContent value="stream" id="panel-stream" keepMounted><StreamTab app={app} message={message} /></TabsContent>
+          <TabsContent value="stream" id="panel-stream" keepMounted><StreamTab app={app} /></TabsContent>
           <TabsContent value="export" id="panel-export" keepMounted><ExportCard app={app} /></TabsContent>
           <TabsContent value="tile" id="panel-tile" keepMounted><TilerCard app={app} onStream={() => setTab('stream')} /></TabsContent>
           <TabsContent value="library" id="panel-library" keepMounted><LibraryTab app={app} /></TabsContent>
         </Tabs>
 
-        <footer className="mt-auto flex flex-wrap items-center gap-x-3 gap-y-1 border-t border-border pt-3 text-xs text-muted-foreground">
+        <footer className="mt-auto pt-3 text-xs text-muted-foreground">
           {version && <a id="version" href={RELEASE_URL} target="_blank" rel="noreferrer" title={`${version.title}. Opens the release on GitHub.`} className={footLink}>{version.label}</a>}
-          <span id="ports">
-            {tilePort ? <a id="port-tiles" href={`${base}/`} target="_blank" rel="noreferrer" title="The tile-server's home page, in your browser" className={footLink}>{`tile-server :${tilePort}`}</a> : 'tile-server :—'}
-            {' · '}
-            {staticPort ? <a id="port-preview" href={`http://127.0.0.1:${staticPort}/`} target="_blank" rel="noreferrer" title="The preview server, in your browser" className={footLink}>{`preview :${staticPort}`}</a> : 'preview :—'}
-          </span>
-          <span className="flex-1" />
-          {links.map(([id, href, label]) => href && (
-            <a key={id} id={id} href={href} target="_blank" rel="noreferrer" className={footLink}>{label}</a>
-          ))}
         </footer>
       </div>
 

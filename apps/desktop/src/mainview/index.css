@@ -69,6 +69,15 @@
 @theme inline {
   --font-sans: ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
   --font-mono: ui-monospace, "Cascadia Code", SFMono-Regular, Consolas, monospace;
+  /* Three sizes for the whole window: labels and secondary lines, everything else, the title. */
+  --text-xs: 0.75rem;
+  --text-xs--line-height: 1.5;
+  --text-sm: 0.8125rem;
+  --text-sm--line-height: 1.5;
+  --text-base: 0.8125rem;
+  --text-base--line-height: 1.5;
+  --text-lg: 1.0625rem;
+  --text-lg--line-height: 1.4;
   --color-background: var(--background);
   --color-foreground: var(--foreground);
   --color-card: var(--card);
@@ -104,7 +113,7 @@
     @apply border-border outline-ring/50;
   }
   body {
-    @apply m-0 bg-background font-sans text-[14px]/[1.5] text-foreground antialiased;
+    @apply m-0 bg-background font-sans text-sm text-foreground antialiased;
   }
 }
 

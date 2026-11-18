@@ -19,9 +19,11 @@
  */
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { Button } from '@/components/ui/button';
+import { cn } from '@/lib/utils';
 import type { AppModel } from './App';
-import { Card } from './components/Card';
-import { Actions, Advanced, Check, Choice, Code, Field, FieldLabel, Hint, Result, TextInput, UrlBar, type Kind, type Message } from './components/bits';
+import { Card, CardTitle } from './components/Card';
+import { Actions, Advanced, Check, Chip, Choice, Code, CopyButton, Field, FieldLabel, Info, LogFold, Result, TextInput, UrlBar, type Kind, type Message } from './components/bits';
+import { PreviewControl } from './StreamTab';
 import { base, openExternal, pickDataset, pickerAvailable, pickerRpc } from './host';
 
 interface ToolOption {
@@ -48,6 +50,14 @@ const TILER_CLI = 'packages/tilers/cli.js';
 const extOf = (src: string) => (/\.copc\.laz$/i.test(src) ? 'copc.laz' : (src.split(/[\\/]/).pop() ?? '').split('.').pop()?.toLowerCase() ?? '');
 const nameOf = (p: string) => p.replace(/[\\/]+$/, '').split(/[\\/]/).pop() ?? p;
 const quote = (a: string) => (/[\s"]/.test(a) ? `"${a}"` : a);
+/** Where a run writes unless told otherwise: a folder next to the input, named after it and the tool. */
+function defaultOutDir(src: string, toolId: string): string {
+  if (!src || /^[a-z][a-z0-9+.-]*:\/\//i.test(src)) return '';
+  const clean = src.replace(/[\\/]+$/, ''), cut = Math.max(clean.lastIndexOf('\\'), clean.lastIndexOf('/'));
+  if (cut < 0) return '';
+  const stem = clean.slice(cut + 1).replace(/\.(copc\.laz|compressed\.ply|[a-z0-9]+)$/i, '');
+  return `${clean.slice(0, cut + 1)}${stem}-${toolId}`;
+}
 const SOURCES: Record<string, string> = { bundled: 'ships with this app', downloaded: 'downloaded by this app', built: 'built from source by this app', path: 'found on PATH', qgis: 'found in a QGIS install', pixi: 'found in pixi', env: 'set by an environment variable' };
 
 /** The arguments of a run: only the options that differ from the tool's defaults, so the command stays short. */
@@ -145,7 +155,9 @@ export function TilerCard({ app, onStream }: { app: AppModel; onStream: () => vo
   const tilesetUrl = result && isTileset && base ? `${base}/tilers/files/${outputKey(result.outDir)}/tileset.json` : '';
   const what = known?.input.db ? (known.input.exists ? 'a PostgreSQL database' : 'a PostgreSQL address that is not complete (postgresql://user@host:5432/database)')
     : known?.input.dir ? `a folder holding ${known.input.exts.slice(0, 6).map((e) => `.${e}`).join(', ') || 'no file'}` : `a .${ext || '?'} file${known?.input.ply ? ` holding ${PLY[known.input.ply]}` : ''}`;
-  const args = tool && src && outDir.trim() ? tilerArgs(tool, src, outDir.trim(), vals, willDownload) : null;
+  // the folder typed, or one next to the input
+  const out = outDir.trim() || (tool ? defaultOutDir(src, tool.id) : '');
+  const args = tool && src && out ? tilerArgs(tool, src, out, vals, willDownload) : null;
   const cliText = args ? `node ${args.map(quote).join(' ')}` : '';
 
   async function browseIn(directory: boolean) {
@@ -163,7 +175,7 @@ export function TilerCard({ app, onStream }: { app: AppModel; onStream: () => vo
     if (!src) return say('Enter the raw file above first.', 'err');
     if (!tool) return say(`No tool takes ${what}. Tiled sources (COPC, Potree, SOG…) go to the Stream live or Export tab.`, 'err');
     if (blocked) return say(`${tool.name} is not on this machine: ${tool.found.hint}`, 'err');
-    if (!outDir.trim()) return say('Pick an empty output folder.', 'err');
+    if (!out) return say('Pick an empty output folder.', 'err');
     if (!host || !pickerRpc) return say('Running a tiler needs the desktop app. The command below does the same from a terminal.', 'err');
     try {
       const { id } = await pickerRpc.request.runCli({ args: args! });
@@ -254,120 +266,138 @@ export function TilerCard({ app, onStream }: { app: AppModel; onStream: () => vo
     if (!result || !tilesetUrl) return;
     app.previewIn(renderer, tilesetUrl, result.kind ?? tool?.kind ?? 'mesh', nameOf(result.outDir));
   }
-  async function copyUrl() {
-    try { await navigator.clipboard.writeText(tilesetUrl); say('Tileset URL copied: it works while this app runs. The folder itself can be hosted on any web server.', 'ok'); } catch { say(tilesetUrl, 'info'); }
-  }
   async function openFolder() {
     if (!result) return;
     if (host) await pickerRpc!.request.openFolder({ path: result.outDir }).catch(() => {});
     else say(result.outDir, 'info');
   }
-  async function copyCli() {
-    try { await navigator.clipboard.writeText(cliText); say('Command copied.', 'ok'); } catch { /* visible anyway */ }
-  }
 
+  // A field shows the value a run will use, the tool's default included: an empty box reads as "nothing set".
   const field = (o: ToolOption) => {
     const v = vals[o.key];
     if (o.type === 'bool') return <Check key={o.key} id={`tiler-${o.key}`} checked={v === undefined ? Boolean(o.default) : Boolean(v)} onChange={(c) => setVal(o.key, c)} title={o.help}>{o.label}</Check>;
     if (o.type === 'enum') return (
-      <Field key={o.key} label={o.label} title={o.help}>
-        <Choice id={`tiler-${o.key}`} value={String(v ?? o.default)} onChange={(c) => setVal(o.key, c)} options={(o.values ?? []).map((x) => ({ value: x, label: x === o.default ? `${x} (default)` : x }))} />
+      <Field key={o.key} label={o.label} info={o.help}>
+        <Choice id={`tiler-${o.key}`} value={String(v ?? o.default)} onChange={(c) => setVal(o.key, c)} options={(o.values ?? []).map((x) => ({ value: x, label: x }))} />
       </Field>
     );
     return (
-      <Field key={o.key} label={o.label} title={o.help}>
-        <TextInput id={`tiler-${o.key}`} value={String(v ?? '')} onChange={(e) => setVal(o.key, e.target.value)} placeholder={o.placeholder ?? String(o.default)} />
+      <Field key={o.key} label={o.label} info={o.help}>
+        <TextInput id={`tiler-${o.key}`} value={String(v ?? (o.type === 'text' ? '' : o.default))} onChange={(e) => setVal(o.key, e.target.value)} placeholder={o.placeholder ?? String(o.default)} />
       </Field>
     );
   };
   const basic = tool?.options.filter((o) => !o.advanced) ?? [], advanced = tool?.options.filter((o) => o.advanced) ?? [];
   const grid = (list: ToolOption[]) => (
     <>
-      <div className="mt-3.5 grid grid-cols-2 gap-3 max-[560px]:grid-cols-1">{list.filter((o) => o.type !== 'bool').map(field)}</div>
-      {list.some((o) => o.type === 'bool') && <div className="my-2 flex flex-wrap items-end gap-x-4 gap-y-1.5">{list.filter((o) => o.type === 'bool').map(field)}</div>}
+      <div className="mt-3 grid grid-cols-2 gap-3 max-sm:grid-cols-1">{list.filter((o) => o.type !== 'bool').map(field)}</div>
+      {list.some((o) => o.type === 'bool') && <div className="mt-1 flex flex-wrap items-center gap-x-4">{list.filter((o) => o.type === 'bool').map(field)}</div>}
     </>
   );
+  const state = (t: Tool) => (t.found.status === 'ready' ? 'Ready' : t.found.downloadable ? `Download, ${(t.found.downloadBytes / 1e6).toFixed(0)} MB` : 'Not installed');
+  const accepted = (k: Tool['kind']) => [...new Set((tools ?? []).filter((t) => t.kind === k).flatMap((t) => t.inputs))].filter((e) => e !== 'postgres').map((e) => `.${e}`).join(' ');
 
   return (
     <Card id="tiler-card">
-      <FieldLabel className="mb-[9px] text-[13.5px] leading-normal text-foreground">Tile raw input <span className="text-xs font-normal text-muted-foreground">— a point cloud, a mesh or Gaussian splats that are not tiled yet: a third-party tiler runs on this machine, then the result is opened</span></FieldLabel>
-      <Field label="Raw input — a file, a folder, or a PostgreSQL address" className="mb-3">
-        <UrlBar>
-          <TextInput id="tiler-src" value={input} onChange={(e) => setInput(e.target.value)} disabled={running} placeholder="C:\data\scan.laz   or   C:\data\model.obj   or   postgresql://user@host:5432/database" className="flex-1" />
-          {host && <>
-            <Button id="tiler-browse-file" disabled={running} title="Pick a raw file: a point cloud (.las, .laz, .e57, .ply, .pts, .xyz…), a mesh (.obj, .fbx, .glb, .ifc…), vectors (.shp, .geojson, .gpkg) or splats (.ply, .spz, .sog, .splat, .ksplat, .lcc)" onClick={() => browseIn(false)}>File…</Button>
-            <Button id="tiler-browse-dir" disabled={running} title="Pick a folder of raw files: LAS or LAZ files, an OSGB tree, meshes" onClick={() => browseIn(true)}>Folder…</Button>
-          </>}
-        </UrlBar>
-      </Field>
+      <div className="mb-3 flex items-center gap-1.5">
+        <CardTitle>Tile raw input</CardTitle>
+        <Info label="About tiling">
+          <p className="m-0">For a point cloud, a mesh or Gaussian splats that are <strong>not tiled yet</strong>. A third-party tiler runs on this machine, then the result opens here. A source that is tiled already goes to <em>Stream live</em> or <em>Export</em>.</p>
+          <p className="m-0">This app writes no tiler: it finds, fetches and runs the official ones. A tool that is not installed is downloaded from its authors' release page and checked against a pinned SHA-256, only after the button says so.</p>
+        </Info>
+      </div>
+      <UrlBar>
+        <TextInput id="tiler-src" aria-label="Raw input: a file, a folder, or a PostgreSQL address" value={input} onChange={(e) => setInput(e.target.value)} disabled={running} placeholder="Raw file or folder: C:\data\scan.laz, C:\data\model.obj, postgresql://user@host/db" className="flex-1" />
+        {host && <>
+          <Button id="tiler-browse-file" disabled={running} title="Pick a raw file: a point cloud, a mesh, vectors or splats" onClick={() => browseIn(false)}>File…</Button>
+          <Button id="tiler-browse-dir" disabled={running} title="Pick a folder of raw files: LAS or LAZ files, an OSGB tree, meshes" onClick={() => browseIn(true)}>Folder…</Button>
+        </>}
+      </UrlBar>
       {unavailable && <Result id="tiler-unavailable" message={{ msg: unavailable, kind: 'err' }} />}
-      {tools && !tool && <Result id="tiler-status-none" message={status} />}
+
+      {/* Nothing to run yet: what this tab takes. */}
       {tools && !tool && (
-        <Hint id="tiler-none">
-          {src ? <>No tool here takes <strong>{what}</strong>. </> : <>Enter a raw file or folder above (<em>File…</em> or <em>Folder…</em>). </>}
-          {(Object.keys(KINDS) as Tool['kind'][]).map((k) => <span key={k} id={`tiler-inputs-${k}`}><strong>{KINDS[k]}:</strong> {[...new Set(tools.filter((t) => t.kind === k).flatMap((t) => t.inputs))].filter((e) => e !== 'postgres').map((e) => `.${e}`).join(', ')}. </span>)}
-          {tools.some((t) => t.inputs.includes('postgres')) && <span id="tiler-inputs-db"><strong>PostGIS table:</strong> postgresql://user@host:5432/database. </span>}
-          A source that is already tiled (COPC, Potree, streamed SOG, 3D Tiles…) goes to the <em>Stream live</em> or <em>Export</em> tab.
-          {!src && host && <> Nothing at hand? <button id="tiler-samples" type="button" onClick={makeSamples} className="cursor-pointer underline">Write tiny sample files</button> (a LAS, a splat PLY, a textured OBJ, 1.3 MB) into a folder you pick.</>}
-        </Hint>
+        <div id="tiler-none" className="mt-3">
+          <Result id="tiler-status-none" message={status} className="mt-0 mb-3" />
+          {src && <p className="m-0 mb-3 text-sm">No tool here takes <strong className="font-medium">{what}</strong>.</p>}
+          <dl className="m-0 grid grid-cols-[auto_1fr] gap-x-4 gap-y-1.5 text-xs text-muted-foreground">
+            {(Object.keys(KINDS) as Tool['kind'][]).map((k) => <div key={k} id={`tiler-inputs-${k}`} className="contents"><dt className="font-medium text-foreground">{KINDS[k]}</dt><dd className="m-0">{accepted(k)}</dd></div>)}
+            {tools.some((t) => t.inputs.includes('postgres')) && <div id="tiler-inputs-db" className="contents"><dt className="font-medium text-foreground">PostGIS table</dt><dd className="m-0">postgresql://user@host:5432/database</dd></div>}
+          </dl>
+          {!src && host && <Button id="tiler-samples" size="sm" className="mt-3" title="A LAS, a splat PLY and a textured OBJ, 1.3 MB, written into a folder you pick" onClick={makeSamples}>Write sample files to try</Button>}
+        </div>
       )}
+
       {tool && (
         <>
-          <div className="grid grid-cols-2 gap-3 max-[560px]:grid-cols-1">
-            <Field label="Tool">
-              <Choice id="tiler-tool" value={tool.id} onChange={setToolId} disabled={running}
-                options={fitting.map((t) => ({ value: t.id, label: `${t.name} → ${t.output.label}${t.found.status === 'ready' ? '' : t.found.downloadable ? '  (download)' : '  (not installed)'}` }))} />
-            </Field>
-            <Field label="Output folder">
-              <UrlBar>
-                <TextInput id="tiler-out" value={outDir} onChange={(e) => setOutDir(e.target.value)} placeholder="C:\tiled\my-scan   (an empty folder)" className="flex-1" />
-                {host && <Button id="tiler-browse" onClick={browseOut}>Folder…</Button>}
-              </UrlBar>
-            </Field>
+          {/* What the input is, then the tools that take it: one row each, the chosen one marked. */}
+          <div className="mt-3 flex items-center gap-2">
+            <FieldLabel>Tool</FieldLabel>
+            <Chip id="tiler-input" data-dir={known?.input.dir ? 'true' : 'false'} data-ply={known?.input.ply ?? ''}>Input: {what}</Chip>
           </div>
-          <Hint id="tiler-about" className="mt-2.5">
-            <span id="tiler-input" data-dir={known?.input.dir ? 'true' : 'false'} data-ply={known?.input.ply ?? ''}>Input: {what}. </span>
-            {tool.summary}{' '}
-            <a href={tool.homepage} onClick={(e) => { e.preventDefault(); openExternal(tool.homepage); }} className="underline">{tool.licence} licence, project page</a>.{' '}
-            <span id="tiler-found" data-status={tool.found.status}>
-              {tool.found.status === 'ready'
-                ? <>On this machine: {SOURCES[tool.found.source ?? ''] ?? tool.found.source}{tool.found.hint ? ` (${tool.found.hint})` : ''}.</>
-                : willDownload
-                  ? <><strong>Not installed.</strong> Running it first downloads {tool.found.missing.join(' and ')} ({tool.delivery === 'uv' ? 'about ' : ''}{(tool.found.downloadBytes / 1e6).toFixed(0)} MB in all){tool.delivery === 'uv'
-                      ? <>: uv installs that pinned version from PyPI into a private environment in this app's tools folder, nothing system-wide.</>
-                      : tool.delivery === 'cargo'
-                      ? <>: its authors publish source only, so the archive is checked against a pinned SHA-256 and compiled once (a few minutes) with this machine's Rust toolchain, or, when it has none that can build it, with one this app fetches into its tools folder for the build and removes afterwards. Only the program is kept.</>
-                      : <> from {tool.found.missing.length > 1 ? 'their' : 'its'} authors' release page, checks {tool.found.missing.length > 1 ? 'each' : 'it'} against a pinned SHA-256 and keeps {tool.found.missing.length > 1 ? 'them' : 'it'} in this app's tools folder.</>}</>
-                  : <><strong>Not on this machine:</strong> {tool.found.hint}.</>}
-            </span>
-          </Hint>
+          <div id="tiler-tool" role="radiogroup" aria-label="Tool" data-value={tool.id} className="mt-1.5 flex flex-col overflow-hidden rounded-md border border-input">
+            {fitting.map((t) => {
+              const on = t.id === tool.id;
+              return (
+                <div key={t.id} className={cn('flex items-center gap-2 border-b border-border px-3 last:border-b-0', on && 'bg-accent/60')}>
+                  <button type="button" role="radio" aria-checked={on} data-tool={t.id} disabled={running} onClick={() => setToolId(t.id)}
+                    className="flex min-w-0 flex-1 cursor-pointer items-center gap-2.5 border-0 bg-transparent py-2 text-left text-sm text-foreground outline-none focus-visible:ring-2 focus-visible:ring-ring/60 disabled:cursor-default">
+                    <span className={cn('size-3.5 flex-none rounded-full border border-muted-foreground', on && 'border-4 border-foreground')} />
+                    <span className="truncate font-medium">{t.name}</span>
+                    <span className="truncate text-xs text-muted-foreground">→ {t.output.label}</span>
+                  </button>
+                  <span className={cn('flex-none text-xs', t.found.status === 'ready' ? 'text-muted-foreground' : t.found.downloadable ? 'text-foreground' : 'text-warning')} title={t.found.status === 'ready' ? (SOURCES[t.found.source ?? ''] ?? t.found.source ?? '') : t.found.hint ?? ''}>{state(t)}</span>
+                  <Info label={`About ${t.name}`}>
+                    <p className="m-0">{t.summary}</p>
+                    <p className="m-0"><a href={t.homepage} onClick={(e) => { e.preventDefault(); openExternal(t.homepage); }} className="underline">Project page</a>, {t.licence} licence{t.version ? `, version ${t.version}` : ''}.</p>
+                    <p className="m-0">
+                      {t.found.status === 'ready'
+                        ? <>On this machine: {SOURCES[t.found.source ?? ''] ?? t.found.source}{t.found.hint ? ` (${t.found.hint})` : ''}.</>
+                        : t.found.downloadable
+                          ? <><strong>Not installed.</strong> Running it first downloads {t.found.missing.join(' and ')} ({(t.found.downloadBytes / 1e6).toFixed(0)} MB){t.delivery === 'uv'
+                              ? <>: uv installs that pinned version from PyPI into a private environment in this app's tools folder, nothing system-wide.</>
+                              : t.delivery === 'cargo'
+                              ? <>: its authors publish source only, so the archive is checked against a pinned SHA-256 and compiled once (a few minutes), with this machine's Rust toolchain or one this app fetches for the build and removes afterwards.</>
+                              : <> from the authors' release page, checked against a pinned SHA-256 and kept in this app's tools folder.</>}</>
+                          : <><strong>Not on this machine:</strong> {t.found.hint}.</>}
+                    </p>
+                  </Info>
+                </div>
+              );
+            })}
+          </div>
+          <span id="tiler-found" data-status={tool.found.status} hidden>{state(tool)}</span>
+
           {basic.length > 0 && grid(basic)}
-          <Actions>
-            {running
-              ? <Button id="tiler-cancel" variant="outline" onClick={cancel} className="border-destructive/60 text-destructive hover:bg-destructive/10 hover:text-destructive">Cancel</Button>
-              : <Button id="tiler-start" variant="default" disabled={blocked} onClick={start}>{willDownload ? 'Download and run' : 'Run'}</Button>}
-          </Actions>
+
+          <Field label="Output folder" className="mt-3">
+            <UrlBar>
+              <TextInput id="tiler-out" value={outDir} onChange={(e) => setOutDir(e.target.value)} placeholder={defaultOutDir(src, tool.id) || 'An empty folder: C:\\tiled\\my-scan'} className="flex-1" />
+              {host && <Button id="tiler-browse" onClick={browseOut}>Folder…</Button>}
+              {running
+                ? <Button id="tiler-cancel" variant="outline" onClick={cancel} className="border-destructive/60 text-destructive hover:bg-destructive/10 hover:text-destructive">Cancel</Button>
+                : <Button id="tiler-start" variant="default" disabled={blocked} onClick={start}>{willDownload ? 'Download and run' : 'Run'}</Button>}
+            </UrlBar>
+          </Field>
+
           <Result id="tiler-status" message={status} />
-          <details id="tiler-log-wrap" hidden={log == null} open={logOpen} onToggle={(e) => setLogOpen((e.target as HTMLDetailsElement).open)} className="mt-2.5">
-            <summary className="cursor-pointer text-[12.5px] text-foreground select-none">Tool output <span className="text-xs font-normal text-muted-foreground">(last 200 lines)</span></summary>
-            <pre id="tiler-log" ref={logEl} className="mt-2 mb-0 max-h-[220px] overflow-auto rounded-md border border-border bg-muted/50 px-2.5 py-2 font-mono text-[11.5px] leading-[1.45] break-all whitespace-pre-wrap">{log?.join('\n')}</pre>
-          </details>
+          <LogFold wrapId="tiler-log-wrap" id="tiler-log" label="Output of the tool, last 200 lines" lines={log} open={logOpen} onOpenChange={setLogOpen} logRef={logEl} />
           <Actions id="tiler-done" hidden={!result}>
             {isTileset ? <>
-              <Button id="tiler-preview" variant="default" onClick={() => preview('cesium')}>Preview in Cesium</Button>
-              <Button id="tiler-preview-3dtrjs" onClick={() => preview('3dtrjs')}>Preview in 3DTRjs</Button>
-              <Button id="tiler-copy-url" onClick={copyUrl}>Copy URL</Button>
+              <PreviewControl id="tiler-preview" primary onPreview={preview} />
+              <CopyButton id="tiler-copy-url" text={tilesetUrl} label="Copy URL" variant="outline" onCopied={() => app.say('Tileset URL copied: it works while this app runs.', 'ok')} />
             </> : <Button id="tiler-stream" variant="default" onClick={streamIt}>Stream it</Button>}
             <Button id="tiler-open" onClick={openFolder}>Open folder</Button>
           </Actions>
-          <Advanced summary="Advanced" hint="more options of the tool, CLI">
+
+          <Advanced>
             {advanced.length > 0 && grid(advanced)}
-            <FieldLabel className="mt-3.5 mb-[9px]">Equivalent CLI <span className="text-xs font-normal">(from the repo root)</span></FieldLabel>
+            <FieldLabel className="mt-3 mb-1.5">Same thing from a terminal, at the repo root</FieldLabel>
             <UrlBar>
-              <Code id="tiler-cli" wrap empty={!cliText}>{cliText || 'pick an output folder'}</Code>
-              <Button id="tiler-cli-copy" disabled={!cliText} onClick={copyCli}>Copy</Button>
+              <Code id="tiler-cli" empty={!cliText}>{cliText || 'Enter an input first'}</Code>
+              <CopyButton id="tiler-cli-copy" text={cliText} title="Copy the command" />
             </UrlBar>
-            {!host && <Hint className="mt-3">Running a tiler needs the desktop app; in a plain browser this card only shows the tools and the command.</Hint>}
+            {!host && <p className="m-0 mt-3 text-xs text-muted-foreground">Running a tiler needs the desktop app; in a plain browser this card only shows the tools and the command.</p>}
           </Advanced>
         </>
       )}
