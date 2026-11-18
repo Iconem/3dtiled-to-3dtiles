@@ -172,6 +172,10 @@ export const FORMATS: FormatMeta[] = [
     { id: 'shokei-falls', label: 'Shokei Falls, Izu Kawazu (Studio Duckbill, 4M) ⬀', src: 'https://d28zzqy0iyovbz.cloudfront.net/bc623b76/v1/lod-meta.json', query: '&up=-y' },
     { id: 'jerash', label: 'Jerash, Jordan (T. Nagao, 10M) ⬀', src: 'https://d28zzqy0iyovbz.cloudfront.net/8e2a4194/v1/lod-meta.json', query: '&up=-y' },
     { id: 'dittrichova-hrobka', sh: 3, label: 'Dittrichova hrobka, Krásná Lípa (D. Dworschak, 54M) ⬀', src: 'https://d28zzqy0iyovbz.cloudfront.net/6c09cd54/v1/lod-meta.json', query: '&up=-y' },
+    // funes.world, an archive of photogrammetry of built heritage (CC BY-NC 4.0), publishes its Gaussian versions as
+    // streamed SOG written by splat-transform. Y-up read off the data: in 161 of 172 ground columns of a chunk the
+    // splats rise towards +Y. Not confirmed by eye. The root bound reaches 20 km (floaters).
+    { id: 'funes-pompeii', sh: 3, label: 'Pompeii (funes.world, F. Cao & Y. Xie, CC BY-NC, 4.6M) ⬀', src: 'https://cdn.funes.world/model3d-lod_cf5c57a1-fd58-4b93-858d-d9e8778bd54a/lod-meta.json', query: '&up=y' },
   ] },
   { fmt: 'lcc', icon: '◆', label: 'LCC', type: 'splat', octree: false, stream: true, assets: [
     // Real public .lcc downloads (found via XGRIDS' own sample-data page,

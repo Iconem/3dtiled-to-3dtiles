@@ -5,6 +5,12 @@ Format loosely follows [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+### Added — 2026-11-18 (browser extract reads Draco and writes SOG; a funes.world sample)
+- **Crop and extract in the browser** reads Draco-compressed tiles (they were skipped and counted) and writes SOG,
+  so it now offers the four splat outputs of the tile server.
+- **Sample**: Pompeii from [funes.world](https://funes.world/) (4.6 M splats, streamed SOG with harmonics,
+  CC BY-NC 4.0, captured by Fengze Cao and Yixuan Xie), in the viewer and in the desktop app's samples.
+
 ### Changed — 2026-11-18 (desktop app: third pass, and its docs get screens)
 - **Tabs**: the underline of the open tab lies on the rule (it sat one pixel off it), and shows in the dark theme,
   where it did not.

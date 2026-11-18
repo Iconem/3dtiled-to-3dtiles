@@ -156,6 +156,9 @@ importers:
       d3-hierarchy:
         specifier: ^3.1.2
         version: 3.1.2
+      draco3dgltf:
+        specifier: 1.5.7
+        version: 1.5.7
       gaussian-splat-lite:
         specifier: 1.8.1
         version: 1.8.1(three@0.187.0)

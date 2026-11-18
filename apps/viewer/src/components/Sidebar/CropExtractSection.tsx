@@ -166,7 +166,7 @@ export default function CropExtractSection({ activeHandleRef }: { activeHandleRe
                 <SelectContent>
                   <SelectItem value="spz">SPZ</SelectItem>
                   <SelectItem value="glb">GLB</SelectItem>
-                  {!inBrowser && <SelectItem value="sog">SOG</SelectItem>}
+                  <SelectItem value="sog">SOG</SelectItem>
                   <SelectItem value="ply">PLY</SelectItem>
                 </SelectContent>
               </Select>

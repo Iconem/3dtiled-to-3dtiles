@@ -39,8 +39,11 @@ drift apart.
 
 **Not in the browser:**
 
-- **COPC** (PDAL, on the server) and **SOG** output (its encoder was not tried in a browser).
-- **Draco-compressed tiles**: no decoder in the worker yet. Such tiles are skipped and counted in the result line.
+- **COPC** (PDAL, on the server).
+- Since 2026-11-18 the worker also writes **SOG** (splat-transform's WebP encoder, 350 KB of wasm) and reads
+  **Draco** tiles (the decoder, 190 KB of wasm, is fetched at the first tile that needs it). Checked headless: the
+  gargoyle served with `transform=draco`, 96 tiles, none skipped; the skatepark's first level written as a 0.97 MB
+  SOG. The SOG was not read back, and neither was timed on a large scene.
 - The **file dialog itself** was not exercised by the automated check (it needs a real click); the writing behind
   it was, through a file handle of the browser's private storage.
 - Not measured: a multi-gigabyte extract, and memory while it runs.

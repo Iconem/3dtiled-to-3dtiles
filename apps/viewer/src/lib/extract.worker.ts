@@ -7,14 +7,17 @@
  * come back from the HTTP cache), and writes the result either straight to a file the user picked (File System Access
  * API: tile by tile, memory stays flat) or, where the browser has no such API, into memory, handed back as a Blob.
  *
- * What the browser does not do: COPC (PDAL, on the server), and Draco-compressed tiles (no decoder here yet: such
- * tiles are skipped and counted). meshopt tiles are decoded; KTX2 and WebP textures are copied as they are.
+ * What the browser does not do: COPC (PDAL, on the server). meshopt and Draco tiles are decoded (the Draco decoder,
+ * 190 KB of wasm, is fetched at the first tile that needs it); KTX2 and WebP textures are copied as they are.
  */
 import { Document, WebIO } from '@gltf-transform/core';
 import { ALL_EXTENSIONS, EXTTextureWebP, KHRTextureBasisu } from '@gltf-transform/extensions';
 import { MeshoptDecoder } from 'three/addons/libs/meshopt_decoder.module.js';
 import { extractLas, extractMeshDocument, extractSplats, extractTilesetJson, extractZip, type ExtractSink } from '../../../../packages/core/extract-core.js';
 import type { BrowserExtractJob, WorkerReply } from './browserExtract';
+import dracoWasmUrl from 'draco3dgltf/draco_decoder_gltf.wasm?url';
+// splat-transform's WebP encoder (SOG output). The package does not export the file, hence the path.
+import webpWasmUrl from '../../../../node_modules/@playcanvas/splat-transform/lib/webp.wasm?url';
 
 declare const self: DedicatedWorkerGlobalScope;
 
@@ -41,6 +44,28 @@ async function webIo(): Promise<WebIO> {
   await MeshoptDecoder.ready;
   io = new WebIO().registerExtensions(ALL_EXTENSIONS).registerDependencies({ 'meshopt.decoder': MeshoptDecoder });
   return io;
+}
+
+/** Does this GLB declare Draco geometry? Read off its JSON chunk, without parsing it. */
+function usesDraco(glb: Uint8Array): boolean {
+  if (glb.length < 20) return false;
+  const jsonLength = new DataView(glb.buffer, glb.byteOffset, glb.byteLength).getUint32(12, true);
+  return new TextDecoder().decode(glb.subarray(20, 20 + jsonLength)).includes('KHR_draco_mesh_compression');
+}
+let dracoReady: Promise<void> | null = null;
+/** Reads a tile, with the Draco decoder added to the reader the first time a tile needs it. */
+async function readGlb(glb: Uint8Array) {
+  const gltf = await webIo();
+  if (usesDraco(glb)) {
+    dracoReady ??= (async () => {
+      // the decoder alone (the package's entry also pulls the encoder); its wasm is handed over, not looked up
+      const create = (await import('draco3dgltf/draco_decoder_gltf_nodejs.js')).default;
+      const wasmBinary = await (await fetch(dracoWasmUrl)).arrayBuffer();
+      gltf.registerDependencies({ 'draco3d.decoder': await create({ wasmBinary }) });
+    })();
+    await dracoReady;
+  }
+  return gltf.readBinary(glb);
 }
 
 /** Where the bytes go: the user's file, or memory up to MEMORY_LIMIT. */
@@ -83,8 +108,7 @@ async function run(job: BrowserExtractJob, handle: FileSystemFileHandle | null) 
   try {
     let stats: Record<string, number> = {};
     if (job.kind === 'las') {
-      const gltf = await webIo();
-      const r = await extractLas({ ...base, enu: !!job.enuFrame, deps: { fetchBytes, readGlb: (b) => gltf.readBinary(b) } }, out.sink);
+      const r = await extractLas({ ...base, enu: !!job.enuFrame, deps: { fetchBytes, readGlb } }, out.sink);
       stats = { points: r.points, tiles: r.tiles };
     } else if (job.kind === 'zip') {
       stats = await extractZip({ ...base, deps: { fetchBytes } }, out.sink);
@@ -102,12 +126,13 @@ async function run(job: BrowserExtractJob, handle: FileSystemFileHandle | null) 
         if (mime === 'image/ktx2') (doc as Document).createExtension(KHRTextureBasisu).setRequired(true);
         else if (mime === 'image/webp') (doc as Document).createExtension(EXTTextureWebP).setRequired(true);
       };
-      const r = await extractMeshDocument({ ...base, deps: { fetchBytes, readGlb: (b) => gltf.readBinary(b), Document, onTexture } });
+      const r = await extractMeshDocument({ ...base, deps: { fetchBytes, readGlb, Document, onTexture } });
       if (!r.primitives) throw new Error(skipped ? `No mesh could be read (${skipped} tiles skipped: ${firstSkip}).` : 'No mesh in the box (is this a mesh source?).');
       await out.sink.write(await gltf.writeBinary(r.document as Document));
       stats = { primitives: r.primitives, tiles: r.tiles };
     } else if (job.kind === 'splat') {
       const splat = await import('@playcanvas/splat-transform');   // several megabytes: loaded only for a splat extract
+      if (job.splatFormat === 'sog') splat.WebPCodec.wasmUrl = webpWasmUrl;   // it looks next to its own script otherwise
       const r = await extractSplats({ ...base, format: job.splatFormat, clip: job.splatClip !== false, deps: { fetchBytes, splat } });
       if (!r) throw new Error('No splat tiles in the box (is this a splat source?).');
       await out.sink.write(r.bytes);

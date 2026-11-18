@@ -27,8 +27,8 @@ export type WorkerReply =
 
 export interface BrowserExtractResult { fileName: string; stats: Record<string, number>; skipped: number; firstSkip: string; streamed: boolean }
 
-/** Splat outputs made in the browser. SOG's encoder is left to the server. */
-export const BROWSER_SPLAT_FORMATS = ['spz', 'ply', 'glb'];
+/** Splat outputs made in the browser: all four of the server's. */
+export const BROWSER_SPLAT_FORMATS = ['spz', 'ply', 'glb', 'sog'];
 
 type SavePicker = (o: { suggestedName: string; types?: { description: string; accept: Record<string, string[]> }[] }) => Promise<FileSystemFileHandle>;
 const savePicker = (): SavePicker | null => (typeof window !== 'undefined' && (window as unknown as { showSaveFilePicker?: SavePicker }).showSaveFilePicker) || null;
