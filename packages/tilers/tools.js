@@ -736,7 +736,7 @@ export const TOOLS = [
     output: { format: 'sog', path: (ctx) => path.join(ctx.outDir, 'lod-meta.json'), label: 'streamed SOG (lod-meta.json)' },
     provide: { bundled: { package: '@playcanvas/splat-transform', script: 'bin/cli.mjs' } },
     options: [
-      { key: 'levels', label: 'Levels of detail', type: 'int', min: 1, max: 12, default: 3, help: 'How many levels the scene gets, the finest being the input itself. A scene of tens of millions of splats takes about 10, so that the coarsest holds a few tens of thousands.' },
+      { key: 'levels', label: 'Levels of detail', type: 'int', min: 1, max: 12, default: 10, help: 'How many levels the scene gets, the finest being the input itself, each one a decimation of the one before. 10 levels at 50 % take a scene of tens of millions of splats down to a few tens of thousands; a small scene needs fewer.' },
       { key: 'keep', label: 'Kept per level (%)', type: 'int', min: 5, max: 90, default: 50, help: 'Each level keeps this share of the splats of the level before it (--decimate).' },
       { key: 'adaptive', label: 'Adaptive decimation', type: 'bool', default: false, help: 'Remove splats where the error is lowest (--decimate-adaptive): better on scenes of mixed scale, more memory. It keeps the large far gaussians, so on an outdoor scene the coarse levels are mostly sky and background unless the scene is cropped first (Keep inside a box).' },
       { key: 'harmonics', label: 'Spherical harmonics', type: 'enum', values: ['keep', '0', '1', '2', '3'], default: 'keep', help: '-H: the highest band kept. 0 is base colour only, about a quarter of the size of a scene with 3 bands.' },

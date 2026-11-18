@@ -113,7 +113,7 @@ test('options: defaults filled, values checked, nothing undeclared or flag-like 
   assert.deepEqual(resolveOptions(splat, { levels: '4', adaptive: 'true', keep: 25 }), { levels: 4, keep: 25, adaptive: true, harmonics: 'keep', rotate: '', box: '', floaters: false, morton: false, chunkCount: 512, chunkExtent: 16, chunkMin: 8, fileCount: '', workers: 4, gpu: 'auto' });
   assert.equal(resolveOptions(splat, { rotate: '-90, 0,0' }).rotate, '-90, 0,0', 'a list of numbers may start with a minus');
   assert.throws(() => resolveOptions(splat, { rotate: '-90,--gpu' }), /numbers separated by commas/);
-  assert.equal(resolveOptions(splat, { levels: '' }).levels, 3, 'an empty field is the default');
+  assert.equal(resolveOptions(splat, { levels: '' }).levels, 10, 'an empty field is the default');
   assert.throws(() => resolveOptions(potree, { method: 'fancy' }), /one of poisson/);
   assert.throws(() => resolveOptions(splat, { levels: 99 }), /between 1 and 12/);
   assert.throws(() => resolveOptions(splat, { levels: 2.5 }), /whole number/);

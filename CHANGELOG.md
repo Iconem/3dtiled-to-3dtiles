@@ -12,6 +12,7 @@ Format loosely follows [Keep a Changelog](https://keepachangelog.com/).
   Only for a server that runs for one person: on with `TILED_ALLOW_EXPORT=1` (the desktop app) or
   `TILED_LOCAL_SOURCES=1`, refused with a message otherwise. The app's *Stream it* now uses it.
 - **Server errors carry their message again**: every failed request answered an empty body.
+- **splat-transform builds 10 levels by default** (it was 3), each 50 % of the one before.
 - **splat-transform, large-scene options**: harmonics, rotation, crop box, floaters, Morton order, chunk minimum,
   splats per file per level, encoding threads, GPU adapter; up to 12 levels.
 - **Two streamed SOG samples** from SuperSplat in the viewer: Shokei Falls (Izu Kawazu, 4.0 M splats, 3 levels) and
