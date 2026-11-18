@@ -98,8 +98,9 @@ export function DatasetCard({ app }: { app: AppModel }) {
             <ChevronDownIcon className="size-3.5" />
           </DropdownMenuTrigger>
           <DropdownMenuContent className="min-w-48">
-            <DropdownMenuRadioGroup value={form.format} onValueChange={(v) => patchForm({ format: String(v) })}>
-              {FORMATS.map((f) => <DropdownMenuRadioItem key={f.value} value={f.value} data-format={f.value}>{f.label}</DropdownMenuRadioItem>)}
+            {/* "auto" stands for the empty format: a menu item needs a value */}
+            <DropdownMenuRadioGroup value={form.format || 'auto'} onValueChange={(v) => patchForm({ format: v === 'auto' ? '' : String(v) })}>
+              {FORMATS.map((f) => <DropdownMenuRadioItem key={f.value} value={f.value || 'auto'} data-format={f.value || 'auto'}>{f.label}</DropdownMenuRadioItem>)}
             </DropdownMenuRadioGroup>
           </DropdownMenuContent>
         </DropdownMenu>
@@ -118,7 +119,7 @@ export function DatasetCard({ app }: { app: AppModel }) {
               ))}
             </div>
             <p className="m-0 text-xs text-muted-foreground">Written in the tileset as a root transform, so every client gets it. A dataset with its own georeference ignores these.</p>
-            {placed && <Button size="sm" variant="ghost" className="self-start" onClick={() => patchForm({ lon: '', lat: '', alt: '', heading: '' })}>Clear</Button>}
+            {placed && <Button id="place-clear" size="sm" variant="ghost" className="self-start" onClick={() => patchForm({ lon: '', lat: '', alt: '', heading: '' })}>Clear</Button>}
           </PopoverContent>
         </Popover>
 
