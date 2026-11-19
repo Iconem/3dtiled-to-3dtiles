@@ -884,10 +884,10 @@ export const DEMO_SETS = {
   },
   /** Every open or evaluation dataset from outside Iconem: the demo app's "Open data" pill. */
   open: {
-    label: 'Open data — RESOURCES.md + national/city 3D Tiles + Esri meshes + Open Heritage 3D + Aerometrex + flai + Vexcel',
+    label: 'Open data — RESOURCES.md + national/city 3D Tiles + Esri meshes + Open Heritage 3D + funes.world + Aerometrex + flai + Vexcel',
     urls: OPEN_DATA.map((d) => d.url),
     entries: OPEN_DATA,
-    include: ['cities', 'esri-3d', 'openheritage3d', 'aerometrex', 'flai', 'vexcel'],
+    include: ['cities', 'esri-3d', 'openheritage3d', 'funes', 'aerometrex', 'flai', 'vexcel'],
   },
   /** Everything committed at once — the "one endpoint, heterogeneous sources, whole planet" pitch. */
   world: {
