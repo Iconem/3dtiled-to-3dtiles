@@ -18,8 +18,9 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - { name: macos-arm64, os: macos-14 }
-          - { name: macos-x64, os: macos-15-intel }
+          # Apple silicon only: Electrobun 2.0.2 has no development kit for Intel Macs (`ElectrobunArtifactPlatformMissing`
+          # on macos-15-intel, run of 2026-11-19).
+          - { name: macos-arm64, os: macos-15 }
           - { name: linux-x64, os: ubuntu-24.04 }
           - { name: linux-arm64, os: ubuntu-24.04-arm }
     steps:
@@ -66,18 +67,28 @@ jobs:
           echo "launcher: $launcher"
           node_dir="$(dirname "$(command -v node)")"
           clean_path="$(echo "$PATH" | tr ':' '\n' | grep -v -F "$node_dir" | grep -v -i node | paste -sd: -)"
-          if [ "$RUNNER_OS" = "Linux" ]; then
-            PATH="$clean_path" xvfb-run -a "$launcher" > app.log 2>&1 &
-          else
-            PATH="$clean_path" "$launcher" > app.log 2>&1 &
+          # A display that outlives the launcher: on Linux the built launcher installs the app for the user and leaves.
+          if [ "$RUNNER_OS" = "Linux" ]; then Xvfb :99 -screen 0 1280x1024x24 > /dev/null 2>&1 & export DISPLAY=:99; sleep 2; fi
+          probe() {
+            title=""
+            for i in $(seq 1 "$1"); do
+              title="$(curl -fsS -m 3 http://127.0.0.1:3001/openapi.json 2>/dev/null | node -e "let s='';process.stdin.on('data',d=>s+=d).on('end',()=>{try{console.log(JSON.parse(s).info.title)}catch{}})" || true)"
+              [ -n "$title" ] && break
+              sleep 3
+            done
+          }
+          PATH="$clean_path" "$launcher" > app.log 2>&1 &
+          probe 25
+          if [ -z "$title" ]; then
+            # installed, not started: start what it installed, as its shortcut does
+            installed="$(find "$HOME/.local/share/com.iconem.3dtiled.desktop" "$HOME/Library/Application Support/com.iconem.3dtiled.desktop" -type f -name launcher 2>/dev/null | head -1)"
+            echo "installed launcher: ${installed:-none}"
+            if [ -n "$installed" ]; then
+              PATH="$clean_path" "$installed" >> app.log 2>&1 &
+              probe 50
+            fi
           fi
-          title=""
-          for i in $(seq 1 60); do
-            title="$(curl -fsS -m 3 http://127.0.0.1:3001/openapi.json 2>/dev/null | node -e "let s='';process.stdin.on('data',d=>s+=d).on('end',()=>{try{console.log(JSON.parse(s).info.title)}catch{}})" || true)"
-            [ -n "$title" ] && break
-            sleep 3
-          done
-          echo "--- app log"; tail -60 app.log || true
+          echo "--- app log"; tail -80 app.log || true
           if [ -z "$title" ]; then echo "the app did not start its tile-server"; ps -eo pid,args | grep -i -E "3dtiled|launcher|tile-server" | grep -v grep || true; exit 1; fi
           owner="$(ps -eo args | grep "tile-server" | grep -v grep | head -1)"
           echo "$title, served by: $owner"
@@ -92,10 +103,13 @@ jobs:
         working-directory: apps/desktop
         run: |
           mkdir -p out
-          # tar keeps the executable bits and the .app layout that a zip made by the artifact upload would lose
-          if [ -d artifacts ] && [ -n "$(ls -A artifacts 2>/dev/null)" ]; then cp -R artifacts/. out/; fi
-          app="$(find build -maxdepth 3 \( -name '*.app' -o -name '3DTiled*' \) -type d | head -1)"
-          if [ -n "$app" ]; then tar -czf "out/3DTiled-${{ matrix.name }}.tar.gz" -C "$(dirname "$app")" "$(basename "$app")"; fi
+          # What Electrobun packed for distribution; without it, the built folder (tar keeps the executable bits
+          # and the .app layout that the artifact's own zip would lose).
+          if [ -d artifacts ] && [ -n "$(ls -A artifacts 2>/dev/null)" ]; then cp -R artifacts/. out/
+          else
+            app="$(find build -maxdepth 3 \( -name '*.app' -o -name '3DTiled*' \) -type d | head -1)"
+            if [ -n "$app" ]; then tar -czf "out/3DTiled-${{ matrix.name }}.tar.gz" -C "$(dirname "$app")" "$(basename "$app")"; fi
+          fi
           [ -f app.log ] && cp app.log out/ || true
           ls -la out
 
