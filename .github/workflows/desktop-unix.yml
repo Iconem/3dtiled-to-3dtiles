@@ -1,0 +1,108 @@
+name: Desktop app (macOS, Linux)
+
+# Builds the Electrobun desktop companion on macOS and Linux, starts it, and keeps what was built as a
+# workflow artifact (14 days). On demand only, and nothing is released: the Windows workflow (desktop.yml)
+# owns the `desktop-latest` release and its update feed. Unsigned. See apps/desktop/README.md.
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: ${{ matrix.name }}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { name: macos-arm64, os: macos-14 }
+          - { name: macos-x64, os: macos-15-intel }
+          - { name: linux-x64, os: ubuntu-24.04 }
+          - { name: linux-arm64, os: ubuntu-24.04-arm }
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      # What an Electrobun app needs to open a window on Linux (the system webview), and a display for the test.
+      - name: Linux libraries
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libwebkit2gtk-4.1-0 libgtk-3-0 libayatana-appindicator3-1 xvfb
+
+      - name: Install Hutch
+        run: |
+          curl -fsSL https://hutch.blackboard.sh/hutch/install.sh | sh
+          echo "$HOME/.hutch/bin" >> "$GITHUB_PATH"
+
+      - name: Bundle Node and the tile-server
+        run: node apps/desktop/scripts/prepare-bundle.mjs
+
+      - name: Build
+        working-directory: apps/desktop
+        run: |
+          hutch --version
+          hutch install --frozen-lockfile --ignore-workspace
+          hutch run typecheck
+          hutch run view
+          export DESKTOP_BUNDLE_MAP="$PWD/bundle/copy-map.json"
+          export BUILD_VERSION="$(date -u +%Y.%-m.%-d)"
+          hutch electrobun build --env=stable
+          echo "--- artifacts"; ls -la artifacts || true
+          echo "--- build"; find build -maxdepth 3 | head -60
+
+      # What a user does: launch. The system Node is hidden, so a pass means the bundled one ran.
+      - name: Smoke test the built app
+        working-directory: apps/desktop
+        run: |
+          launcher="$(find build -type f -name launcher | head -1)"
+          if [ -z "$launcher" ]; then echo "no launcher in build/"; find build -maxdepth 6 -type f | head -80; exit 1; fi
+          echo "launcher: $launcher"
+          node_dir="$(dirname "$(command -v node)")"
+          clean_path="$(echo "$PATH" | tr ':' '\n' | grep -v -F "$node_dir" | grep -v -i node | paste -sd: -)"
+          if [ "$RUNNER_OS" = "Linux" ]; then
+            PATH="$clean_path" xvfb-run -a "$launcher" > app.log 2>&1 &
+          else
+            PATH="$clean_path" "$launcher" > app.log 2>&1 &
+          fi
+          title=""
+          for i in $(seq 1 60); do
+            title="$(curl -fsS -m 3 http://127.0.0.1:3001/openapi.json 2>/dev/null | node -e "let s='';process.stdin.on('data',d=>s+=d).on('end',()=>{try{console.log(JSON.parse(s).info.title)}catch{}})" || true)"
+            [ -n "$title" ] && break
+            sleep 3
+          done
+          echo "--- app log"; tail -60 app.log || true
+          if [ -z "$title" ]; then echo "the app did not start its tile-server"; ps -eo pid,args | grep -i -E "3dtiled|launcher|tile-server" | grep -v grep || true; exit 1; fi
+          owner="$(ps -eo args | grep "tile-server" | grep -v grep | head -1)"
+          echo "$title, served by: $owner"
+          case "$owner" in *"3dtiled/runtime/node"*) ;; *) echo "the tile-server does not run on the bundled Node"; exit 1 ;; esac
+          url="https%3A%2F%2Fs3.amazonaws.com%2Fhobu-lidar%2Fautzen-classified.copc.laz"
+          curl -fsS -m 120 "http://127.0.0.1:3001/stream/tileset.json?format=copc&url=$url&cache=none" | node -e "let s='';process.stdin.on('data',d=>s+=d).on('end',()=>console.log('COPC tileset', JSON.parse(s).asset.version))"
+          pkill -f launcher || true
+          pkill -f tile-server || true
+
+      - name: Pack what was built
+        if: always()
+        working-directory: apps/desktop
+        run: |
+          mkdir -p out
+          # tar keeps the executable bits and the .app layout that a zip made by the artifact upload would lose
+          if [ -d artifacts ] && [ -n "$(ls -A artifacts 2>/dev/null)" ]; then cp -R artifacts/. out/; fi
+          app="$(find build -maxdepth 3 \( -name '*.app' -o -name '3DTiled*' \) -type d | head -1)"
+          if [ -n "$app" ]; then tar -czf "out/3DTiled-${{ matrix.name }}.tar.gz" -C "$(dirname "$app")" "$(basename "$app")"; fi
+          [ -f app.log ] && cp app.log out/ || true
+          ls -la out
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: 3DTiled-${{ matrix.name }}
+          path: apps/desktop/out
+          retention-days: 14
+          if-no-files-found: warn
