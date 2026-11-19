@@ -281,7 +281,7 @@ export async function handleStream(req, res, u) {
     // depth=0: the root tile only (no children, no hierarchy drain) — what /aggregate needs to place a
     // child; honoured by copc-live's curved explicit tree, ignored where the root is already cheap.
     const depth = u.searchParams.has('depth') ? Math.max(0, Math.trunc(Number(u.searchParams.get('depth')))) : undefined;
-    const ts = await adapter.tileset(url, { tiling: u.searchParams.get('tiling'), lazy, hierarchy, prefetch, centroids, sh, crs, curved, depth, ...geosplatsOpts, ...nexusOpts, splatBudget: u.searchParams.get('splatBudget'), up: u.searchParams.get('up') || undefined });
+    const ts = await adapter.tileset(url, { tiling: u.searchParams.get('tiling'), lazy, hierarchy, prefetch, centroids, sh, crs, curved, depth, ...geosplatsOpts, ...nexusOpts, splatBudget: u.searchParams.get('splatBudget'), up: u.searchParams.get('up') || undefined, center: u.searchParams.get('center') === '1', strays: u.searchParams.get('strays') || undefined });
     // User-directed globe placement (&lon=&lat=[&alt=][&heading=][&scale=]): attach a LOCAL dataset to
     // a real location so ANY 3D Tiles client (Cesium for Unreal/Unity, QGIS, native CesiumJS) streams
     // it in place — no viewer-side reorientation needed. Composes ON TOP of the adapter's own
@@ -309,7 +309,7 @@ export async function handleStream(req, res, u) {
     }
     const centroids = u.searchParams.get('centroids') === '1' || u.searchParams.get('centroids') === 'true';
     let glb = await adapter.tile(url, m[1], { centroids, sh: u.searchParams.get('sh') || undefined, crs: u.searchParams.get('crs') || undefined, curved: curvedParam(u.searchParams.get('curved')),
-      colors: u.searchParams.get('colors') || undefined, attributes: attributesParam(u.searchParams.get('attributes')) || undefined });
+      colors: u.searchParams.get('colors') || undefined, attributes: attributesParam(u.searchParams.get('attributes')) || undefined, strays: u.searchParams.get('strays') || undefined });
     if (!glb) { res.writeHead(404, CORS); res.end('no such node'); return true; }
     const transform = TRANSFORMS.has(u.searchParams.get('transform')) ? u.searchParams.get('transform') : null;
     if (transform) glb = await applyTransform(glb, transform, u.searchParams.get('tex'));

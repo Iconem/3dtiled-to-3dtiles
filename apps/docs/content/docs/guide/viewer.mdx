@@ -74,7 +74,7 @@ scene.add(tiles.group);
 `viewer.html` consolidates all controls into a right **sidebar** (Renderer · Basemap · Tileset &
 LoD · Navigation · Local frame · Ion · Snippet), including a **Max SSE (px)** input that drives
 CesiumJS `maximumScreenSpaceError` and 3DTRJS `errorTarget` (empty = auto, and the field shows what
-auto resolves to for the loaded tileset: `auto · 2` for points, 16 for meshes, 0.5 for splats), and a **Debug** select (see below) that
+auto resolves to for the loaded tileset: `auto · 2` for points, 16 for meshes, 0.5 for splats, 8 for a streamed SOG, whose tiles state the spacing of their splats), and a **Debug** select (see below) that
 draws bounding volumes coloured by octree depth in both renderers. The preset bar includes the
 **◈ GSplat 1/2** reference splat tilesets from the
 [3DTilesRendererJS-3DGS-Plugin](https://github.com/WilliamLiu-1997/3DTilesRendererJS-3DGS-Plugin)

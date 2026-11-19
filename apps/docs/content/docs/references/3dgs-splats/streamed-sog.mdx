@@ -102,8 +102,13 @@ few dozen splats, all of which a renderer refines before it draws anything. Coll
 - the tiles of a level are the **shallowest nodes whose splats of that level fit the budget** (100 000 by
   default); a tile's content is the runs of all the leaves below it, end to end;
 - a tile of level L has as children the tiles of level L−1 under it, `refine: REPLACE`;
-- its geometric error is its node's bound diagonal × 0.1, divided by √2 per level below the coarsest (a level
-  holds half the previous one's splats, which on surfaces is a √2 spacing step).
+- its geometric error is **8 × the spacing of its splats**, the square root of the largest face of its bound
+  divided by its splat count: what a tile lacks next to its children is detail finer than that spacing. At a
+  16 px error target a tile refines when its splats stand 2 px apart. The error is capped at the node's bound
+  diagonal × 0.1, divided by √2 per level below the coarsest, which was the whole rule before 2026-11-19: with it
+  a scene of few levels (funes.world's Pompeii: 2 levels, tiles 600 m across) refined to its finest level as
+  soon as it was framed whole.
+- a tile's box and error come from its leaves that are **not stray** (below).
 
 Lublin becomes 7 169 tiles (median 65 000 splats, one or two chunk files each, 32 at most) and a 2.3 MB
 `tileset.json`; its root tile is the whole scene at the coarsest level, 1 MB. The same cap on what a client
@@ -115,6 +120,25 @@ must read before it sees anything that the depth cut puts on a mosaic and `vpc-s
 | A merged tile | `tiles/node_<n>.glb` | `tile/m<path>_<level>.glb`: the node (one child index per character from the root) and the level; the server collects the runs |
 | `0` | the 1:1 mapping below | the same |
 | Up axis | `--up z\|y\|-y` | `&up=z\|y\|-y` |
+| Anchor | | `&center=1`: the median of the scene at the origin, its ground at height 0 |
+| Strays | boxes ignore them | the same; `&strays=0` leaves them out of the tiles |
+
+**Stray leaves.** A 3DGS training leaves splats far from the scene: floaters, or a whole sky box. funes.world's
+Pompeii is a site 1.5 km across inside a 40 km cube of sky that holds 18 % of its splats; the hall of Xiaoxitian
+is 44 units long inside a root bound of 343. The tree's bounds enclose them, so every box up the tree is the
+cube: a camera at the site is *inside* every tile's box, where the screen-space error is infinite and the whole
+scene refines to its finest level at once, and a viewer frames the cube instead of the site. The leaves of
+splat-transform's tree hold about as many splats each, so a leaf of strays is far larger than the others: a
+leaf is stray when its diagonal is over 4 × the median leaf diagonal (weighted by splats; trees of under 16
+leaves have none). A tile's box is the bound of its leaves that are not stray. Their splats stay in the tile
+and are drawn with it. `&strays=0` drops them: for a scene set on a globe, where a sky box hides the globe
+and, from outside, the scene. Pompeii loses 211 of its 1 024 leaves that way, Xiaoxitian 19 of 349 (0.6 % of
+its splats).
+
+**The anchor.** A scene's origin is wherever its author left it: Pompeii's ground lies 150 units up its Y
+axis. `&center=1` moves the median of the leaves' centres (weighted by splats, strays left out) to the origin
+and the height a tenth of them lie under to 0, so that `&lon=&lat=&alt=` puts the scene, not its origin, at
+that point on the ground. Heading and scale stay the file's.
 
 **The up axis.** A tile's box is turned Y-up→Z-up the way a client turns glTF content, and the root transform
 turns both back, so a client ends up in the scene's *native* frame: a native Z-up scene stands upright, which

@@ -3,7 +3,7 @@
   "provider": "funes.world",
   "attribution": "© funes.world and its contributors, CC BY-NC 4.0",
   "source": "https://funes.world — an archive of photogrammetry of human-made places (2,432 entities in November 2026). Most are single-file meshes; the ones re-made as Gaussian splats are published as streamed SOG (lod-meta.json, written by splat-transform) on cdn.funes.world. On 2026-11-19 two entities had a streamed-SOG model; both are listed. The list is kept by hand: the site's robots.txt disallows /api/, the only place that names a model's files.",
-  "note": "CC BY-NC 4.0 on every entry: the set as a whole is non-commercial too. Scenes are in a local frame: each is placed at its entity's coordinates, Y-up as read off the data (Pompeii from the way splats rise off the ground, Xiaoxitian from side views of its points: eaves, pagodas and niches stand upright with +Y up); heading and scale are not known, so a scene sits at its site but is not aligned to the imagery.",
+  "note": "CC BY-NC 4.0 on every entry: the set as a whole is non-commercial too. Scenes are in a local frame: each is placed at its entity's coordinates by the median of its splats (center=1: the files' own origins are arbitrary, and stray splats reach 20 km; strays=0 leaves those out, Pompeii's sky box among them), at the SRTM ground height there (alt), Y-up as read off the data (Pompeii from the way splats rise off the ground, Xiaoxitian from side views of its points: eaves, pagodas and niches stand upright with +Y up); heading and scale are not known, so a scene sits at its site but is not aligned to the imagery.",
   "built": "2026-11-19",
   "entries": [
     {
@@ -18,8 +18,9 @@
       "page": "https://funes.world/entities/pompeii",
       "lon": 14.4886761,
       "lat": 40.7513570697598,
+      "alt": 35,
       "url": "https://cdn.funes.world/model3d-lod_cf5c57a1-fd58-4b93-858d-d9e8778bd54a/lod-meta.json",
-      "params": { "up": "y" }
+      "params": { "up": "y", "center": "1", "strays": "0" }
     },
     {
       "format": "sog",
@@ -33,8 +34,9 @@
       "page": "https://funes.world/entities/xiaoxitian-thousand-buddha-nunnery-in-linfen",
       "lon": 110.9260551,
       "lat": 36.7018824,
+      "alt": 1022,
       "url": "https://cdn.funes.world/model3d-lod_2c780b29-25ee-4385-9532-fa5c2f1b425e/lod-meta.json",
-      "params": { "up": "y" }
+      "params": { "up": "y", "center": "1", "strays": "0" }
     }
   ]
 }

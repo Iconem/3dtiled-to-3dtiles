@@ -4,6 +4,7 @@ import type { ViewerHandle } from '@/lib/viewer-handle';
 import { ecefToPose, poseToEcef, type CameraPose } from '@/lib/cameraPose';
 import type { DatasetMarker } from '@/lib/aggregate';
 import type { AssetType } from '@/lib/formats';
+import { defaultSseFor } from '@/lib/utils';
 import { CESIUM_ION_TOKEN } from '@/lib/ion';
 import { useViewerStore } from '@/state/store';
 import DatasetTooltip, { MARKER_RING_COLOR, markerColor, type TooltipChannel } from './DatasetTooltip';
@@ -116,10 +117,9 @@ const CesiumViewer = forwardRef<ViewerHandle, Props>(function CesiumViewer({ vis
     store.getState().hideError();
     store.getState().setStatus(`Loading…\n${url}`);
     const isSplat = type === 'splat';
-    const isMesh = type === 'mesh';
     // 2 px for point clouds: at 4 px a Potree root (6.8 m spacing at Carcassonne) only refines below
     // ~1 km, which reads as "it does not load" — points are sparse where a mesh would still look whole.
-    const defaultSSE = isSplat ? 0.5 : isMesh ? 16 : 2;
+    const defaultSSE = defaultSseFor(type, url);
     const sse = opts?.sseOverride ?? store.getState().maxSSE ?? defaultSSE;
     store.getState().setAutoSSE(opts?.sseOverride ?? defaultSSE);
     const loadOpts: any = isSplat

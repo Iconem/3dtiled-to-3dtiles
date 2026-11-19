@@ -361,6 +361,24 @@
             "description": "Streamed SOG only. The tree is collapsed per LOD level: a tile holds every run of one level under the shallowest node whose splats of that level fit this budget (tile/m<path>_<level>.glb). 0 keeps one tile per leaf run. Default from TILED_SOG_SPLAT_BUDGET."
           },
           {
+            "name": "up",
+            "in": "query",
+            "schema": { "type": "string", "enum": ["z", "y", "-y"], "default": "z" },
+            "description": "Streamed SOG only. The scene's native axis that is up."
+          },
+          {
+            "name": "center",
+            "in": "query",
+            "schema": { "type": "string", "enum": ["1"] },
+            "description": "Streamed SOG only. Moves the median of the scene's splats to the origin and its ground to height 0, so that lon/lat/alt place the scene rather than its file's origin."
+          },
+          {
+            "name": "strays",
+            "in": "query",
+            "schema": { "type": "string", "enum": ["0"] },
+            "description": "Streamed SOG only. 0 leaves the stray leaves (floaters, a sky box: leaves over 4 times the median leaf size) out of the tiles. Tile boxes ignore them either way."
+          },
+          {
             "name": "attributes",
             "in": "query",
             "schema": {

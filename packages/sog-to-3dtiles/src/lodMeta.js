@@ -67,7 +67,86 @@ export function upTransform(up) {
 // it. The same cap on the size of a root that /aggregate's depth cut and vpc-split.mjs put on a mosaic.
 
 export const DEFAULT_SPLAT_BUDGET = 100_000;
-const NODE_GE_FACTOR = 0.1;   // a tile's geometric error: its node's bound diagonal × this, ÷ √2 per level below the coarsest
+const NODE_GE_FACTOR = 0.1;   // a tile's geometric error is at most its node's bound diagonal × this, ÷ √2 per level below the coarsest
+// … and at most SPACING_GE_FACTOR × the spacing of its splats, √(largest face of its bound ÷ its splats): what a tile
+// lacks next to its children is detail finer than that spacing, whatever its size. With the size rule alone a scene of
+// few levels (funes.world's Pompeii: 2 levels, tiles 600 m across) refined to its finest level, 3 M splats, as soon as
+// it was framed whole. At the usual 16 px error target a tile now refines when its splats stand 2 px apart.
+const SPACING_GE_FACTOR = 8;
+
+// ── Stray leaves ─────────────────────────────────────────────────────────────────────────────────────────────────────
+//
+// A 3DGS training leaves splats far from the scene: floaters, or a whole sky box (funes.world's Pompeii: a site 1.5 km
+// across inside a 40 km cube of sky holding 18 % of its splats). The tree's bounds enclose them, so every box up the
+// tree is the cube: a camera at the site is INSIDE every tile's box, where the screen-space error is infinite and the
+// whole scene refines to its finest level at once, and a viewer frames the cube, not the site. The leaves of
+// splat-transform's tree hold about as many splats each, so a leaf of strays is far larger than the others: a leaf is
+// STRAY when its diagonal is over STRAY_FACTOR × the median leaf diagonal (weighted by splats). A tile's box is then the
+// bound of the leaves under it that are not stray (its own bound when all are): the strays are still in its content,
+// and drawn with it, but no longer size it. A tree of under STRAY_MIN_LEAVES leaves has no strays.
+const STRAY_FACTOR = 4, STRAY_MIN_LEAVES = 16;
+const diagonalOf = (b) => Math.hypot(b.max[0] - b.min[0], b.max[1] - b.min[1], b.max[2] - b.min[2]) || 1e-3;
+const leafSplats = (leaf) => Object.values(leaf.lods ?? {}).reduce((n, run) => n + (run.count ?? 0), 0);
+function leavesOf(node, out = []) {
+  if (node.children) { for (const ch of node.children) leavesOf(ch, out); return out; }
+  out.push(node);
+  return out;
+}
+/** The value of `items` (`[value, weight]` pairs) below which the share `q` of the weight lies. */
+function weightedQuantile(items, q) {
+  const sorted = items.filter(([, w]) => w > 0).sort((a, b) => a[0] - b[0]);
+  if (!sorted.length) return NaN;
+  const total = sorted.reduce((n, [, w]) => n + w, 0);
+  let acc = 0;
+  for (const [v, w] of sorted) { acc += w; if (acc >= q * total) return v; }
+  return sorted[sorted.length - 1][0];
+}
+
+/**
+ * A function giving a node's bound without its stray leaves: `{ min, max, stray }`, `stray` true when every leaf under
+ * the node is stray (the bound is then the node's own).
+ * @param {object} tree  `lod-meta.json`'s `tree`
+ * @returns {((node:object) => {min:number[], max:number[], stray:boolean}) & { isStray:(leaf:object) => boolean }}
+ *   `isStray`: is this leaf a stray one
+ */
+export function strayFreeBounds(tree) {
+  const leaves = leavesOf(tree);
+  const stray = new Set();
+  if (leaves.length >= STRAY_MIN_LEAVES) {
+    const limit = STRAY_FACTOR * weightedQuantile(leaves.map((l) => [diagonalOf(l.bound), leafSplats(l)]), 0.5);
+    for (const l of leaves) if (diagonalOf(l.bound) > limit) stray.add(l);
+    if (stray.size === leaves.length) stray.clear();
+  }
+  const memo = new WeakMap();
+  const of = (node) => {
+    let b = memo.get(node);
+    if (b) return b;
+    if (!node.children) b = { min: node.bound.min, max: node.bound.max, stray: stray.has(node) };
+    else {
+      const kept = node.children.map(of).filter((c) => !c.stray);
+      b = kept.length
+        ? { min: [0, 1, 2].map((a) => Math.min(...kept.map((c) => c.min[a]))), max: [0, 1, 2].map((a) => Math.max(...kept.map((c) => c.max[a]))), stray: false }
+        : { min: node.bound.min, max: node.bound.max, stray: true };
+    }
+    memo.set(node, b);
+    return b;
+  };
+  of.isStray = (leaf) => stray.has(leaf);
+  return of;
+}
+
+/**
+ * Where a scene stands, read off its tree: the median of its leaves' centres (weighted by splats, strays left out) on
+ * each native axis, and `low`, the height a tenth of them lie under on each axis and its opposite, a stand-in for the
+ * ground under whichever axis is up. Used to anchor a scene placed on the globe (`&center=1`).
+ * @returns {{ centre:number[], low:number[], high:number[] }}
+ */
+export function sceneAnchor(tree) {
+  const bounds = strayFreeBounds(tree);
+  const leaves = leavesOf(tree).filter((l) => !bounds(l).stray);
+  const axis = (a, q) => weightedQuantile(leaves.map((l) => [(l.bound.min[a] + l.bound.max[a]) / 2, leafSplats(l)]), q);
+  return { centre: [0, 1, 2].map((a) => axis(a, 0.5)), low: [0, 1, 2].map((a) => axis(a, 0.1)), high: [0, 1, 2].map((a) => axis(a, 0.9)) };
+}
 
 /** The node at `path` (one child index per character, '' the root), or null. */
 export function lodNodeAt(tree, path) {
@@ -76,9 +155,13 @@ export function lodNodeAt(tree, path) {
   return node;
 }
 
-/** The runs `{ file, offset, count }` of LOD `level` under a node, in leaf order, neighbours in one file joined. */
-export function lodRunsUnder(node, level, out = []) {
-  if (node.children) { for (const ch of node.children) lodRunsUnder(ch, level, out); return out; }
+/**
+ * The runs `{ file, offset, count }` of LOD `level` under a node, in leaf order, neighbours in one file joined.
+ * `skip`: leaves left out (the stray ones, when a scene is served without them).
+ */
+export function lodRunsUnder(node, level, out = [], skip = null) {
+  if (node.children) { for (const ch of node.children) lodRunsUnder(ch, level, out, skip); return out; }
+  if (skip?.(node)) return out;
   const run = node.lods?.[String(level)];
   if (!run?.count) return out;
   const last = out[out.length - 1];
@@ -92,20 +175,23 @@ export function lodRunsUnder(node, level, out = []) {
  * @param {object} tree  `lod-meta.json`'s `tree`
  * @param {number} lodLevels  how many LOD levels the scene has
  * @param {number} budget  splats of one level a tile may hold (> 0)
- * @param {{ box:(min:number[], max:number[]) => number[], content:(runs:object[], path:string, level:number, stride?:number) => object }} make
+ * @param {{ box:(min:number[], max:number[]) => number[], content:(runs:object[], path:string, level:number, stride?:number) => object, dropStrays?:boolean }} make
  *   `box` a node's bound as a 3D Tiles box; `content` the tile content of a node's runs at a level, every `stride`-th
- *   splat of them when the root is a thinned preview (see below)
+ *   splat of them when the root is a thinned preview (see below); `dropStrays`: the stray leaves (above) are left out
+ *   of the tiles altogether, for a scene set on a globe, where a sky box hides the globe and the scene itself
  * @returns {object} the root tile (no transform)
  */
-export function collapseLodTree(tree, lodLevels, budget, { box, content }) {
+export function collapseLodTree(tree, lodLevels, budget, { box, content, dropStrays = false }) {
   const maxLevel = lodLevels - 1;
+  const bounds = strayFreeBounds(tree);            // a tile's box and error come from its leaves that are not strays
+  const skip = dropStrays ? bounds.isStray : null;
   const memo = new WeakMap();
   const counts = (node) => {                       // per-level splat counts under a node
     let c = memo.get(node);
     if (c) return c;
     c = {};
     if (node.children) for (const ch of node.children) for (const [L, n] of Object.entries(counts(ch))) c[L] = (c[L] ?? 0) + n;
-    else for (const [L, run] of Object.entries(node.lods ?? {})) c[L] = run.count;
+    else if (!skip?.(node)) for (const [L, run] of Object.entries(node.lods ?? {})) c[L] = run.count;
     memo.set(node, c);
     return c;
   };
@@ -115,13 +201,21 @@ export function collapseLodTree(tree, lodLevels, budget, { box, content }) {
   const emitters = (node, path, L) => (fits(node, L) ? [[node, path]]
     : node.children.flatMap((ch, i) => (total(ch) ? emitters(ch, path + i, L) : [])));
   const diagonal = (b) => Math.hypot(b.max[0] - b.min[0], b.max[1] - b.min[1], b.max[2] - b.min[2]) || 1e-3;
-  const geOf = (node, L) => diagonal(node.bound) * NODE_GE_FACTOR * Math.pow(LEVEL_RATIO, maxLevel - L);
-  const tileAt = (node, path, L) => {              // a node that fits the budget at level L
-    const tile = { boundingVolume: { box: box(node.bound.min, node.bound.max) }, geometricError: geOf(node, L), refine: 'REPLACE' };
-    const runs = lodRunsUnder(node, L);
+  const spacing = (node, n) => {                   // of n splats spread over the largest face of the node's bound
+    const b = bounds(node);
+    const e = [0, 1, 2].map((a) => Math.max(b.max[a] - b.min[a], 1e-6)).sort((p, q) => q - p);
+    return n > 0 ? Math.sqrt((e[0] * e[1]) / n) : Infinity;
+  };
+  const geOf = (node, L, stride = 1) => Math.min(
+    diagonal(bounds(node)) * NODE_GE_FACTOR * Math.pow(LEVEL_RATIO, maxLevel - L) * Math.sqrt(stride),
+    SPACING_GE_FACTOR * spacing(node, (counts(node)[String(L)] ?? 0) / stride));
+  const tileAt = (node, path, L, above = Infinity) => {   // a node that fits the budget at level L; `above`: its parent's error
+    const b = bounds(node);
+    const tile = { boundingVolume: { box: box(b.min, b.max) }, geometricError: Math.min(geOf(node, L), above), refine: 'REPLACE' };
+    const runs = lodRunsUnder(node, L, [], skip);
     if (runs.length) tile.content = content(runs, path, L);
     if (L > 0) {
-      const kids = emitters(node, path, String(L - 1)).map(([ch, p]) => tileAt(ch, p, L - 1)).filter((t) => t.content || t.children?.length);
+      const kids = emitters(node, path, String(L - 1)).map(([ch, p]) => tileAt(ch, p, L - 1, tile.geometricError)).filter((t) => t.content || t.children?.length);
       if (kids.length) tile.children = kids;
     }
     return tile;
@@ -133,9 +227,10 @@ export function collapseLodTree(tree, lodLevels, budget, { box, content }) {
   // splats are enlarged by √stride (thinSplats) to keep covering the surface, and the root's error grows the same.
   const coarse = counts(tree)[String(maxLevel)] ?? 0;
   const stride = Math.max(2, Math.ceil(coarse / budget));
-  const root = { boundingVolume: { box: box(tree.bound.min, tree.bound.max) }, geometricError: geOf(tree, maxLevel) * Math.sqrt(stride), refine: 'REPLACE',
-                 children: emitters(tree, '', String(maxLevel)).map(([ch, p]) => tileAt(ch, p, maxLevel)) };
-  const runs = lodRunsUnder(tree, maxLevel);
+  const rootBound = bounds(tree);
+  const root = { boundingVolume: { box: box(rootBound.min, rootBound.max) }, geometricError: geOf(tree, maxLevel, stride), refine: 'REPLACE' };
+  root.children = emitters(tree, '', String(maxLevel)).map(([ch, p]) => tileAt(ch, p, maxLevel, root.geometricError));
+  const runs = lodRunsUnder(tree, maxLevel, [], skip);
   if (runs.length) root.content = content(runs, '', maxLevel, stride);
   return root;
 }

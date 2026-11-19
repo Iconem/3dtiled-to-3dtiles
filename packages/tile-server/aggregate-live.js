@@ -891,11 +891,11 @@ export const DEMO_SETS = {
   },
   /** Everything committed at once — the "one endpoint, heterogeneous sources, whole planet" pitch. */
   world: {
-    label: 'Open data + national/city 3D Tiles + Esri meshes + Aerometrex + Vexcel — every committed dataset',
+    label: 'Open data + national/city 3D Tiles + Esri meshes + funes.world + Aerometrex + Vexcel — every committed dataset',
     urls: OPEN_DATA.map((d) => d.url),
     entries: OPEN_DATA,
     // Aerometrex's US city previews come from the committed manifest (proxied, with its attribution)
-    include: ['cities', 'esri-3d', 'aerometrex', 'vexcel'],
+    include: ['cities', 'esri-3d', 'funes', 'aerometrex', 'vexcel'],
   },
 };
 

@@ -176,6 +176,8 @@ export const FORMATS: FormatMeta[] = [
     // streamed SOG written by splat-transform. Y-up read off the data: in 161 of 172 ground columns of a chunk the
     // splats rise towards +Y. Not confirmed by eye. The root bound reaches 20 km (floaters).
     { id: 'funes-pompeii', sh: 3, label: 'Pompeii (funes.world, F. Cao & Y. Xie, CC BY-NC, 4.6M) ⬀', src: 'https://cdn.funes.world/model3d-lod_cf5c57a1-fd58-4b93-858d-d9e8778bd54a/lod-meta.json', query: '&up=y' },
+    // Y-up read off side views of its points (eaves, pagodas and niches upright). An interior: the hall's long axis lies at 45° to X and Z.
+    { id: 'funes-xiaoxitian', sh: 3, label: 'Xiaoxitian, Mahavira Hall sculptures (funes.world, H. Xu & Y. Xie, CC BY-NC, 11.2M) ⬀', src: 'https://cdn.funes.world/model3d-lod_2c780b29-25ee-4385-9532-fa5c2f1b425e/lod-meta.json', query: '&up=y' },
   ] },
   { fmt: 'lcc', icon: '◆', label: 'LCC', type: 'splat', octree: false, stream: true, assets: [
     // Real public .lcc downloads (found via XGRIDS' own sample-data page,

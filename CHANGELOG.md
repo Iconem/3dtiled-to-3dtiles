@@ -5,6 +5,21 @@ Format loosely follows [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+### Fixed — 2026-11-19 (streamed SOG: stray splats, level of detail, placement; funes.world)
+- **A streamed SOG with floaters or a sky box no longer loads whole.** funes.world's Pompeii is a site 1.5 km
+  across inside a 40 km cube of sky; every tile's box was the cube, so a camera at the site was inside all of them
+  and the scene refined to its finest level at once, and the viewer framed a 36 km sphere. A tile's box now comes
+  from its leaves that are not stray (a leaf over 4 × the median leaf size). Pompeii's largest box went from
+  20 km to 770 m.
+- **A tile's geometric error follows the spacing of its splats** (8 × it, capped at the old size rule), and the
+  viewer's default error target for a streamed SOG is 8 px, not the 0.5 px of other splats. Pompeii framed whole
+  in the viewer: 22 tiles of the coarse level, where all 60 were loaded and 37 drawn at the finest.
+- **`&center=1` and `&strays=0`** on a streamed SOG: the scene anchored by the median of its splats with its
+  ground at height 0, and served without its stray splats. The `funes` set uses both, with the SRTM ground height
+  of each site: Pompeii, seen from above, lies on the town; Xiaoxitian stood under the terrain (1 022 m) before.
+- **Xiaoxitian is a viewer and desktop sample**, and the `funes` set is part of `world` as well as `open`.
+- Not checked: frame rates (the checks ran without a GPU), and the heading of either scene against the imagery.
+
 ### Added — 2026-11-19 (one-stop tiler on Linux and macOS, `pdal_wrench build_vpc`, a funes.world set)
 - **Tile raw input on Linux and macOS**: the tool downloads are per platform (Linux x64 and arm64, macOS arm64 and
   x64) where the project publishes a build, each with its pinned SHA-256; `.tar.gz` releases are unpacked by the

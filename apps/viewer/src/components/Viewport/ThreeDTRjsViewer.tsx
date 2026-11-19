@@ -55,6 +55,7 @@ import * as THREE from 'three';
 import { acceleratedRaycast, computeBoundsTree, disposeBoundsTree } from 'three-mesh-bvh';
 import type { ViewerHandle } from '@/lib/viewer-handle';
 import { MW, type AssetType } from '@/lib/formats';
+import { defaultSseFor } from '@/lib/utils';
 import { CESIUM_ION_TOKEN } from '@/lib/ion';
 import { GOOGLE_MAPS_API_KEY } from '@/lib/google';
 import { ecefToPose, poseToEcef, type CameraPose } from '@/lib/cameraPose';
@@ -1381,7 +1382,7 @@ const Scene = forwardRef<ViewerHandle, { loadArgs: LoadArgs; tooltip: TooltipCha
 
   const isSplat = loadArgs?.type === 'splat';
   const isPoints = loadArgs?.type === 'pointcloud';
-  const defaultSSE = isSplat ? 0.5 : loadArgs?.type === 'mesh' ? 16 : 2;   // see CesiumViewer: 2 px for points
+  const defaultSSE = defaultSseFor(loadArgs?.type, loadArgs?.url);   // see CesiumViewer: 2 px for points
   const errorTarget = loadArgs?.sseOverride ?? maxSSE ?? defaultSSE;
   const autoSSE = loadArgs ? loadArgs.sseOverride ?? defaultSSE : null;
   useEffect(() => { store.getState().setAutoSSE(autoSSE); }, [autoSSE]);

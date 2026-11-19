@@ -9,6 +9,8 @@
  *
  *   GET /sog/tileset.json?url=<lod-meta.json URL>
  *   GET /sog/tile/<file>_<offset>_<count>.glb?url=<lod-meta.json URL>   (run encoded in the name)
+ *   `&center=1` on the tileset: the scene's median at the origin and its ground at height 0 (for a placement by
+ *   longitude and latitude); `&strays=0`: without its stray leaves, floaters and sky boxes (lodMeta.js).
  *   GET /sog/tile/m<path>_<level>[s<stride>].glb?url=<lod-meta.json URL> (a merged tile: every run of a LOD level under a node;
  *                                                                       `s<k>`: every k-th splat of them, the root's preview of a level over the budget)
  *
@@ -22,7 +24,7 @@ import path from 'node:path';
 import { readSog, MemoryReadFileSystem } from '@playcanvas/splat-transform';
 import { extractRange } from '../sog-to-3dtiles/src/sogChunk.js';
 import { sogMetaFiles } from '../sog-to-3dtiles/src/sogBundle.js';
-import { lodGeometricErrors, collapseLodTree, lodNodeAt, lodRunsUnder, thinSplats, concatSh, DEFAULT_SPLAT_BUDGET, upTransform, upParam } from '../sog-to-3dtiles/src/lodMeta.js';
+import { lodGeometricErrors, collapseLodTree, lodNodeAt, lodRunsUnder, thinSplats, concatSh, DEFAULT_SPLAT_BUDGET, upTransform, upParam, strayFreeBounds, sceneAnchor } from '../sog-to-3dtiles/src/lodMeta.js';
 import { memoizeAsync, fetchSource as fetchBuf, tilePool, runTileTaskOr, ownBytes, shParam } from '../core/index.js';
 import { splatArraysGlb } from './splat-tile.js';
 
@@ -106,9 +108,11 @@ function getChunkTable(ctx, fileIdx, sh = 0) {
 
 // Build the 3D Tiles tree from lod.tree (bounds persisted → no decode). Each leaf LOD run becomes a
 // REPLACE-chain tile whose content URI encodes the run: tile/<file>_<offset>_<count>.glb.
-function buildTileset(ctx, urlParam, centroids = false, budget = SPLAT_BUDGET, up = 'z') {
-  const enc = encodeURIComponent(urlParam);
-  const rootDiag = boundDiagonal(ctx.lod.tree.bound.min, ctx.lod.tree.bound.max);
+function buildTileset(ctx, urlParam, centroids = false, budget = SPLAT_BUDGET, up = 'z', center = false, dropStrays = false) {
+  const enc = encodeURIComponent(urlParam) + (dropStrays && budget > 0 ? '&strays=0' : '');
+  // the scene without its stray leaves (floaters, a sky box) when the tree is collapsed: lodMeta.js's strayFreeBounds
+  const sceneBound = budget > 0 ? strayFreeBounds(ctx.lod.tree)(ctx.lod.tree) : ctx.lod.tree.bound;
+  const rootDiag = boundDiagonal(sceneBound.min, sceneBound.max);
   const ROOT_GE = rootDiag * ROOT_GE_FACTOR;
   const geAt = d => ROOT_GE * Math.pow(DEPTH_RATIO, d);
 
@@ -137,10 +141,20 @@ function buildTileset(ctx, urlParam, centroids = false, budget = SPLAT_BUDGET, u
   // scene's native frame; `&up=y|-y` says which native axis is up when it is not Z (lodMeta.js's upTransform).
   const lodLevels = ctx.lod.lodLevels ?? (ctx.lod.counts?.length ?? 1);
   const root = budget > 0
-    ? collapseLodTree(ctx.lod.tree, lodLevels, budget, { box: boundToZUpBox, content: (_runs, path, level, stride = 1) => ({ uri: `tile/m${path}_${level}${stride > 1 ? `s${stride}` : ''}.glb?url=${enc}` }) })
+    ? collapseLodTree(ctx.lod.tree, lodLevels, budget, { box: boundToZUpBox, dropStrays, content: (_runs, path, level, stride = 1) => ({ uri: `tile/m${path}_${level}${stride > 1 ? `s${stride}` : ''}.glb?url=${enc}` }) })
     : build(ctx.lod.tree, 0).tile;
   root.transform = upTransform(up);
-  const ts = { asset: { version: '1.1' }, geometricError: rootDiagGE, root, extensionsUsed: ['3DTILES_content_gltf'] };
+  if (center) {
+    // `&center=1`: the scene's own origin is wherever its author left it (Pompeii's ground is 150 units up its
+    // axis), so a placement by longitude and latitude lands beside or above the site. This moves the median of the
+    // scene to the origin and its ground to height 0, in the upright frame the transform above yields.
+    const { centre, low, high } = sceneAnchor(ctx.lod.tree);
+    const t = root.transform;
+    const upright = ([x, y, z]) => { const p = [x, -z, y]; return [0, 1, 2].map((r) => t[r] * p[0] + t[4 + r] * p[1] + t[8 + r] * p[2]); };
+    const c = upright(centre), lo = upright(low), hi = upright(high);
+    if (c.every(Number.isFinite)) { t[12] = -c[0]; t[13] = -c[1]; t[14] = -Math.min(lo[2], hi[2]); }
+  }
+  const ts = { asset: { version: '1.1' }, geometricError: Math.max(rootDiagGE, root.geometricError), root, extensionsUsed: ['3DTILES_content_gltf'] };
   // centroids mode emits glTF POINTS tiles → do NOT advertise the gaussian-splatting extension.
   if (!centroids) ts.extensions = { '3DTILES_content_gltf': {
     extensionsUsed: ['KHR_gaussian_splatting', 'KHR_gaussian_splatting_compression_spz_2'],
@@ -189,7 +203,7 @@ export const sogTileRe = /^(?:\d+_\d+_\d+|m\d*_\d+(?:s\d+)?)$/;
 // index, cache=none ≡ cache=hierarchy; cache=full routes to /convert). `centroids` → POINTS preview.
 export async function sogTileset(url, opts = {}) {
   const b = opts.splatBudget == null || opts.splatBudget === '' ? SPLAT_BUDGET : Number(opts.splatBudget);
-  return buildTileset(await getCtx(url), url, opts.centroids, Number.isFinite(b) && b >= 0 ? b : SPLAT_BUDGET, upParam(opts.up));
+  return buildTileset(await getCtx(url), url, opts.centroids, Number.isFinite(b) && b >= 0 ? b : SPLAT_BUDGET, upParam(opts.up), opts.center === true, opts.strays === '0');
 }
 export async function sogTile(url, key, opts = {}) {
   const ctx = await getCtx(url);
@@ -199,7 +213,8 @@ export async function sogTile(url, key, opts = {}) {
     if (!m) return null;
     const [, path, level, strideStr] = m;
     const node = lodNodeAt(ctx.lod.tree, path);
-    const runs = node ? lodRunsUnder(node, Number(level)) : [];
+    const skip = opts.strays === '0' ? (ctx.bounds ??= strayFreeBounds(ctx.lod.tree)).isStray : null;   // `&strays=0`: the scene without its stray leaves
+    const runs = node ? lodRunsUnder(node, Number(level), [], skip) : [];
     if (!runs.length || runs.some((r) => !ctx.lod.filenames[r.file])) return null;
     const parts = [];
     for (const r of runs) parts.push(extractRange(await getChunkTable(ctx, r.file, sh), r.offset, r.count, sh));   // in run order

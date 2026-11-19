@@ -2,7 +2,7 @@
 // no tile of splittable nodes exceeds the budget, a merged tile names a node the live route finds again.
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { collapseLodTree, lodNodeAt, lodRunsUnder } from '../src/lodMeta.js';
+import { collapseLodTree, lodNodeAt, lodRunsUnder, strayFreeBounds, sceneAnchor } from '../src/lodMeta.js';
 
 /** A full binary tree `depth` deep; every leaf has `levels` runs, level L of 2^(levels-1-L)... reversed: level 0 the largest. */
 function scene(depth, levels, base = 64) {
@@ -50,4 +50,54 @@ test('neighbouring runs of one file are joined; a tree that fits is one chain', 
   assert.deepEqual(runs, [{ file: 0, offset: 0, count: 8 * 64 }]);
   const root = collapseLodTree(tree, lodLevels, 1e9, { box, content: (r) => ({ uri: String(r.length) }) });
   assert.ok(root.content && root.children.length === 1 && !root.children[0].children);
+});
+
+// A scene with stray leaves: 31 leaves side by side along X, one unit each, and one leaf of floaters 1000 units wide.
+function strayScene() {
+  const { tree } = scene(5, 2);                       // 32 leaves, x from 0 to 32
+  const far = lodNodeAt(tree, '11111');
+  far.bound = { min: [31, -500, -500], max: [1031, 500, 500] };
+  const grow = (n) => { if (!n.children) return n.bound; const bs = n.children.map(grow); n.bound = { min: [0, 1, 2].map((a) => Math.min(...bs.map((b) => b.min[a]))), max: [0, 1, 2].map((a) => Math.max(...bs.map((b) => b.max[a]))) }; return n.bound; };
+  grow(tree);
+  return { tree, far };
+}
+
+test('a stray leaf does not size the boxes above it', () => {
+  const { tree, far } = strayScene();
+  const bounds = strayFreeBounds(tree);
+  assert.equal(bounds.isStray(far), true);
+  assert.deepEqual(bounds(tree).max, [31, 1, 1], 'the root is the 31 leaves that are not stray');
+  assert.equal(bounds(far).stray, true);
+  const root = collapseLodTree(tree, 2, 1e9, { box, content: (r) => ({ uri: String(r.length) }) });
+  assert.deepEqual(root.boundingVolume.box, [0, 0, 0, 31, 1, 1]);
+  // its splats are still in the tile, unless they are dropped
+  const all = lodRunsUnder(tree, 0).reduce((n, r) => n + r.count, 0);
+  const kept = lodRunsUnder(tree, 0, [], bounds.isStray).reduce((n, r) => n + r.count, 0);
+  assert.equal(all, 32 * 64);
+  assert.equal(kept, 31 * 64);
+  const seen = [];
+  collapseLodTree(tree, 2, 1e9, { box, dropStrays: true, content: (runs, path, level) => { seen.push({ runs, level }); return { uri: 'x' }; } });
+  assert.equal(seen.find((s) => s.level === 0).runs.reduce((n, r) => n + r.count, 0), 31 * 64);
+});
+
+test('a small tree has no strays, and the anchor is the median of the leaves', () => {
+  const { tree } = scene(3, 2);                       // 8 leaves: under the minimum
+  lodNodeAt(tree, '111').bound = { min: [7, -500, -500], max: [1007, 500, 500] };
+  assert.equal(strayFreeBounds(tree).isStray(lodNodeAt(tree, '111')), false);
+  const { tree: big } = strayScene();
+  const { centre } = sceneAnchor(big);
+  assert.ok(centre[0] > 14 && centre[0] < 17, `x median ${centre[0]}`);
+  assert.equal(centre[1], 0.5);
+});
+
+test('a tile\'s error is at most 8 × the spacing of its splats', () => {
+  // one leaf of 1 000 000 splats over a 100 × 100 × 1 slab: spacing 0.1, so an error of 0.8, not the 14 of its diagonal
+  const leaf = (x) => ({ bound: { min: [x, 0, 0], max: [x + 100, 100, 1] }, lods: { 0: { file: 0, offset: 0, count: 2e6 }, 1: { file: 1, offset: 0, count: 1e6 } } });
+  const a = leaf(0), b = leaf(100);
+  const tree = { bound: { min: [0, 0, 0], max: [200, 100, 1] }, children: [a, b] };
+  const root = collapseLodTree(tree, 2, 1e6, { box, content: () => ({ uri: 'x' }) });
+  const coarse = root.children[0];
+  assert.ok(Math.abs(coarse.geometricError - 0.8) < 1e-9, `got ${coarse.geometricError}`);
+  assert.ok(root.geometricError >= coarse.geometricError);
+  assert.ok(coarse.children.every((c) => c.geometricError <= coarse.geometricError));
 });

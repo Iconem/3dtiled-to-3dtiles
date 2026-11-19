@@ -63,6 +63,7 @@ export const CATALOG: SampleGroup[] = [
       { id: 'cathedral-interior', label: 'Cathedral interior', format: 'sog', origin: 'SuperSplat (community)', src: 'https://d28zzqy0iyovbz.cloudfront.net/02d5f4eb/v3/lod-meta.json' },
       { id: 'vysehrad', label: 'Vyšehrad, Prague (83 M)', format: 'sog', origin: 'D. Dworschak, on SuperSplat', src: 'https://d28zzqy0iyovbz.cloudfront.net/1b7afbf6/v1/lod-meta.json' },
       { id: 'funes-pompeii', label: 'Pompeii (4.6 M, CC BY-NC)', format: 'sog', origin: 'F. Cao and Y. Xie, on funes.world', src: 'https://cdn.funes.world/model3d-lod_cf5c57a1-fd58-4b93-858d-d9e8778bd54a/lod-meta.json' },
+      { id: 'funes-xiaoxitian', label: 'Xiaoxitian, Mahavira Hall (11.2 M, CC BY-NC)', format: 'sog', origin: 'H. Xu and Y. Xie, on funes.world', src: 'https://cdn.funes.world/model3d-lod_2c780b29-25ee-4385-9532-fa5c2f1b425e/lod-meta.json' },
     ],
   },
   {
