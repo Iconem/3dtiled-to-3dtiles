@@ -31,16 +31,16 @@ jobs:
           distribution: temurin
           java-version: 21
       - name: Run every downloadable tiler
-        run: sh scripts/tilers-smoke.sh "$RUNNER_TEMP/tilers" | tee "$RUNNER_TEMP/tilers-smoke.txt"
+        shell: bash
+        run: |
+          set -o pipefail
+          sh scripts/tilers-smoke.sh "$RUNNER_TEMP/tilers" | tee "$RUNNER_TEMP/tilers-smoke.txt"
       - name: Summary
         if: always()
         run: |
           {
             echo '### ${{ matrix.os }}'
             echo '```'
-            cat "$RUNNER_TEMP/tilers-smoke.txt" 2>/dev/null || echo 'no output'
+            grep -E '^(platform|OK|SKIP|FAIL|---) ' "$RUNNER_TEMP/tilers-smoke.txt" 2>/dev/null || echo 'no output'
             echo '```'
           } >> "$GITHUB_STEP_SUMMARY"
-      - name: Logs of the tools that failed
-        if: failure()
-        run: for f in "$RUNNER_TEMP"/tilers/log-*.txt; do echo "::group::$f"; tail -40 "$f"; echo "::endgroup::"; done
