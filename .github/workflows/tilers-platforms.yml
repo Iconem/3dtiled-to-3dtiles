@@ -1,0 +1,46 @@
+name: Tilers on macOS and Linux
+
+# The one-stop tiler's per-platform downloads, run for real where no developer machine is at hand: macOS (arm64 and
+# x64) and Linux (arm64 and x64). Each job installs every downloadable tool for its platform and runs it on the
+# package's tiny samples (scripts/tilers-smoke.sh). Manual only.
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  smoke:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [macos-15, macos-15-intel, ubuntu-24.04-arm, ubuntu-24.04]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - name: Java, for mago 3DTiler
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 21
+      - name: Run every downloadable tiler
+        run: sh scripts/tilers-smoke.sh "$RUNNER_TEMP/tilers" | tee "$RUNNER_TEMP/tilers-smoke.txt"
+      - name: Summary
+        if: always()
+        run: |
+          {
+            echo '### ${{ matrix.os }}'
+            echo '```'
+            cat "$RUNNER_TEMP/tilers-smoke.txt" 2>/dev/null || echo 'no output'
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+      - name: Logs of the tools that failed
+        if: failure()
+        run: for f in "$RUNNER_TEMP"/tilers/log-*.txt; do echo "::group::$f"; tail -40 "$f"; echo "::endgroup::"; done
