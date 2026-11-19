@@ -94,8 +94,8 @@ export function LibraryTab({ app }: { app: AppModel }) {
   }
 
   const bookmarkOf = (e: HistoryEntry) => {
-    const { src, format, cache, lon, lat, alt, heading, name } = e;
-    updateLib((l) => { l.bookmarks.push({ id: newId(), name, addedAt: Date.now(), src, format, cache, lon, lat, alt, heading }); });
+    const { src, format, cache, lon, lat, alt, heading, scale, name } = e;
+    updateLib((l) => { l.bookmarks.push({ id: newId(), name, addedAt: Date.now(), src, format, cache, lon, lat, alt, heading, scale }); });
     say(`${name} is bookmarked.`, 'ok');
   };
 

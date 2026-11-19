@@ -188,6 +188,9 @@ share one selection function and one cached mosaic.
   the same formula in the vertex shader of one `THREE.Points` layer. Neither costs per-frame
   JavaScript. Hover uses `drillPick`, so a small dataset's marker still answers when a larger,
   already-loaded dataset covers it (Canal Grande under the Venice airborne scan).
+- **The tour** (`‹`, the dice, `›`, beside the picker's button) flies to the previous, the next or a random
+  site of the mosaic. A stop is a site that is shown (the captures of one platform scene are one stop, framed on
+  the largest), in the order of the index; filters and hidden sources shorten the tour.
 - **The picker** (`in view N ▾`) lists the datasets that are in the frustum and at least 3% of the
   viewport tall — the ones rendering or about to — **grouped by platform scene**, each with a
   checkbox and its capture date. A group's **latest** button hides that site's older dated captures

@@ -13,6 +13,30 @@ import { SidebarCollapsibleSection } from './SidebarSection';
 import { isAggregateUrl, readSnap, snapParamFor, withSnap, loadMosaic } from '@/lib/aggregate';
 import { useUrlState } from '@/state/urlState';
 
+/**
+ * One number of the placement: it shows what the viewer reads, and takes a typed value on Enter or on leaving the
+ * field. While it is being typed in, the value read from the viewer does not overwrite it.
+ */
+function PlacedField({ id, label, value, digits, step, title, onCommit }: {
+  id: string; label: string; value: number; digits: number; step: number; title?: string; onCommit: (v: number) => void;
+}) {
+  const [draft, setDraft] = useState<string | null>(null);
+  const commit = () => {
+    if (draft == null) return;
+    const v = Number(draft);
+    setDraft(null);
+    if (draft.trim() !== '' && Number.isFinite(v) && v !== Number(value.toFixed(digits))) onCommit(v);
+  };
+  return (
+    <div className="flex items-center justify-between" title={title}>
+      <Label className="text-xs" htmlFor={id}>{label}</Label>
+      <Input id={id} type="number" step={step} className="h-7 w-32" value={draft ?? value.toFixed(digits)}
+        onFocus={(e) => setDraft(e.target.value)} onChange={(e) => setDraft(e.target.value)} onBlur={commit}
+        onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); commit(); } else if (e.key === 'Escape') setDraft(null); }} />
+    </div>
+  );
+}
+
 export default function LocalFrameSection({ activeHandleRef }: { activeHandleRef: React.RefObject<ViewerHandle | null> }) {
   const lf = useViewerStore((s) => s.localFrame);
   const setLocalFrame = useViewerStore((s) => s.setLocalFrame);
@@ -67,6 +91,14 @@ export default function LocalFrameSection({ activeHandleRef }: { activeHandleRef
     return () => window.clearInterval(id);
   }, [gizmoOn, activeHandleRef]);
   const numbers = placed?.numbers ?? null;
+  /** A typed number: the tileset goes there, and the readout follows at once. */
+  function typePlacement(k: 'lon' | 'lat' | 'alt' | 'heading' | 'scale', v: number) {
+    if (!numbers) return;
+    if (k === 'scale' && !(v > 0)) return;
+    const { lon, lat, alt, heading, scale } = numbers;
+    activeHandleRef.current?.setTilesetPlacement?.({ lon, lat, alt, heading, scale, [k]: v });
+    setPlaced(activeHandleRef.current?.getTilesetPlacement?.() ?? null);
+  }
 
   async function copyPlacedUrl() {
     if (!placed?.streamUrl || !numbers) return;
@@ -153,11 +185,14 @@ export default function LocalFrameSection({ activeHandleRef }: { activeHandleRef
             ))}
           </div>
           {numbers && (
-            <div className="rounded-md border px-2 py-1.5 font-mono text-[11px] leading-5" title="Where the tileset stands: the placement /stream takes (lon, lat, alt, heading, scale).">
-              <div>{numbers.lon.toFixed(6)}, {numbers.lat.toFixed(6)}</div>
-              <div>{numbers.alt.toFixed(1)} m · {numbers.heading.toFixed(1)}° · ×{numbers.scale.toFixed(3)}</div>
+            <div data-testid="placement" className="flex flex-col gap-1.5" title="Where the tileset stands: the placement /stream takes. Drag the gizmo, or type a number.">
+              <PlacedField id="placed-lon" label="Longitude" value={numbers.lon} digits={7} step={0.0001} onCommit={(v) => typePlacement('lon', v)} />
+              <PlacedField id="placed-lat" label="Latitude" value={numbers.lat} digits={7} step={0.0001} onCommit={(v) => typePlacement('lat', v)} />
+              <PlacedField id="placed-alt" label="Altitude (m)" value={numbers.alt} digits={2} step={1} onCommit={(v) => typePlacement('alt', v)} />
+              <PlacedField id="placed-heading" label="Heading (°)" value={numbers.heading} digits={2} step={1} title="Degrees clockwise from north" onCommit={(v) => typePlacement('heading', v)} />
+              <PlacedField id="placed-scale" label="Scale" value={numbers.scale} digits={4} step={0.1} onCommit={(v) => typePlacement('scale', v)} />
               {!numbers.exact && (
-                <div className="text-amber-600 dark:text-amber-400" title="A tilt, or a scale that differs by axis, is not something the five numbers can say: the URL would drop it. The saved tileset keeps the exact transform.">
+                <div className="text-[11px] text-amber-600 dark:text-amber-400" title="A tilt, or a scale that differs by axis, is not something the five numbers can say: the URL would drop it. The saved tileset keeps the exact transform.">
                   {numbers.tilt >= 0.05 ? `tilted ${numbers.tilt.toFixed(1)}°` : 'scaled by axis'}: saved tileset only
                 </div>
               )}

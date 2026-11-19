@@ -6,9 +6,9 @@ import { CATALOG } from './catalog';
 import { base, docsUrl, staticPort, viewerUrl } from './host';
 import type { DatasetOptions } from './library';
 
-export const PLACEMENT = ['lon', 'lat', 'alt', 'heading'] as const;
+export const PLACEMENT = ['lon', 'lat', 'alt', 'heading', 'scale'] as const;
 
-export const EMPTY_FORM: Required<DatasetOptions> = { src: '', format: '', cache: 'none', lon: '', lat: '', alt: '', heading: '' };
+export const EMPTY_FORM: Required<DatasetOptions> = { src: '', format: '', cache: 'none', lon: '', lat: '', alt: '', heading: '', scale: '' };
 
 /**
  * `/tiles` is the front door: it dispatches to /stream for cache=none|hierarchy and /convert for

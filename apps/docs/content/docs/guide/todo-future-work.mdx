@@ -304,8 +304,9 @@ flowchart LR
   **Built on 2026-11-19, in the demo viewer** (Local Frame section, 3DTRjs): with the transform gizmo on, the
   section reads the tileset's placement back as the five numbers, and offers *Copy placed URL* (the `/stream` URL
   with them) and *Save tileset* (the source under the exact transform, burnt into a root). The mapping both ways
-  is `core/placement.js`. Left: the same in the desktop app's *Place on globe*, typing a heading and a scale as
-  numbers, burning the transform into an **exported folder**'s own root, and `&anchor=` for sources other than
+  is `core/placement.js`. The five numbers can be typed since the same day, and the desktop app's *Place on globe*
+  has a scale and takes a URL copied there (*Paste placed URL*). Left: the gizmo itself inside the desktop app's
+  preview, burning the transform into an **exported folder**'s own root, and `&anchor=` for sources other than
   streamed SOG (which has `&center=1`).
 
   **Asked for on 2026-11-18:** the inspector's way of doing it, a tileset aligned on a 3DTilesRendererJS globe with
@@ -451,6 +452,28 @@ flowchart LR
 - [ ] **`rtc_center` / decompress for ingestion** — apply the existing per-tile decompress pipeline to
   *existing remote 3D Tiles* (not just our own output) so consumers that can't read Draco/KTX2/
   `CESIUM_RTC` (e.g. blender **BLOSM**) can load them.
+- [ ] **Geometric error from the source, format by format** (audit of 2026-11-19, after the streamed-SOG
+  fix). Where a tile's error comes from today:
+  - *from a value the source stores*: Potree (`spacing`, halved per level), COPC (`info.spacing`, live and since
+    2026-11-19 offline), Nexus (each node's `error`), OSGB (the `RangeList` of its paged LODs), 3MX
+    (`maxScreenDiameter`), Bing (its own tileset);
+  - *from splat density*: RAD (2 × box diagonal ÷ ∛count, averaged per depth), streamed SOG (at most 8 × the
+    splat spacing, stray leaves left out of the box);
+  - *from the size of the box alone*: **I3S** (half the node's box diagonal; `lodSelection` /
+    `maxScreenThreshold`, which the format stores per node, is not read), **LCC and LCC2** (5 % of the scene
+    diagonal, halved per level; per-node boxes and counts are not used), **GeoSplats** (the octant's diagonal), a
+    **VPC** without an overview (the size of each file's box).
+
+  The box-only ones share streamed SOG's weakness: a box inflated by outliers inflates the error, and a camera
+  inside the box refines everything. To do, in this order: I3S from `maxScreenThreshold` (the format's own
+  answer), then the spacing cap of streamed SOG for LCC, LCC2 and GeoSplats (count ÷ largest face of the node's
+  own box), each checked against a reference viewer of the format on one scene.
+- [ ] **Crop box with full freedom** (asked on 2026-11-19). The box turns about the vertical only (`heading`).
+  Wanted: position, rotation and scale on all three axes, with handles on the faces as well as the move, turn
+  and scale gizmos at the centre, the way 3DTilesRendererJS's own examples handle a box. What it needs: the crop
+  as a full oriented box (centre, three half-axes) in the store, in `orientBox` and `inBbox` of
+  `core/extract-core.js`, and in `/extract` (today `bbox` plus `heading`); a tilted box has no lon/lat/height
+  reading, so the sidebar would show centre, size and three angles instead.
 - [x] **Browser-native bbox crop / subsample extract** (done 2026-11-16: LAS, merged GLB, splats and zip, the
   same files as the server's; Draco tiles and SOG output since 2026-11-18, an oriented box and archives past 4 GB since 2026-11-19;
   [Crop and extract in the browser](/docs/guide/planning/browser-crop-extract)) — pull a cropped/decimated copy of a tiled asset

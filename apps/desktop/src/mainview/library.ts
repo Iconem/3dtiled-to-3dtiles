@@ -21,6 +21,8 @@ export interface DatasetOptions {
   lat?: string;
   alt?: string;
   heading?: string;
+  /** Uniform scale of the placement; '' is 1. */
+  scale?: string;
 }
 
 export interface LibraryEntry extends DatasetOptions {
@@ -90,7 +92,7 @@ export function saveLocal(lib: Library): void {
 }
 
 const sameDataset = (a: DatasetOptions, b: DatasetOptions) =>
-  (['src', 'format', 'cache', 'lon', 'lat', 'alt', 'heading'] as const).every((k) => (a[k] || '') === (b[k] || ''));
+  (['src', 'format', 'cache', 'lon', 'lat', 'alt', 'heading', 'scale'] as const).every((k) => (a[k] || '') === (b[k] || ''));
 
 /** The same dataset served again moves back to the top rather than filling the list. */
 export function noteServed(lib: Library, name: string, o: DatasetOptions): void {

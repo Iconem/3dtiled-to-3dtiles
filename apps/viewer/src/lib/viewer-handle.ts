@@ -4,7 +4,7 @@ import type { DatasetStyle } from './datasetStyle';
 import type { BasemapId } from './basemaps';
 import type { TerrainMode } from './terrainModes';
 import type { CameraPose } from './cameraPose';
-import type { DecomposedPlacement } from '../../../../packages/core/placement.js';
+import type { DecomposedPlacement, Placement } from '../../../../packages/core/placement.js';
 
 /**
  * Renderer-agnostic contract both CesiumViewer and ThreeDTRjsViewer implement via
@@ -78,6 +78,11 @@ export interface ViewerHandle {
   hideTilesetGizmo?(): void;
   /** Where the loaded tileset stands now, after the local frame, the Z offset and the transform gizmo; null before a load. */
   getTilesetPlacement?(): TilesetPlacement | null;
+  /**
+   * Put the tileset at these five numbers (the ones getTilesetPlacement reads). A tilt or a scale by axis the gizmo
+   * gave is kept on top. False when the source takes no placement (it is georeferenced by its own data).
+   */
+  setTilesetPlacement?(p: Placement): boolean;
 }
 
 /** The loaded tileset's placement, as the transform gizmo left it (lib/…/core/placement.js). */

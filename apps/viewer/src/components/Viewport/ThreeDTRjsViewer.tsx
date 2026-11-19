@@ -56,7 +56,7 @@ import { acceleratedRaycast, computeBoundsTree, disposeBoundsTree } from 'three-
 import type { ViewerHandle } from '@/lib/viewer-handle';
 import { MW, type AssetType } from '@/lib/formats';
 import { defaultSseFor } from '@/lib/utils';
-import { decomposePlacement, isStreamUrl, streamUrlPlacement } from '../../../../../packages/core/placement.js';
+import { decomposePlacement, isStreamUrl, placementMatrix, streamUrlPlacement } from '../../../../../packages/core/placement.js';
 import { CESIUM_ION_TOKEN } from '@/lib/ion';
 import { GOOGLE_MAPS_API_KEY } from '@/lib/google';
 import { ecefToPose, poseToEcef, type CameraPose } from '@/lib/cameraPose';
@@ -471,10 +471,19 @@ function GoogleGlobe({ ktxLoader }: { ktxLoader: KTX2Loader }) {
 // render once the ref did populate. That's what "gizmo pill doesn't show it before I switch ortho/
 // persp mode" actually was: switching modes just happened to trigger an UNRELATED re-render at a
 // moment when the ref had since become valid.
+/** Sent when the tileset's transform is set from outside the gizmo (typed numbers): its handles must follow. */
+const PLACEMENT_SET_EVENT = 'tileset-placement-set';
+
 function TilesetGizmo({ tilesRef, pickScene }: { tilesRef: React.MutableRefObject<TilesRendererImpl | null>; pickScene: THREE.Object3D | null }) {
   const on = useViewerStore((s) => s.tilesetGizmoOn);
   const mode = useViewerStore((s) => s.gizmoMode);
   const [proxy, setProxy] = useState<THREE.Object3D | null>(null);
+  const [setFromOutside, setSetFromOutside] = useState(0);
+  useEffect(() => {
+    const bump = () => setSetFromOutside((v) => v + 1);
+    window.addEventListener(PLACEMENT_SET_EVENT, bump);
+    return () => window.removeEventListener(PLACEMENT_SET_EVENT, bump);
+  }, []);
   // Baseline transform captured whenever the gizmo (re)anchors. TransformControls attached directly to
   // `tilesRef.current.group` renders its handles at the GROUP's own local position — for georeferenced
   // content that's (0,0,0)-ish (the real ECEF placement is baked into the loaded tile hierarchy's OWN
@@ -505,7 +514,7 @@ function TilesetGizmo({ tilesRef, pickScene }: { tilesRef: React.MutableRefObjec
     proxy.quaternion.identity();
     proxy.scale.set(1, 1, 1);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [on, mode, proxy]);
+  }, [on, mode, proxy, setFromOutside]);
 
   const handleChange = useCallback(() => {
     const tiles = tilesRef.current;
@@ -2086,6 +2095,26 @@ const Scene = forwardRef<ViewerHandle, { loadArgs: LoadArgs; tooltip: TooltipCha
         url,
       };
     },
+    setTilesetPlacement(p) {
+      const tiles = tilesRef.current;
+      const url = store.getState().lastLoadUrl;
+      if (!tiles || !url || ![p.lon, p.lat, p.alt, p.heading, p.scale].every(Number.isFinite) || !(p.scale > 0)) return false;
+      const own = isStreamUrl(url) ? streamUrlPlacement(url) : null;
+      if (!own && !needsEnuAnchorRef.current) return false;
+      const g = tiles.group;
+      g.updateMatrix();
+      // from the placement it has to the one asked for: whatever else the matrix holds (a tilt, a scale by axis)
+      // rides along, and the same step holds whether the server placed it first or not
+      const full = own ? g.matrix.clone().multiply(new THREE.Matrix4().fromArray(own)) : g.matrix;
+      const cur = decomposePlacement(full.elements);
+      const from = new THREE.Matrix4().fromArray(placementMatrix(cur.lon, cur.lat, cur.alt, cur.heading, cur.scale));
+      const to = new THREE.Matrix4().fromArray(placementMatrix(p.lon, p.lat, p.alt, p.heading, p.scale));
+      to.multiply(from.invert()).multiply(g.matrix).decompose(g.position, g.quaternion, g.scale);
+      g.updateMatrixWorld(true);
+      window.dispatchEvent(new Event(PLACEMENT_SET_EVENT));        // the gizmo re-anchors on the new transform
+      invalidate();
+      return true;
+    },
   }), [camera, invalidate, frameToTileset, applyZOffsetInternal, animateCameraTo, snapToGroundInternal, fitPointHeights]);
 
   /**
@@ -2380,6 +2409,7 @@ const ThreeDTRjsViewer = forwardRef<ViewerHandle, Props>(function ThreeDTRjsView
     showTilesetGizmo: () => sceneRef.current?.showTilesetGizmo?.(),
     hideTilesetGizmo: () => sceneRef.current?.hideTilesetGizmo?.(),
     getTilesetPlacement: () => sceneRef.current?.getTilesetPlacement?.() ?? null,
+    setTilesetPlacement: (p) => sceneRef.current?.setTilesetPlacement?.(p) ?? false,
   }), [whenScene]);
 
   return (

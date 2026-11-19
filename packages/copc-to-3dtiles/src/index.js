@@ -123,6 +123,11 @@ export async function convert(inputPath, outDir, opts = {}) {
   console.log(`\r  ${nodeMap.size}/${nodeMap.size} tiles (${workers ? `${workers} worker threads` : `${defaultConcurrency()} lanes`})`);
 
   const rootError = rootGeometricError(cube);
+  // A tile's geometric error is the point spacing of its node: the root's (COPC info VLR) halved per level, as the
+  // live stream writes it (tile-server/copc-live.js) and as Potree does. It was the cube's diagonal halved per
+  // level, 100 to 200 times the spacing: a client refined every node until it was a few pixels wide. A file
+  // without a usable spacing falls back to the Potree convention, the cube over 128.
+  const spacing = copc.info.spacing > 0 && Number.isFinite(copc.info.spacing) ? copc.info.spacing : rootError / 128;
   const tiling = opts.tiling === 'explicit' ? 'explicit' : 'implicit';
   let tileset;
 
@@ -132,7 +137,7 @@ export async function convert(inputPath, outDir, opts = {}) {
     const root = buildExplicitTree('0-0-0-0', {
       exists: k => nodeMap.has(k),
       boxOf: k => { const { level, x, y, z } = keyToCoords(k); return cubeToBox(octreeSubCube(cube, level, x, y, z), origin); },
-      geometricErrorOf: k => rootError / 2 ** keyToCoords(k).level,
+      geometricErrorOf: k => spacing / 2 ** keyToCoords(k).level,
       contentUriOf: k => { if (!nodeMap.has(k)) return null; const { level, x, y, z } = keyToCoords(k); return `tiles/${level}/${x}/${y}/${z}.glb`; },
       refine: 'ADD',
     });
@@ -157,7 +162,7 @@ export async function convert(inputPath, outDir, opts = {}) {
       root: {
         boundingVolume: { box: [0,0,0, (cube[3]-cube[0])/2,0,0, 0,(cube[4]-cube[1])/2,0, 0,0,(cube[5]-cube[2])/2] },
         refine: 'ADD',
-        geometricError: rootError,
+        geometricError: spacing,
         implicitTiling: { subdivisionScheme: 'OCTREE', availableLevels: maxLevel + 1, subtreeLevels: SUBTREE_LEVELS, subtrees: { uri: 'subtrees/{level}/{x}/{y}/{z}.subtree' } },
         content: { uri: 'tiles/{level}/{x}/{y}/{z}.glb' },
       },

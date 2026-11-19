@@ -44,6 +44,7 @@ const PLACEMENT_FIELDS: Record<(typeof PLACEMENT)[number], { label: string; plac
   lat: { label: 'Latitude', placeholder: '48.8584' },
   alt: { label: 'Altitude (m)', placeholder: '0' },
   heading: { label: 'Heading (°)', placeholder: '0' },
+  scale: { label: 'Scale', placeholder: '1' },
 };
 
 // One file dialog, no folder dialog: a dataset that is a folder (Potree, a streamed SOG, an unpacked 3D Tiles tree,
@@ -96,6 +97,19 @@ export function DatasetCard({ app }: { app: AppModel }) {
       if (!first) return say('The clipboard holds no text.', 'err');
       replaceSrc(first);
     } catch (e) { say(`Could not read the clipboard (${e}): paste in the field with Ctrl+V.`, 'err'); }
+  }
+
+  /** A placement found with the viewer's gizmo: its *Copy placed URL* is read from the clipboard, and its five numbers fill the form. */
+  async function pastePlacement() {
+    try {
+      const text = (pickerAvailable() ? await readClipboard() : await navigator.clipboard.readText()).trim();
+      let sp: URLSearchParams;
+      try { sp = new URL(text).searchParams; } catch { return say('The clipboard holds no URL: copy one with Copy placed URL, in the viewer.', 'err'); }
+      const lon = sp.get('lon'), lat = sp.get('lat');
+      if (!lon || !lat) return say('The URL in the clipboard carries no placement (no lon and lat).', 'err');
+      patchForm({ lon, lat, alt: sp.get('alt') ?? '', heading: sp.get('heading') ?? '', scale: sp.get('scale') ?? '' });
+      say('Placement taken from the URL in the clipboard.', 'ok');
+    } catch (e) { say(`Could not read the clipboard (${e}).`, 'err'); }
   }
 
   /** The star: adds the dataset to the Library, or takes it out when it is there. */
@@ -175,7 +189,10 @@ export function DatasetCard({ app }: { app: AppModel }) {
               ))}
             </div>
             <p className="m-0 text-xs text-muted-foreground">Written in the tileset as a root transform, so every client gets it. A dataset with its own georeference ignores these.</p>
-            {placed && <Button id="place-clear" size="sm" variant="ghost" className="self-start" onClick={() => patchForm({ lon: '', lat: '', alt: '', heading: '' })}>Clear</Button>}
+            <div className="flex gap-1">
+              <Tip text="Place it by hand in the viewer (Local Frame, Transform gizmo), Copy placed URL there, then take its numbers here"><Button id="place-paste" size="sm" variant="outline" onClick={pastePlacement}>Paste placed URL</Button></Tip>
+              {placed && <Button id="place-clear" size="sm" variant="ghost" onClick={() => patchForm({ lon: '', lat: '', alt: '', heading: '', scale: '' })}>Clear</Button>}
+            </div>
           </PopoverContent>
         </Popover>
       </div>

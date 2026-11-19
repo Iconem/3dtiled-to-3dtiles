@@ -115,7 +115,7 @@ export function App() {
 
   const dataset = useCallback((): DatasetOptions => ({
     src: form.src.trim(), format: form.format, cache: form.cache,
-    lon: form.lon.trim(), lat: form.lat.trim(), alt: form.alt.trim(), heading: form.heading.trim(),
+    lon: form.lon.trim(), lat: form.lat.trim(), alt: form.alt.trim(), heading: form.heading.trim(), scale: form.scale.trim(),
   }), [form]);
   const noteServedNow = useCallback(() => {
     const f = dataset();
@@ -123,7 +123,7 @@ export function App() {
   }, [dataset, updateLib]);
 
   const loadIntoBuilder = useCallback((e: DatasetOptions) => {
-    setForm({ src: e.src, format: e.format ?? '', cache: e.cache ?? 'none', lon: e.lon ?? '', lat: e.lat ?? '', alt: e.alt ?? '', heading: e.heading ?? '' });
+    setForm({ src: e.src, format: e.format ?? '', cache: e.cache ?? 'none', lon: e.lon ?? '', lat: e.lat ?? '', alt: e.alt ?? '', heading: e.heading ?? '', scale: e.scale ?? '' });
   }, []);
 
   // The window keeps the size it has, whatever the tab or the tool shows: a taller page scrolls. Only a preview asks

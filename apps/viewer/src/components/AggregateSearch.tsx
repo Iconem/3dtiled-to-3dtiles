@@ -12,7 +12,7 @@
  * and the snap to ground change the tree itself, and reload it.
  */
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { ChevronDown, ChevronRight } from 'lucide-react';
+import { ChevronDown, ChevronLeft, ChevronRight, Dices } from 'lucide-react';
 import { Input } from '@/components/ui/input';
 import { Checkbox } from '@/components/ui/checkbox';
 import { Slider } from '@/components/ui/slider';
@@ -319,6 +319,22 @@ export default function AggregateSearch({ activeHandleRef, renderer }: {
   const [toggledNodes, setToggledNodes] = useState<Set<string>>(() => new Set());
   const flipNode = (k: string) => setToggledNodes((prev) => { const next = new Set(prev); if (next.has(k)) next.delete(k); else next.add(k); return next; });
 
+  // The tour: the sites that are shown, in the index's order, one stop each (a site's captures are one stop, at
+  // its largest). Previous, next and a random one fly there; the stop is remembered by its key, so a filter that
+  // changes the list does not move the place in it.
+  const stops = useMemo(() => {
+    const m = new Map<string, DatasetMarker>();
+    for (const d of full?.datasets ?? []) {
+      if (!activeIds.has(d.id)) continue;
+      const k = d.group ?? `id:${d.id}`;
+      const cur = m.get(k);
+      if (!cur || d.radius > cur.radius) m.set(k, d);
+    }
+    return [...m].map(([key, d]) => ({ key, d }));
+  }, [full, activeIds]);
+  const [stopKey, setStopKey] = useState('');
+  useEffect(() => { setStopKey(''); }, [baseUrl]);
+
   // Credits for what is on screen — a mosaic mixes providers, and each one's attribution must be
   // shown while its data is visible (Aerometrex's previews, the national agencies' LiDAR …).
   const credits = useMemo(() => {
@@ -407,6 +423,21 @@ export default function AggregateSearch({ activeHandleRef, renderer }: {
     setOpen(false);
   }
 
+  /** Fly to another stop of the tour: the next, the previous, or one drawn at random (never the one we are at). */
+  function tour(step: 1 | -1 | 'random') {
+    if (!stops.length) return;
+    const at = stops.findIndex((x) => x.key === stopKey);
+    let i: number;
+    if (step === 'random') {
+      i = Math.floor(Math.random() * stops.length);
+      if (i === at && stops.length > 1) i = (i + 1 + Math.floor(Math.random() * (stops.length - 1))) % stops.length;
+    } else i = at < 0 ? (step === 1 ? 0 : stops.length - 1) : (at + step + stops.length) % stops.length;
+    setStopKey(stops[i].key);
+    pick({ kind: 'dataset', d: stops[i].d });
+    const d = stops[i].d;
+    useViewerStore.getState().setStatus(`${i + 1}/${stops.length} · ${d.scene || d.name}${d.project ? ` — ${d.project}` : ''} [${d.format}]`);
+  }
+
   function onKey(e: React.KeyboardEvent) {
     if (e.key === 'ArrowDown') { e.preventDefault(); setOpen(true); setCursor((c) => Math.min(rows.length - 1, c + 1)); }
     else if (e.key === 'ArrowUp') { e.preventDefault(); setCursor((c) => Math.max(0, c - 1)); }
@@ -442,6 +473,14 @@ export default function AggregateSearch({ activeHandleRef, renderer }: {
           {error ? <span className="text-destructive">{error}</span>
             : full ? `${shownCount}/${full.count} shown${full.unplaced.length ? ` · ${full.unplaced.length} unplaced` : ''}${full.failed.length ? ` · ${full.failed.length} failed` : ''}`
             : '…'}
+        </span>
+        <span className="inline-flex shrink-0 overflow-hidden rounded border" data-testid="tour">
+          <button type="button" data-testid="tour-prev" disabled={stops.length < 2} onClick={() => tour(-1)} className="px-1 py-0.5 hover:bg-accent disabled:opacity-40"
+            title="Previous site of the mosaic" aria-label="Previous site"><ChevronLeft className="size-3.5" /></button>
+          <button type="button" data-testid="tour-random" disabled={!stops.length} onClick={() => tour('random')} className="border-x px-1.5 py-0.5 hover:bg-accent disabled:opacity-40"
+            title={`Fly to a site drawn at random among the ${stops.length} shown`} aria-label="A random site"><Dices className="size-3.5" /></button>
+          <button type="button" data-testid="tour-next" disabled={stops.length < 2} onClick={() => tour(1)} className="px-1 py-0.5 hover:bg-accent disabled:opacity-40"
+            title="Next site of the mosaic" aria-label="Next site"><ChevronRight className="size-3.5" /></button>
         </span>
         <button type="button" data-testid="picker-toggle" onClick={() => setPanel((v) => !v)}
           className={`shrink-0 rounded border px-1.5 py-0.5 ${panel ? 'bg-accent text-foreground' : ''}`}>

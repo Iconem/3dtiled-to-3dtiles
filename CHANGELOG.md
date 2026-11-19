@@ -5,6 +5,25 @@ Format loosely follows [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+### Added — 2026-11-19 (a tour of a mosaic's sites; the placement typed)
+- **Mosaic: previous, next and a random site.** Three buttons beside *in view* fly from one site of the mosaic to
+  another, in the order of its index or drawn at random. Only the sites that are shown count, and the captures of
+  one site are one stop. Checked on the cities set: 18 stops, the next and the previous wrap around, four random
+  draws in a row gave four different sites.
+- **Placement tool: the five numbers can be typed** (viewer, Local Frame, with the gizmo on): longitude, latitude,
+  altitude, heading and scale are fields; Enter or leaving the field moves the tileset there, and the gizmo follows.
+  A tilt the gizmo gave is kept. Checked on the Nexus gargoyle: a typed heading of 30°, scale of 2, altitude of
+  150 m and a move to another continent read back exactly, and the server given the copied URL places the scene
+  where the viewer drew it (difference under a millimetre).
+- **Desktop app, Place on globe: a Scale field, and *Paste placed URL***, which takes the five numbers from a URL
+  copied with the viewer's *Copy placed URL*. Type-checked only: no desktop build was made.
+
+### Fixed — 2026-11-19 (offline COPC: a tile's error is its point spacing)
+- **A COPC converted offline refined far too early.** Its tiles' geometric error was the octree cube's diagonal
+  halved per level; the live stream had moved to the file's own point spacing (COPC info) halved per level, the
+  offline converter had not. Autzen: the root tile's error goes from 8 064 m to 36.4 m, 222 times less, the same
+  value the stream gives. The tileset's own error is unchanged. Folders converted before keep the old values.
+
 ### Added — 2026-11-19 (oriented crop box, placement tool, archives past 4 GB; the tilers on macOS and arm64)
 - **Crop & Extract: the box can be turned.** A *Heading* turns it about its centre, for a street or a building that
   does not run north-south; the gizmo's rotate mode turns it in 3D, and *Set box to view* now gives a box turned to

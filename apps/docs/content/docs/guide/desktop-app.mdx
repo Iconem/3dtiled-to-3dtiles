@@ -160,7 +160,8 @@ The window shows controls, not explanations. Since 2026-11-18:
   Under it, the **format** (what the name says, or the one you choose; a pasted or picked dataset starts from
   detection again) and **Threads** (the tile threads, for streaming and for exports alike) on the left; on the
   right, how it is served (*Stream*, *Index first* (`cache=hierarchy`) or *Convert once* (`cache=full`)), then
-  **Place on globe** (a popover with longitude, latitude, altitude and heading).
+  **Place on globe** (a popover with longitude, latitude, altitude, heading and scale; *Paste placed URL* fills
+  them from a URL copied with the viewer's *Copy placed URL*, after placing the dataset there with the gizmo).
 - **The window keeps its size.** A tab or a tool with more to show scrolls; only a preview makes the window larger,
   and closing it gives the size back.
 - **Settings** (the gear): theme and tile threads (the same setting as *Threads* in the dataset bar). **Help** (the
@@ -183,7 +184,7 @@ The window shows controls, not explanations. Since 2026-11-18:
   started with `TILED_LOCAL_SOURCES=1`.
 - Builds the URL against `/tiles/tileset.json`, the front door that dispatches to `/stream` for
   `cache=none|hierarchy` and `/convert` for `cache=full` — so the UI never re-encodes that routing rule.
-- **Place on globe** applies `&lon/&lat/&alt/&heading` as a root ENU transform *in
+- **Place on globe** applies `&lon/&lat/&alt/&heading/&scale` as a root ENU transform *in
   the tileset*, so every client gets the placement — not just the preview. Sources carrying their own
   georeference ignore them.
 - **Test the endpoint** (under *More*) fetches the tileset and reports asset version, geometric error, bounding-volume
