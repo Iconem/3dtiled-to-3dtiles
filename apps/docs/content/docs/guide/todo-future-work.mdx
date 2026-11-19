@@ -453,19 +453,20 @@ flowchart LR
   *existing remote 3D Tiles* (not just our own output) so consumers that can't read Draco/KTX2/
   `CESIUM_RTC` (e.g. blender **BLOSM**) can load them.
 - [ ] **Geometric error from the source, format by format** (audit of 2026-11-19, after the streamed-SOG
-  fix). Where a tile's error comes from today:
+  fix; the table, the six inconsistencies found and the rule proposed for the box-only formats are now on
+  [their own page](/docs/guide/geometric-error)). Where a tile's error comes from today:
   - *from a value the source stores*: Potree (`spacing`, halved per level), COPC (`info.spacing`, live and since
     2026-11-19 offline), Nexus (each node's `error`), OSGB (the `RangeList` of its paged LODs), 3MX
     (`maxScreenDiameter`), Bing (its own tileset);
   - *from splat density*: RAD (2 × box diagonal ÷ ∛count, averaged per depth), streamed SOG (at most 8 × the
     splat spacing, stray leaves left out of the box);
-  - *from the size of the box alone*: **I3S** (half the node's box diagonal; `lodSelection` /
-    `maxScreenThreshold`, which the format stores per node, is not read), **LCC and LCC2** (5 % of the scene
+  - *from the size of the box alone*: **I3S** (half the node's box diagonal; `lodThreshold`, which the
+    format stores per node with the layer's `lodSelectionMetricType`, is not read), **LCC and LCC2** (5 % of the scene
     diagonal, halved per level; per-node boxes and counts are not used), **GeoSplats** (the octant's diagonal), a
     **VPC** without an overview (the size of each file's box).
 
   The box-only ones share streamed SOG's weakness: a box inflated by outliers inflates the error, and a camera
-  inside the box refines everything. To do, in this order: I3S from `maxScreenThreshold` (the format's own
+  inside the box refines everything. To do, in this order: I3S from `lodThreshold` (the format's own
   answer), then the spacing cap of streamed SOG for LCC, LCC2 and GeoSplats (count ÷ largest face of the node's
   own box), each checked against a reference viewer of the format on one scene.
 - [ ] **Crop box with full freedom** (asked on 2026-11-19). The box turns about the vertical only (`heading`).

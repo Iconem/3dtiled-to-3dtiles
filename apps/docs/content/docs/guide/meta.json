@@ -1,6 +1,7 @@
 {
   "pages": [
     "supported-formats",
+    "geometric-error",
     "gltf-transform",
     "tile-compression",
     "demo-viewer",

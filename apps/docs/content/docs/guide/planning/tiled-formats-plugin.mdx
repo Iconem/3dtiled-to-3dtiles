@@ -38,6 +38,17 @@ Two things were checked in the installed packages on 2026-11-19, and both shrink
 That leaves **COPC and VPC**, which nothing in the browser reads into a tiles renderer today, and the four mesh
 formats: **Nexus, 3MX, I3S, OSGB**.
 
+## Plugins that exist, outside upstream
+
+Looked up on 2026-11-19. None is used by the viewer except the first.
+
+| Plugin | What it reads | Notes |
+|---|---|---|
+| [3d-tiles-rendererjs-3dgs-plugin](https://github.com/WilliamLiu-1997/3d-tiles-rendererjs-3dgs-plugin) (William Liu) | Gaussian splats in 3D Tiles (`KHR_gaussian_splatting`) | the viewer's splat plugin (0.3.1), drawing with his [Gaussian Splat Lite](https://github.com/WilliamLiu-1997/Gaussian-Splat-Lite) |
+| Gaussian Splat Lite's own schedulers | RAD, streamed SOG (`lod-meta.json`), LCC2 | three.js, outside `TilesRenderer`: streamed SOG since 2026-09-07, RAD since 2026-09-08, LCC2 since 1.6.1 (2026-11-02). Not used by the viewer, which goes through the server's 3D Tiles for these |
+| [3d-tiles-renderer-3tz](https://github.com/zalmoxes-laran/3d-tiles-renderer-3tz) (Emanuel Demetrescu, MIT) | a `.3tz` archive, in place | `Tiles3tzPlugin`: reads the ZIP directory by range request, then one request per tile; uses the `@3dtilesIndex1@` index for large archives; takes a local file too. **Not added to the viewer**: `.3tz` goes through the server's `/3dtiles-self-contained` here. Worth trying for the no-server case; a young repository (4 commits when read) |
+| The PlayCanvas renderer of 3DTilesRendererJS (#1765, merged 2026-10-28) | 3D Tiles in a PlayCanvas scene | makes a streamed-SOG plugin plausible, PlayCanvas owning that format; nobody has asked for it that we know of |
+
 ## What it gives, what it costs
 
 | | Tile server (today) | Plugin in the browser |
@@ -152,6 +163,14 @@ Sizes are rough, in working days for one person who knows the readers.
 | **3. Meshes** | Nexus, then 3MX, I3S (with SLPK), OSGB | each mesh preset loads in plugin mode, same triangle counts as server mode | 2 to 3 each |
 | **4. Release** | npm package, a demo page on GitHub Pages per format, the docs below | someone outside loads their own COPC from a README snippet | 2 |
 | **5. Upstream** | show it to 3DTilesRendererJS; ask what, if anything, belongs there. Offer the two Potree cases it refuses (Brotli, LAZ nodes) if wanted | a reply | |
+
+**Phase 0, first attempt done on 2026-11-19** (`apps/viewer/src/potree-lab/copcPlugin.js`, lab mode `copc`).
+Shorter than planned, because of one observation: a COPC octree has the shape of a Potree one, so the plugin is
+upstream's `PotreePlugin` with another loader (about 200 lines), not a plugin written from the hooks. Autzen and
+the Namur overview draw from their buckets with no server, with the adaptive size and eye-dome lighting; the
+hierarchy stays lazy. Reader: [copc.js](https://github.com/connormanning/copc.js) with laz-perf, which Potree and
+Giro3D also use; no faster reader was found, and none was measured. **Still owed by phase 0**: the numbers (time
+to first tile, tiles per second, main-thread stalls) beside the server path, on a machine with a GPU.
 
 Phase 0 decides whether the rest is worth it: if a COPC from a bucket is not at least as quick to a first view as
 through the server on the same machine, the project stops there. Phases 2 and 3 are independent once 1 is done.

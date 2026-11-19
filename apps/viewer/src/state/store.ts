@@ -230,7 +230,7 @@ export const useViewerStore = create<ViewerStore>((set, get) => ({
   shadeless: false,
   brightness: 1.6,
   fov: 60,
-  controlMode: 'globe',
+  controlMode: 'auto',
   terrainBehind: true,
   pointSize: 2,
   setMaxSSE: (v) => set({ maxSSE: v }),

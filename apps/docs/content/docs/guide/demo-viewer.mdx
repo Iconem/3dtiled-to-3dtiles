@@ -67,7 +67,7 @@ Both are in the page's address (`sh=3`, `centroids=true`), so a link reopens the
 
 | Mode | Behaviour |
 |---|---|
-| **Auto** | Globe from far away, Orbit close up |
+| **Auto** (default) | Globe from far away, Orbit close up |
 | Globe | the whole Earth: drag the ground under the cursor |
 | Orbit | rotate around a target, level with the horizon |
 | Environment | move through a scene, pivoting on what is under the cursor |
@@ -136,7 +136,9 @@ Moves the tileset as a whole.
   on the per-dataset snap ([below](#snap-to-terrain-in-a-mosaic)).
 - **Snap to ground** does it once, and **Undo** restores the previous offset.
 - **Z offset** and **Clearance above ground** (10 m by default) set the height by hand.
-- The **transform gizmo** moves, turns and scales the tileset by hand. Turning it on turns *Auto* off, which
+- The **transform gizmo** moves, turns and scales the tileset by hand. It stands at the tileset's own origin
+  (for a mosaic, at the point the camera looks at), its arrows point east, north and up, and the camera holds
+  still while a handle is dragged. Turning it on turns *Auto* off, which
   would put the tileset back where it measured it.
 
 **Keeping a placement.** While the gizmo is on, the section shows where the tileset stands (longitude, latitude,

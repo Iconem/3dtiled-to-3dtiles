@@ -80,6 +80,7 @@ budget rather than a screen-space error).
 |---|---|---|
 | `potree` | `PotreePlugin` reads `cloud.js` directly in the browser | **Adaptive, per point**: each point is sized by the deepest *active* octree node containing it, resolved in the vertex shader from a texture of the active node hierarchy |
 | `stream` | This repo's `/stream` turns the same `cloud.js`, or a `.copc.laz`, into 3D Tiles (POINTS GLB), rendered through `PointCloudEffectsPlugin` | `sizing=` **adaptive**, per point like `potree`, for implicit `ADD` octrees ([3DTilesRendererJS#1792](https://github.com/NASA-AMMOS/3DTilesRendererJS/pull/1792), vendored until released); **tile**, each tile's points from its own geometric error; or **fixed**, one world size |
+| `copc` | **`CopcPlugin`** (first attempt, `potree-lab/copcPlugin.js`) reads a `.copc.laz` directly in the browser by range requests: no server | as `potree`: it is upstream's `PotreePlugin` with a COPC loader |
 | `tileset` | **Any** 3D Tiles URL as is: typically an `/aggregate` mosaic of point clouds, kept regional with `&only=` | same as `stream` |
 
 A COPC that declares no CRS takes one in the URL fragment: `…/overview.copc.laz#crs=EPSG:3812`, which
@@ -98,6 +99,22 @@ Everything is in the query string, so any view is a shareable link:
 ```
 /potree-lab?url=<cloud.js>&mode=potree|stream&shape=round&edl=0.4&scale=1&geSize=1&transform=meshopt
 ```
+
+**`copc` mode.** A COPC octree has the shape of a Potree one (a cube halved per level, additive refinement, a
+spacing halved per level), so the plugin keeps `PotreePlugin` whole and replaces its loader: copc.js for the
+header, the info VLR and the hierarchy pages (read lazily, when the first node under a page is asked for),
+laz-perf (WebAssembly) for each node's chunk. Checked in headless Chrome on 2026-11-19: Autzen from its S3 bucket,
+17 tiles and 578 k points for the first view out of 20 range requests and 6.1 MB, refined when the camera comes
+closer; on the Namur overview, 1 hierarchy page of 104 read for the first view and 14 after a close zoom. The bar
+at the bottom counts requests, megabytes, pages and the decode time per million points. What it lacks: the cloud
+is drawn in the file's own coordinates (no placement on the globe from the CRS), the decode runs on the main
+thread, only position and colour (or intensity as a grey) are read, and one failed range request in five runs
+was seen from S3 under 25 parallel requests (the plugin now tries once more). The plan it is the first step of:
+[tiled formats plugins](/docs/guide/planning/tiled-formats-plugin).
+
+The dataset picker also lists the **manifests uploaded in the viewer** (Aggregate row, *your own manifest*): the
+viewer keeps each file in this browser's storage, and the lab reads it from there, listing its Potree and COPC
+entries one by one and the manifest as a mosaic of its point clouds (`tileset` mode).
 
 The dataset picker lists public samples plus — **dev server only** — every Potree entry of the Iconem
 share-link manifest (`.local/aggregate-sets/iconem.json`). Vite serves that file to **loopback clients

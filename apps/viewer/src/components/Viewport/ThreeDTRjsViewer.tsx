@@ -471,6 +471,21 @@ function GoogleGlobe({ ktxLoader }: { ktxLoader: KTX2Loader }) {
 // render once the ref did populate. That's what "gizmo pill doesn't show it before I switch ortho/
 // persp mode" actually was: switching modes just happened to trigger an UNRELATED re-render at a
 // moment when the ref had since become valid.
+/**
+ * drei's TransformControls, with the camera controls held off for the length of a drag. drei pauses
+ * `state.controls` itself on `dragging-changed`, but 3DTilesRendererJS's <CameraTransition> writes
+ * `controls.enabled = !manager.animating` on every frame, which undid the pause one frame later: the
+ * camera orbited under a gizmo drag. This runs after it (mounted later, same priority) and wins.
+ */
+function GizmoControls(props: React.ComponentProps<typeof TransformControls>) {
+  const ref = useRef<any>(null);
+  useFrame((state) => {
+    const c: any = state.controls;
+    if (ref.current?.dragging && c && c.enabled !== false) c.enabled = false;
+  });
+  return <TransformControls ref={ref} {...props} />;
+}
+
 /** Sent when the tileset's transform is set from outside the gizmo (typed numbers): its handles must follow. */
 const PLACEMENT_SET_EVENT = 'tileset-placement-set';
 
@@ -484,35 +499,58 @@ function TilesetGizmo({ tilesRef, pickScene }: { tilesRef: React.MutableRefObjec
     window.addEventListener(PLACEMENT_SET_EVENT, bump);
     return () => window.removeEventListener(PLACEMENT_SET_EVENT, bump);
   }, []);
-  // Baseline transform captured whenever the gizmo (re)anchors. TransformControls attached directly to
-  // `tilesRef.current.group` renders its handles at the GROUP's own local position — for georeferenced
-  // content that's (0,0,0)-ish (the real ECEF placement is baked into the loaded tile hierarchy's OWN
-  // transform, several levels below `group`), i.e. near Earth's center, nowhere close to what's actually
-  // on screen ("gizmo doesn't work, only for local-origin tilesets" — those happen to have their content
-  // sitting near (0,0,0) already, so group's own position coincides with the visible geometry). Drag a
-  // proxy positioned at the tileset's actual bounding-sphere center instead, and re-apply the proxy's
-  // motion — translated, and rotated/scaled AROUND that pivot rather than the group's own distant local
-  // origin — onto the real group transform.
+  // Where the handles stand. TransformControls attached directly to `tilesRef.current.group` draws them
+  // at the GROUP's own position: for georeferenced content that is the Earth's centre (the placement is
+  // in the root tile's transform, below the group). So a proxy is dragged instead, and its motion is
+  // re-applied to the group about that pivot. The pivot is the root tile's own origin when it lies in
+  // the data (what a placement moves), else the centre of the data; for a mosaic, whose centre is deep
+  // in the Earth, the point the camera looks at. On the globe the proxy is turned to east, north, up,
+  // so the arrows (space="local") read as those.
+  const camera = useThree((s) => s.camera);
+  const get = useThree((s) => s.get);
   const baseGroupPos = useRef(new THREE.Vector3());
   const baseGroupQuat = useRef(new THREE.Quaternion());
   const baseGroupScale = useRef(new THREE.Vector3(1, 1, 1));
   const basePivot = useRef(new THREE.Vector3());
+  const baseProxyQuat = useRef(new THREE.Quaternion());
 
   useEffect(() => {
     const tiles = tilesRef.current;
     if (!on || !proxy || !tiles) return;
     const sphere = new THREE.Sphere();
     tiles.group.updateWorldMatrix(true, false);
-    const pivot = (tiles as any).getBoundingSphere(sphere)
-      ? sphere.center.clone().applyMatrix4(tiles.group.matrixWorld)
-      : tiles.group.getWorldPosition(new THREE.Vector3());
+    const world = tiles.group.matrixWorld;
+    const centre = (tiles as any).getBoundingSphere(sphere) ? sphere.center.clone().applyMatrix4(world) : null;
+    const radius = sphere.radius * world.getMaxScaleOnAxis();
+    const rt: number[] | undefined = (tiles.root as any)?.transform;
+    const origin = rt ? new THREE.Vector3(rt[12], rt[13], rt[14]).applyMatrix4(world) : null;
+    const pivot = origin && centre && origin.distanceTo(centre) <= radius ? origin
+      : centre ?? tiles.group.getWorldPosition(new THREE.Vector3());
+    const onGlobe = camera.position.length() > 6378137 * 0.5;
+    if (onGlobe && pivot.length() < 6.0e6) {
+      // more than 300 km underground: nothing to grab there. The controls' pivot, else the ground ahead.
+      const c: any = get().controls, probe = new THREE.Vector3();
+      const ray = new THREE.Ray(camera.position.clone(), camera.getWorldDirection(new THREE.Vector3()));
+      if (c?.target && c.target.lengthSq() > 0) pivot.copy(c.target);
+      else if (c?.getPivotPoint?.(probe)) pivot.copy(probe);
+      else if (WGS84_ELLIPSOID.intersectRay(ray, probe)) pivot.copy(probe);
+    }
     basePivot.current.copy(pivot);
     baseGroupPos.current.copy(tiles.group.position);
     baseGroupQuat.current.copy(tiles.group.quaternion);
     baseGroupScale.current.copy(tiles.group.scale);
     proxy.position.copy(pivot);
     proxy.quaternion.identity();
+    if (onGlobe && pivot.length() > 6.0e6) {
+      const c = WGS84_ELLIPSOID.getPositionToCartographic(pivot, { lat: 0, lon: 0, height: 0 } as any);
+      const { east, north } = enuAxes(c.lat, c.lon);
+      const up = WGS84_ELLIPSOID.getPositionToNormal(pivot, new THREE.Vector3());
+      proxy.quaternion.setFromRotationMatrix(new THREE.Matrix4().makeBasis(east, north, up));
+    }
+    baseProxyQuat.current.copy(proxy.quaternion);
     proxy.scale.set(1, 1, 1);
+    proxy.updateMatrixWorld(true);
+    get().invalidate();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [on, mode, proxy, setFromOutside]);
 
@@ -521,15 +559,15 @@ function TilesetGizmo({ tilesRef, pickScene }: { tilesRef: React.MutableRefObjec
     if (!proxy || !tiles) return;
     const pivot = basePivot.current;
     const dPos = proxy.position.clone().sub(pivot);
-    const dq = proxy.quaternion;
-    const r = baseGroupPos.current.clone().sub(pivot).applyQuaternion(dq);
+    const dq = proxy.quaternion.clone().multiply(baseProxyQuat.current.clone().invert());
+    // one scale for the three axes (a placement has one): the handle that moved the most decides
+    const sc = [proxy.scale.x, proxy.scale.y, proxy.scale.z].reduce((a, v) => (Math.abs(v - 1) > Math.abs(a - 1) ? v : a), 1);
+    const k = Math.max(1e-6, Math.abs(sc));
+    // turned and scaled about the pivot, not about the group's own distant origin
+    const r = baseGroupPos.current.clone().sub(pivot).multiplyScalar(k).applyQuaternion(dq);
     tiles.group.position.copy(pivot).add(r).add(dPos);
     tiles.group.quaternion.copy(dq).multiply(baseGroupQuat.current);
-    tiles.group.scale.set(
-      baseGroupScale.current.x * proxy.scale.x,
-      baseGroupScale.current.y * proxy.scale.y,
-      baseGroupScale.current.z * proxy.scale.z,
-    );
+    tiles.group.scale.copy(baseGroupScale.current).multiplyScalar(k);
     tiles.group.updateMatrixWorld(true);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [proxy]);
@@ -538,7 +576,7 @@ function TilesetGizmo({ tilesRef, pickScene }: { tilesRef: React.MutableRefObjec
   return (
     <>
       <object3D ref={setProxy} />
-      {proxy && <TransformControls object={proxy} mode={mode} onChange={handleChange} />}
+      {proxy && <GizmoControls object={proxy} mode={mode} space="local" onChange={handleChange} />}
     </>
   );
 }
@@ -612,7 +650,7 @@ function CropGizmo({ tilesRef, pickScene }: { tilesRef: React.MutableRefObject<T
         <boxGeometry args={[1, 1, 1]} />
         <meshBasicMaterial color="cyan" wireframe depthTest={false} transparent />
       </mesh>
-      {box && <TransformControls object={box} mode={mode} space="local" onMouseUp={commit} />}
+      {box && <GizmoControls object={box} mode={mode} space="local" onMouseUp={commit} />}
     </>
   );
 }

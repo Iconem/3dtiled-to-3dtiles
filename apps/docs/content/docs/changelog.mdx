@@ -8,6 +8,41 @@ Format loosely follows [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+### Added — 2026-11-19 (a COPC plugin for 3DTilesRendererJS, first attempt; uploaded manifests in the Potree lab; the geometric error page)
+- **CopcPlugin, a first attempt** (`apps/viewer/src/potree-lab/copcPlugin.js`, Potree lab, *load as: CopcPlugin*):
+  a `.copc.laz` read from its bucket by 3DTilesRendererJS with no tile server. It is upstream's `PotreePlugin`
+  with another loader (a COPC octree has the shape of a Potree one), so the tiles, the error (spacing halved per
+  level), the adaptive point size and eye-dome lighting are upstream's. copc.js reads the header and the
+  hierarchy pages, laz-perf decodes each node. Checked in headless Chrome: Autzen (10.6 M points) draws from S3
+  in its colours, 17 tiles and 578 k points for the first view from 20 range requests and 6.1 MB; closer, it
+  refines; on the Namur overview the hierarchy stays lazy (1 page of 104 for the first view, 14 after a close
+  zoom). Not done: placement on the globe from the CRS, decoding in a worker, other attributes, VPC. Timings
+  beside the server path were not measured properly.
+- **Potree lab: the manifests uploaded in the viewer are listed.** The lab only knew the dev server's
+  `.local/aggregate-sets/iconem.json`; a manifest loaded through the viewer's Aggregate row (kept in the
+  browser) was not looked at. Its Potree and COPC entries are now in the dataset list, and the manifest itself as
+  a mosaic of its point clouds.
+- **Docs: [Geometric error, format by format](/docs/guide/geometric-error)**, second page of the guide: where
+  each format's tile error comes from, with the file, what each source stores that is not used, six
+  inconsistencies found by reading every reader, and a rule proposed for the box-only formats.
+- **CI: the desktop app on macOS and Linux** (`desktop-unix.yml`, on demand, nothing released): see the desktop
+  page for what the first runs gave.
+
+### Fixed — 2026-11-19 (the transform gizmo: where it stands, and the camera under it)
+- **The camera no longer moves while a gizmo is dragged** (tileset gizmo and crop box). drei pauses the controls
+  for the drag, but 3DTilesRendererJS's `CameraTransition` sets `controls.enabled` again on every frame, so the
+  pause lasted one frame. The gizmo now holds the controls off itself for the length of the drag. Checked on a
+  simulated drag: the controls stay off until the release (they came back on at the next frame before).
+- **The tileset gizmo stands on the data.** It stood at the centre of the data's bounding sphere, which for a
+  mosaic is deep inside the Earth. It now stands at the root tile's own origin when that lies in the data, else
+  at the centre of the data, and for a mosaic at the point the camera looks at (7 km above the mean radius on the
+  cities set, where it was near the centre of the Earth). Its arrows point east, north and up.
+- **Scaling with the gizmo no longer throws the tileset away from the Earth**: the scale is applied about the
+  gizmo, and it is one number for the three axes, as a placement has one.
+
+### Changed — 2026-11-19
+- **Controls mode defaults to Auto** (Globe from far away, Orbit close up) instead of Globe.
+
 ### Added — 2026-11-19 (a tour of a mosaic's sites; the placement typed)
 - **Mosaic: previous, next and a random site.** Three buttons beside *in view* fly from one site of the mosaic to
   another, in the order of its index or drawn at random. Only the sites that are shown count, and the captures of

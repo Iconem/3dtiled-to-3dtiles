@@ -1,0 +1,110 @@
+---
+title: "Geometric error, format by format"
+description: "Where each tile's geometricError comes from for every source format (a value the source stores, the density of its points or splats, or the size of its box alone), what the source could give instead, and how a viewer turns it into a decision to refine."
+---
+
+A 3D Tiles viewer decides to load a tile's children from one number per tile, its `geometricError`. None of the
+source formats stores that number as such, so each reader derives it. This page says from what, format by format,
+with the line of code, so that a scene that loads too much or too little can be traced to its cause.
+
+Cross-checked against the code on 2026-11-19 (live stream and offline converter, each line read). Not re-run on
+data for this page: the per-format pages hold the measurements.
+
+## How a viewer uses it
+
+```
+error on screen (px) = geometricError × screen height ÷ (2 × distance × tan(fov ÷ 2))
+```
+
+A tile is refined while that number is above the viewer's target (16 px by default in CesiumJS, 1 to 2 px in this
+viewer for point clouds). Two things follow.
+
+- **The distance is to the tile's bounding volume, not to its centre.** Inside the volume the distance is zero and
+  the error is infinite, whatever the tile's `geometricError`: the tile is always refined (unless its error is 0).
+  Both renderers do this. 3DTilesRendererJS: `error = distance === 0 ? Infinity : geometricError / (distance ×
+  sseDenominator)` (`TilesRenderer.js`). CesiumJS: `distance = Math.max(distanceToCamera, EPSILON7)`
+  (`Cesium3DTile.getScreenSpaceError`), which gives a number in the millions. It is the right rule: a tile 2 km
+  wide whose near face is 10 m from the camera must be judged at 10 m, not at the 1 km to its centre.
+- **So a box larger than its content is expensive.** A camera standing inside an inflated box refines the tile
+  every time. This is what made a streamed SOG with a sky box load its finest level everywhere: every tile above a
+  sky leaf had the 40 km cube as its box. Tight boxes matter as much as the error itself.
+
+## The table
+
+| Error comes from | Formats |
+|---|---|
+| **A value the source stores** | Potree, COPC, Nexus, OSGB, 3MX, Bing 3D (partly), streamed SOG when asked (`lodErrors`) |
+| **The density of points or splats** | RAD, streamed SOG (default), a VPC with an overview |
+| **The size of the box alone** | I3S, LCC, LCC2, GeoSplats, a VPC without an overview |
+
+### From a value the source stores
+
+| Format | Tile error | Where |
+|---|---|---|
+| **Potree** 1.x, 2.0 | `spacing ÷ 2^depth`; without a spacing, the cube ÷ 128 | `tile-server/potree-live.js`, `potree-to-3dtiles/src/index.js` |
+| **COPC** | `info.spacing ÷ 2^level`; without one, the cube diagonal ÷ 128 | `tile-server/copc-live.js`, `copc-to-3dtiles/src/index.js` (the same since 2026-11-19) |
+| **Nexus** | the node `error` × 8 (the largest of its level in the default mode; the node's own in `paths` mode); leaves 0 | `nexus-to-3dtiles/src/nexus-tileset.js` |
+| **OSGB** | from the `RangeList` of each paged LOD: `2 × radius × 16 ÷ range` in pixel mode, `16 × range ÷ 935` in distance mode | `tile-server/osgb-live.js` |
+| **3MX** | node box diagonal ÷ `maxScreenDiameter` | `tile-server/threemx-live.js` |
+| **Bing 3D** | the tileset-level error of its own 3D Tiles; the six faces are given half of it, halved per level (their own values are not read) | `tile-server/bing-live.js` |
+
+### From density
+
+| Format | Tile error | Where |
+|---|---|---|
+| **RAD** | `2 × box diagonal ÷ ∛count`, averaged per depth, never rising with depth | `rad-to-3dtiles/src/tilesetBuilder.js` |
+| **Streamed SOG** (`lod-meta.json`) | the smaller of `0.1 × diagonal × (1/√2)^k × √stride` and `8 × √(largest face ÷ splats)`, never above the parent's; stray leaves left out of the box | `sog-to-3dtiles/src/lodMeta.js` |
+| **VPC with an overview** | file leaves capped at `max(1 m, √(set area ÷ overview points))` | `tile-server/vpc-live.js` |
+
+### From the size of the box alone
+
+| Format | Tile error | What the source has that is not used |
+|---|---|---|
+| **I3S** | half the node's box diagonal; leaves 0 | `lodThreshold` per node with the layer's `lodSelectionMetricType`; `vertexCount` per node. Neither is read |
+| **LCC** (version 1) | 5 % of the scene diagonal for the coarsest level, halved per level | splats per unit per level, cell size (parsed) |
+| **LCC2** | the same rule from the root | per node: splat count, bounding box (parsed) |
+| **GeoSplats** | the octant's diagonal (a quarter of it for the 64-cell grid) | total and per-level counts, cell boxes (parsed, used only to pick a level) |
+| **VPC without an overview** | the larger of the longest box side × √3 and the sphere radius | `pc:count` per file, footprint area (parsed) |
+
+These share the weakness streamed SOG had: a box inflated by outliers inflates the error, and nothing ties the
+error to how dense the content is.
+
+## What is known to be inconsistent
+
+Found by the cross-check, not fixed yet. Most important first.
+
+1. **3MX has no pixel factor where OSGB has 16.** OSGB writes errors that reproduce the source's switch distances
+   at a 16 px target; 3MX writes `diagonal ÷ maxScreenDiameter`, which does so at a 1 px target. At 16 px a 3MX
+   node is refined when it is 16 times larger on screen than the source asks.
+2. **RAD, live.** The live stream builds the tree in fragments of 3 levels, and each fragment averages only its
+   own nodes with depth restarting at 0. The same node can get a different error live and offline, and the error
+   can rise across a fragment boundary.
+3. **I3S.** `lodThreshold` is ignored; live uses the node's oriented box, offline the box of the decoded geometry,
+   so the two give different numbers.
+4. **Potree, offline.** The tileset-level error is the spacing (the root diagonal live), and the fallback without
+   a spacing is the X width ÷ 128 (the diagonal ÷ 128 live).
+5. **Streamed SOG.** The tileset-level error differs live and offline.
+6. **Bing 3D.** The faces' errors are assumed, not read.
+
+## A rule for the box-only formats
+
+Proposed, not built. The error of a tile should be **the spacing of what it draws**, with the box rule kept only
+as a ceiling:
+
+```
+spacing = √(largest face of the node's own box ÷ count)        surfaces: scans, splats, meshes
+error   = min(k × spacing, the box rule, the parent's error)   k = 8 for splats, 1 to 2 for points
+```
+
+- The largest face rather than the volume, because this data lies on surfaces: a cube root of the volume
+  overstates the spacing of a flat scene.
+- The box rule stays as a ceiling so that a node with few splats in a large box is not given a huge error.
+- Each format has the count without downloading a tile (last column above), so this costs nothing at request time.
+- **I3S first uses its own answer**: `lodThreshold` with `maxScreenThresholdSQ` is the screen area, in square
+  pixels, above which a node is refined, so `error = 2 × radius × 16 ÷ √(4 × lodThreshold ÷ π)` reproduces the
+  source's switch distance at a 16 px target, as OSGB does. The density rule is its fallback.
+- Dividing the diagonal by the root of the density, as one might first write it, mixes units; the spacing itself
+  is the error, and the diagonal only bounds it.
+
+Each change needs one scene per format checked against a reference viewer of that format, since it moves how much
+is loaded.

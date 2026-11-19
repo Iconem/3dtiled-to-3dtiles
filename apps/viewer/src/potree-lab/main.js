@@ -15,6 +15,10 @@
  *            3DTilesRendererJS PR #1792 adds for implicit ADD octrees (vendored in ./vendor until it
  *            is released).
  *
+ *   copc     CopcPlugin (./copcPlugin.js): a .copc.laz read in the browser by range requests, with no
+ *            server, on upstream's PotreePlugin (same tiles, same adaptive size). A first attempt:
+ *            drawn in the file's own coordinates, decoded on the main thread.
+ *
  *   tileset  Any 3D Tiles URL as is — typically an /aggregate mosaic of point clouds (filter it with
  *            &only= so it stays regional) — with the same effects and sizing as `stream`.
  *
@@ -24,7 +28,8 @@
  * State lives in the query string so any view is shareable:
  *   /potree-lab?url=<cloud.js|.copc.laz|tileset.json>&mode=potree|stream|tileset&shape=round&edl=0.4&scale=1&sizing=adaptive|tile|fixed
  *
- * Dataset list = built-in public samples + (dev server only) the Iconem share-link manifest at
+ * Dataset list = built-in public samples + the manifests uploaded in the viewer (Aggregate row, kept in
+ * this browser's localStorage) + (dev server only) the Iconem share-link manifest at
  * .local/aggregate-sets/iconem.json, served loopback-only by vite.config.ts.
  */
 import { Scene, WebGLRenderer, PerspectiveCamera, Box3, Sphere, Vector2, Vector3, Raycaster } from 'three';
@@ -36,6 +41,7 @@ import { DebugTilesPlugin, GLTFExtensionsPlugin, ImplicitTilingPlugin, Reorienta
 import { MeshoptDecoder } from 'three/addons/libs/meshopt_decoder.module.js';
 import { GUI } from 'three/addons/libs/lil-gui.module.min.js';
 import { PotreePlugin } from '@/lib/potreePlugin';
+import { CopcPlugin } from './copcPlugin.js';
 import { PointCloudEffectsPlugin } from './vendor/PointCloudEffectsPlugin.js';
 import { MW } from '@/lib/formats';
 
@@ -44,6 +50,7 @@ const BUILTIN = {
   'sample · Lion Takanawa': `${POTREE_REPO}lion_takanawa/cloud.js`,
   'sample · Lion (normals)': `${POTREE_REPO}lion_takanawa_normals/cloud.js`,
   'sample · Vol Total': `${POTREE_REPO}vol_total/cloud.js`,
+  'COPC · Autzen stadium (10.6 M points)': 'https://s3.amazonaws.com/hobu-lidar/autzen-classified.copc.laz',
   'flai COPC · Belgium Namur (EPSG:3812)': 'https://open-lidar-data.s3.eu-central-1.amazonaws.com/data/BE/SPW/NAMUR_2021-2022/overview/overview.copc.laz#crs=EPSG:3812',
   'aggregate · Open Heritage 3D (Potree 2.0 via /stream)': `${MW}/aggregate/tileset.json?set=openheritage3d`,
 };
@@ -51,10 +58,12 @@ const BUILTIN = {
 const MODE_OF = (u) => (/\/aggregate\/|tileset\.json/.test(u) ? 'tileset' : null);
 
 const q = new URLSearchParams(location.search);
+/** The two modes that read the source in the browser through a plugin (adaptive size from the octree). */
+const inPlugin = () => params.mode === 'potree' || params.mode === 'copc';
 const params = {
   dataset: '',
   url: q.get('url') || BUILTIN['sample · Lion Takanawa'],
-  mode: ['stream', 'tileset'].includes(q.get('mode')) ? q.get('mode') : 'potree',
+  mode: ['stream', 'tileset', 'copc'].includes(q.get('mode')) ? q.get('mode') : 'potree',
   enable: true,
   errorTarget: Number(q.get('error') ?? 1),
   pointScale: Number(q.get('scale') ?? 1),
@@ -257,7 +266,7 @@ function setWorldSize(material, size) {
 }
 
 function applyStreamSizes() {
-  if (!tiles || params.mode === 'potree') return;
+  if (!tiles || inPlugin()) return;
   effects.adaptivePointSize = params.sizing === 'adaptive';
   effects.pointScale = params.pointScale;
   if (params.sizing === 'adaptive') return;        // the plugin sizes the points itself
@@ -277,10 +286,13 @@ function initTiles() {
     edlRadius: params.edlRadius,
   };
 
+  // `copc` reads the file in the browser (CopcPlugin, no server); any other source asked for in that mode is not one
+  if (params.mode === 'copc' && !/\.copc\.laz/i.test(params.url)) params.mode = 'potree';
   if (params.mode === 'potree' && /\.copc\.laz|tileset\.json|\/aggregate\//i.test(params.url)) params.mode = 'stream';
-  if (params.mode === 'potree') {
+  if (inPlugin()) {
     tiles = new TilesRenderer();
-    effects = new PotreePlugin({ url: params.url, pointScale: params.pointScale, ...effectOpts });
+    const Plugin = params.mode === 'copc' ? CopcPlugin : PotreePlugin;
+    effects = new Plugin({ url: params.url.split('#')[0], pointScale: params.pointScale, ...effectOpts });
     tiles.registerPlugin(effects);
     tiles.group.rotation.x = -Math.PI / 2;           // Potree is Z-up
   } else {
@@ -351,7 +363,7 @@ function applyLoading() {
 function syncUrl() {
   const s = new URLSearchParams({ url: params.url, mode: params.mode, shape: params.pointShape,
     edl: params.edl ? String(params.edlStrength) : '0', scale: String(params.pointScale), error: String(params.errorTarget) });
-  if (params.mode !== 'potree') { s.set('sizing', params.sizing); if (params.sizing === 'fixed') s.set('fixed', String(params.fixedSize)); }
+  if (!inPlugin()) { s.set('sizing', params.sizing); if (params.sizing === 'fixed') s.set('fixed', String(params.fixedSize)); }
   if (params.debugColorMode !== 'none') s.set('debug', params.debugColorMode);
   if (params.displayBoxBounds) s.set('boxes', '1');
   if (params.controls !== 'env') s.set('controls', params.controls);
@@ -391,8 +403,8 @@ function onDatasetChange(name) {
 }
 let datasetCtl = gui.add(params, 'dataset', Object.keys(datasets)).name('dataset').onChange(onDatasetChange);
 const urlCtl = gui.add(params, 'url').name('source url').onFinishChange(initTiles);
-const modeCtl = gui.add(params, 'mode', { 'PotreePlugin (adaptive size)': 'potree', '/stream 3D Tiles + effects': 'stream', 'any 3D Tiles url + effects': 'tileset' })
-  .name('load as').onChange(() => { streamFolder.show(params.mode !== 'potree'); scaleCtl.name(params.mode === 'potree' ? 'point scale' : 'size multiplier'); initTiles(); });
+const modeCtl = gui.add(params, 'mode', { 'PotreePlugin (adaptive size)': 'potree', 'CopcPlugin (COPC in the browser, no server)': 'copc', '/stream 3D Tiles + effects': 'stream', 'any 3D Tiles url + effects': 'tileset' })
+  .name('load as').onChange(() => { streamFolder.show(!inPlugin()); scaleCtl.name(inPlugin() ? 'point scale' : 'size multiplier'); initTiles(); });
 
 gui.add(params, 'controls', { 'EnvironmentControls (3DTRjs)': 'env', 'GlobeControls (3DTRjs)': 'globe', 'OrbitControls (three)': 'orbit' })
   .name('controls').onChange((v) => { makeControls(v); syncUrl(); });
@@ -406,8 +418,8 @@ tilesFolder.add(params, 'maxParse', 1, 32, 1).name('parses / frame').onChange(()
 tilesFolder.add(params, 'cacheMB', 50, 2000, 50).name('tile cache (MB)').onChange(() => { applyLoading(); syncUrl(); });
 
 const points = gui.addFolder('points');
-const scaleCtl = points.add(params, 'pointScale', 0.1, 4, 0.05).name(params.mode === 'potree' ? 'point scale' : 'size multiplier').onChange((v) => {
-  if (params.mode === 'potree') effects.pointScale = v; else applyStreamSizes();
+const scaleCtl = points.add(params, 'pointScale', 0.1, 4, 0.05).name(inPlugin() ? 'point scale' : 'size multiplier').onChange((v) => {
+  if (inPlugin()) effects.pointScale = v; else applyStreamSizes();
   syncUrl();
 });
 points.add(params, 'pointShape', ['square', 'round', 'sphere']).name('shape').onChange((v) => { effects.pointShape = v; syncUrl(); });
@@ -426,7 +438,7 @@ function showSizingCtls() {
   fixedSizeCtl.show(params.sizing === 'fixed');
 }
 showSizingCtls();
-streamFolder.show(params.mode !== 'potree');
+streamFolder.show(!inPlugin());
 
 const debug = gui.addFolder('debug');
 debug.add(params, 'debugColorMode', ['none', 'node', 'depth', 'tile']).name('color by').onChange((v) => { effects.debugColorMode = v; syncUrl(); });
@@ -434,17 +446,48 @@ debug.add(params, 'displayBoxBounds').name('bounding boxes').onChange((v) => {
   tiles.getPluginByName('DEBUG_TILES_PLUGIN').displayBoxBounds = v; syncUrl();
 });
 
+function listDatasets() {
+  const match = Object.entries(datasets).find(([, u]) => u === params.url);
+  params.dataset = match ? match[0] : '';
+  datasetCtl = replaceOptions(datasetCtl, Object.keys(datasets), onDatasetChange);
+  datasetCtl.updateDisplay();
+  document.getElementById('hud').dataset.listed = String(Object.keys(datasets).length - Object.keys(BUILTIN).length);
+}
+
+// Manifests uploaded in the viewer (its Aggregate row): the viewer keeps each file in localStorage under
+// `3dtiled:manifest:<set>` (lib/aggregate.ts), and this page shares its origin. Their Potree and COPC
+// entries are listed one by one, and each manifest as its mosaic; the file is sent to the server again
+// first, since a restarted server no longer holds the set.
+const UPLOAD_PREFIX = '3dtiled:manifest:';
+function listUploadedManifests() {
+  let n = 0;
+  try {
+    for (let i = 0; i < localStorage.length; i++) {
+      const key = localStorage.key(i);
+      if (!key?.startsWith(UPLOAD_PREFIX)) continue;
+      const text = localStorage.getItem(key) ?? '';
+      let m; try { m = JSON.parse(text); } catch { continue; }
+      const entries = Array.isArray(m) ? m : m?.entries ?? [];
+      const label = (!Array.isArray(m) && m?.label) || 'uploaded manifest';
+      const clouds = entries.filter((e) => e?.url && (e.format === 'potree' || e.format === 'copc'));
+      if (!clouds.length) continue;
+      fetch(`${MW}/aggregate/set`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: text }).catch(() => {});
+      datasets[`${label} · mosaic of ${clouds.length} point clouds`] = `${MW}/aggregate/tileset.json?set=${key.slice(UPLOAD_PREFIX.length)}&nest=geodetic&format=potree,copc`;
+      for (const e of clouds) if (e.format === 'potree' || /\.copc\.laz/i.test(e.url)) datasets[`${label} · ${[e.project, e.name].filter(Boolean).join(' / ') || e.url}`] = e.url;
+      n += clouds.length;
+    }
+  } catch { /* storage refused (private window): the built-in list stands */ }
+  return n;
+}
+if (listUploadedManifests()) listDatasets();
+
 // Iconem datasets: dev-only manifest of share links (see file header). Absent in production builds.
 fetch('/local-sets/iconem.json')
   .then((r) => (r.ok ? r.json() : null))
   .then((m) => {
     if (!m?.entries) return;
     for (const e of m.entries.filter((x) => x.format === 'potree')) datasets[`Iconem · ${e.project} / ${e.name}`] = e.url;
-    const match = Object.entries(datasets).find(([, u]) => u === params.url);
-    params.dataset = match ? match[0] : '';
-    datasetCtl = replaceOptions(datasetCtl, Object.keys(datasets), onDatasetChange);
-    datasetCtl.updateDisplay();
-    hud.dataset.iconem = String(Object.keys(datasets).length - Object.keys(BUILTIN).length);
+    listDatasets();
   })
   .catch(() => {});
 
@@ -459,9 +502,10 @@ function updateHud() {
   });
   LAB.visibleTiles = vis;
   LAB.visiblePoints = pts;
-  hud.textContent = `${params.mode === 'potree' ? 'PotreePlugin · adaptive size' : `${params.mode === 'tileset' ? '3D Tiles url' : '/stream 3D Tiles'} · ${{ adaptive: 'adaptive size', tile: 'size from tile GE', fixed: 'fixed size' }[params.sizing]}`}`
+  const cs = params.mode === 'copc' && effects?.loader?.stats;
+  hud.textContent = `${cs ? `CopcPlugin · no server · ${cs.requests} requests, ${(cs.bytes / 1048576).toFixed(1)} MB, ${cs.pages} hierarchy pages, decode ${cs.points ? (cs.decodeMs / cs.points * 1e6).toFixed(0) : 0} ms per M points` : inPlugin() ? 'PotreePlugin · adaptive size' : `${params.mode === 'tileset' ? '3D Tiles url' : '/stream 3D Tiles'} · ${{ adaptive: 'adaptive size', tile: 'size from tile GE', fixed: 'fixed size' }[params.sizing]}`}`
     + ` · ${vis} tiles · ${pts.toLocaleString('en-US')} points · ${tiles.downloadQueue.currJobs ?? 0}↓ ${tiles.parseQueue.currJobs ?? 0}⚙ · cache ${(tiles.lruCache.cachedBytes / 1048576).toFixed(0)} MB`
-    + (hud.dataset.iconem ? ` · ${hud.dataset.iconem} Iconem datasets listed` : '')
+    + (hud.dataset.listed ? ` · ${hud.dataset.listed} datasets from manifests` : '')
     + (LAB.errors.length ? ` · ${LAB.errors.length} error(s)` : '');
 }
 
