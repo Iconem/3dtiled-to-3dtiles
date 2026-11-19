@@ -522,7 +522,8 @@ export async function installTool(id, o = {}) {
     // Everything uv writes stays in this folder: the environment, the Python it downloads, its cache, the launcher.
     const env = { ...process.env, UV_TOOL_DIR: path.join(dir, 'env'), UV_TOOL_BIN_DIR: path.join(dir, 'bin'), UV_PYTHON_INSTALL_DIR: path.join(dir, 'python'),
                   UV_CACHE_DIR: path.join(dir, 'cache'), UV_NO_CONFIG: '1', UV_NO_PROGRESS: '1' };
-    const code = await runLogged([uv.exe, 'tool', 'install', '--managed-python', '--python', p.uv.python, '--force', p.uv.spec], env, log);
+    const extra = (p.uv.with?.[`${process.platform}-${process.arch}`] ?? []).flatMap((req) => ['--with', req]);   // requirements this platform needs held back
+    const code = await runLogged([uv.exe, 'tool', 'install', '--managed-python', '--python', p.uv.python, '--force', ...extra, p.uv.spec], env, log);
     const exe = path.join(dir, 'bin', exeName(p.uv.bin));
     if (code !== 0 || !isFile(exe)) { await fsp.rm(dir, { recursive: true, force: true }).catch(() => {}); throw new Error(`uv could not install ${p.uv.spec} (exit code ${code}). Nothing was installed.`); }
     await fsp.rm(path.join(dir, 'cache'), { recursive: true, force: true }).catch(() => {});

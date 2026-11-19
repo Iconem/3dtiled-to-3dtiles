@@ -158,8 +158,8 @@ test('commands: each tool is called the way it documents', () => {
   const s = planRun('splat-transform', ply, out, { levels: 3, keep: 40, gpu: 'cpu' }, found(['node', 'cli.mjs']));
   const t = (n) => path.join(out, '.tiler-tmp', `lod${n}.ply`);
   assert.deepEqual(s.steps.map((x) => x.cmd), [
-    ['node', 'cli.mjs', '-w', ply, '--decimate', '40%', t(1)],
-    ['node', 'cli.mjs', '-w', t(1), '--decimate', '40%', t(2)],
+    ['node', 'cli.mjs', '-w', '--gpu', 'cpu', ply, '--decimate', '40%', t(1)],
+    ['node', 'cli.mjs', '-w', '--gpu', 'cpu', t(1), '--decimate', '40%', t(2)],
     ['node', 'cli.mjs', '-w', ply, '-l', '0', t(1), '-l', '1', t(2), '-l', '2', path.join(out, 'lod-meta.json'), '--lod-chunk-count', '512', '--lod-chunk-extent', '16', '--gpu', 'cpu'],
   ]);
   assert.equal(planRun('splat-transform', ply, out, { levels: 1 }, found(['node', 'cli.mjs'])).steps.length, 1, 'one level: no decimation');

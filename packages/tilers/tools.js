@@ -503,7 +503,9 @@ export const TOOLS = [
     inputs: ['las', 'laz', 'xyz', 'ply'],
     ply: 'points',
     output: tileset,
-    provide: { uv: { version: '12.1.1', spec: 'py3dtiles[las,ply]==12.1.1', python: '3.12', bin: 'py3dtiles', approxBytes: 110e6 } },
+    // `with`: further requirements by platform. numba 0.63 (llvmlite 0.46) ships no wheel for Intel macOS, and its
+    // source build fails there: the last version that does is asked for.
+    provide: { uv: { version: '12.1.1', spec: 'py3dtiles[las,ply]==12.1.1', python: '3.12', bin: 'py3dtiles', approxBytes: 110e6, with: { 'darwin-x64': ['numba<0.63'] } } },
     options: [
       { key: 'srsIn', label: 'Input EPSG code', type: 'int', min: 1024, max: 999999, default: '', placeholder: '32631', help: '--srs_in: the EPSG code of the input, for a file that carries none (or to override it).' },
       { key: 'srsOut', label: 'Output EPSG code', type: 'int', min: 1024, max: 999999, default: 4978, help: '--srs_out: 4978 (Earth-centred, what 3D Tiles viewers expect) when the input has a CRS. Not passed when the input has none.' },
@@ -631,7 +633,9 @@ export const TOOLS = [
     provide: {
       env: 'MAGO_3D_TILER_JAR',
       needs: { runtime: 'java', min: 25 },
-      command: ({ runtime, file }) => [...runtime, '-jar', file],
+      // the JVM's default heap is a quarter of the machine's memory: with 7 GB (a macOS arm64 CI runner) the tool ran
+      // out of it shuffling 20 000 points. 70 % leaves the rest to the system.
+      command: ({ runtime, file }) => [...runtime, '-XX:MaxRAMPercentage=70', '-jar', file],
       download: {
         version: '1.17.0',
         'win32-x64': {
@@ -963,7 +967,9 @@ export const TOOLS = [
       const decimate = opt.adaptive ? '--decimate-adaptive' : '--decimate';
       for (let i = 1; i < opt.levels; i++) {
         const out = path.join(tmpDir, `lod${i}.ply`);
-        steps.push({ cmd: [...exe, '-w', ...(opt.adaptive ? gpu : []), levels[i - 1], decimate, pct(opt.keep), out], label: `level ${i}: ${opt.keep} % of level ${i - 1}` });
+        // the tool opens a device for a plain decimation as well as an adaptive one (3.11): on a machine without a
+        // GPU (a server, a CI runner) `cpu` must reach this step too
+        steps.push({ cmd: [...exe, '-w', ...gpu, levels[i - 1], decimate, pct(opt.keep), out], label: `level ${i}: ${opt.keep} % of level ${i - 1}` });
         levels.push(out);
       }
       const merge = [...exe, '-w'];
