@@ -761,6 +761,12 @@
             "description": "west,south,minHeight,east,north,maxHeight — degrees,degrees,meters."
           },
           {
+            "name": "heading",
+            "in": "query",
+            "schema": { "type": "number", "default": 0 },
+            "description": "Turns the box about its centre, degrees clockwise from north (an oriented box). bbox stays the box before it is turned: its centre, and its size east-west and north-south."
+          },
+          {
             "name": "maxGE",
             "in": "query",
             "schema": {

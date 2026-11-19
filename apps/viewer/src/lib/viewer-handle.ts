@@ -4,6 +4,7 @@ import type { DatasetStyle } from './datasetStyle';
 import type { BasemapId } from './basemaps';
 import type { TerrainMode } from './terrainModes';
 import type { CameraPose } from './cameraPose';
+import type { DecomposedPlacement } from '../../../../packages/core/placement.js';
 
 /**
  * Renderer-agnostic contract both CesiumViewer and ThreeDTRjsViewer implement via
@@ -75,4 +76,23 @@ export interface ViewerHandle {
   hideCropGizmo?(): void;
   showTilesetGizmo?(): void;
   hideTilesetGizmo?(): void;
+  /** Where the loaded tileset stands now, after the local frame, the Z offset and the transform gizmo; null before a load. */
+  getTilesetPlacement?(): TilesetPlacement | null;
+}
+
+/** The loaded tileset's placement, as the transform gizmo left it (lib/…/core/placement.js). */
+export interface TilesetPlacement {
+  /** The five numbers `/stream` takes, with how far the matrix is from them; null for a source georeferenced by its own data. */
+  numbers: DecomposedPlacement | null;
+  /** The viewer's own matrix on the tileset (column-major), to burn into a root. */
+  matrix: number[];
+  /** Has it been moved at all (is the matrix not the identity). */
+  moved: boolean;
+  /** Bounding sphere of the tileset in its own frame, [x, y, z, radius]; null when unknown. */
+  sphere: number[] | null;
+  geometricError: number;
+  /** The loaded URL when it is a `/stream` one that takes placement parameters; null otherwise. */
+  streamUrl: string | null;
+  /** The loaded URL. */
+  url: string;
 }

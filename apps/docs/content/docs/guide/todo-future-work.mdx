@@ -23,7 +23,7 @@ Roughly in the order we're tackling them, grouped by theme below.
   Deferred until one is wired.
 - **Runtime (Node → browser)** — audit of what's browser-portable per converter; almost everything
   already is except `remote-zip.js`'s SLPK unzip (`node:zlib` call with no browser equivalent). Now a project plan:
-  [Tiled formats read in the browser (draft)](/docs/guide/planning/tiled-formats-plugin), 3DTilesRendererJS plugins
+  [Tiled formats read in the browser (plan)](/docs/guide/planning/tiled-formats-plugin), 3DTilesRendererJS plugins
   over the readers of this repo, no tile server.
 - **Rendering/viewer** — `3d-tiles-rendererjs-3dgs-plugin` upgraded from 0.1.13 (Spark) to 0.3.1 (its author's
   Gaussian Splat Lite renderer) with three.js 0.187 on 2026-11-16; the look of each splat preset is still to compare
@@ -301,6 +301,13 @@ flowchart LR
   a tileset in place, whereas the point here is to end at a *stateless URL* against the middleware —
   placement as a request parameter, not a saved file.
 
+  **Built on 2026-11-19, in the demo viewer** (Local Frame section, 3DTRjs): with the transform gizmo on, the
+  section reads the tileset's placement back as the five numbers, and offers *Copy placed URL* (the `/stream` URL
+  with them) and *Save tileset* (the source under the exact transform, burnt into a root). The mapping both ways
+  is `core/placement.js`. Left: the same in the desktop app's *Place on globe*, typing a heading and a scale as
+  numbers, burning the transform into an **exported folder**'s own root, and `&anchor=` for sources other than
+  streamed SOG (which has `&center=1`).
+
   **Asked for on 2026-11-18:** the inspector's way of doing it, a tileset aligned on a 3DTilesRendererJS globe with
   gizmos or controls and the transform burnt into its root, for tiled meshes and point clouds as well as tiled
   splats. Two places it can apply: on the **output** (the root transform of an exported folder), or on a **3D Tiles
@@ -445,7 +452,7 @@ flowchart LR
   *existing remote 3D Tiles* (not just our own output) so consumers that can't read Draco/KTX2/
   `CESIUM_RTC` (e.g. blender **BLOSM**) can load them.
 - [x] **Browser-native bbox crop / subsample extract** (done 2026-11-16: LAS, merged GLB, splats and zip, the
-  same files as the server's; left: Draco tiles, SOG output, an oriented box;
+  same files as the server's; Draco tiles and SOG output since 2026-11-18, an oriented box and archives past 4 GB since 2026-11-19;
   [Crop and extract in the browser](/docs/guide/planning/browser-crop-extract)) — pull a cropped/decimated copy of a tiled asset
   (point cloud, mesh, or splat) by an OBB defined in the viewer — BLOSM-style but JS/browser-native.
   See the dump-tiles feature idea (memory). **Refinement-aware traversal**: for **ADD** octrees

@@ -13,6 +13,8 @@ export interface BrowserExtractJob {
   kind: BrowserExtractKind;
   tilesetUrl: string;
   bbox: [number, number, number, number, number, number];   // w, s, minH, e, n, maxH
+  /** the box turned about its centre, degrees clockwise from north */
+  heading?: number;
   maxGE: number;
   enuFrame?: boolean;
   splatFormat?: string;

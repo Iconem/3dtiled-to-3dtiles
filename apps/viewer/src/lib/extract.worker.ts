@@ -13,7 +13,7 @@
 import { Document, WebIO } from '@gltf-transform/core';
 import { ALL_EXTENSIONS, EXTTextureWebP, KHRTextureBasisu } from '@gltf-transform/extensions';
 import { MeshoptDecoder } from 'three/addons/libs/meshopt_decoder.module.js';
-import { extractLas, extractMeshDocument, extractSplats, extractTilesetJson, extractZip, type ExtractSink } from '../../../../packages/core/extract-core.js';
+import { extractLas, extractMeshDocument, extractSplats, extractTilesetJson, extractZip, orientBox, type ExtractSink } from '../../../../packages/core/extract-core.js';
 import type { BrowserExtractJob, WorkerReply } from './browserExtract';
 import dracoWasmUrl from 'draco3dgltf/draco_decoder_gltf.wasm?url';
 // splat-transform's WebP encoder (SOG output). The package does not export the file, hence the path.
@@ -100,7 +100,7 @@ async function openSink(handle: FileSystemFileHandle | null) {
 async function run(job: BrowserExtractJob, handle: FileSystemFileHandle | null) {
   let skipped = 0, firstSkip = '';
   const base = {
-    url: job.tilesetUrl, bb: job.bbox as number[], maxGE: job.maxGE, initM: job.extractMatrix ?? undefined, signal: controller.signal,
+    url: job.tilesetUrl, bb: orientBox([...job.bbox], job.heading), maxGE: job.maxGE, initM: job.extractMatrix ?? undefined, signal: controller.signal,
     onProgress: (p: Record<string, number | string>) => post({ type: 'progress', progress: p }),
     onSkip: (_url: string, e: unknown) => { skipped++; if (!firstSkip) firstSkip = e instanceof Error ? e.message : String(e); },
   };

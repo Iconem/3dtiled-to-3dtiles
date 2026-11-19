@@ -5,6 +5,38 @@ Format loosely follows [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+### Added — 2026-11-19 (oriented crop box, placement tool, archives past 4 GB; the tilers on macOS and arm64)
+- **Crop & Extract: the box can be turned.** A *Heading* turns it about its centre, for a street or a building that
+  does not run north-south; the gizmo's rotate mode turns it in 3D, and *Set box to view* now gives a box turned to
+  the camera. `&heading=` on `/extract`, the same in the browser. Autzen, a 600 m by 60 m box at 0°, 45°, 90° and
+  360°: the browser and the server return the same points each time.
+- **Placement tool** (viewer, Local Frame, 3DTRjs): with the transform gizmo on, the section shows where the tileset
+  stands (longitude, latitude, altitude, heading, scale) and keeps it two ways: **Copy placed URL**, the `/stream`
+  URL with those five numbers, and **Save tileset**, a `tileset.json` holding the source under the exact
+  transform. Checked on the Nexus gargoyle: moved, turned 30° and doubled, the server given the copied URL places it
+  within a millimetre of where the viewer drew it. `core/placement.js` maps the numbers and the matrix both ways.
+- **A manual CI run for the tilers on macOS and Linux, x64 and arm64** (`tilers-platforms.yml`): every downloadable
+  tool installed and run on the samples. All four systems pass.
+- **Browser plugins: the plan** was rewritten from the draft
+  ([Tiled formats read in the browser](/docs/guide/planning/tiled-formats-plugin)): upstream now reads Potree, the
+  splat renderer streams RAD, SOG and LCC2 itself, so the plan is COPC and VPC first, then the four mesh formats.
+
+### Fixed — 2026-11-19 (found by the multi-gigabyte extract and the four-platform run)
+- **A zip of tiles past 4 GB**, or of more than 65 535 tiles, was not a valid archive: it is now a ZIP64. A 5.1 GB
+  archive was read back with Python.
+- **COPC streams advertised content for octree nodes that hold no point**: every client asked for tiles answered
+  404 (143 of 9 672 over six AHN5 files). The implicit subtrees now say tile, no content.
+- **A local scene in the 3DTRjs viewer stood turned from north** by an angle that depended on where it was (46° at
+  the default frame). Its frame is now true east and north, as the server's placement and the Cesium renderer.
+- **splat-transform on a machine without a GPU**: *Device: cpu* now reaches every decimation step, so the levels
+  are made on a server or a CI runner.
+- **mago 3DTiler ran out of Java heap** on a 7 GB machine: Java tools start with 70 % of the memory.
+- **py3dtiles did not install on Intel macOS**: numba is held below 0.63 there.
+- Measured, not changed: a 5.41 GB LAS (150 M points) written by the browser in 22 minutes with a flat 152 MB page
+  heap; the SOG of the browser extract read back, same splats as its SPZ; the SOG and Nexus converter options and
+  RAD's `--scale` and `--ge-scale` each change a real export. RAD's `--sh` was only seen on the live path (the one
+  sample with harmonics is 1.28 GB).
+
 ### Fixed — 2026-11-19 (streamed SOG: stray splats, level of detail, placement; funes.world)
 - **A streamed SOG with floaters or a sky box no longer loads whole.** funes.world's Pompeii is a site 1.5 km
   across inside a 40 km cube of sky; every tile's box was the cube, so a camera at the site was inside all of them

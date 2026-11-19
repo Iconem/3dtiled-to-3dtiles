@@ -55,7 +55,7 @@ export default function CropExtractSection({ activeHandleRef }: { activeHandleRe
     return s.rawUrlMode && !field.startsWith(MW) ? buildMiddlewareUrl(field, params) : field;
   }
 
-  async function doBrowserExtract(kind: BrowserExtractKind, tilesetUrl: string, bbox: [number, number, number, number, number, number], extractMatrix: number[] | null) {
+  async function doBrowserExtract(kind: BrowserExtractKind, tilesetUrl: string, bbox: [number, number, number, number, number, number], heading: number, extractMatrix: number[] | null) {
     if (running) return;
     const ctl = new AbortController(); abortRef.current = ctl;
     const t0 = performance.now();
@@ -63,7 +63,7 @@ export default function CropExtractSection({ activeHandleRef }: { activeHandleRe
     s.tlog(`⬇ extract ${kind} in the browser (GE ${s.maxGE})…`);
     try {
       const r = await runBrowserExtract(
-        { kind, tilesetUrl, bbox, maxGE: s.maxGE, enuFrame: s.enuFrame, splatFormat: s.splatFormat, splatClip: s.splatClip, extractMatrix },
+        { kind, tilesetUrl, bbox, heading, maxGE: s.maxGE, enuFrame: s.enuFrame, splatFormat: s.splatFormat, splatClip: s.splatClip, extractMatrix },
         { signal: ctl.signal, onProgress: (p) => setRunning(Object.entries(p).filter(([k]) => k !== 'pass').map(([k, v]) => `${Number(v).toLocaleString()} ${k}`).join(', ') + (p.pass === 'count' ? ' (counting)' : '')) },
       );
       if (!r) { s.tlog('extract cancelled'); return; }
@@ -81,11 +81,12 @@ export default function CropExtractSection({ activeHandleRef }: { activeHandleRe
     const tilesetUrl = resolvedTilesetUrl();
     if (!tilesetUrl) return;
     const { w, s: sN, minH, e, n, maxH } = s.crop;
+    const heading = Number.isFinite(s.crop.heading) ? s.crop.heading : 0;
     if ([w, sN, minH, e, n, maxH].some(Number.isNaN)) { s.setStatus('Set the crop box first (⬚ Set box to view).'); return; }
     const extractMatrix = h()?.getExtractMatrix() ?? null;
-    if (inBrowser && kind !== 'copc') { void doBrowserExtract(kind, tilesetUrl, [w, sN, minH, e, n, maxH], extractMatrix); return; }
+    if (inBrowser && kind !== 'copc') { void doBrowserExtract(kind, tilesetUrl, [w, sN, minH, e, n, maxH], heading, extractMatrix); return; }
     const outUrl = extractCrop({
-      kind, tilesetUrl, bbox: [w, sN, minH, e, n, maxH], maxGE: s.maxGE,
+      kind, tilesetUrl, bbox: [w, sN, minH, e, n, maxH], heading, maxGE: s.maxGE,
       lasStream: s.lasStream, enuFrame: s.enuFrame, splatFormat: s.splatFormat, splatClip: s.splatClip, extractMatrix,
     });
     s.tlog(`⬇ extract ${kind} (GE ${s.maxGE}) — download starting…`);
@@ -123,6 +124,10 @@ export default function CropExtractSection({ activeHandleRef }: { activeHandleRe
           <Label className="w-24 shrink-0 text-xs">minH / maxH (m)</Label>
           <Input type="number" className="h-7" value={s.crop.minH} onChange={(e) => s.setCrop({ minH: parseFloat(e.target.value) })} />
           <Input type="number" className="h-7" value={s.crop.maxH} onChange={(e) => s.setCrop({ maxH: parseFloat(e.target.value) })} />
+        </div>
+        <div className="flex items-center justify-between gap-1" title="Turns the box about its centre, clockwise from north, for a street or a building that does not run north-south. The numbers above are the box before it is turned. With the 3D gizmo: rotate it (R).">
+          <Label className="w-24 shrink-0 text-xs">Heading (°)</Label>
+          <Input type="number" className="h-7" step={1} value={s.crop.heading || 0} onChange={(e) => s.setCrop({ heading: parseFloat(e.target.value) || 0 })} />
         </div>
         <ToggleGroup type="single" variant="outline" size="sm" value={s.extractWhere} onValueChange={(v) => v && s.setExtractWhere(v as 'server' | 'browser')}
           title="Where the extract runs. Tile server: every output, any size. Browser: no server needed, the file is written by this page (LAS, GLB, SPZ/PLY/GLB splats, zip); no COPC">

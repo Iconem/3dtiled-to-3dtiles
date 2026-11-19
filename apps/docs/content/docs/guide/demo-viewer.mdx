@@ -116,8 +116,13 @@ It runs in one of two places, chosen by the switch in the section:
 | Meshes | merged GLB | merged GLB |
 | Splats | SPZ, GLB, SOG, PLY | SPZ, GLB, SOG, PLY |
 | Any | zip of the tiles | zip of the tiles |
-| Size | any | any in Chrome and Edge (written to disk as it goes); 1 GB elsewhere |
+| Size | any | any in Chrome and Edge (written to disk as it goes; a zip past 4 GB is a ZIP64); 1 GB elsewhere. A merged GLB and a splat file are built in memory first |
 | Compressed tiles | Draco, meshopt, KTX2 | Draco, meshopt; KTX2 textures are copied as they are |
+
+**The box can be turned.** *Heading* turns it about its centre, clockwise from north, for a street or a building
+that does not run north-south; the four numbers above it stay those of the box before it is turned. *Set box to
+view* gives a box turned to the camera, so its sides follow the screen's. In the 3D view the gizmo's rotate mode
+turns it (a tilt snaps back). The server takes the same number as `&heading=`.
 
 Both run the same code and give the same file. Without a reachable tile server the switch starts on
 *In the browser*. The tileset's host must allow cross-origin requests for the browser to read it. Details:
@@ -131,10 +136,20 @@ Moves the tileset as a whole.
   on the per-dataset snap ([below](#snap-to-terrain-in-a-mosaic)).
 - **Snap to ground** does it once, and **Undo** restores the previous offset.
 - **Z offset** and **Clearance above ground** (10 m by default) set the height by hand.
-- The **gizmo** drags the tileset (W, E and R switch its mode), with its numbers below.
+- The **transform gizmo** moves, turns and scales the tileset by hand. Turning it on turns *Auto* off, which
+  would put the tileset back where it measured it.
 
-These last ones apply in this viewer only. To attach a dataset to the globe for every client, put the placement
-in its URL: [`&lon=&lat=`](/docs/guide/cli-usage).
+**Keeping a placement.** While the gizmo is on, the section shows where the tileset stands (longitude, latitude,
+altitude, heading, scale) and two ways to keep it, so that the work does not stay in this viewer:
+
+- **Copy placed URL**: the `/stream` URL with that placement as its
+  [`&lon=&lat=&alt=&heading=&scale=`](/docs/guide/cli-usage), for any 3D Tiles client. For a local dataset served
+  by `/stream`. The five numbers cannot say a tilt or a scale that differs by axis: the section says so when the
+  gizmo made one, and the URL would drop it.
+- **Save tileset**: a `placed-tileset.json` that holds the loaded tileset under the exact transform, burnt into
+  its root. It works for any tileset, tilt included; it points at the source, which must stay reachable. A tileset
+  whose own tiles are bounded by regions (absolute longitudes and latitudes) cannot be moved this way by any
+  client.
 
 ## How a mosaic is built
 

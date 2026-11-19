@@ -8,6 +8,8 @@ import type { TerrainMode } from '@/lib/terrainModes';
 
 export interface CropBbox {
   w: number; s: number; minH: number; e: number; n: number; maxH: number;
+  /** The box turned about its centre, degrees clockwise from north; 0 is the plain lon/lat box. */
+  heading: number;
 }
 
 interface ViewerStore {
@@ -246,7 +248,7 @@ export const useViewerStore = create<ViewerStore>((set, get) => ({
   setTerrainBehind: (v) => set({ terrainBehind: v }),
   setPointSize: (v) => set({ pointSize: v }),
 
-  crop: { w: NaN, s: NaN, minH: -50, e: NaN, n: NaN, maxH: 800 },
+  crop: { w: NaN, s: NaN, minH: -50, e: NaN, n: NaN, maxH: 800, heading: 0 },
   maxGE: 0,
   lasStream: true,
   enuFrame: true,

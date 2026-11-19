@@ -7,7 +7,7 @@
  *   • splats                 → SPZ, GLB, SOG, PLY (GET /extract/splat)
  *   • anything               → a cropped tileset.json, or a zip of the tiles (GET /extract/tileset, /extract/zip)
  *
- *   GET /extract/{las|copc|glb|splat|tileset|zip}?url=<tileset.json>&bbox=<west,south,minH,east,north,maxH>[&maxGE=<m>][&maxDepth=N]
+ *   GET /extract/{las|copc|glb|splat|tileset|zip}?url=<tileset.json>&bbox=<west,south,minH,east,north,maxH>[&heading=<deg>][&maxGE=<m>][&maxDepth=N]
  *
  * The walk, the box test and the writers are core/extract-core.js, which has no Node imports: the viewer runs the
  * same code in the browser when there is no tile server (apps/viewer/src/lib/browserExtract.ts). What is here is what
@@ -23,7 +23,7 @@ import { Document, NodeIO } from '@gltf-transform/core';
 import { ALL_EXTENSIONS } from '@gltf-transform/extensions';
 import * as splat from '@playcanvas/splat-transform';
 import { decompressGlb, CORS, fetchSource } from '../core/index.js';
-import { IDENT, parseBbox, extractTilesetJson, extractZip, extractLas, extractMeshDocument, extractSplats } from '../core/extract-core.js';
+import { IDENT, parseBbox, orientBox, extractTilesetJson, extractZip, extractLas, extractMeshDocument, extractSplats } from '../core/extract-core.js';
 
 // Resolve the PDAL binary for /extract/copc. Prefer $PDAL_BIN, then the pixi-global shim (`pixi global
 // install pdal` → ~/.pixi/bin/pdal[.exe]), then `pdal` on PATH. pixi is the right installer here — PDAL
@@ -66,6 +66,8 @@ export async function handleExtract(req, res, u) {
   }
   const bb = parseBbox(bboxStr);
   if (!bb) { res.writeHead(400, CORS); res.end('bbox needs 6 numbers (deg,deg,m,deg,deg,m)'); return true; }
+  // &heading=<deg>: the box turned about its centre, clockwise from north (an oriented box; extract-core.js's orientBox)
+  orientBox(bb, u.searchParams.get('heading'));
   // Optional viewer-applied extra modelMatrix (col-major 16): Z-offset nudge / local-frame ENU placement.
   // Seeds the traversal world chain so the dump matches the on-screen (shifted) position. Identity if absent/bad.
   let initM = IDENT;

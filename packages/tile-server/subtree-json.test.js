@@ -140,3 +140,13 @@ async function readFolderAsFiles(dir) {
   }
   return files;
 }
+
+test('a tile without content: available, its content bit clear', () => {
+  const nodes = new Map([['0-0-0-0', { pointCount: 10 }], ['1-0-0-0', { pointCount: 0 }], ['1-1-0-0', { pointCount: 5 }]]);
+  const all = parseSubtreeBuffer(buildSubtreeBuffer('0-0-0-0', nodes, 2));
+  const some = parseSubtreeBuffer(buildSubtreeBuffer('0-0-0-0', nodes, 2, (k) => nodes.get(k).pointCount > 0));
+  // bit 0 is the root, bits 1.. its children in Morton order: 1-0-0-0 is bit 1, 1-1-0-0 bit 2
+  assert.deepEqual([0, 1, 2, 3].map((i) => all.contentBit(i)), [1, 1, 1, 0]);
+  assert.deepEqual([0, 1, 2, 3].map((i) => some.tileBit(i)), [1, 1, 1, 0], 'the empty node is still a tile');
+  assert.deepEqual([0, 1, 2, 3].map((i) => some.contentBit(i)), [1, 0, 1, 0], 'but has no content');
+});

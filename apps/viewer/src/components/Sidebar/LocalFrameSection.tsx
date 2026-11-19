@@ -1,4 +1,4 @@
-import { useEffect } from 'react';
+import { useEffect, useState } from 'react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Checkbox } from '@/components/ui/checkbox';
@@ -7,7 +7,8 @@ import { Separator } from '@/components/ui/separator';
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible';
 import { ChevronDown } from 'lucide-react';
 import { useViewerStore } from '@/state/store';
-import type { ViewerHandle } from '@/lib/viewer-handle';
+import type { ViewerHandle, TilesetPlacement } from '@/lib/viewer-handle';
+import { placedStreamUrl, placedTileset } from '../../../../../packages/core/placement.js';
 import { SidebarCollapsibleSection } from './SidebarSection';
 import { isAggregateUrl, readSnap, snapParamFor, withSnap, loadMosaic } from '@/lib/aggregate';
 import { useUrlState } from '@/state/urlState';
@@ -51,6 +52,38 @@ export default function LocalFrameSection({ activeHandleRef }: { activeHandleRef
   function useCurrentView() {
     const v = h()?.useCurrentView();
     if (v) setLocalFrame(v);
+  }
+
+  // The placement tool: while the gizmo is on, where the tileset stands, read off the viewer a few times a second
+  // (a drag moves it without touching the store), and the two ways to keep it.
+  const gizmoMode = useViewerStore((s) => s.gizmoMode);
+  const setGizmoMode = useViewerStore((s) => s.setGizmoMode);
+  const [placed, setPlaced] = useState<TilesetPlacement | null>(null);
+  useEffect(() => {
+    if (!gizmoOn) { setPlaced(null); return; }
+    const read = () => setPlaced(activeHandleRef.current?.getTilesetPlacement?.() ?? null);
+    read();
+    const id = window.setInterval(read, 400);
+    return () => window.clearInterval(id);
+  }, [gizmoOn, activeHandleRef]);
+  const numbers = placed?.numbers ?? null;
+
+  async function copyPlacedUrl() {
+    if (!placed?.streamUrl || !numbers) return;
+    const url = placedStreamUrl(placed.streamUrl, numbers);
+    try { await navigator.clipboard.writeText(url); useViewerStore.getState().setStatus(`Placed URL copied.\n${url}`); }
+    catch { useViewerStore.getState().setStatus(`Placed URL (copy it from here):\n${url}`); }
+  }
+  function savePlacedTileset() {
+    if (!placed?.sphere) return;
+    const ts = placedTileset(placed.url, placed.matrix, { sphere: placed.sphere, geometricError: placed.geometricError,
+      placement: numbers ? { lon: numbers.lon, lat: numbers.lat, alt: numbers.alt, heading: numbers.heading, scale: numbers.scale } : undefined });
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(new Blob([JSON.stringify(ts, null, 2)], { type: 'application/json' }));
+    a.download = 'placed-tileset.json';
+    document.body.appendChild(a); a.click(); a.remove();
+    setTimeout(() => URL.revokeObjectURL(a.href), 60_000);
+    useViewerStore.getState().setStatus('placed-tileset.json saved: the source tileset under the transform shown, for any 3D Tiles client.');
   }
 
   return (
@@ -103,9 +136,47 @@ export default function LocalFrameSection({ activeHandleRef }: { activeHandleRef
           onChange={(e) => { const v = Number(e.target.value); if (Number.isFinite(v)) setZOffsetClearance(v); }} />
       </div>
       <Label className="text-xs" title="Drag (or press W/E/R to switch translate/rotate/scale) a gizmo on the loaded tileset itself">
-        <Checkbox checked={gizmoOn} onCheckedChange={(v) => { const on = !!v; setGizmoOn(on); if (on) h()?.showTilesetGizmo?.(); else h()?.hideTilesetGizmo?.(); }} />
+        <Checkbox checked={gizmoOn} onCheckedChange={(v) => {
+          const on = !!v; setGizmoOn(on);
+          // placing by hand: the automatic ground snap would put the tileset back where it measured it
+          if (on) { if (zOffsetAuto) setZOffsetAuto(false, true); h()?.showTilesetGizmo?.(); } else h()?.hideTilesetGizmo?.();
+        }} />
         Transform gizmo (3DTRJS)
       </Label>
+      {gizmoOn && renderer === '3dtrjs' && (
+        <div className="flex flex-col gap-1.5">
+          <div className="flex gap-1">
+            {(['translate', 'rotate', 'scale'] as const).map((m) => (
+              <Button key={m} size="sm" className="flex-1" variant={gizmoMode === m ? 'default' : 'outline'} onClick={() => setGizmoMode(m)}>
+                {m === 'translate' ? 'Move' : m === 'rotate' ? 'Turn' : 'Scale'}
+              </Button>
+            ))}
+          </div>
+          {numbers && (
+            <div className="rounded-md border px-2 py-1.5 font-mono text-[11px] leading-5" title="Where the tileset stands: the placement /stream takes (lon, lat, alt, heading, scale).">
+              <div>{numbers.lon.toFixed(6)}, {numbers.lat.toFixed(6)}</div>
+              <div>{numbers.alt.toFixed(1)} m · {numbers.heading.toFixed(1)}° · ×{numbers.scale.toFixed(3)}</div>
+              {!numbers.exact && (
+                <div className="text-amber-600 dark:text-amber-400" title="A tilt, or a scale that differs by axis, is not something the five numbers can say: the URL would drop it. The saved tileset keeps the exact transform.">
+                  {numbers.tilt >= 0.05 ? `tilted ${numbers.tilt.toFixed(1)}°` : 'scaled by axis'}: saved tileset only
+                </div>
+              )}
+            </div>
+          )}
+          <div className="flex gap-1">
+            <Button size="sm" variant="outline" className="flex-1" disabled={!placed?.streamUrl || !numbers}
+              title={placed?.streamUrl ? 'The stream URL with this placement as its lon, lat, alt, heading and scale: paste it into any 3D Tiles client.' : 'Only a /stream URL of a local dataset takes placement parameters. Save the tileset instead.'}
+              onClick={copyPlacedUrl}>
+              Copy placed URL
+            </Button>
+            <Button size="sm" variant="outline" className="flex-1" disabled={!placed?.sphere}
+              title="A tileset.json that holds the loaded tileset under this exact transform (burnt into its root). It points at the source, which must stay reachable."
+              onClick={savePlacedTileset}>
+              Save tileset
+            </Button>
+          </div>
+        </div>
+      )}
 
       <Separator className="my-1" />
 

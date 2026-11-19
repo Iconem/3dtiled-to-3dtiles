@@ -83,9 +83,12 @@ function writeUInt64LE(buf, off, v) { buf.writeUInt32LE(v >>> 0, off); buf.write
  * @param {string} rootKey
  * @param {{has:(key:string)=>boolean}} avail  anything with .has(key) over "level-x-y-z" keys
  * @param {number} subtreeLevels
+ * @param {(key:string)=>boolean} [hasContent]  does an available tile have content; every one does when omitted.
+ *   A COPC octree has nodes that hold no point, only children: a tile, but no content. Marked as content, each
+ *   was a request answered 404 for every client (143 of the 9 672 tiles of six AHN5 files).
  * @returns {Buffer}
  */
-export function buildSubtreeBuffer(rootKey, avail, subtreeLevels) {
+export function buildSubtreeBuffer(rootKey, avail, subtreeLevels, hasContent = null) {
   const { level: rootLevel, x: rootX, y: rootY, z: rootZ } = keyToCoords(rootKey);
   const tileCount = (Math.pow(8, subtreeLevels) - 1) / 7;          // levels 0..N-1
   const childSubtreeCount = Math.pow(8, subtreeLevels);            // nodes at depth N
@@ -98,8 +101,10 @@ export function buildSubtreeBuffer(rootKey, avail, subtreeLevels) {
     const absLevel = rootLevel + d, stride = 2 ** d, totalAtLevel = stride*stride*stride;
     for (let m = 0; m < totalAtLevel; m++) {
       const { x: dx, y: dy, z: dz } = mortonDecodeBig(BigInt(m));
-      if (avail.has(coordsToKey(absLevel, rootX*stride + dx, rootY*stride + dy, rootZ*stride + dz))) {
-        setBit(tileBits, bitIndex); setBit(contentBits, bitIndex);
+      const key = coordsToKey(absLevel, rootX*stride + dx, rootY*stride + dy, rootZ*stride + dz);
+      if (avail.has(key)) {
+        setBit(tileBits, bitIndex);
+        if (!hasContent || hasContent(key)) setBit(contentBits, bitIndex);
       }
       bitIndex++;
     }

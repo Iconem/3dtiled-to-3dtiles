@@ -7,6 +7,8 @@ export interface ExtractOptions {
   kind: ExtractKind;
   tilesetUrl: string; // the CURRENTLY LOADED tileset url (already resolved, not raw)
   bbox: [number, number, number, number, number, number]; // w,s,minH,e,n,maxH
+  /** the box turned about its centre, degrees clockwise from north */
+  heading?: number;
   maxGE: number;
   lasStream?: boolean;
   enuFrame?: boolean;
@@ -32,6 +34,7 @@ export function buildExtractUrl(o: ExtractOptions): string {
     extra += `&format=${o.splatFormat || 'spz'}`;
     if (!o.splatClip) extra += '&clip=0';
   }
+  if (o.heading) extra += `&heading=${o.heading}`;
   if (o.extractMatrix && o.extractMatrix.length === 16) extra += `&matrix=${o.extractMatrix.join(',')}`;
   return `${MW}/extract/${o.kind}?url=${encodeURIComponent(src)}&bbox=${o.bbox.join(',')}&maxGE=${o.maxGE}${extra}`;
 }

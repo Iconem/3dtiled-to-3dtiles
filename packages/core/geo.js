@@ -10,6 +10,7 @@ import proj4 from 'proj4';
 // WGS84 geodetic ↔ ECEF and the ENU basis live in ecef.js (no imports: the browser uses them too).
 import { DEG, llhToEcef, ecefToLlh, enuFrame } from './ecef.js';
 export { DEG, llhToEcef, ecefToLlh, enuFrame };
+import { placementMatrix } from './placement.js';
 
 /** Column-major ENU→ECEF placement matrix (columns East, North, Up, origin). */
 export const enuMatrix = (lon, lat, cx, cy, cz) => {
@@ -44,23 +45,9 @@ export function mat4Multiply(a, b) {
   return r;
 }
 
-/**
- * User-directed globe placement for a LOCAL (non-georeferenced) tileset: ENU frame at (lon°, lat°,
- * alt m) with an optional compass `heading` (degrees CLOCKWISE from north, rotating the dataset about
- * local Up) and uniform `scale`. Returns the column-major root `transform`. Compose it ON TOP of a
- * tileset's existing local-upright flip (mat4Multiply(placement, flip)) — the flip maps content →
- * upright Z-up local, this maps upright local → ECEF.
- */
-export function placementMatrix(lon, lat, alt = 0, heading = 0, scale = 1) {
-  const e = llhToEcef(lon, lat, alt);
-  let m = enuMatrix(lon, lat, e[0], e[1], e[2]);
-  if (heading) {                                   // compass CW → math-positive CCW about +Z (Up)
-    const h = -heading * DEG, c = Math.cos(h), s = Math.sin(h);
-    m = mat4Multiply(m, [c,s,0,0, -s,c,0,0, 0,0,1,0, 0,0,0,1]);
-  }
-  if (scale !== 1) m = mat4Multiply(m, [scale,0,0,0, 0,scale,0,0, 0,0,scale,0, 0,0,0,1]);
-  return m;
-}
+// placementMatrix (lon, lat, alt, heading, scale → the root transform) lives in placement.js, with its inverse: the
+// viewer's placement gizmo uses both, and that module has no imports a browser lacks.
+export { placementMatrix };
 
 /** True iff a root `transform` already places content at ECEF scale (translation ≫ any local frame). */
 export const isEcefPlaced = (t) => !!t && Math.hypot(t[12], t[13], t[14]) > 1e6;

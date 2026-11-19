@@ -29,6 +29,8 @@ export interface ExtractSink {
 export const IDENT: number[];
 export const SPLAT_FORMATS: string[];
 export function parseBbox(str: unknown): number[] | null;
+/** Turn a box about its centre, `heading` degrees clockwise from north; returns `bb` itself. */
+export function orientBox(bb: number[], heading?: number | string | null): number[];
 export function walkTileset(
   tilesetUrl: string, bb: number[],
   o: { maxGE?: number; maxDepth?: number; initM?: number[]; fetchBytes: (url: string) => Promise<Uint8Array>; signal?: AbortSignal },

@@ -892,7 +892,7 @@ const CesiumViewer = forwardRef<ViewerHandle, Props>(function CesiumViewer({ vis
           maxH = Math.round(centerCarto.height + bs.radius);
         }
       }
-      store.getState().setCrop({ w, s, e, n, minH, maxH });
+      store.getState().setCrop({ w, s, e, n, minH, maxH, heading: 0 });   // this renderer draws the plain box only
       store.getState().setMaxGE(ge);
       updateCropBoxInternal();
       return [w, s, store.getState().crop.minH, e, n, store.getState().crop.maxH];

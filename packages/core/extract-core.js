@@ -15,7 +15,8 @@
  * (apps/viewer/src/lib/browserExtract.ts) are both thin callers of this module. A tile that cannot be fetched or
  * read is skipped, and reported through `onSkip(tileUrl, error)` when given; a cancelled `signal` stops the walk.
  *
- * `bb` is GEOGRAPHIC: [west°, south°, minH m, east°, north°, maxH m]. The walk honours each tile's refine: **ADD**
+ * `bb` is GEOGRAPHIC: [west°, south°, minH m, east°, north°, maxH m], optionally turned about its centre
+ * (`orientBox(bb, heading)`: an oriented box, for a street or a building that does not run north-south). The walk honours each tile's refine: **ADD**
  * tiles contribute at every level down to `maxGE`; **REPLACE** tiles only at the refinement frontier (geometric error
  * ≤ maxGE, or a leaf). Explicit children, external tilesets and implicit tilings are followed.
  */
@@ -44,8 +45,40 @@ const bytesOf = (b) => (b instanceof Uint8Array ? b : new Uint8Array(b));
 const viewOf = (u8) => new DataView(u8.buffer, u8.byteOffset, u8.byteLength);
 const absUrl = (uri, base) => (/^https?:/i.test(uri) ? uri : new URL(uri, base).href);
 const isJsonUri = (uri) => /\.json(\?|$)/i.test(uri || '');
-export const inBbox = (lon, lat, h, bb) => lon >= bb[0] && lon <= bb[3] && lat >= bb[1] && lat <= bb[4] && h >= bb[2] && h <= bb[5];
-const overlap = (mn, mx, bb) => mx[0] >= bb[0] && mn[0] <= bb[3] && mx[1] >= bb[1] && mn[1] <= bb[4] && mx[2] >= bb[2] && mn[2] <= bb[5];
+/** Is a point (degrees, metres) inside the box? An oriented box (`orientBox`) is tested in its own turned axes. */
+export function inBbox(lon, lat, h, bb) {
+  if (h < bb[2] || h > bb[5]) return false;
+  const r = bb.rot;
+  if (!r) return lon >= bb[0] && lon <= bb[3] && lat >= bb[1] && lat <= bb[4];
+  const de = (lon - r.lon) * r.mLon, dn = (lat - r.lat) * r.mLat;        // metres east and north of the centre
+  return Math.abs(de * r.cos - dn * r.sin) <= r.halfE && Math.abs(de * r.sin + dn * r.cos) <= r.halfN;
+}
+// the lon/lat box that encloses an oriented one (`bb.outer`) is what whole tiles are tested against
+const overlap = (mn, mx, box) => { const bb = box.outer ?? box; return mx[0] >= bb[0] && mn[0] <= bb[3] && mx[1] >= bb[1] && mn[1] <= bb[4] && mx[2] >= bb[2] && mn[2] <= bb[5]; };
+
+const EARTH_R = 6378137;
+/**
+ * Turn a box about its centre: `heading` degrees clockwise from north, as a compass reads. The six numbers keep
+ * their meaning (the box before it is turned: its centre, and its size east-west and north-south in metres at that
+ * latitude); the turned box is what `inBbox` then tests. 0, or nothing, leaves the plain lon/lat box.
+ * @param {number[]} bb  [west°, south°, minH, east°, north°, maxH]
+ * @param {number} [heading]  degrees
+ * @returns {number[]} `bb` itself, with `rot` and `outer` set when turned
+ */
+export function orientBox(bb, heading) {
+  const h = Number(heading) || 0;
+  delete bb.rot; delete bb.outer;
+  if (!(Math.abs(h % 360) > 1e-9)) return bb;
+  const lon = (bb[0] + bb[3]) / 2, lat = (bb[1] + bb[4]) / 2, a = h / R2D;
+  const mLat = EARTH_R / R2D, mLon = mLat * Math.max(0.01, Math.cos(lat / R2D));
+  const halfE = (bb[3] - bb[0]) / 2 * mLon, halfN = (bb[4] - bb[1]) / 2 * mLat, cos = Math.cos(a), sin = Math.sin(a);
+  bb.rot = { heading: h, lon, lat, mLon, mLat, halfE, halfN, cos, sin };
+  // corners: u along the turned east axis (cos, −sin), v along the turned north axis (sin, cos), in (east, north)
+  const ext = (ax, ay) => Math.abs(halfE * ax) + Math.abs(halfN * ay);
+  const dE = ext(cos, sin), dN = ext(sin, cos);
+  bb.outer = [lon - dE / mLon, lat - dN / mLat, bb[2], lon + dE / mLon, lat + dN / mLat, bb[5]];
+  return bb;
+}
 const checkAbort = (signal) => { if (signal?.aborted) throw signal.reason ?? new Error('extract cancelled'); };
 
 /** `bbox=w,s,minH,e,n,maxH` → six numbers, or null when it is not that. */
@@ -206,8 +239,8 @@ async function rootOriginEcef(tilesetUrl, initM, fetchBytes) {
   } catch { return null; }
 }
 
-const cropRoot = (bb, children) => ({ asset: { version: '1.1' }, geometricError: 1e7,
-  root: { boundingVolume: { region: [bb[0]/R2D, bb[1]/R2D, bb[3]/R2D, bb[4]/R2D, bb[2], bb[5]] }, geometricError: 1e7, refine: 'ADD', children } });
+const cropRoot = (box, children) => { const bb = box.outer ?? box; return { asset: { version: '1.1' }, geometricError: 1e7,
+  root: { boundingVolume: { region: [bb[0]/R2D, bb[1]/R2D, bb[3]/R2D, bb[4]/R2D, bb[2], bb[5]] }, geometricError: 1e7, refine: 'ADD', children } }; };
 const UNIT_BOX = [0,0,0, 1,0,0, 0,1,0, 0,0,1];
 
 // ── cropped tileset (JSON only, tiles left where they are) ────────────────────────────────────────────────────────
@@ -234,7 +267,10 @@ export function crc32(u8) {
 
 /**
  * A STORE-mode (no compression) ZIP written as it goes: each entry's data is in hand before add(), so its crc and
- * size are in the local header. 32-bit sizes (zip32): fine for crops. Tiles are already compressed, so storing is right.
+ * size are in the local header. Tiles are already compressed, so storing is right. An entry is one tile, under
+ * 4 GB; the archive may be larger and hold more than 65 535 of them: an entry that starts past 4 GB carries its
+ * offset in a ZIP64 extra field, and the archive then ends with the ZIP64 end records (what 7-Zip, Windows, unzip
+ * 6 and Python read). An archive under both limits is byte for byte the plain ZIP it was.
  * @param {(bytes:Uint8Array)=>Promise<void>|void} write
  */
 export function zipStore(write) {
@@ -252,20 +288,34 @@ export function zipStore(write) {
       entries.push({ nameBuf, crc, size, localOffset });
     },
     async end() {
-      const cdStart = offset;
+      const cdStart = offset, MAX32 = 0xffffffff;
       for (const e of entries) {
-        const c = new Uint8Array(46), v = new DataView(c.buffer);
-        v.setUint32(0, 0x02014b50, true); v.setUint16(4, 20, true); v.setUint16(6, 20, true); v.setUint32(8, 0, true);
+        const far = e.localOffset >= MAX32;                  // its offset does not fit 32 bits: a ZIP64 extra field
+        const c = new Uint8Array(46 + (far ? 12 : 0)), v = new DataView(c.buffer);
+        v.setUint32(0, 0x02014b50, true); v.setUint16(4, far ? 45 : 20, true); v.setUint16(6, far ? 45 : 20, true); v.setUint32(8, 0, true);
         v.setUint32(12, 0, true); v.setUint32(16, e.crc, true); v.setUint32(20, e.size, true); v.setUint32(24, e.size, true);
-        v.setUint16(28, e.nameBuf.length, true); v.setUint32(30, 0, true); v.setUint32(34, 0, true); v.setUint32(38, 0, true); v.setUint32(42, e.localOffset, true);
-        await w(c); await w(e.nameBuf);
+        v.setUint16(28, e.nameBuf.length, true); v.setUint16(30, far ? 12 : 0, true); v.setUint16(32, 0, true); v.setUint32(34, 0, true); v.setUint32(38, 0, true);
+        v.setUint32(42, far ? MAX32 : e.localOffset, true);
+        await w(c.subarray(0, 46)); await w(e.nameBuf);
+        if (far) { v.setUint16(46, 0x0001, true); v.setUint16(48, 8, true); v.setBigUint64(50, BigInt(e.localOffset), true); await w(c.subarray(46)); }
+      }
+      const cdSize = offset - cdStart;
+      const zip64 = entries.length > 0xffff || cdStart >= MAX32 || cdSize >= MAX32;
+      if (zip64) {
+        const z = new Uint8Array(56 + 20), v = new DataView(z.buffer), at = offset;
+        v.setUint32(0, 0x06064b50, true); v.setBigUint64(4, 44n, true); v.setUint16(12, 45, true); v.setUint16(14, 45, true);   // ZIP64 end of central directory
+        v.setUint32(16, 0, true); v.setUint32(20, 0, true);
+        v.setBigUint64(24, BigInt(entries.length), true); v.setBigUint64(32, BigInt(entries.length), true);
+        v.setBigUint64(40, BigInt(cdSize), true); v.setBigUint64(48, BigInt(cdStart), true);
+        v.setUint32(56, 0x07064b50, true); v.setUint32(60, 0, true); v.setBigUint64(64, BigInt(at), true); v.setUint32(72, 1, true);   // its locator
+        await w(z);
       }
       const eocd = new Uint8Array(22), v = new DataView(eocd.buffer);
       v.setUint32(0, 0x06054b50, true); v.setUint16(4, 0, true); v.setUint16(6, 0, true);
-      v.setUint16(8, entries.length, true); v.setUint16(10, entries.length, true);
-      v.setUint32(12, offset - cdStart, true); v.setUint32(16, cdStart, true); v.setUint16(20, 0, true);
+      v.setUint16(8, Math.min(entries.length, 0xffff), true); v.setUint16(10, Math.min(entries.length, 0xffff), true);
+      v.setUint32(12, Math.min(cdSize, MAX32), true); v.setUint32(16, Math.min(cdStart, MAX32), true); v.setUint16(20, 0, true);
       await w(eocd);
-      return { entries: entries.length, bytes: offset };
+      return { entries: entries.length, bytes: offset, zip64 };
     },
   };
 }

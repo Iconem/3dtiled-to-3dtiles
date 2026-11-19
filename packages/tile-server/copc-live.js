@@ -340,7 +340,8 @@ export async function copcSubtree(url, key) {
     const { level, x, y, z } = keyToCoords(key);
     await ctx.ensureForSubtree(level, x, y, z);
   }
-  return buildSubtreeBuffer(key, ctx.nodeMap, SUBTREE_LEVELS);
+  // a node without points (it only has children) is a tile without content: the tile route answers 404 for it
+  return buildSubtreeBuffer(key, ctx.nodeMap, SUBTREE_LEVELS, (k) => (ctx.nodeMap.get(k)?.pointCount ?? 0) > 0);
 }
 
 // Direct /copc/* HTTP routes were removed 2026-07-02 — /stream/tileset.json?format=copc&url=<…> (+

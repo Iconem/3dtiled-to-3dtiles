@@ -4,7 +4,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import { Document, NodeIO } from '@gltf-transform/core';
 import { enuMatrix, llhToEcef, ecefToLlh } from '../core/index.js';
-import { walkTileset, extractLas, extractZip, extractTilesetJson, extractMeshDocument, parseBbox, crc32 } from '../core/extract-core.js';
+import { walkTileset, extractLas, extractZip, extractTilesetJson, extractMeshDocument, parseBbox, crc32, orientBox, inBbox, zipStore } from '../core/extract-core.js';
 import { zipDirectory, zipEntries } from '../sog-to-3dtiles/src/sogBundle.js';
 import { crc32 as nodeCrc32 } from 'node:zlib';
 
@@ -200,4 +200,59 @@ test('a cancelled extract stops at the next tile; an unreadable tile is skipped'
   broken.deps.fetchBytes = async (url) => { if (/west/.test(url)) throw new Error('503'); return broken.fetchBytes(url); };
   const out = chunksSink();
   assert.equal((await extractLas({ url: B + 'ts.json', bb: EVERYWHERE, deps: broken.deps }, out.sink)).points, 5);
+});
+
+test('an oriented box: the same box turned about its centre', () => {
+  // 200 m east-west by 20 m north-south, turned 45°: its long axis now runs from north-west to south-east
+  const at = (e, n) => [LON + e / M_PER_DEG_LON, LAT + n / M_PER_DEG_LAT, 0];
+  const plain = boxM(-100, -10, 100, 10);
+  assert.equal(inBbox(...at(90, 0), plain), true);
+  assert.equal(inBbox(...at(60, -60), plain), false);
+  const turned = orientBox(boxM(-100, -10, 100, 10), 45);
+  assert.equal(inBbox(...at(90, 0), turned), false, 'the old east end is outside');
+  assert.equal(inBbox(...at(60, -60), turned), true, 'a compass heading of 45° swings the east end to the south-east');
+  assert.equal(inBbox(...at(-60, 60), turned), true);
+  assert.equal(inBbox(...at(60, 60), turned), false);
+  assert.equal(inBbox(...at(60, -60).slice(0, 2), 2e4, turned), false, 'heights still clip');
+  // the enclosing lon/lat box holds its corners, and a heading of 0 or 360 is the plain box
+  const [w, s0, , e, n] = turned.outer;
+  assert.ok(Math.abs((e - w) / 2 * M_PER_DEG_LON - 77.8) < 1.5 && Math.abs((n - s0) / 2 * M_PER_DEG_LAT - 77.8) < 1.5, 'half a diagonal each way');
+  assert.equal(orientBox(boxM(-100, -10, 100, 10), 0).rot, undefined);
+  assert.equal(orientBox(boxM(-100, -10, 100, 10), 360).rot, undefined);
+});
+
+test('an oriented box crops points and prunes tiles by its enclosing box', async () => {
+  const pts = [[60, -60, 0], [90, 0, 0], [-60, 60, 0], [0, 0, 0]];
+  const files = { 'ts.json': json({ asset: { version: '1.1' }, geometricError: 10, root: { transform: ROOT_M, boundingVolume: { box: box(0, 0, 120) }, geometricError: 0, refine: 'ADD', content: { uri: 'a.glb' } } }),
+    'a.glb': await pointsGlb(pts) };
+  const fetchBytes = async (u) => files[u.split('/').pop()];
+  const readGlb = (b) => io.readBinary(b);
+  const chunks = [];
+  const r = await extractLas({ url: 'http://x/ts.json', bb: orientBox(boxM(-100, -10, 100, 10), 45), maxGE: 0, twoPass: true, deps: { fetchBytes, readGlb } }, { write: (b) => { chunks.push(b); } });
+  assert.equal(r.points, 3, 'the three points along the turned axis; (90, 0) is out');
+});
+
+test('zip: more than 65 535 entries end with the ZIP64 records, fewer do not', async () => {
+  const run = async (n) => {
+    const parts = []; const zip = zipStore((b) => { parts.push(Buffer.from(b)); });
+    const one = new Uint8Array([7]);
+    for (let i = 0; i < n; i++) await zip.add(`t/${i}`, one);
+    const end = await zip.end();
+    return { end, file: Buffer.concat(parts) };
+  };
+  const small = await run(3);
+  assert.equal(small.end.zip64, false);
+  assert.equal(small.file.readUInt32LE(small.file.length - 22), 0x06054b50);
+  assert.equal(small.file.readUInt16LE(small.file.length - 22 + 10), 3);
+  const big = await run(70000);
+  assert.equal(big.end.zip64, true);
+  const f = big.file, eocd = f.length - 22, loc = eocd - 20, z = loc - 56;
+  assert.equal(f.readUInt16LE(eocd + 10), 0xffff, 'the 16-bit count is the marker');
+  assert.equal(f.readUInt32LE(loc), 0x07064b50);
+  assert.equal(Number(f.readBigUInt64LE(loc + 8)), z, 'the locator points at the ZIP64 end record');
+  assert.equal(f.readUInt32LE(z), 0x06064b50);
+  assert.equal(Number(f.readBigUInt64LE(z + 32)), 70000);
+  const cdStart = Number(f.readBigUInt64LE(z + 48));
+  assert.equal(f.readUInt32LE(cdStart), 0x02014b50, 'the central directory is where the record says');
+  assert.equal(f.readUInt32LE(eocd + 16), cdStart, 'and still fits the 32-bit field here');
 });

@@ -43,10 +43,46 @@ drift apart.
 - Since 2026-11-18 the worker also writes **SOG** (splat-transform's WebP encoder, 350 KB of wasm) and reads
   **Draco** tiles (the decoder, 190 KB of wasm, is fetched at the first tile that needs it). Checked headless: the
   gargoyle served with `transform=draco`, 96 tiles, none skipped; the skatepark's first level written as a 0.97 MB
-  SOG. The SOG was not read back, and neither was timed on a large scene.
+  SOG. The SOG was read back on 2026-11-19 (splat-transform, in Node): 83 585 splats, as many as the SPZ of the same
+  extract, positions within 0.016 units of it (SOG's quantisation). Neither was timed on a large scene.
 - The **file dialog itself** was not exercised by the automated check (it needs a real click); the writing behind
   it was, through a file handle of the browser's private storage.
-- Not measured: a multi-gigabyte extract, and memory while it runs.
+
+**A multi-gigabyte extract (2026-11-19).** Six of the nine AHN5 tiles of Amsterdam (a VPC of COPC files) cropped
+to a box and written as LAS in headless Chrome, through the same file handle a picked file gets:
+
+| | |
+|---|---|
+| Points, tiles | 150 387 092 points from 9 529 tiles |
+| File | 5.41 GB (5.04 GiB); its size is exactly what its header says (offset to points + count × record length) |
+| Time | 22 minutes, a steady 114 000 points a second; the whole of Autzen (10.65 M points, 0.36 GB) took 86 s at 124 000 |
+| Memory | the page's JavaScript heap stayed at 152 MB from the first minute to the last; Chrome as a whole (all its processes, the worker's and the GPU's included) peaked at 1.44 GB |
+| Nothing lost | one of the six files extracted whole gives 28 721 134 points, the count in its own header |
+
+What it turned up:
+
+- **A zip past 4 GB was not a valid archive**: the writer was ZIP32. It now writes ZIP64 where needed (an entry
+  that starts past 4 GB, more than 65 535 entries), and an archive under both limits is byte for byte what it was.
+  A real 5.1 GB archive written by it was read back with Python's `zipfile`, the entry past 4 GB with its CRC.
+- **143 tiles were skipped with a 404.** They are octree nodes that hold no point, only children; the implicit
+  tiling of a COPC stream marked them as having content, so every client asked for them. Fixed in the subtrees
+  (`core/tiling.js`): such a node is a tile without content.
+- **A merged GLB and a splat file are still built in memory** before they are written: they are bounded by the
+  tab's memory (and a GLB by its 4 GB format limit), not by the disk. LAS, the zip and the cropped tileset are not.
+
+**An oriented box (2026-11-19).** The box can be turned about its centre (`heading`, degrees clockwise from north;
+`orientBox` in `extract-core.js`): points are tested in the turned axes, whole tiles against the lon/lat box that
+encloses it. Checked on Autzen with a 600 m by 60 m box at four headings, in the browser and on the server:
+
+| Heading | Points, browser | Points, server | Extent of the result, east × north |
+|---|---|---|---|
+| 0° | 313 600 | 313 600 | 601 m × 60 m |
+| 45° | 281 793 | 281 793 | 467 m × 465 m |
+| 90° | 244 846 | 244 846 | 60 m × 599 m |
+| 360° | 313 600 | 313 600 | 601 m × 60 m |
+
+In the viewer the gizmo's rotate mode turns the box and *Set box to view* turns it to the camera (a camera heading
+of −43.2° gave a box at −43.2°).
 
 ## Where we are
 
@@ -86,8 +122,8 @@ The walk fetches tiles itself; it does not read what the renderer has on screen,
 view-dependent mix of levels and an extract must be complete at one level. Tiles the browser already downloaded
 come back from its HTTP cache.
 
-**The box** comes from the existing section (west, south, east, north, heights), or an oriented box from the
-gizmo. Same parameters as the server, so one form drives both.
+**The box** comes from the existing section (west, south, east, north, heights, and a heading that turns it), or
+from the gizmo. Same parameters as the server, so one form drives both.
 
 **Writing the file.** Extracts can be gigabytes, so output is streamed where the browser allows:
 

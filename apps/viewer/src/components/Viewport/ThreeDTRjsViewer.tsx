@@ -56,6 +56,7 @@ import { acceleratedRaycast, computeBoundsTree, disposeBoundsTree } from 'three-
 import type { ViewerHandle } from '@/lib/viewer-handle';
 import { MW, type AssetType } from '@/lib/formats';
 import { defaultSseFor } from '@/lib/utils';
+import { decomposePlacement, isStreamUrl, streamUrlPlacement } from '../../../../../packages/core/placement.js';
 import { CESIUM_ION_TOKEN } from '@/lib/ion';
 import { GOOGLE_MAPS_API_KEY } from '@/lib/google';
 import { ecefToPose, poseToEcef, type CameraPose } from '@/lib/cameraPose';
@@ -543,8 +544,8 @@ function enuAxes(lat: number, lon: number) {
 
 /**
  * The crop box in 3D, two-way with the sidebar's numbers (store.crop): it follows them, and a drag
- * writes back on release, so what is extracted is what is drawn. The box is a lon/lat box, so a
- * rotation has no meaning for it and snaps back on release.
+ * writes back on release, so what is extracted is what is drawn. The box may be turned about the
+ * vertical (store.crop.heading, an oriented box); a tilt has no meaning for it and snaps back on release.
  */
 function CropGizmo({ tilesRef, pickScene }: { tilesRef: React.MutableRefObject<TilesRendererImpl | null>; pickScene: THREE.Object3D | null }) {
   // state, not a ref: TransformControls needs the mesh on the render it mounts, and the placement
@@ -557,7 +558,7 @@ function CropGizmo({ tilesRef, pickScene }: { tilesRef: React.MutableRefObject<T
 
   const place = useCallback(() => {
     if (!box) return;
-    const { w, s, e, n, minH, maxH } = useViewerStore.getState().crop;
+    const { w, s, e, n, minH, maxH, heading } = useViewerStore.getState().crop;
     if ([w, s, e, n, minH, maxH].some((v) => Number.isNaN(v))) return;
     const lat = THREE.MathUtils.degToRad((s + n) / 2), lon = THREE.MathUtils.degToRad((w + e) / 2);
     WGS84_ELLIPSOID.getCartographicToPosition(lat, lon, (minH + maxH) / 2, box.position);
@@ -566,6 +567,8 @@ function CropGizmo({ tilesRef, pickScene }: { tilesRef: React.MutableRefObject<T
     const up = WGS84_ELLIPSOID.getPositionToNormal(box.position, new THREE.Vector3());
     const { east, north } = enuAxes(lat, lon);
     box.quaternion.setFromRotationMatrix(new THREE.Matrix4().makeBasis(east, up, north.clone().negate()));
+    // the heading: clockwise from north seen from above, so a negative turn about the box's own up (its Y)
+    box.quaternion.multiply(new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 1, 0), -THREE.MathUtils.degToRad(heading || 0)));
     const R = 6378137;
     box.scale.set(
       Math.max(1, THREE.MathUtils.degToRad(e - w) * R * Math.cos(lat)),
@@ -585,8 +588,12 @@ function CropGizmo({ tilesRef, pickScene }: { tilesRef: React.MutableRefObject<T
     const halfLat = THREE.MathUtils.radToDeg(Math.abs(box.scale.z) / 2 / R);
     const halfLon = THREE.MathUtils.radToDeg(Math.abs(box.scale.x) / 2 / (R * Math.max(0.01, Math.cos(c.lat))));
     const halfH = Math.abs(box.scale.y) / 2;
-    useViewerStore.getState().setCrop({ w: lon - halfLon, e: lon + halfLon, s: lat - halfLat, n: lat + halfLat, minH: Math.round(c.height - halfH), maxH: Math.round(c.height + halfH) });
-    place();                                                    // a rotation snaps back; crop may be unchanged
+    // Its turn about the vertical: where its own X axis points, in east and north at the place it now is.
+    const { east, north } = enuAxes(c.lat, c.lon);
+    const x = new THREE.Vector3(1, 0, 0).applyQuaternion(box.quaternion);
+    const heading = Math.round(THREE.MathUtils.radToDeg(Math.atan2(-x.dot(north), x.dot(east))) * 10) / 10;
+    useViewerStore.getState().setCrop({ w: lon - halfLon, e: lon + halfLon, s: lat - halfLat, n: lat + halfLat, minH: Math.round(c.height - halfH), maxH: Math.round(c.height + halfH), heading: Object.is(heading, -0) ? 0 : heading });
+    place();                                                    // a tilt snaps back; crop may be unchanged
   }, [box, place]);
 
   if (!on || !pickScene || !tilesRef.current) return null;
@@ -903,9 +910,10 @@ const Scene = forwardRef<ViewerHandle, { loadArgs: LoadArgs; tooltip: TooltipCha
       const anchor = new THREE.Vector3();
       ellipsoidForAnchor.getCartographicToPosition(THREE.MathUtils.degToRad(lat), THREE.MathUtils.degToRad(lon), alt, anchor);
       const up = ellipsoidForAnchor.getPositionToNormal(anchor, new THREE.Vector3());
-      const helper = Math.abs(up.y) < 0.99 ? new THREE.Vector3(0, 1, 0) : new THREE.Vector3(1, 0, 0);
-      const east = new THREE.Vector3().crossVectors(helper, up).normalize();
-      const north = new THREE.Vector3().crossVectors(up, east).normalize();
+      // True east and north, as the server's placement (&lon=&lat=) and the Cesium renderer use: a local scene then
+      // faces the same way in all three. (An axis picked off the scene's Y, as before, left it turned by an angle
+      // that depends on where it is: 46 degrees at the default frame.)
+      const { east, north } = enuAxes(THREE.MathUtils.degToRad(lat), THREE.MathUtils.degToRad(lon));
       // A tileset's OWN local frame is Z-up, not Y-up — glTF content (Y-up per spec) already went
       // through the standard Y-up→Z-up conversion one level below `tiles.group` when it was loaded as
       // a tile, and every already-working root `transform` in this codebase confirms it: geo.js's
@@ -1937,7 +1945,7 @@ const Scene = forwardRef<ViewerHandle, { loadArgs: LoadArgs; tooltip: TooltipCha
         const ground = ellipsoid.intersectRay(raycaster.ray, new THREE.Vector3());
         if (ground) corners.push(ground);
       }
-      let w: number, e: number, s: number, n: number, minH: number, maxH: number;
+      let w: number, e: number, s: number, n: number, minH: number, maxH: number, heading = 0;
       if (corners.length) {
         // Project each corner into a local East-North-Up tangent frame at their centroid and take
         // min/max in TRUE east/north METERS there, rather than raw lon/lat min/max — plain degree
@@ -1954,7 +1962,15 @@ const Scene = forwardRef<ViewerHandle, { loadArgs: LoadArgs; tooltip: TooltipCha
         center.divideScalar(corners.length);
         const centerCarto: any = {};
         ellipsoid.getPositionToCartographic(center, centerCarto);
-        const { east, north } = enuAxes(centerCarto.lat, centerCarto.lon);
+        const { east: geoEast, north: geoNorth } = enuAxes(centerCarto.lat, centerCarto.lon);
+        // The box is turned to the camera's heading (an oriented box), so its sides follow the screen's: the way
+        // the camera looks along the ground, or its up vector when it looks straight down.
+        const look = camera.getWorldDirection(new THREE.Vector3());
+        let he = look.dot(geoEast), hn = look.dot(geoNorth);
+        if (Math.hypot(he, hn) < 0.2) { const camUp = new THREE.Vector3(0, 1, 0).applyQuaternion(camera.quaternion); he = camUp.dot(geoEast); hn = camUp.dot(geoNorth); }
+        const headingRad = Math.atan2(he, hn), ch = Math.cos(headingRad), sh = Math.sin(headingRad);
+        const east = geoEast.clone().multiplyScalar(ch).addScaledVector(geoNorth, -sh);    // the box's own east and north
+        const north = geoEast.clone().multiplyScalar(sh).addScaledVector(geoNorth, ch);
         let minE = Infinity, maxE = -Infinity, minN = Infinity, maxN = -Infinity;
         const heights: number[] = [];
         const rel = new THREE.Vector3();
@@ -1969,10 +1985,14 @@ const Scene = forwardRef<ViewerHandle, { loadArgs: LoadArgs; tooltip: TooltipCha
         }
         const R = 6378137;
         const cosLat = Math.max(0.1, Math.cos(centerCarto.lat));
-        w = THREE.MathUtils.radToDeg(centerCarto.lon + minE / (R * cosLat));
-        e = THREE.MathUtils.radToDeg(centerCarto.lon + maxE / (R * cosLat));
-        s = THREE.MathUtils.radToDeg(centerCarto.lat + minN / R);
-        n = THREE.MathUtils.radToDeg(centerCarto.lat + maxN / R);
+        // the box's centre, back in true east and north, then its half sizes along its own axes
+        const midE = (minE + maxE) / 2, midN = (minN + maxN) / 2, halfE = (maxE - minE) / 2, halfN = (maxN - minN) / 2;
+        const cE = midE * ch + midN * sh, cN = -midE * sh + midN * ch;
+        w = THREE.MathUtils.radToDeg(centerCarto.lon + (cE - halfE) / (R * cosLat));
+        e = THREE.MathUtils.radToDeg(centerCarto.lon + (cE + halfE) / (R * cosLat));
+        s = THREE.MathUtils.radToDeg(centerCarto.lat + (cN - halfN) / R);
+        n = THREE.MathUtils.radToDeg(centerCarto.lat + (cN + halfN) / R);
+        heading = Math.round(THREE.MathUtils.radToDeg(headingRad) * 10) / 10;
         // Five points of a surface say little about the height of what stands on it: a flat view would
         // give a box with no height, and an extract of nothing. A quarter of its width above and below, up to 1 km.
         const pad = THREE.MathUtils.clamp(0.25 * Math.max(maxE - minE, maxN - minN), 10, 1000);
@@ -1993,7 +2013,7 @@ const Scene = forwardRef<ViewerHandle, { loadArgs: LoadArgs; tooltip: TooltipCha
         w = centerLon - dLon; e = centerLon + dLon; s = centerLat - dLat; n = centerLat + dLat;
         minH = centerCarto.height - sphere.radius; maxH = centerCarto.height + sphere.radius;
       }
-      store.getState().setCrop({ w, s, e, n, minH: Math.round(minH), maxH: Math.round(maxH) });
+      store.getState().setCrop({ w, s, e, n, minH: Math.round(minH), maxH: Math.round(maxH), heading });
       return [w, s, store.getState().crop.minH, e, n, store.getState().crop.maxH];
     },
     getExtractMatrix() {
@@ -2041,6 +2061,31 @@ const Scene = forwardRef<ViewerHandle, { loadArgs: LoadArgs; tooltip: TooltipCha
     hideCropGizmo() { store.getState().setCropGizmoOn(false); },
     showTilesetGizmo() { store.getState().setTilesetGizmoOn(true); },
     hideTilesetGizmo() { store.getState().setTilesetGizmoOn(false); },
+    getTilesetPlacement() {
+      const tiles = tilesRef.current;
+      const url = store.getState().lastLoadUrl;
+      if (!tiles || !url) return null;
+      const g = tiles.group;
+      g.updateMatrix();
+      const matrix = Array.from(g.matrix.elements);
+      const moved = matrix.some((v, i) => Math.abs(v - (i % 5 === 0 ? 1 : 0)) > 1e-9);
+      // The five numbers describe the placement the SERVER applies. A /stream URL that already carries one is moved
+      // by the group's matrix on top of it; a local scene has none yet, and the group's matrix (the local frame's
+      // anchor, then the gizmo) is it. A source placed by its own data takes no such parameters.
+      const own = isStreamUrl(url) ? streamUrlPlacement(url) : null;
+      const local = !!needsEnuAnchorRef.current;
+      const numbers = own ? decomposePlacement(new THREE.Matrix4().fromArray(matrix).multiply(new THREE.Matrix4().fromArray(own)).elements)
+        : local ? decomposePlacement(matrix) : null;
+      const sphere = new THREE.Sphere();
+      const hasSphere = (tiles as any).getBoundingSphere(sphere);
+      return {
+        numbers, matrix, moved,
+        sphere: hasSphere ? [sphere.center.x, sphere.center.y, sphere.center.z, sphere.radius] : null,
+        geometricError: Number((tiles as any).root?.geometricError) || 0,
+        streamUrl: isStreamUrl(url) && numbers ? url : null,
+        url,
+      };
+    },
   }), [camera, invalidate, frameToTileset, applyZOffsetInternal, animateCameraTo, snapToGroundInternal, fitPointHeights]);
 
   /**
@@ -2334,6 +2379,7 @@ const ThreeDTRjsViewer = forwardRef<ViewerHandle, Props>(function ThreeDTRjsView
     hideCropGizmo: () => sceneRef.current?.hideCropGizmo?.(),
     showTilesetGizmo: () => sceneRef.current?.showTilesetGizmo?.(),
     hideTilesetGizmo: () => sceneRef.current?.hideTilesetGizmo?.(),
+    getTilesetPlacement: () => sceneRef.current?.getTilesetPlacement?.() ?? null,
   }), [whenScene]);
 
   return (

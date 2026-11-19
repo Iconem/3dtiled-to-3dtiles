@@ -36,14 +36,33 @@ symbolic links kept inside the install folder, long names), as it does zips. Dow
 samples): gocesiumtiler, rusty-tiles (points and mesh), Obj2Tiles, py3dtiles with its fetched uv and Python, mago
 3DTiler with its fetched Java runtime, Nexus once `libgl1` was installed. The package's tests pass there too.
 
+**Tried on four systems** the same day, on GitHub's runners (`.github/workflows/tilers-platforms.yml`, started by
+hand; it runs `scripts/tilers-smoke.sh`): every downloadable tool installed by the package, then run on the tiny
+samples.
+
+| Tool | Linux x64 | Linux arm64 | macOS arm64 | macOS x64 |
+|---|---|---|---|---|
+| gocesiumtiler (points and splats), rusty-tiles (points and mesh) | ran | ran | ran | no build published |
+| point-tiler, Obj2Tiles, py3dtiles, mago 3DTiler, splat-transform, 3DGS PLY converter | ran | ran | ran | ran |
+| Nexus | ran | ran | no build published | no build published |
+| PotreeConverter 2 | no build published | no build published | no build published | no build published |
+
+The first run found three faults, fixed since, and the run that followed passed on all four:
+
+- **splat-transform stopped on a machine without a GPU, also with *Device: cpu***. Version 3.11 opens a device for
+  a plain decimation as well as an adaptive one, and the device asked for was only passed to the adaptive one. It
+  now reaches every decimation step: with *Device: cpu* the levels are made on a server or a runner.
+- **mago 3DTiler ran out of Java heap** on the macOS arm64 runner (7 GB of memory) with 20 000 points: a JVM takes a
+  quarter of the machine's memory by default. Java tools are now started with `-XX:MaxRAMPercentage=70`.
+- **py3dtiles did not install on Intel macOS**: numba 0.63 (llvmlite 0.46) ships no wheel for it and its source
+  build fails. The install holds numba below 0.63 there.
+
 **Not tried:**
 
-- **macOS, and arm64 on either system**: nothing was run. The entries are the checksums GitHub publishes for each
-  asset, and the path of the program inside each archive was read off the archive itself. An unsigned binary may
-  need allowing in *Privacy & Security* the first time.
+- **The desktop app itself on macOS or Linux** (its installer, its window): the runs above are the tiler package
+  through the CLI. An unsigned binary may need allowing in *Privacy & Security* the first time on a Mac with a
+  screen, which a runner does not show.
 - pg2b3dm (it needs a database), the QGIS lookups on macOS and Linux, and a Rust toolchain fetched for a build.
-- splat-transform's levels of detail need a GPU: in a container without one, the run stops with *Unable to
-  retrieve a WebGPU adapter*, also with *Device: cpu*.
 
 **`pdal_wrench build_vpc`** (QGIS ships it): a folder of LAS, LAZ or COPC files becomes one virtual point cloud
 (`.vpc`), an index of the files and not a copy. Tried on two COPC tiles cut from the sample cloud: the `.vpc` is
