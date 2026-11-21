@@ -271,6 +271,13 @@ ending in `.3tz` typed in the field loads the same way. Cesium has no such plugi
 | **tastier .3tz (ZIP+index)** | `sample-data/input/3DTILES-PACKAGES/tastier.3tz` (bundled) |
 | **tastier .3dtiles (SQLite)** | `sample-data/input/3DTILES-PACKAGES/tastier.3dtiles` (bundled) |
 | **loaders.gl test.3tz (mesh)** | `sample-data/input/3DTILES-PACKAGES/loadersgl-test.3tz` (bundled) |
+| **loaders.gl test.3tz (mesh, hosted)** | loaders.gl's own test archive on raw.githubusercontent.com |
+| **lion .3tz (implicit octree, hosted)** | Potree's lion, packed, in [3dtiles-samples](https://github.com/jo-chemla/3dtiles-samples) on raw.githubusercontent.com |
+
+Each `.3tz` also has an *in place (3tz plugin)* pill: the browser reads the archive itself by range requests. The
+hosted two work on any deployment; the bundled ones only where `sample-data/` is served (the dev server answers
+range requests since 2026-11-21). A host must answer `Range` without compressing the file: GitHub Pages gzips a
+`.3tz` and then applies the range to the gzipped bytes, raw.githubusercontent.com does not.
 
 ### GeoSplats ✨, Bing 3D 🗺, 3MX 🏛
 

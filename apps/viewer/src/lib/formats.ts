@@ -98,6 +98,11 @@ export const TOOLS_DATASETS: Record<string, Asset[]> = {
     { id: 'tastier-3tz', label: 'tastier .3tz (ZIP+index)', type: 'splat', pkg: 'sample-data/input/3DTILES-PACKAGES/tastier.3tz' },
     { id: 'tastier-3dtiles', label: 'tastier .3dtiles (SQLite)', type: 'splat', pkg: 'sample-data/input/3DTILES-PACKAGES/tastier.3dtiles' },
     { id: 'loadersgl-3tz', label: 'loaders.gl test.3tz (mesh)', type: 'mesh', pkg: 'sample-data/input/3DTILES-PACKAGES/loadersgl-test.3tz' },
+    // Hosted with CORS and range requests, so they also open on a deployment that ships no sample-data:
+    // loaders.gl's own test archive (raw GitHub), and Potree's lion as an implicit octree (raw GitHub: GitHub Pages gzips a .3tz and then
+    // applies ranges to the gzipped bytes).
+    { id: 'loadersgl-3tz-web', label: 'loaders.gl test.3tz (mesh, hosted)', type: 'mesh', pkg: 'https://raw.githubusercontent.com/visgl/loaders.gl/master/modules/tiles-3d/test/3d-tiles/data/test.3tz' },
+    { id: 'lion-3tz-web', label: 'lion .3tz (implicit octree, hosted)', type: 'pointcloud', pkg: 'https://raw.githubusercontent.com/jo-chemla/3dtiles-samples/main/lion_takanawa/lion_takanawa.3tz' },
   ],
 };
 

@@ -30,6 +30,17 @@ viewer for point clouds). Two things follow.
 - **So a box larger than its content is expensive.** A camera standing inside an inflated box refines the tile
   every time. This is what made a streamed SOG with a sky box load its finest level everywhere: every tile above a
   sky leaf had the 40 km cube as its box. Tight boxes matter as much as the error itself.
+- **Inside a box, only the chain of nodes around the camera goes to full depth.** Being inside the root's box
+  forces the root to refine, and nothing more: each child is then judged on its own box. In an octree the eight
+  children tile their parent exactly, so the camera is inside one node per level, and that chain (about one node
+  per level) goes to the finest level. The siblings are judged by the distance to their boxes, as usual. That is
+  how interiors (a building, a cave, a nave) work in both renderers.
+- **What an octree does cost: its boxes are the cells, not the content.** An explicit tileset can fit each box to
+  what it holds; an octree node's box is its whole cell, empty corners included. Distances are then measured to
+  empty space, so a node is judged nearer than its points are, and the neighbours of the camera's cell (distance
+  near 0 across a shared face) refine almost as if the camera were inside them. Interiors and sparse scans pay most.
+  Neither COPC nor Potree 2 stores a node's real extent in its hierarchy, so a fitted box would mean reading each
+  node before announcing it; today the tile servers send the cell.
 
 A source that says "replace this node once its bounding sphere is N pixels across" is reproduced by
 `geometricError = 2 × radius × 16 ÷ N`: the sphere is N pixels across at the distance where that error is 16 px
@@ -182,6 +193,31 @@ What the numbers say, and what they do not:
   mosaic's root is then refined only from about 110 m (1080 px screen), so nothing shows from afar. The count that would be needed
   is that of the file's root node, which the `.vpc` does not give. A VPC with an overview, or with `&leafError=`,
   is not changed by the parameter.
+
+### Does it load faster? Measured in the viewer (2026-11-21)
+
+Headless Chrome on this laptop (no GPU), local tile server, the viewer's own framed view of each preset, the same
+camera both ways; one run per dataset first to warm the tile server, then box, density, box, density. *Settled* is
+the moment the renderer last had a tile queued, downloading or parsing; bytes are what the tile server sent. Times
+include the network to each source, so the ratios matter, not the seconds.
+
+| Preset | Box rule | `&ge=density` | |
+|---|---|---|---|
+| I3S, New York buildings | 227 tiles, 517 MB, settled at 16 to 22 s | 70 tiles, 160 MB, 6 to 7 s | 3.2× fewer bytes, about 3× sooner |
+| I3S, Rancho mesh (SceneServer) | 12 tiles, 39 to 41 MB, 6 to 6.5 s | 4 tiles, 9.8 MB, 2.5 to 3 s | 4× fewer bytes, about 2× sooner |
+| LCC2, Tunis | 167 tiles, 271 to 300 MB, 72 to 73 s | 159 tiles, 162 MB, 70 to 76 s | 1.7 to 1.9× fewer bytes, same time (bound by the source) |
+| LCC, Sutro Tower | 120 tiles, 53 MB | the same | every tile is wanted at this view either way |
+| LCC2, Unreal street | 17 tiles, 42 MB | the same | the same |
+| GeoSplats, Jastrzębia Góra | 86 tiles, then stuck | 737 tiles, 454 MB, still loading at 180 s | see below |
+
+- **I3S is where the option pays**, as the errors above predicted: the layer's own thresholds refine far later than
+  the size of the box does.
+- **GeoSplats is not faster either way, and the box run only looks it.** With the box rule the renderer wanted
+  1 563 leaf tiles; it filled its 1 000 MB cache with 86 coarse ones (1 018 MB) and refused 1 799 more, so it stopped
+  on the coarsest level. With density it wants about 500 and loads them. What drives both is the viewer's splat
+  target, 0.5 px; what each mode then shows was not compared.
+- Not measured: frame rate (no GPU), a moving camera, and whether the picture at the density target is fine
+  enough.
 
 Formats for which `&ge=density` changes the answer: `i3s`, `lcc`, `lcc2`, `geosplats`, and `vpc` when the set shows
 no overview and has no `&leafError=`. All others ignore it (for Nexus, `ge` is a number, its own error factor).

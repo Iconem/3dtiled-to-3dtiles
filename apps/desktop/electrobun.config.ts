@@ -44,9 +44,11 @@ export default {
 			// machine that has them. See the README for the full credential list.
 			codesign: process.env.ELECTROBUN_CODESIGN === "1",
 			notarize: process.env.ELECTROBUN_NOTARIZE === "1",
-			// A DMG is only meaningful for a signed distributable; local prototype builds just want
-			// the .app bundle, and building a DMG every time is slow.
-			createDmg: process.env.ELECTROBUN_CODESIGN === "1",
+			// A DMG for a signed build, and for the CI build that is released (ELECTROBUN_DMG=1, set by
+			// desktop-unix.yml): unsigned, it still beats a .tar.zst for a person (open it, drag the app to
+			// Applications), though the first launch then asks for Open Anyway. Local prototype builds just
+			// want the .app bundle, and building a DMG every time is slow.
+			createDmg: process.env.ELECTROBUN_CODESIGN === "1" || process.env.ELECTROBUN_DMG === "1",
 		},
 		linux: {
 			bundleCEF: false,

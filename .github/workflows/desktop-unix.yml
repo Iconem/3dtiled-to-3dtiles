@@ -61,7 +61,14 @@ jobs:
           hutch run view
           export DESKTOP_BUNDLE_MAP="$PWD/bundle/copy-map.json"
           export BUILD_VERSION="$(date -u +%Y.%-m.%-d)"
+          # macOS: a .dmg beside Electrobun's update archive, for people (electrobun.config.ts)
+          export ELECTROBUN_DMG=1
           hutch electrobun build --env=stable
+          # a DMG named without its platform would be skipped by the publish step below
+          for f in artifacts/*.dmg; do
+            [ -e "$f" ] || continue
+            case "$(basename "$f")" in *macos-*) ;; *) mv "$f" "artifacts/macos-arm64-$(basename "$f")" ;; esac
+          done
           echo "--- artifacts"; ls -la artifacts || true
           echo "--- build"; find build -maxdepth 3 | head -60
 

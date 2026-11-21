@@ -87,6 +87,7 @@ export function httpSource( url, options = {} ) {
 	let requests = 0;
 	let bytes = 0;
 	let etag = null;
+	let headTried = false; // 3dtiled: the size from a HEAD, once (see tail)
 	const pending = new Set();
 
 	// Every error leaves with the range asked and, when a response came, its
@@ -137,6 +138,19 @@ export function httpSource( url, options = {} ) {
 			ranges = true;
 			const match = /^bytes (\d+)-(\d+)\/(\d+)\s*$/.exec( res.headers.get( 'content-range' ) || '' );
 			const bad = () => new Error( `${ url }: the answer to Range ${ range } does not match it (Content-Range: ${ res.headers.get( 'content-range' ) }).` );
+			// 3dtiled: a cross-origin host that does not list Content-Range in Access-Control-Expose-Headers
+			// (GitHub Pages, raw.githubusercontent.com) hides it from the page. For a plain `bytes=a-b` asked
+			// at a known offset, the 206 and the length of its body are then the check.
+			if ( ! match && offset !== null && res.headers.get( 'content-range' ) === null ) {
+
+				const expected = size !== null ? Math.min( length, size - offset ) : length;
+				const out = await readCapped( res, expected, bad );
+				if ( out.byteLength !== expected ) throw bad();
+				bytes += out.byteLength;
+				return out;
+
+			}
+
 			if ( ! match ) {
 
 				if ( res.body ) await res.body.cancel();
@@ -175,6 +189,31 @@ export function httpSource( url, options = {} ) {
 
 	return {
 		async tail( length ) {
+
+			// 3dtiled: the size first, from a HEAD (Content-Length is readable across origins), then the
+			// tail as a plain `bytes=a-b`. A suffix range (`bytes=-n`) is not a CORS-safelisted header, so
+			// across origins it costs a preflight, which static hosts such as GitHub Pages refuse (405).
+			if ( ! whole && size === null && ! headTried ) {
+
+				headTried = true;
+				try {
+
+					requests ++;
+					const h = await fetchFn( url, { ...baseOptions, method: 'HEAD' } );
+					const n = Number( h.headers.get( 'content-length' ) );
+					if ( h.ok && Number.isFinite( n ) && n > 0 ) size = n;
+
+				} catch { /* no HEAD: the suffix range below */ }
+
+			}
+
+			if ( ! whole && size !== null ) {
+
+				const start = Math.max( 0, size - length );
+				const out = await ask( `bytes=${ start }-${ size - 1 }`, { offset: start, length: size - start } );
+				if ( out ) return { bytes: out, size };
+
+			}
 
 			if ( ! whole ) {
 

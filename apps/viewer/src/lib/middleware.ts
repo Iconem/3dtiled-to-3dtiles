@@ -112,7 +112,7 @@ export function currentPresets(p: MiddlewareParams & { toolName: ToolName; tiles
       id: `fmt-pkg-${a.id}-plugin`,
       label: `📦 ${a.label} · in place (3tz plugin)`,
       type: a.type!,
-      url: `${ORIGIN}/${a.pkg!}`,
+      url: /^https?:\/\//.test(a.pkg!) ? a.pkg! : `${ORIGIN}/${a.pkg!}`,
     }));
     return [...viaServer, ...inPlace];
   }

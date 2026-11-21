@@ -1,6 +1,7 @@
 // cdp-screenshot.mjs — headless-Chrome screenshot with a REAL readiness wait (no virtual time):
 //   node scripts/cdp-screenshot.mjs <url> <out.png> [--wait-expr '<js expr, truthy when ready>']
 //        [--width 1440] [--height 900] [--settle 1500] [--timeout 120000] [--eval '<js run after load>'] [--print-eval]
+//        [--preload '<js run in the page before any of its own scripts>']
 // Drives Chrome over the DevTools Protocol using Node's native WebSocket — no puppeteer dependency.
 import { spawn } from 'node:child_process';
 import fs from 'node:fs/promises';
@@ -15,6 +16,7 @@ const waitExpr = opt('wait-expr', 'true');
 const settle = Number(opt('settle', 1500));
 const timeout = Number(opt('timeout', 120000));
 const evalAfter = opt('eval', null);
+const preload = opt('preload', null);
 if (!url || !out) { console.error('usage: cdp-screenshot.mjs <url> <out.png> [--wait-expr …]'); process.exit(1); }
 
 const CHROME = await (async () => {
@@ -48,6 +50,8 @@ const evalJs = async (expression) => (await send('Runtime.evaluate', { expressio
 
 await send('Page.enable'); await send('Runtime.enable');
 await send('Emulation.setDeviceMetricsOverride', { width, height, deviceScaleFactor: 1, mobile: false });
+// e.g. a fetch counter: it has to be in place before the page's first request
+if (preload) await send('Page.addScriptToEvaluateOnNewDocument', { source: preload });
 await send('Page.navigate', { url });
 // wait for readiness expression
 const t1 = Date.now();

@@ -5,6 +5,26 @@ Format loosely follows [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+### Added — 2026-11-21 (hosted `.3tz` samples read in place; loading measured with `&ge=density`)
+- **Two `.3tz` archives that open in place on any deployment**: loaders.gl's test archive, and Potree's lion as
+  an implicit octree, packed and added to [3dtiles-samples](https://github.com/jo-chemla/3dtiles-samples). Both are
+  read from raw.githubusercontent.com (CORS `*`, ranges on the file as stored; GitHub Pages gzips the archive and
+  its ranges then point into the gzipped bytes). The lion reads 1.3 MB of its 7.9 MB in 22 requests.
+- **The dev server answers range requests** on `/sample-data/` (206, suffix ranges, `Content-Range` exposed), so
+  the bundled archives are read in place there too (14 requests for the tastier archive, which was one whole
+  download).
+- **Loading with `&ge=density`, measured**: from the viewer's framed view, 3.2× fewer bytes and about 3× sooner on
+  the New York buildings (I3S), 4× fewer bytes on the Rancho mesh, 1.7 to 1.9× fewer bytes at the same time on
+  Tunis (LCC2), no change on two small LCC scenes. GeoSplats loads more with it: with the box rule the renderer
+  hits its 1 000 MB cache with 86 coarse tiles and stops. The table: [Geometric error](/docs/guide/geometric-error).
+- **macOS: a `.dmg`** beside the update archive in the CI build (`ELECTROBUN_DMG=1`; local builds still skip it).
+
+### Fixed — 2026-11-21 (`.3tz` in place from static hosts)
+- **The 3tz plugin failed with "Failed to fetch" on GitHub-hosted archives.** It asked for the end of the file with
+  a suffix range (`bytes=-n`), which across origins costs a CORS preflight that static hosts refuse (405), and it
+  needed `Content-Range`, which they do not expose. The vendored `sources.js` now takes the size from a HEAD and
+  asks `bytes=a-b`, checking a 206 by its length when `Content-Range` is hidden (marked `3dtiled:`).
+
 ### Added — 2026-11-21 (tile errors from density, as an option; a `.3tz` read in place; the COPC plugin, second pass)
 - **`&ge=density` on `/stream/tileset.json`, and a *density error* pill** in the viewer's top bar for **I3S, LCC,
   LCC2 and GeoSplats**, whose tile errors come from the size of each box alone. With it, a tile's error is the

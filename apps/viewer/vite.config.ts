@@ -49,7 +49,8 @@ export default defineConfig({
           if (!url.startsWith('/sample-data/')) return next();
           const filePath = path.resolve(repoRoot, '.' + decodeURIComponent(url.split('?')[0]));
           if (!filePath.startsWith(repoRoot)) return next();
-          try { await stat(filePath); }
+          let size = 0;
+          try { size = (await stat(filePath)).size; }
           catch { return next(); }
           const ext = path.extname(filePath).toLowerCase();
           // Potree 1.x's tree descriptor is cloud.js — pure JSON with a .js extension. Vite's normal
@@ -64,6 +65,27 @@ export default defineConfig({
           };
           res.setHeader('Content-Type', mime[ext] ?? 'application/octet-stream');
           res.setHeader('Access-Control-Allow-Origin', '*');
+          // Range requests, as a static host answers them: a .3tz read in place (Tiles3tzPlugin) asks for
+          // its central directory and then each file's bytes, and COPC readers do the same.
+          res.setHeader('Accept-Ranges', 'bytes');
+          res.setHeader('Access-Control-Expose-Headers', 'Content-Range, Content-Length, Accept-Ranges');
+          const m = /^bytes=(\d*)-(\d*)$/.exec(String(req.headers.range ?? '').trim());
+          if (m && (m[1] || m[2])) {
+            let start = m[1] ? Number(m[1]) : Math.max(0, size - Number(m[2]));
+            let end = m[1] && m[2] ? Math.min(Number(m[2]), size - 1) : size - 1;
+            if (start >= size || start > end) {
+              res.statusCode = 416;
+              res.setHeader('Content-Range', `bytes */${size}`);
+              return res.end();
+            }
+            res.statusCode = 206;
+            res.setHeader('Content-Range', `bytes ${start}-${end}/${size}`);
+            res.setHeader('Content-Length', String(end - start + 1));
+            if (req.method === 'HEAD') return res.end();
+            return createReadStream(filePath, { start, end }).pipe(res);
+          }
+          res.setHeader('Content-Length', String(size));
+          if (req.method === 'HEAD') return res.end();
           createReadStream(filePath).pipe(res);
         });
       },
