@@ -30,7 +30,8 @@ Format loosely follows [Keep a Changelog](https://keepachangelog.com/).
   nor in Fly mode).
 - **CI: the macOS and Linux desktop builds can join the release.** `desktop-unix.yml` now adds the builds that
   pass its start-up test to `desktop-latest` (input `publish`, on by default), and the Windows workflow no longer
-  deletes files that are not its own.
+  deletes files that are not its own. Run of 2026-11-21: Linux x64, Linux arm64 and, for the first time, macOS
+  arm64 pass and are in the release (the Mac build is an `.app.tar.zst`, unsigned, opened by nobody yet).
 
 ### Fixed — 2026-11-21 (geometric errors that disagreed)
 - **3MX** errors had no pixel factor: `diagonal × 16 ÷ maxScreenDiameter` now, as OSGB, so a node is refined at
