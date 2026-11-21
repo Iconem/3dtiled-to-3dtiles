@@ -20,7 +20,7 @@
  * Not carried over: the environment chunk (`root.data.env`, a far shell of splats around the scene), the collision
  * meshes (`meshFiles`, `bvhFiles`) and `virtualLoD`, the settings of an extra LOD a renderer derives by itself.
  */
-import { lccGeoref, LCC_LOCAL_UPRIGHT } from '../../core/index.js';
+import { lccGeoref, LCC_LOCAL_UPRIGHT, densityError, DENSITY_K } from '../../core/index.js';
 
 const ROOT_GE_FACTOR = 0.05, DEPTH_RATIO = 0.5;
 
@@ -66,15 +66,18 @@ export function parseLcc2(text) {
  * The 3D Tiles tileset of a parsed manifest, and the runs its tiles are cut from.
  * @param {ReturnType<typeof parseLcc2>} manifest
  * @param {(run:{file:number,start:number,count:number,depth:number}) => string} contentUri  a tile's content uri
- * @param {{centroids?:boolean, tag?:string}} [opts]  `centroids`: the tiles are glTF POINTS, no splat extension advertised
+ * @param {{centroids?:boolean, tag?:string, density?:boolean}} [opts]  `centroids`: the tiles are glTF POINTS, no splat
+ *   extension advertised. `density` (the live stream's &ge=density): a node that has splats and children gets
+ *   8 × the spacing of its splats, √(largest face of its own box / its 3dgs.count), under the rule above and under
+ *   its parent's error; a leaf keeps the rule above, under its parent's error.
  * @returns {{ tileset:object, runs:{file:number,start:number,count:number,depth:number,uri:string}[] }}
  */
-export function lcc2Tileset(manifest, contentUri, { centroids = false, tag = 'lcc2' } = {}) {
+export function lcc2Tileset(manifest, contentUri, { centroids = false, tag = 'lcc2', density = false } = {}) {
   const { root, files, envFile, meta } = manifest;
   const bb = root.boundingBox;
   const rootGE = (Math.hypot(bb.max[0] - bb.min[0], bb.max[1] - bb.min[1], bb.max[2] - bb.min[2]) || 1) * ROOT_GE_FACTOR;
   const runs = [];
-  const build = (node, depth, parentBox) => {
+  const build = (node, depth, parentBox, above = Infinity) => {
     const box = isBox(node.boundingBox) ? node.boundingBox : parentBox;
     const tile = { boundingVolume: { box: boundToZUpBox(box.min, box.max) }, geometricError: rootGE * 2 * Math.pow(DEPTH_RATIO, depth), refine: 'REPLACE' };
     const g = node.data?.['3dgs'];
@@ -88,7 +91,14 @@ export function lcc2Tileset(manifest, contentUri, { centroids = false, tag = 'lc
         tile.content = { uri: run.uri };
       }
     }
-    const kids = lcc2Children(node).map((c) => build(c, depth + 1, box));
+    const below = lcc2Children(node);
+    if (density) {
+      const sides = [0, 1, 2].map((k) => box.max[k] - box.min[k]);
+      tile.geometricError = below.length && tile.content
+        ? densityError({ sides, count: g.count, k: DENSITY_K.splats, boxError: tile.geometricError, parentError: above })
+        : Math.min(tile.geometricError, above);
+    }
+    const kids = below.map((c) => build(c, depth + 1, box, tile.geometricError));
     if (kids.length) tile.children = kids;
     return tile;
   };

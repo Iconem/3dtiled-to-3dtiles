@@ -32,7 +32,7 @@ import fs   from 'fs/promises';
 import path from 'path';
 import { fileURLToPath } from 'node:url';
 import { decodeChunk, extractRange } from './sogChunk.js';
-import { lodGeometricErrors, collapseLodTree, thinSplats, concatSh, DEFAULT_SPLAT_BUDGET, upTransform, upParam } from './lodMeta.js';
+import { lodGeometricErrors, collapseLodTree, thinSplats, concatSh, DEFAULT_SPLAT_BUDGET, upTransform, upParam, strayFreeBounds } from './lodMeta.js';
 import { sogChunkToFiles } from './tile-task.js';
 
 const TILE_TASK = new URL('./tile-task.js', import.meta.url).href;
@@ -224,9 +224,13 @@ export async function convert(input, outDir, opts = {}) {
   // client sees the scene's native frame; `--up y|-y` says which native axis is up when it is not Z (lodMeta.js).
   root.tile.transform = upTransform(upParam(opts.up));
 
+  // The tileset-level error as the live stream writes it (tile-server/sog-live.js): the larger of 5 % of the scene's
+  // diagonal (without its stray leaves when the tree is collapsed) and the root tile's own error. It was the root
+  // tile's error alone.
+  const sceneBound = budget > 0 ? strayFreeBounds(lod.tree)(lod.tree) : lod.tree.bound;
   const tileset = {
     asset: { version: '1.1' },
-    geometricError: root.tile.geometricError,
+    geometricError: Math.max(boundDiagonal(sceneBound.min, sceneBound.max) * ROOT_GE_FACTOR, root.tile.geometricError),
     root: root.tile,
     // centroids mode emits plain glTF POINTS tiles → no splat-extension advertisement.
     ...(opts.centroidsOnly ? {} : {

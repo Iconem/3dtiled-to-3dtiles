@@ -5,7 +5,7 @@ import { Input } from '@/components/ui/input';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { useUrlState } from '@/state/urlState';
 import { useViewerStore } from '@/state/store';
-import { PSEUDO_FORMATS, FORMAT_PILL_ORDER, STREAM_ONLY_FORMATS, pillMeta, fmtMeta, canCentroids, canSh, MW } from '@/lib/formats';
+import { PSEUDO_FORMATS, FORMAT_PILL_ORDER, STREAM_ONLY_FORMATS, pillMeta, fmtMeta, canCentroids, canSh, canDensityError, MW } from '@/lib/formats';
 import { buildMiddlewareUrl, currentPresets, type MiddlewareParams, type Preset } from '@/lib/middleware';
 import type { ViewerHandle } from '@/lib/viewer-handle';
 import { formatPose, parsePose, type CameraPose } from '@/lib/cameraPose';
@@ -198,6 +198,7 @@ export default function TopBar({ activeHandleRef }: { activeHandleRef: React.Ref
     centroidsOnly: url.centroids,
     tilingMode: url.tiling,
     shDegree: url.sh,
+    densityError: url.ge === 'density',
   };
 
   const availableSets = useAvailableSets();
@@ -331,7 +332,7 @@ export default function TopBar({ activeHandleRef }: { activeHandleRef: React.Ref
   // keystroke would be jarring; its value is just read fresh the next time something else reloads.
   // The startup `?load=` wins only for the mode/format/… the page opened with: keyed on those deps
   // rather than a run-once flag, because StrictMode runs this effect twice on mount.
-  const depsKey = [url.mode, url.format, url.tool, url.tilesetOp, url.cache, url.tiling, url.centroids, url.sh, url.transform, url.curved].join('|');
+  const depsKey = [url.mode, url.format, url.tool, url.tilesetOp, url.cache, url.tiling, url.centroids, url.sh, url.ge, url.transform, url.curved].join('|');
   const startKey = useRef(depsKey);
   useEffect(() => {
     if (START_LOAD && depsKey === startKey.current) {
@@ -363,7 +364,7 @@ export default function TopBar({ activeHandleRef }: { activeHandleRef: React.Ref
     const target = wanted || presets.find((p) => p.url);
     if (target) selectPreset(target, depsKey === startKey.current);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [url.mode, url.format, url.tool, url.tilesetOp, url.cache, url.tiling, url.centroids, url.sh, url.transform, url.curved, setsKnown]);
+  }, [url.mode, url.format, url.tool, url.tilesetOp, url.cache, url.tiling, url.centroids, url.sh, url.ge, url.transform, url.curved, setsKnown]);
 
   const manifestButton = (
     <>
@@ -482,6 +483,9 @@ export default function TopBar({ activeHandleRef }: { activeHandleRef: React.Ref
                 ))}
               {url.mode === 'stream' && canSh(url.format) && !url.centroids && (
                 <Pill tint="emerald" active={url.sh > 0} onClick={() => setUrl({ sh: url.sh > 0 ? 0 : 3 })} title="View-dependent colour: keep the splats' spherical harmonics, up to the degree the file holds (tiles get larger). Off: base colour only.">✦ harmonics</Pill>
+              )}
+              {url.mode === 'stream' && canDensityError(url.format) && (
+                <Pill tint="emerald" active={url.ge === 'density'} onClick={() => setUrl({ ge: url.ge === 'density' ? 'box' : 'density' })} title="Experimental. This format's tile errors come from the size of each box alone. On: from the density of what the tile draws (for I3S, from its own lodThreshold first), never above the box rule. Tiles refine later, so less is loaded; compare the two.">◇ density error</Pill>
               )}
               {url.mode === 'stream' && canCentroids(url.format) && (
                 <Pill tint="emerald" active={url.centroids} onClick={() => setUrl({ centroids: !url.centroids })} title="Render splat centres as glTF POINTS instead of full gaussians">◦ centroids</Pill>

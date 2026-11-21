@@ -15,7 +15,7 @@ const ORIGIN_PROTOCOL = typeof window !== 'undefined' ? window.location.protocol
 // the viewer's own static file server in prod) — window.location.origin already carries the right
 // port implicitly (or no port at all behind a reverse proxy on 443), so no hardcoded ":3000" is needed
 // here at all. Only kept a literal fallback for non-browser evaluation.
-const ORIGIN = typeof window !== 'undefined' ? window.location.origin : `${ORIGIN_PROTOCOL}//${ORIGIN_HOST}:3000`;
+export const ORIGIN = typeof window !== 'undefined' ? window.location.origin : `${ORIGIN_PROTOCOL}//${ORIGIN_HOST}:3000`;
 export const SDATA = `${ORIGIN}/sample-data`;
 
 // The tile-server middleware, UNLIKE sample data above, is a genuinely separate origin in a real
@@ -369,6 +369,9 @@ export const STREAM_ONLY_FORMATS = new Set(['osgb']);
 export const canCentroids = (fmt: string) => SPLAT_FORMATS.has(fmt);
 /** Formats whose tiles can carry spherical harmonics (the server's `&sh=`): RAD, streamed SOG, LCC2. */
 export const canSh = (fmt: string) => fmt === 'rad' || fmt === 'sog' || fmt === 'lcc2';
+/** Formats whose tile error comes from the size of the box alone, and for which the server can derive it from the
+ *  density of the content instead (`&ge=density`; for I3S, from its own `lodThreshold` first). */
+export const canDensityError = (fmt: string) => fmt === 'i3s' || fmt === 'lcc' || fmt === 'lcc2' || fmt === 'geosplats';
 
 export const SNIPPETS: Record<string, { title: string; code: string; note: string }> = {
   pointcloud: {

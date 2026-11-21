@@ -28,7 +28,7 @@ import { fileURLToPath } from 'node:url';
 import { createHash, randomUUID } from 'node:crypto';
 import { datasetGroundSamples, offsetFromSamples } from '../core/dataset-ground.js';
 import { sampleTerrain, TERRAINS } from '../core/terrain.js';
-import { llhToEcef, ecefToLlh, curvedParam, httpStatusOf } from '../core/index.js';
+import { llhToEcef, ecefToLlh, curvedParam, httpStatusOf, geRuleParam } from '../core/index.js';
 import { vpcSet, sniffParam, planOverview, overviewParam, leafErrorParam } from './vpc-live.js';
 
 const CORS = { 'Access-Control-Allow-Origin': '*', 'Access-Control-Allow-Headers': '*' };
@@ -1238,7 +1238,7 @@ export async function handleAggregate(req, res, u) {
     // The overview of the whole set, when the VPC names one, is placed as a leaf beside the groups, and
     // the file leaves open at the error the overview leaves (&overview=0 drops it, &leafError=<m> sets
     // the error by hand). See planOverview in vpc-live.js and the VPC docs page.
-    const plan = await planOverview(vpc.set, vpc.report, { overview: overviewParam(u.searchParams.get('overview')), leafError: leafErrorParam(u.searchParams.get('leafError')) });
+    const plan = await planOverview(vpc.set, vpc.report, { overview: overviewParam(u.searchParams.get('overview')), leafError: leafErrorParam(u.searchParams.get('leafError')), density: geRuleParam(u.searchParams.get('ge')) === 'density' });
     vpc.set = plan.set;
     sets.vpc = vpc.set;
     u = new URL(u.href);

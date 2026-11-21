@@ -6,7 +6,7 @@
  * One front-door over the per-format range adapters (the format-specific range logic is irreducible —
  * a COPC LAZ chunk, a Potree octree-node byte range, etc. — but the entry point is unified):
  *
- *   GET /stream/tileset.json?url=<SRC>&format=<fmt>[&cache=none|hierarchy][&prefetch=N][&tiling=…]
+ *   GET /stream/tileset.json?url=<SRC>&format=<fmt>[&cache=none|hierarchy][&prefetch=N][&tiling=…][&ge=density]
  *   GET /stream/tile/<key>.glb?url=<SRC>&format=<fmt>       → one range-built tile from that adapter
  *   GET /stream/subtrees/<key>.subtree?url=<SRC>&format=<fmt>  → implicit-tiling subtree (octree fmts)
  *   GET /stream/threemx/node/<path>.json?url=<SRC>          → 3MX lazy-fragment continuation (one .3mxb)
@@ -35,6 +35,12 @@
  *
  * The tileset's relative content URIs (`tile/<key>.glb?url=…`) get `&format=<fmt>` appended so the
  * follow-up `/stream/tile/...` requests carry the format and dispatch to the same adapter.
+ *
+ * `&ge=density` (opt-in; i3s, lcc, lcc2, geosplats, and a vpc without an overview) derives each tile's geometric error
+ * from the spacing of what the tile draws, the format's box rule kept as a ceiling (core/geometric-error.js). I3S
+ * first uses the layer's own lodThreshold. It changes tileset JSON only, never a tile's bytes, so it is carried to
+ * child TILESET URLs (a VPC's cells and nested VPCs) and not to tile URLs. Other formats ignore it; for Nexus `ge` is
+ * a number, its own error factor.
  */
 import { pathOfKey } from './path-key.js';
 import { copcTileset, copcTile, copcSubtree, copcTileRe, copcDrain } from './copc-live.js';
@@ -49,7 +55,7 @@ import { osgbTileset, osgbTile, osgbTileRe, osgbNode } from './osgb-live.js';
 import { geosplatsTileset, geosplatsTile, geosplatsTileRe } from './geosplats-live.js';
 import { nexusTileset, nexusTile, nexusTileRe } from './nexus-live.js';
 import { handleSelfContained } from './3dtiles-self-contained.js';
-import { detectFormatByName, compressTile, decompressTile, applyPlacement, curvedParam, attributesSpec } from '../core/index.js';
+import { detectFormatByName, compressTile, decompressTile, applyPlacement, curvedParam, attributesSpec, geRuleParam } from '../core/index.js';
 import { localSourceUrl } from '../core/source-fetch.js';
 
 // Per-tile glTF-Transform op applied to every streamed tile GLB, the streaming counterpart of the
@@ -141,7 +147,10 @@ async function handleThreemxNode(u, res) {
   if (!n) return false;
   const url = u.searchParams.get('url');
   if (!url) { res.writeHead(400, CORS); res.end('missing ?url=<source url>'); return true; }
-  const frag = await threemxNode(url, pathOfKey(n[1]));
+  // &ge and &bb: the error and the box of the tile that points here, which the fragment's root repeats (threemx-live.js)
+  const ge = u.searchParams.has('ge') ? Number(u.searchParams.get('ge')) : undefined;
+  const bb = u.searchParams.has('bb') ? u.searchParams.get('bb').split(',').map(Number) : undefined;
+  const frag = await threemxNode(url, pathOfKey(n[1]), { ge, bb });
   if (!frag) { res.writeHead(404, CORS); res.end('no such node'); return true; }
   // threemx-live.js bakes absolute /stream/tile/…&format=threemx URIs itself (a relative "tile/…" here
   // would resolve against THIS fragment's own path, not /stream/) — no tagContentUris needed.
@@ -177,7 +186,10 @@ async function handleRadSubtree(u, res) {
   const url = u.searchParams.get('url');
   if (!url) { res.writeHead(400, CORS); res.end('missing ?url=<source url>'); return true; }
   const centroids = u.searchParams.get('centroids') === '1' || u.searchParams.get('centroids') === 'true';
-  const ts = await radSubtree(url, n[1], { centroids, sh: u.searchParams.get('sh') || undefined });
+  // &d and &pe: the depth of the fragment's root in the whole tree and the error it has in the fragment above (rad-live.js)
+  const d = u.searchParams.has('d') ? Number(u.searchParams.get('d')) : undefined;
+  const pe = u.searchParams.has('pe') ? Number(u.searchParams.get('pe')) : undefined;
+  const ts = await radSubtree(url, n[1], { centroids, sh: u.searchParams.get('sh') || undefined, depth: d, parentError: pe });
   res.writeHead(200, { 'Content-Type': 'application/json', ...CORS });
   res.end(JSON.stringify(ts));
   return true;
@@ -281,7 +293,9 @@ export async function handleStream(req, res, u) {
     // depth=0: the root tile only (no children, no hierarchy drain) — what /aggregate needs to place a
     // child; honoured by copc-live's curved explicit tree, ignored where the root is already cheap.
     const depth = u.searchParams.has('depth') ? Math.max(0, Math.trunc(Number(u.searchParams.get('depth')))) : undefined;
-    const ts = await adapter.tileset(url, { tiling: u.searchParams.get('tiling'), lazy, hierarchy, prefetch, centroids, sh, crs, curved, depth, ...geosplatsOpts, ...nexusOpts, splatBudget: u.searchParams.get('splatBudget'), up: u.searchParams.get('up') || undefined, center: u.searchParams.get('center') === '1', strays: u.searchParams.get('strays') || undefined });
+    // ge=density: the opt-in density rule for the box-only formats (see the header); anything else leaves the rules as they are
+    const geRule = geRuleParam(u.searchParams.get('ge'));
+    const ts = await adapter.tileset(url, { tiling: u.searchParams.get('tiling'), lazy, hierarchy, prefetch, centroids, sh, crs, curved, depth, geRule, ...geosplatsOpts, ...nexusOpts, splatBudget: u.searchParams.get('splatBudget'), up: u.searchParams.get('up') || undefined, center: u.searchParams.get('center') === '1', strays: u.searchParams.get('strays') || undefined });
     // User-directed globe placement (&lon=&lat=[&alt=][&heading=][&scale=]): attach a LOCAL dataset to
     // a real location so ANY 3D Tiles client (Cesium for Unreal/Unity, QGIS, native CesiumJS) streams
     // it in place — no viewer-side reorientation needed. Composes ON TOP of the adapter's own

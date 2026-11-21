@@ -71,7 +71,7 @@ export const lcc2TileRe = /^\d+_\d+_\d+$/;
 export async function lcc2Tileset(url, opts = {}) {
   const { manifest } = await getCtx(url);
   const enc = encodeURIComponent(url);
-  return buildTileset(manifest, (run) => `tile/${run.file}_${run.start}_${run.count}.glb?url=${enc}`, { centroids: !!opts.centroids, tag: 'lcc2-live' }).tileset;
+  return buildTileset(manifest, (run) => `tile/${run.file}_${run.start}_${run.count}.glb?url=${enc}`, { centroids: !!opts.centroids, tag: 'lcc2-live', density: opts.geRule === 'density' }).tileset;
 }
 
 export async function lcc2Tile(url, key, opts = {}) {

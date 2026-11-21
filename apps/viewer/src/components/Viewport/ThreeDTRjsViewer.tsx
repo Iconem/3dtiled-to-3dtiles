@@ -50,6 +50,8 @@ const useGlobeQueues = (t: any) => {
 };
 const useGlobeCache = (t: any) => { if (t && t.lruCache !== GLOBE_LRU_CACHE) t.lruCache = GLOBE_LRU_CACHE; };
 import { GaussianSplatPlugin } from '3d-tiles-rendererjs-3dgs-plugin';
+// a .3tz read in place by range requests (vendored, MIT: src/vendor/3d-tiles-renderer-3tz/README.md)
+import { Tiles3tzPlugin } from '@/vendor/3d-tiles-renderer-3tz/index.js';
 import { GaussianSplatRenderer } from 'gaussian-splat-lite';
 import * as THREE from 'three';
 import { acceleratedRaycast, computeBoundsTree, disposeBoundsTree } from 'three-mesh-bvh';
@@ -483,6 +485,23 @@ function GizmoControls(props: React.ComponentProps<typeof TransformControls>) {
     const c: any = state.controls;
     if (ref.current?.dragging && c && c.enabled !== false) c.enabled = false;
   });
+  // G, R, S choose move, rotate, scale while a gizmo is shown, as in Blender. Not while typing, and not
+  // in Fly mode, where S is "backwards".
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.ctrlKey || e.metaKey || e.altKey || e.repeat) return;
+      const t = e.target as HTMLElement | null;
+      if (t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.tagName === 'SELECT' || t.isContentEditable)) return;
+      const st = useViewerStore.getState();
+      if (st.controlMode === 'fly') return;
+      const m = e.code === 'KeyG' ? 'translate' : e.code === 'KeyR' ? 'rotate' : e.code === 'KeyS' ? 'scale' : null;
+      if (!m) return;
+      st.setGizmoMode(m);
+      e.preventDefault();
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, []);
   return <TransformControls ref={ref} {...props} />;
 }
 
@@ -527,6 +546,19 @@ function TilesetGizmo({ tilesRef, pickScene }: { tilesRef: React.MutableRefObjec
     const pivot = origin && centre && origin.distanceTo(centre) <= radius ? origin
       : centre ?? tiles.group.getWorldPosition(new THREE.Vector3());
     const onGlobe = camera.position.length() > 6378137 * 0.5;
+    // Better than either: the data itself, under the centre. An octree's root origin is the centre of its
+    // cube (COPC) or a corner of it (Potree), often far above or below the points; a ray dropped along the
+    // vertical through the centre lands on what is loaded, which is where a hand would grab the model.
+    // Skipped for a mosaic (its centre is inside the Earth); when nothing is hit, the rule above stands.
+    if (centre && radius > 0 && !(onGlobe && centre.length() < 6.0e6)) {
+      const up = onGlobe ? WGS84_ELLIPSOID.getPositionToNormal(centre, new THREE.Vector3()) : camera.up.clone().normalize();
+      const rc = new THREE.Raycaster(centre.clone().addScaledVector(up, radius * 1.01), up.clone().negate(), 0, radius * 2.02);
+      (rc as any).firstHitOnly = true;
+      rc.params.Points = { threshold: Math.max(0.05, radius * 0.004) };
+      let hit: THREE.Intersection | undefined;
+      try { hit = rc.intersectObject(tiles.group, true)[0]; } catch { /* a tile mid-load */ }
+      if (hit) pivot.copy(hit.point);
+    }
     if (onGlobe && pivot.length() < 6.0e6) {
       // more than 300 km underground: nothing to grab there. The controls' pivot, else the ground ahead.
       const c: any = get().controls, probe = new THREE.Vector3();
@@ -2310,6 +2342,8 @@ const Scene = forwardRef<ViewerHandle, { loadArgs: LoadArgs; tooltip: TooltipCha
               implicit roots) never expands past the root tile. Plug-and-play, no options, and a no-op on
               explicit tilesets (only triggers on nodes that actually carry `implicitTiling`). */}
           <TilesPlugin plugin={ImplicitTilingPlugin as any} />
+          {/* a root URL ending in .3tz is read from the archive itself; any other URL is left alone */}
+          <TilesPlugin plugin={Tiles3tzPlugin as any} />
           {isGoogleData && <TilesPlugin plugin={GoogleCloudAuthPlugin as any} args={{ apiToken: GOOGLE_MAPS_API_KEY, autoRefreshToken: true } as any} />}
           <TilesPlugin plugin={GLTFExtensionsPlugin as any} args={gltfArgs as any} />
           {/* point sprites: shape, min/max size, EDL — the same plugin the potree lab and the native

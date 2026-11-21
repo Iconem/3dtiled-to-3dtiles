@@ -36,8 +36,9 @@ which is the same bug our own decoder had. `PotreeLoader.js` now has the patch,
 `v1Attributes()`, that accepts 1.8's objects (their `size`, or `elements × elementSize`). With it an
 Iconem 1.8 cloud loads raw (12,343 points on screen; 0 before). It is the first commit of PR #1780, described below.
 
-**COPC therefore always goes through the middleware**, in `stream` mode (a `.copc.laz` URL is
-detected), and the lab's `potree` mode is the raw, middleware-free path for Potree only.
+**With upstream's plugins alone, COPC therefore goes through the middleware**, in `stream` mode (a
+`.copc.laz` URL is detected), and the lab's `potree` mode is the raw, middleware-free path for Potree
+only. The lab's own `copc` mode, below, reads a COPC in the browser.
 
 ## Controls
 
@@ -80,7 +81,7 @@ budget rather than a screen-space error).
 |---|---|---|
 | `potree` | `PotreePlugin` reads `cloud.js` directly in the browser | **Adaptive, per point**: each point is sized by the deepest *active* octree node containing it, resolved in the vertex shader from a texture of the active node hierarchy |
 | `stream` | This repo's `/stream` turns the same `cloud.js`, or a `.copc.laz`, into 3D Tiles (POINTS GLB), rendered through `PointCloudEffectsPlugin` | `sizing=` **adaptive**, per point like `potree`, for implicit `ADD` octrees ([3DTilesRendererJS#1792](https://github.com/NASA-AMMOS/3DTilesRendererJS/pull/1792), vendored until released); **tile**, each tile's points from its own geometric error; or **fixed**, one world size |
-| `copc` | **`CopcPlugin`** (first attempt, `potree-lab/copcPlugin.js`) reads a `.copc.laz` directly in the browser by range requests: no server | as `potree`: it is upstream's `PotreePlugin` with a COPC loader |
+| `copc` | **`CopcPlugin`** (`potree-lab/copcPlugin.js`) reads a `.copc.laz` directly in the browser by range requests, decodes it in workers and, with `place=globe`, places it from its CRS: no server | as `potree`: it is upstream's `PotreePlugin` with a COPC loader |
 | `tileset` | **Any** 3D Tiles URL as is: typically an `/aggregate` mosaic of point clouds, kept regional with `&only=` | same as `stream` |
 
 A COPC that declares no CRS takes one in the URL fragment: `…/overview.copc.laz#crs=EPSG:3812`, which
@@ -94,6 +95,13 @@ example this shows Mes Aynak's newest capture with eye-dome lighting:
 Both modes share the effects: point shape (`square`/`round`/`sphere`), minimum pixel size, eye-dome
 lighting (strength, radius) and debug colouring by node / depth / tile.
 
+The `potree` and `copc` modes also have **colour by** (`color=` in the URL): the file's colours,
+elevation, intensity, classification (the ASPRS classes), return number, number of returns, point
+source, user data, GPS time. The continuous ones are spread between the 2nd and the 98th percentile of
+what is loaded, and the bar at the bottom gives that range. A COPC offers all of them. A Potree cloud
+offers elevation and intensity only, because upstream's `PotreeLoader` decodes nothing else; the bar
+says so when the attribute is missing and the file's colours stay.
+
 Everything is in the query string, so any view is a shareable link:
 
 ```
@@ -103,13 +111,47 @@ Everything is in the query string, so any view is a shareable link:
 **`copc` mode.** A COPC octree has the shape of a Potree one (a cube halved per level, additive refinement, a
 spacing halved per level), so the plugin keeps `PotreePlugin` whole and replaces its loader: copc.js for the
 header, the info VLR and the hierarchy pages (read lazily, when the first node under a page is asked for),
-laz-perf (WebAssembly) for each node's chunk. Checked in headless Chrome on 2026-11-19: Autzen from its S3 bucket,
-17 tiles and 578 k points for the first view out of 20 range requests and 6.1 MB, refined when the camera comes
-closer; on the Namur overview, 1 hierarchy page of 104 read for the first view and 14 after a close zoom. The bar
-at the bottom counts requests, megabytes, pages and the decode time per million points. What it lacks: the cloud
-is drawn in the file's own coordinates (no placement on the globe from the CRS), the decode runs on the main
-thread, only position and colour (or intensity as a grey) are read, and one failed range request in five runs
-was seen from S3 under 25 parallel requests (the plugin now tries once more). The plan it is the first step of:
+laz-perf (WebAssembly) for each node's chunk. The bar at the bottom counts requests, megabytes, pages, the
+decode time per million points and the time the page itself was held.
+
+- **Decoding runs in workers.** The page fetches each chunk (so the request goes through the renderer's plugins
+  like any tile) and hands it to one of min(4, cores - 1) workers, which returns position, colour and the
+  attributes below as one transferred buffer; the geometry's attributes are views on it. When no worker can be
+  started the same code runs on the page, and the bar says so; `workers=0` asks for that. Measured in headless
+  Chrome on 2026-11-21 (software rendering and a busy machine, so read the ratios, not the times): on the first
+  91 nodes of Autzen (3.0 M points, the renderer stopped), the page was held 640 to 910 ms per million points
+  when it decoded itself, and 1.2 to 2.0 ms with the workers, about 500 times less; a 4 ms timer saw 420 to
+  760 ms of gaps per million points before and none after. The decode itself costs the same wherever it runs
+  (630 to 990 ms per million points in both cases), and the total time did not change: the network was the
+  limit.
+- **Attributes.** Beside position and colour (the file's RGB, or its intensity as a grey), each tile carries
+  intensity, classification, return number, number of returns, point source, user data and GPS time (seconds
+  after the file's first, as float32), for point formats 6, 7 and 8. That is 30 bytes per point where position
+  and colour alone took 18; the plugin's `attributes` option keeps fewer.
+- **Placement from the CRS.** With `place=globe` the root tile gets a transform to earth-centred coordinates,
+  computed with proj4 from the WKT the file declares, by the method of the server's `georefFromCrs`: the centre
+  of the octree goes to longitude and latitude, and the frame there is measured through the projection, which
+  accounts for the unit (Autzen is in feet), the grid convergence and the scale factor at once. The vertical
+  unit is read from the vertical part of a compound CRS. The lab has no globe: it turns that place back to its
+  own frame (Y up, metres) and writes the longitude, latitude, height, unit and convergence in the bar. On
+  Autzen (EPSG:2992, feet, with heights in US survey feet) the mean point of the root tile lands at 123.06870°W
+  44.05610°N, 135 m, which is Autzen Stadium in Eugene; the matrix is 5 mm from proj4 applied to that point, and
+  8 cm at a corner of the cloud 1 km from the centre. A file with no CRS, or one proj4 cannot read, stays in its
+  own coordinates and the bar gives the reason. A CRS for a file that declares none goes in the URL fragment as
+  a proj string or WKT (`#crs=+proj=lcc …`): proj4 in the browser knows no EPSG code but 4326 and 3857, where
+  `/stream` has a table of them.
+
+Checked the same day: Autzen from its S3 bucket, 45 tiles and 1.52 M points for the first view out of 48 range
+requests and 14.5 MB, and placed, 44 tiles and 1.33 M points out of 47 requests and 13.0 MB; the production
+build too (the worker and the wasm are emitted as assets).
+
+What it lacks: a globe to see the placed cloud on; a geoid (a gravity-related height is taken as a height above
+the ellipsoid); the bending of a cloud wider than about 20 km onto the ellipsoid, which the server does and this
+does not (the frame is a plane, and the bar warns); a VPC; a legend for the colours. Colouring by an attribute
+is done on the page, tile by tile, and is not counted in the time above. A request already sent to a worker is
+not cancelled when its tile is no longer wanted. Nothing here was run on a real GPU. S3 answered one range
+request in 15 to 25 s twice during these runs, and one failed request in five runs was seen earlier under 25
+parallel requests (the plugin tries once more). The plan this is the first step of:
 [tiled formats plugins](/docs/guide/planning/tiled-formats-plugin).
 
 The dataset picker also lists the **manifests uploaded in the viewer** (Aggregate row, *your own manifest*): the

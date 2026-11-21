@@ -1,6 +1,6 @@
 // Ported as pure functions from viewer.html's buildMiddlewareUrl/streamParams/assetUrl/srcUrl
 // (lines ~694-797) — same algorithms, but read an explicit params object instead of globals.
-import { MW, SDATA, FORMATS, DIRECT, TOOLS_DATASETS, PSEUDO_FORMATS, STREAM_ONLY_FORMATS, fmtMeta, canCentroids, canSh, type Asset, type AssetType, type FormatMeta } from './formats';
+import { MW, SDATA, ORIGIN, FORMATS, DIRECT, TOOLS_DATASETS, PSEUDO_FORMATS, STREAM_ONLY_FORMATS, fmtMeta, canCentroids, canSh, canDensityError, type Asset, type AssetType, type FormatMeta } from './formats';
 import { GOOGLE_MAPS_API_KEY } from './google';
 
 export type TilesetOp = 'implicit-to-explicit' | 'upgrade' | '';
@@ -23,12 +23,15 @@ export interface MiddlewareParams {
   tilingMode: TilingMode;
   /** splats: spherical-harmonic degree to ask for, 0 or absent = base colour only */
   shDegree?: number;
+  /** box-only formats (I3S, LCC, LCC2, GeoSplats): tile errors from the density of the content (`&ge=density`) */
+  densityError?: boolean;
 }
 
-export function streamParams(f: FormatMeta | undefined, p: Pick<MiddlewareParams, 'tilingMode' | 'centroidsOnly' | 'selectedFormat' | 'shDegree'>) {
+export function streamParams(f: FormatMeta | undefined, p: Pick<MiddlewareParams, 'tilingMode' | 'centroidsOnly' | 'selectedFormat' | 'shDegree' | 'densityError'>) {
   let q = f?.octree ? `&tiling=${p.tilingMode}` : '';
   if (canCentroids(p.selectedFormat) && p.centroidsOnly) q += '&centroids=1';
   else if (canSh(p.selectedFormat) && p.shDegree) q += `&sh=${p.shDegree}`;
+  if (canDensityError(p.selectedFormat) && p.densityError) q += '&ge=density';
   return q;
 }
 
@@ -97,12 +100,21 @@ export function currentPresets(p: MiddlewareParams & { toolName: ToolName; tiles
     return DIRECT.map((d) => ({ id: d.id, label: `${d.icon} ${d.label}`, type: d.type, url: wrap(d.url) }));
   }
   if (p.selectedFormat === 'packages') {
-    return (TOOLS_DATASETS['packages'] || []).map((a) => ({
+    const viaServer: Preset[] = (TOOLS_DATASETS['packages'] || []).map((a) => ({
       id: `fmt-pkg-${a.id}`,
       label: `📦 ${a.label}`,
       type: a.type!,
       url: `${MW}/stream/tileset.json?format=${a.pkg!.toLowerCase().endsWith('.3tz') ? '3tz' : '3dtiles-pkg'}&url=${encodeURIComponent(a.pkg!)}`,
     }));
+    // The same .3tz archives read in place by the browser (Tiles3tzPlugin, 3DTilesRendererJS only): range
+    // requests on the archive itself, no tile server.
+    const inPlace: Preset[] = (TOOLS_DATASETS['packages'] || []).filter((a) => a.pkg!.toLowerCase().endsWith('.3tz')).map((a) => ({
+      id: `fmt-pkg-${a.id}-plugin`,
+      label: `📦 ${a.label} · in place (3tz plugin)`,
+      type: a.type!,
+      url: `${ORIGIN}/${a.pkg!}`,
+    }));
+    return [...viaServer, ...inPlace];
   }
   if (p.selectedFormat === 'aggregate') {
     // /aggregate mosaics: one 3D Tiles endpoint over many datasets (see docs "Meta-tilesets").
@@ -152,7 +164,7 @@ export function currentPresets(p: MiddlewareParams & { toolName: ToolName; tiles
     ];
   }
   if (p.selectedFormat === 'geosplats') {
-    const gs = (mdl: string) => `${MW}/stream/tileset.json?format=geosplats&url=${encodeURIComponent(mdl)}&lod=5`;
+    const gs = (mdl: string) => `${MW}/stream/tileset.json?format=geosplats&url=${encodeURIComponent(mdl)}&lod=5${p.densityError ? '&ge=density' : ''}`;
     // Same rawSrc fix as threemx above — the raw source is the MapTiler splats model.json URL.
     return [
       { id: 'gs-1', label: '✨ Jastrzębia Góra, Poland', type: 'splat', url: gs('https://api.maptiler.com/splats/019e67bf-b89b-743d-91dd-79f7f4b4bd4e/model.json?key=GKF1QdQ4MpjgqtKiQuxR'), rawSrc: 'https://api.maptiler.com/splats/019e67bf-b89b-743d-91dd-79f7f4b4bd4e/model.json?key=GKF1QdQ4MpjgqtKiQuxR' },

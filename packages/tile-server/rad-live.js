@@ -39,7 +39,13 @@
  *
  *   GET /stream/tileset.json?url=<.rad URL>&format=rad[&cache=hierarchy]
  *   GET /stream/tile/<nodeIndex>.glb?url=<.rad URL>&format=rad
- *   GET /stream/rad/subtree/<chunkIndex>.json?url=<.rad URL>   (cache=none continuation)
+ *   GET /stream/rad/subtree/<chunkIndex>.json?url=<.rad URL>[&d=<depth>&pe=<error>]   (cache=none continuation;
+ *       &d and &pe are the depth of that chunk's node in the whole tree and the error it has in the fragment above)
+ *
+ * GEOMETRIC ERROR. cache=hierarchy gives the offline converter's tileset (the same builder over the whole graph). The
+ * default cache=none does not give the same errors (tilesetBuilder.js says why: per-depth means over a part of a
+ * level, and a graph walked in parts). What it guarantees is that the error never rises: a fragment's root repeats
+ * the error it has in the fragment above, and every level below stays under the level above.
  */
 import { inflateRawSync } from 'node:zlib';
 import { chunkBoundsAndTopology, topologyFromProps } from '../rad-to-3dtiles/src/index.js';
@@ -216,7 +222,7 @@ function makeTileset(ctx, urlParam, centroids = false, sh = 0) {
 // it treats as root) — only the TRUE tree root needs it; a nested subtree.json's own "root" is really
 // an interior node that already inherits the real root's transform once the external reference
 // resolves, so re-applying it there would double-flip the content.
-function makeLazyTileset(nodes, urlParam, centroids, isRoot, sh = 0) {
+function makeLazyTileset(nodes, urlParam, centroids, isRoot, sh = 0, from = {}) {
   const enc = encodeURIComponent(urlParam);
   const cq = (centroids ? '&centroids=1' : '') + (sh ? `&sh=${sh}` : '');
   // ABSOLUTE /stream/... URIs (baking &format=rad in ourselves) — this tileset.json can be served
@@ -225,7 +231,10 @@ function makeLazyTileset(nodes, urlParam, centroids, isRoot, sh = 0) {
   // for the nested case (same reasoning as threemx-live.js's own absolute-URI fragments).
   const ts = buildTileset(nodes, {
     tileUriTemplate: `/stream/tile/{index}.glb?url=${enc}&format=rad${cq}`,
-    subtreeUriTemplate: `/stream/rad/subtree/{index}.json?url=${enc}${cq}`,
+    // &d, &pe: the depth of the fragment's root in the whole tree and the error it has here, which the fragment
+    // repeats and stays under (tilesetBuilder.js), so the error never rises across a fragment boundary
+    subtreeUriTemplate: `/stream/rad/subtree/{index}.json?url=${enc}${cq}&d={depth}&pe={error}`,
+    ...(isRoot ? {} : { baseDepth: Number.isFinite(from.depth) ? from.depth : 0, parentError: from.parentError }),
   });
   if (!isRoot) delete ts.root.transform;
   ts.extensionsUsed = ['3DTILES_content_gltf'];
@@ -269,5 +278,5 @@ export async function radTile(url, key, opts = {}) { return serveTileGlb(await g
 export async function radSubtree(url, chunkIndexStr, opts = {}) {
   const hctx = await getHeaderCtx(url);
   const nodes = await scanBoundedTopology(hctx, Number(chunkIndexStr), RAD_LAZY_DEPTH);
-  return makeLazyTileset(nodes, url, opts.centroids, false, shDegree(opts.sh));
+  return makeLazyTileset(nodes, url, opts.centroids, false, shDegree(opts.sh), { depth: opts.depth, parentError: opts.parentError });
 }

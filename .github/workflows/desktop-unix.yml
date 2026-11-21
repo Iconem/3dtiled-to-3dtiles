@@ -1,13 +1,20 @@
 name: Desktop app (macOS, Linux)
 
 # Builds the Electrobun desktop companion on macOS and Linux, starts it, and keeps what was built as a
-# workflow artifact (14 days). On demand only, and nothing is released: the Windows workflow (desktop.yml)
-# owns the `desktop-latest` release and its update feed. Unsigned. See apps/desktop/README.md.
+# workflow artifact (14 days). On demand only. With `publish` (the default), a platform whose build started
+# and served a tileset adds its files to the rolling `desktop-latest` release, beside the Windows ones
+# (desktop.yml): every file name starts with its platform, so neither workflow touches the other's files.
+# Unsigned. See apps/desktop/README.md.
 on:
   workflow_dispatch:
+    inputs:
+      publish:
+        description: Add the builds that pass to the desktop-latest release
+        type: boolean
+        default: true
 
 permissions:
-  contents: read
+  contents: write
 
 jobs:
   build:
@@ -112,6 +119,27 @@ jobs:
           fi
           [ -f app.log ] && cp app.log out/ || true
           ls -la out
+
+      # Only what passed the smoke test above, and only files named after this platform: the Windows files
+      # of the same release (installer, portable zip, update feed) are never touched.
+      - name: Add to the rolling release
+        if: success() && inputs.publish
+        working-directory: apps/desktop
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if ! gh release view desktop-latest > /dev/null 2>&1; then echo "no desktop-latest release yet: run desktop.yml first"; exit 0; fi
+          files=""
+          for f in artifacts/*; do
+            case "$(basename "$f")" in
+              *win-*) echo "skipped (a Windows name): $f" ;;
+              *linux-*|*macos-*|*darwin-*|*mac-*) files="$files $f" ;;
+              *) echo "skipped (no platform in its name): $f" ;;
+            esac
+          done
+          if [ -z "$files" ]; then echo "nothing to publish"; ls -la artifacts || true; exit 0; fi
+          echo "publishing:$files"
+          gh release upload desktop-latest $files --clobber
 
       - uses: actions/upload-artifact@v4
         if: always()

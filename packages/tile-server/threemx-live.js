@@ -8,7 +8,8 @@
  * textured mesh is assembled into a glTF with glTF-Transform.
  *
  *   GET /stream/tileset.json?url=<Scene.3mx | root.3mxb URL>&format=threemx
- *   GET /stream/threemx/node/<encRelPath>.json?url=<master>     (lazy fragment for a child .3mxb)
+ *   GET /stream/threemx/node/<encRelPath>.json?url=<master>[&ge=<error>&bb=<min,max>]   (lazy fragment for a child
+ *       .3mxb; &ge and &bb are the error and the box of the tile that points here, which the fragment's root repeats)
  *   GET /stream/tile/<encRelPath>__<nodeIdx>.glb?url=<master>&format=threemx
  *
  * Master `.3mx` JSON: layers[0] = { SRS, SRSOrigin, root }. `.3mxb`: "3MXBO" + uint32LE headerSize +
@@ -18,7 +19,7 @@
  */
 import { pathKey, pathOfKey } from './path-key.js';
 import path from 'node:path';
-import { georefFromCrs, memoizeAsync, fetchSource as fetchBuf, tilePool, runTileTaskOr, ownBytes } from '../core/index.js';
+import { georefFromCrs, memoizeAsync, fetchSource as fetchBuf, tilePool, runTileTaskOr, ownBytes, screenDiameterError } from '../core/index.js';
 import { parse3mxb, threemxNodeGlb } from './mesh-tile.js';
 
 const CTM_RE = /__\d+$/;
@@ -49,19 +50,34 @@ const boxOf = (mn, mx) => {
   return [c[0], c[1], c[2], h[0], 0, 0, 0, h[1], 0, 0, 0, h[2]];
 };
 const diagOf = (mn, mx) => Math.hypot(mx[0] - mn[0], mx[1] - mn[1], mx[2] - mn[2]);
-// maxScreenDiameter is screen-px-on-bounding-sphere; 0 = "always refine". Use bbox diagonal as a
-// monotonic geometric error (children are smaller → naturally decreasing). Tunable.
-const geOf = (node) => { const d = diagOf(node.bbMin, node.bbMax); return node.maxScreenDiameter > 0 ? d / node.maxScreenDiameter : d; };
+const num = (v) => Number(v.toPrecision(9));
+/**
+ * The geometric error of a 3MX node. `maxScreenDiameter` is the diameter, in pixels, that the node's bounding sphere
+ * may reach on screen: past it the node is replaced by its children (0: always). A .3mxb stores no sphere, only
+ * bbMin/bbMax, so the sphere is the box's, whose diameter is the box diagonal. A client with a 16 px target then
+ * switches at the source's distance when
+ *     geometricError = diagonal · 16 / maxScreenDiameter
+ * which is OSGB's rule for a PagedLOD in pixel mode (osgb-live.js, core/geometric-error.js). A node without children
+ * has error 0, as an OSGB unit without a finer file.
+ */
+export function threemxGeometricError(node) {
+  if (!(node.children || []).length) return 0;
+  return screenDiameterError(diagOf(node.bbMin, node.bbMax) / 2, node.maxScreenDiameter);
+}
 
 // ── lazy fragment: one .3mxb → a tileset.json (its nodes as children; child .3mxb → external refs) ──
-async function buildFragment(ctx, relPath, masterUrl, isRoot) {
+// `from`: { ge, bb } of the tile that points at this file (the fragment's root repeats them, so that it is refined
+// exactly when that tile is, and no node below is given a larger error than the node it refines).
+async function buildFragment(ctx, relPath, masterUrl, isRoot, from = {}) {
+  const above = Number.isFinite(from.ge) ? from.ge : Infinity;
   const enc = encodeURIComponent(masterUrl);
   const buf = await fetchBuf(ctx.base + relPath);
   const { nodes } = parse3mxb(buf);
   const relDir = path.posix.dirname(relPath);
 
   const tiles = nodes.map((node, i) => {
-    const tile = { boundingVolume: { box: boxOf(node.bbMin, node.bbMax) }, geometricError: geOf(node), refine: 'REPLACE' };
+    const ge = num(Math.min(threemxGeometricError(node), above));
+    const tile = { boundingVolume: { box: boxOf(node.bbMin, node.bbMax) }, geometricError: ge, refine: 'REPLACE' };
     // Absolute (not relative "tile/…"): this tree can be embedded at /stream/tileset.json OR nested
     // under /stream/threemx/node/<n>.json, where a relative ref would resolve against the FRAGMENT's
     // own path (…/threemx/node/tile/…) instead of /stream/tile/… — same fix RAD/I3S needed pre-simplification.
@@ -71,8 +87,11 @@ async function buildFragment(ctx, relPath, masterUrl, isRoot) {
       const cr = joinRel(relDir, childRel);
       // Absolute: this fragment can be embedded at /stream/tileset.json OR nested under
       // /stream/threemx/node/<n>.json, where a relative ref would resolve wrong.
-      kids.push({ boundingVolume: { box: boxOf(node.bbMin, node.bbMax) }, geometricError: geOf(node) * 0.5, refine: 'REPLACE',
-                  content: { uri: `/stream/threemx/node/${pathKey(cr)}.json?url=${enc}` } });
+      // The finer file is another tileset. Its tile here has the box and the error of this node, and the fragment
+      // answers with a root that has them too (&ge, &bb), as OSGB's does: it was half this node's error, which
+      // showed the finer file only once the node was twice the size the source asks for.
+      kids.push({ boundingVolume: { box: boxOf(node.bbMin, node.bbMax) }, geometricError: ge, refine: 'REPLACE',
+                  content: { uri: `/stream/threemx/node/${pathKey(cr)}.json?url=${enc}&ge=${ge}&bb=${[...node.bbMin, ...node.bbMax].join(',')}` } });
     }
     if (kids.length) tile.children = kids;
     return tile;
@@ -81,7 +100,12 @@ async function buildFragment(ctx, relPath, masterUrl, isRoot) {
   // Wrap this file's nodes under one root tile (union box) so the fragment has a single root.
   let mn = [Infinity, Infinity, Infinity], mx = [-Infinity, -Infinity, -Infinity];
   for (const n of nodes) for (let k = 0; k < 3; k++) { mn[k] = Math.min(mn[k], n.bbMin[k]); mx[k] = Math.max(mx[k], n.bbMax[k]); }
-  const root = { boundingVolume: { box: boxOf(mn, mx) }, geometricError: diagOf(mn, mx) * 2, refine: 'REPLACE', children: tiles };
+  // The root of the dataset is always refined into its nodes (an error no smaller than theirs nor than its own size);
+  // the root of a finer file repeats the tile that points at it.
+  const bb = from.bb?.length === 6 && from.bb.every(Number.isFinite) ? from.bb : null;
+  const root = Number.isFinite(from.ge)
+    ? { boundingVolume: { box: bb ? boxOf(bb.slice(0, 3), bb.slice(3)) : boxOf(mn, mx) }, geometricError: from.ge, refine: 'REPLACE', children: tiles }
+    : { boundingVolume: { box: boxOf(mn, mx) }, geometricError: num(Math.max(diagOf(mn, mx) * 2, ...tiles.map((t) => t.geometricError))), refine: 'REPLACE', children: tiles };
   if (isRoot && ctx.transform) root.transform = ctx.transform;
   return { asset: { version: '1.1' }, geometricError: root.geometricError, root, extensionsUsed: ['3DTILES_content_gltf'] };
 }
@@ -112,7 +136,7 @@ export async function threemxTile(url, key) {
 // like RAD/I3S had), so unlike those two this genuinely can't collapse to "always eager": discovering
 // the tree at all means fetching every .3mxb, which for a real city-scale model is the whole point of
 // only doing it as the camera refines in. Called from stream-live.js's /stream/threemx/node/<path>.json.
-export async function threemxNode(url, relPath) { return buildFragment(await getCtx(url), relPath, url, false); }
+export async function threemxNode(url, relPath, from = {}) { return buildFragment(await getCtx(url), relPath, url, false, from); }
 
 // Direct /threemx/* HTTP routes were removed 2026-07-02 — /stream/tileset.json?format=threemx&url=<…>
 // (+ /stream/tile/…) now covers tileset/tile serving; the lazy node-fragment continuation moved to

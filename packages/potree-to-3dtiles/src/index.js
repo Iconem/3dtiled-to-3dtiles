@@ -60,7 +60,11 @@ export async function convert(inDir, outDir, opts = {}) {
   await fs.mkdir(path.join(outDir, 'tiles'), { recursive: true });
 
   const gc = [0,1,2].map(k => (src.rootBox.min[k] + src.rootBox.max[k]) / 2); // global centre
-  const rootSpacing = src.spacing || (src.rootBox.max[0] - src.rootBox.min[0]) / 128;
+  // As the live stream (tile-server/potree-live.js): a tile's error is the spacing halved per level, the cube's
+  // diagonal / 128 when the cloud states no spacing (it was the X width / 128), and the tileset-level error is the
+  // cube's diagonal (it was the spacing).
+  const rootDiag = Math.hypot(src.rootBox.max[0] - src.rootBox.min[0], src.rootBox.max[1] - src.rootBox.min[1], src.rootBox.max[2] - src.rootBox.min[2]);
+  const rootSpacing = src.spacing || rootDiag / 128;
   // Georef the local frame: points + boxes are emitted relative to `gc` (projected coords), so place
   // that frame on the globe via the cloud's CRS (cloud.js `projection` / metadata WKT) — same origin
   // and same georefFromCrs() the live /potree adapter uses, so prebuilt == live placement. null when
@@ -170,7 +174,7 @@ export async function convert(inDir, outDir, opts = {}) {
     await src.close();
     tileset = {
       asset: { version: '1.1' },
-      geometricError: rootSpacing,
+      geometricError: rootDiag,
       root: {
         boundingVolume: { box: boxOf(src.rootBox) }, refine: 'ADD', geometricError: rootSpacing,
         ...(transform ? { transform } : {}),
@@ -191,7 +195,7 @@ export async function convert(inDir, outDir, opts = {}) {
     const root = buildTile('r');
     if (transform) root.transform = transform;
     await src.close();
-    tileset = { asset: { version: '1.1' }, geometricError: rootSpacing, root };
+    tileset = { asset: { version: '1.1' }, geometricError: rootDiag, root };
   }
 
   await fs.writeFile(path.join(outDir, 'tileset.json'), JSON.stringify(tileset, null, 2));

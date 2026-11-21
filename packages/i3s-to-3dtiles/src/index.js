@@ -24,7 +24,7 @@
 import fs   from 'fs/promises';
 import path from 'path';
 import { fileURLToPath } from 'node:url';
-import { readSceneLayer, loadNodePages, geodeticToEcef, childIndices } from './i3sParse.js';
+import { readSceneLayer, loadNodePages, geodeticToEcef, childIndices, obbToFrameBox, i3sBoxError } from './i3sParse.js';
 import { i3sNodeToFile } from './tile-task.js';
 import { convertTiles } from '../../core/index.js';
 
@@ -178,10 +178,11 @@ export async function convert(inDir, outDir, opts = {}) {
     }
     const box = aabbToBox(aabb);
     tile.boundingVolume = { box };
-    // geometricError = half the tile's bounding-box diagonal → shrinks as tiles subdivide, so the
-    // renderer only refines tiles that are large on screen (leaves = 0). Fixes "all tiles always load".
-    const diag = 2 * Math.hypot(box[3], box[7], box[11]);
-    tile.geometricError = (tile.children && tile.children.length) ? diag * 0.5 : 0;
+    // geometricError = half the diagonal of the node's own bounding volume from the index (its OBB, enclosed in the
+    // tileset's frame), leaves 0: the live stream's rule and number (i3sParse.js's i3sBoxError). It was half the
+    // diagonal of the box above (the decoded geometry and every descendant's), which the live stream cannot know.
+    // The tile's bounding volume stays that box. A node without an OBB keeps the old rule.
+    tile.geometricError = i3sBoxError(node.obb?.halfSize ? obbToFrameBox(node.obb, isGeographic, toEnu) : box, !!(tile.children && tile.children.length));
     return { tile, aabb };
   };
 

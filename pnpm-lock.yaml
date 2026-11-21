@@ -153,6 +153,9 @@ importers:
       clsx:
         specifier: 2.1.1
         version: 2.1.1
+      copc:
+        specifier: 0.0.8
+        version: 0.0.8
       d3-hierarchy:
         specifier: ^3.1.2
         version: 3.1.2
@@ -162,6 +165,9 @@ importers:
       gaussian-splat-lite:
         specifier: 1.8.1
         version: 1.8.1(three@0.187.0)
+      laz-perf:
+        specifier: 0.0.7
+        version: 0.0.7
       lucide-react:
         specifier: 1.23.0
         version: 1.23.0(react@19.2.7)
@@ -171,6 +177,9 @@ importers:
       playcanvas:
         specifier: 2.19.7
         version: 2.19.7
+      proj4:
+        specifier: 2.20.9
+        version: 2.20.9
       react:
         specifier: 19.2.7
         version: 19.2.7

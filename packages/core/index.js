@@ -22,3 +22,4 @@ export { LasWriter, writeLasBuffer, lasHeaderBuffer, lasRecordBuffer, LAS_RECORD
 export { memoizeAsync } from './cache.js';
 export { requestSource, fetchSource, fetchSourceJson, fetchSourceRange, isAbsent, httpStatusOf, hostLimit, isLenientHost } from './source-fetch.js';
 export { openZip, writeZip } from './zip.js';
+export { SSE_TARGET, DENSITY_K, screenDiameterError, boxSides, largestFace, densitySpacing, densityError, i3sLodError, geRuleParam } from './geometric-error.js';

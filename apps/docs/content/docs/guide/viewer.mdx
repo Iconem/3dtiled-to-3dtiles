@@ -261,7 +261,10 @@ Already-3D-Tiles sources, loaded directly (no conversion/streaming adapter invol
 
 ### Packages 📦 (Tools mode)
 
-`.3tz`/`.3dtiles` self-contained packages, served in-place via `/3dtiles-self-contained`.
+`.3tz`/`.3dtiles` self-contained packages, served in-place via `/3dtiles-self-contained`. Since 2026-11-21 each `.3tz` also has an
+*in place (3tz plugin)* pill: the 3DTilesRendererJS view reads the archive itself by range requests, with the
+vendored [`Tiles3tzPlugin`](https://github.com/zalmoxes-laran/3d-tiles-renderer-3tz), and no tile server; any URL
+ending in `.3tz` typed in the field loads the same way. Cesium has no such plugin and needs the server pills.
 
 | Pill | Source |
 |------|--------|

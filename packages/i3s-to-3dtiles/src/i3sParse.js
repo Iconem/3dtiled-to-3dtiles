@@ -154,6 +154,46 @@ export function obbToBox(obb, isGeographic = true) {
 }
 
 /**
+ * A node's OBB → the axis-aligned box that encloses its 8 corners in the tileset's frame (`toEnu`: ECEF → the shared
+ * east-north-up frame of a geographic layer; a local layer's box is its OBB as stored). The enclosing box always
+ * holds what the OBB holds, whatever the OBB's orientation.
+ */
+export function obbToFrameBox(obb, isGeographic, toEnu) {
+  if (!isGeographic) {
+    const c = obb.center, h = obb.halfSize;
+    return [c[0], c[1], c[2], h[0],0,0, 0,h[1],0, 0,0,h[2]];
+  }
+  const e = obbToBox(obb, true); // [cx,cy,cz, ax(3), ay(3), az(3)] in ECEF
+  const c = [e[0], e[1], e[2]], ax = [e[3],e[4],e[5]], ay = [e[6],e[7],e[8]], az = [e[9],e[10],e[11]];
+  const min = [Infinity,Infinity,Infinity], max = [-Infinity,-Infinity,-Infinity];
+  for (const sx of [-1,1]) for (const sy of [-1,1]) for (const sz of [-1,1]) {
+    const corner = [ c[0]+sx*ax[0]+sy*ay[0]+sz*az[0], c[1]+sx*ax[1]+sy*ay[1]+sz*az[1], c[2]+sx*ax[2]+sy*ay[2]+sz*az[2] ];
+    const u = toEnu(corner);
+    for (let k=0;k<3;k++){ if(u[k]<min[k])min[k]=u[k]; if(u[k]>max[k])max[k]=u[k]; }
+  }
+  const cen=[0,1,2].map(k=>(min[k]+max[k])/2), hf=[0,1,2].map(k=>Math.max((max[k]-min[k])/2,0.5));
+  return [cen[0],cen[1],cen[2], hf[0],0,0, 0,hf[1],0, 0,0,hf[2]];
+}
+
+/**
+ * The geometric error of an I3S node, for the live stream and the offline converter alike: half the diagonal of the
+ * node's own bounding volume as the index gives it (`obbToFrameBox` of its OBB), 0 for a node without children. Never
+ * from the decoded geometry, which only the offline converter has.
+ */
+export const i3sBoxError = (frameBox, hasChildren) => (hasChildren ? Math.hypot(frameBox[3], frameBox[7], frameBox[11]) : 0);
+
+/**
+ * What a node says of its own switch: `lodThreshold` (node pages; read through the layer's `lodSelectionMetricType`),
+ * or the first usable entry of a legacy node's `lodSelection[]` (`metricType`, `maxError`). null when it says nothing.
+ */
+export function i3sNodeLod(node, layerMetric) {
+  if (Number.isFinite(node?.lodThreshold)) return { metricType: layerMetric, value: node.lodThreshold };
+  for (const sel of Array.isArray(node?.lodSelection) ? node.lodSelection : [])
+    if (Number.isFinite(sel?.maxError) && /^(maxScreenThreshold(SQ)?|density-threshold)$/i.test(sel.metricType ?? '')) return { metricType: sel.metricType, value: sel.maxError };
+  return null;
+}
+
+/**
  * Decode a DefaultGeometrySchema buffer — either the UNCOMPRESSED `PerAttributeArray` layout, or
  * (for PointCloud layers whose schema declares `encoding: "lepcc-xyz"`) a LEPCC-compressed XYZ blob
  * decoded via lepccDecode.js. LEPCC point clouds carry ONLY `position` (verified: Moro_Bay_LiDAR,

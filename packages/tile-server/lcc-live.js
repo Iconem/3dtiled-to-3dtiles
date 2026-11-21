@@ -20,7 +20,7 @@
  *     and slice tiles out of the decompressed buffer in memory instead of re-reading over HTTP.
  */
 import { lccSplatGlb } from './splat-tile.js';
-import { tilePool, runTileTaskOr, ownBytes, lccGeoref, LCC_LOCAL_UPRIGHT, memoizeAsync, fetchSource as fetchBuf } from '../core/index.js';
+import { tilePool, runTileTaskOr, ownBytes, lccGeoref, LCC_LOCAL_UPRIGHT, memoizeAsync, fetchSource as fetchBuf, densityError, boxSides, DENSITY_K } from '../core/index.js';
 import { readRange } from './range-getter.js';
 import { remoteZipFileSystem } from './remote-zip.js';
 
@@ -125,17 +125,32 @@ const getCtx = memoizeAsync(async (url) => {
   return { readData, units, scaleMin: scaleAttr.min, scaleMax: scaleAttr.max, sceneBox: boundToZUpBox(bb.min, bb.max), rootGE: diag * ROOT_GE_FACTOR, transform };
 });
 
-function buildTileset(ctx, urlParam, centroids = false) {
+// `density` (&ge=density): a level's error is 8 × the spacing of its splats, √(largest face of the unit's box / the
+// level's splat count from index.bin), under the rule above and under the level that it refines. The finest level
+// of a unit (a leaf) keeps the rule above. The unit's box is its grid cell over the whole scene's height.
+function buildTileset(ctx, urlParam, centroids = false, density = false) {
   const enc = encodeURIComponent(urlParam);
   const geAt = d => ctx.rootGE * Math.pow(DEPTH_RATIO, d);
   const children = [];
   for (const unit of ctx.units) {
     const maxL = unit.lods[unit.lods.length - 1].level;
     let child = null;                                     // nest coarsest (outer) → finest (inner), REPLACE
+    const chain = [];                                     // [tile, splats], finest first
     for (const { level, pts, off, size } of unit.lods) {  // ascending level (0 = finest)
       const tile = { boundingVolume: { box: unit.box }, geometricError: geAt(maxL - level), refine: 'REPLACE', content: { uri: `tile/${off}_${size}_${pts}.glb?url=${enc}` } };
       if (child) tile.children = [child];
       child = tile;
+      chain.push([tile, pts]);
+    }
+    if (density) {
+      const sides = boxSides(unit.box);
+      let above = ctx.rootGE * 2;                         // the root's error
+      for (let i = chain.length - 1; i >= 0; i--) {       // coarsest first
+        const [tile, pts] = chain[i];
+        tile.geometricError = i === 0 ? Math.min(tile.geometricError, above)
+          : densityError({ sides, count: pts, k: DENSITY_K.splats, boxError: tile.geometricError, parentError: above });
+        above = tile.geometricError;
+      }
     }
     children.push(child);
   }
@@ -167,7 +182,7 @@ async function serveTileGlb(ctx, off, size, pts, centroids = false) {
 export const lccTileRe = /^\d+_\d+_\d+$/;
 // hierarchy/prefetch are no-ops (LCC's unit grid lives in one index.bin — monolithic flat index,
 // cache=none ≡ cache=hierarchy; cache=full routes to /convert). `centroids` → POINTS preview.
-export async function lccTileset(url, opts = {}) { return buildTileset(await getCtx(url), url, opts.centroids); }
+export async function lccTileset(url, opts = {}) { return buildTileset(await getCtx(url), url, opts.centroids, opts.geRule === 'density'); }
 export async function lccTile(url, key, opts = {}) { const [o, s, p] = key.split('_').map(Number); return serveTileGlb(await getCtx(url), o, s, p, opts.centroids); }
 
 // Direct /lcc/* HTTP routes were removed 2026-07-02 — /stream/tileset.json?format=lcc&url=<…> (+

@@ -16,6 +16,20 @@
  * Geometric error: proportional to node.bounds.featureSize if available,
  * otherwise parent-halved. Each child must have strictly smaller error
  * than its parent.
+ *
+ * LIVE AND OFFLINE. The offline converter and the live stream's cache=hierarchy hand this builder the whole tree and
+ * get the same tileset. The live stream's default (cache=none) hands it fragments of a few levels, and does NOT get
+ * the same errors, for two reasons that only reading every chunk removes (which is what cache=hierarchy does):
+ *   - a level's error is a mean over the nodes of that depth. The first fragment holds every node of its depths, so
+ *     its per-depth errors are the whole tree's; a deeper fragment has the mean over its own nodes only;
+ *   - RAD's chunks form a graph, not a tree (a chunk is reached from several parents). Over the whole graph each
+ *     node is emitted once, under the parent the depth-first walk meets first, and takes half that parent's error
+ *     when its own level's would not be below it. A fragment walks only its part of the graph, so the same chunk can
+ *     sit under another parent, at another error, and in several fragments. Measured on coit-40m-sh1-lod.rad
+ *     (2026-11-21): 14 of the first fragment's 174 nodes have the whole tree's error.
+ * What a fragment does guarantee: its root repeats the error it has in the fragment above (`parentError`), the tile
+ * that points at it has that error too, and each level below stays under the level above. So the error never rises
+ * with depth, within a fragment or across a boundary.
  */
 
 const GEOMETRIC_ERROR_SCALE    = 1.0;
@@ -38,6 +52,12 @@ export function buildTileset(nodes, opts = {}) {
     // at that node. Mirrors how Potree/COPC cut their implicit octree into linked subtrees.
     subtreeUriTemplate = null,
     rootGeometricError = null,
+    // A FRAGMENT of the tree (rad-live.js's cache=none continuation): `nodes` hold one node of the tree and a few
+    // levels below it. `baseDepth` is that node's depth in the whole tree and `parentError` the error it was given in
+    // the fragment above. The fragment's root then repeats that error, and every level below stays under it, so the
+    // error never rises across a fragment boundary. Both go into `subtreeUriTemplate` as {depth} and {error}.
+    baseDepth = 0,
+    parentError = null,
     // geScale: global multiplier applied to every tile GE. Default 1 — raw
     //   featureSize GE is already the right magnitude (matches the reference
     //   3DGS-PLY-3DTiles-Converter). >1 over-refines (full detail everywhere).
@@ -71,7 +91,8 @@ export function buildTileset(nodes, opts = {}) {
   // the cause of uneven tile selection. We anchor each level to the MEAN
   // featureSize at that depth (real splat size, like their leaf "sparsity + extent"
   // reference) and force it strictly decreasing with depth.
-  const geByDepth = computeErrorByDepth(nodes, geBasis);
+  const fragment = parentError != null && Number.isFinite(parentError) && parentError > 0;
+  const geByDepth = computeErrorByDepth(nodes, geBasis, fragment ? parentError : null);
   // Bake in the inspector's "Layer Multiplier" then "Geometric Error" scale.
   // Layer: GE(d) = leafGE + (GE(d) − leafGE) × geLayer  — stretches the depth range.
   // Scale: multiply every GE by geScale — raises the baseline to pixel-SSE units.
@@ -94,6 +115,8 @@ export function buildTileset(nodes, opts = {}) {
     // the same assigned depth (so equal error), which stalls REPLACE refinement.
     // Force a strict decrease on those rare edges (0 for Coit, ~3 for Tastier).
     if (parentError != null && error >= parentError) error = parentError * 0.5;
+    // The root of a fragment is a node the fragment above already holds: the same error here as there.
+    if (fragment && node === root) error = rootError;
     const uri = tileUriTemplate.replace('{index}', node.nodeIndex ?? node.index);
     const t = {
       boundingVolume: boundingVolume(node), // own-splat AABB; expanded below to nest
@@ -107,11 +130,14 @@ export function buildTileset(nodes, opts = {}) {
     // tile whose own content is an external tileset.json that resumes the scan rooted here, instead
     // of emitting (nonexistent, in `nodes`) real children.
     if (node.frontier && subtreeUriTemplate) {
-      const subUri = subtreeUriTemplate.replace('{index}', node.nodeIndex ?? node.index);
-      const subError = Math.min(error * 0.5, error - 1e-6);
+      // The tile that points at the fragment has this node's error, and the fragment's root repeats it ({error}): the
+      // node's children then show when the node is refined, as in the whole tree. (It had half the error, which
+      // showed them only from twice as near; and the fragment restarted its errors from its own nodes.)
+      const subUri = subtreeUriTemplate.replace('{index}', node.nodeIndex ?? node.index)
+        .replace('{depth}', String(baseDepth + node.depth)).replace('{error}', String(error));
       t.children = [{
         boundingVolume: t.boundingVolume,
-        geometricError: Math.max(subError, 0),
+        geometricError: error,
         refine: 'REPLACE',
         content: { uri: subUri },
       }];
@@ -146,7 +172,7 @@ export function buildTileset(nodes, opts = {}) {
   }
 
   const root3dt = tile(root, rootError * 2);
-  const geSummary = [...geByDepth.entries()].map(([d, g]) => `${d}:${g.toFixed(3)}`).join(' ');
+  const geSummary = [...geByDepth.entries()].map(([d, g]) => `${baseDepth + d}:${g.toFixed(3)}`).join(' ');
   console.log(`  [tileset] geometricError by depth → ${geSummary}`);
 
   // Root-node RX(180°) transform: flips the content upright in the tileset frame.
@@ -198,7 +224,7 @@ function nodeBasisValue(n, basis) {
  * Mean base error per tree depth, forced strictly decreasing with depth so
  * REPLACE refinement converges. Uniform-per-depth = sibling tiles refine together.
  */
-function computeErrorByDepth(nodes, basis = 'spatial') {
+function computeErrorByDepth(nodes, basis = 'spatial', rootError = null) {
   const sum = new Map(), cnt = new Map();
   let maxDepth = 0;
   for (const n of nodes) {
@@ -213,7 +239,8 @@ function computeErrorByDepth(nodes, basis = 'spatial') {
   let prev = Infinity;
   for (let d = 0; d <= maxDepth; d++) {
     let g = cnt.get(d) ? sum.get(d) / cnt.get(d) : prev * 0.5;
-    if (!(g < prev)) g = prev * 0.5; // enforce strict decrease across levels
+    if (d === 0 && rootError != null) g = rootError;   // a fragment: its root's error is the one the fragment above gave it
+    else if (!(g < prev)) g = prev * 0.5; // enforce strict decrease across levels
     byDepth.set(d, g);
     prev = g;
   }

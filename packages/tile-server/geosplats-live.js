@@ -1,7 +1,7 @@
 /**
  * geosplats-live.js — **MapTiler GeoSplats → OGC 3D Tiles** live stream converter.
  *
- *   GET /stream/tileset.json?url=<model.json URL>&format=geosplats[&lod=1..8]
+ *   GET /stream/tileset.json?url=<model.json URL>&format=geosplats[&lod=1..8][&ge=density]
  *   GET /stream/tile/<m>-<grid>-<oct>-<lod>.glb?url=<model.json URL>&format=geosplats
  *
  * GeoSplats (https://www.maptiler.com/geosplats/) is a georeferenced HLOD splat format: a `model.json`
@@ -21,7 +21,7 @@
  * `Referer: https://www.maptiler.com/` (server-side); the browser only ever talks to this middleware.
  * Reverse-engineered structure: docs-references/maptiler-geosplats.md.
  */
-import { llhToEcef, enuFrame, fetchSource, tilePool, runTileTaskOr, ownBytes } from '../core/index.js';
+import { llhToEcef, enuFrame, fetchSource, tilePool, runTileTaskOr, ownBytes, densityError, DENSITY_K } from '../core/index.js';
 import { geosplatsBundleGlb } from './splat-tile.js';
 
 const SPLAT_TASKS = new URL('./tile-tasks-splats.js', import.meta.url).href;   // what a tile worker runs (TILED_WORKERS)
@@ -138,7 +138,13 @@ function pickLod(counts, target) {                          // clamp target to a
   return target;
 }
 // Build the octree subtree for one sub-model. Returns the grid_1 tile (nested), or null.
-function buildSubmodelOctree(meta, m, modelUrl, enc) {
+// `density` (&ge=density): a cell that has finer cells under it gets 8 × the spacing of the splats its tile draws,
+// √(largest face of the cell's own box / the splats of the LOD the tile is cut at), under the rule above and under its
+// parent's error; a cell with nothing finer keeps the rule above, under its parent's error. `counts` is cumulative
+// and a tile holds one LOD's own splats, so the count is counts[lod − 1] − counts[lod − 2] (measured on the two
+// sample models: 191 993 for a tile of 200 704 splats, 66 108 for 73 984, the rest being the padding of the SOG image).
+const lodSplats = (counts, lod) => (Array.isArray(counts) && counts[lod - 1] > 0 ? counts[lod - 1] - (lod > 1 ? counts[lod - 2] || 0 : 0) : undefined);
+function buildSubmodelOctree(meta, m, modelUrl, enc, density = false) {
   const byGrid = { 1: octantsOf(meta, 1), 8: octantsOf(meta, 8), 64: octantsOf(meta, 64) };
   // grid_1's single cell usually omits bounding_box (only finer cells carry it) → synthesize from the
   // sub-model bbox so the root octant still gets content + a proper geometricError.
@@ -146,13 +152,19 @@ function buildSubmodelOctree(meta, m, modelUrl, enc) {
     const g1 = meta.voxel_grids?.grid_1?.[0], bb = meta.bounding_box;
     byGrid[1] = [{ oct: 0, bb, center: g1?.center || { x:(bb.min.x+bb.max.x)/2, y:(bb.min.y+bb.max.y)/2, z:(bb.min.z+bb.max.z)/2 }, counts: g1?.counts }];
   }
-  const mk = (g, cell) => {
+  const mk = (g, cell, above = Infinity) => {
     const b = boxOf(cell.bb), cg = CHILD_GRID[g];
     const lod = pickLod(cell.counts, LOD_FOR_GRID[g] || 8);
-    const kids = cg ? byGrid[cg].filter(cc => inside(cc.center, cell.bb)).map(cc => mk(cg, cc)) : [];
+    const finer = cg ? byGrid[cg].filter(cc => inside(cc.center, cell.bb)) : [];
+    let ge = cg ? b.diag : b.diag / 4;
+    if (density) {
+      const bb = cell.bb, sides = [bb.max.x - bb.min.x, bb.max.y - bb.min.y, bb.max.z - bb.min.z];
+      ge = finer.length ? densityError({ sides, count: lodSplats(cell.counts, lod), k: DENSITY_K.splats, boxError: ge, parentError: above }) : Math.min(ge, above);
+    }
+    const kids = finer.map(cc => mk(cg, cc, ge));
     // Relative (resolved against the tileset.json's own URL) — the /stream/tile/<key>.glb generic
     // route handles it; tagContentUris appends &format=geosplats.
-    return { boundingVolume: { box: b.box }, geometricError: cg ? b.diag : b.diag / 4, refine: 'REPLACE',
+    return { boundingVolume: { box: b.box }, geometricError: ge, refine: 'REPLACE',
       content: { uri: `tile/${m}-${g}-${cell.oct}-${lod}.glb?url=${enc(modelUrl)}` }, children: kids };
   };
   if (byGrid[1].length) return mk(1, byGrid[1][0]);
@@ -196,7 +208,7 @@ export async function geosplatsTileset(modelUrl, opts = {}) {
   const ghalf = gmin[0] === Infinity ? 1000 : Math.max(gmax[0]-gmin[0], gmax[1]-gmin[1], gmax[2]-gmin[2]) / 2;
   // HLOD: each sub-model → its voxel-grid octree (grid_1→8→64). Falls back to a single full-LOD tile.
   const children = subs.map(({ i, meta }) => {
-    const tree = meta && buildSubmodelOctree(meta, i, modelUrl, enc);
+    const tree = meta && buildSubmodelOctree(meta, i, modelUrl, enc, opts.geRule === 'density');
     if (tree) return tree;
     const bb = meta?.bounding_box; const b = bb ? boxOf(bb) : { box: [center[0],center[1],center[2], ghalf,0,0, 0,ghalf,0, 0,0,ghalf], diag: ghalf*2 };
     return { boundingVolume: { box: b.box }, geometricError: b.diag/4, refine: 'REPLACE',

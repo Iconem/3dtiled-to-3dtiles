@@ -29,6 +29,8 @@ const urlStateParsers = {
   centroids: parseAsBoolean.withDefault(false),
   // splats: spherical-harmonic degree asked of the server (`&sh=`), 0 = base colour only. RAD, streamed SOG, LCC2.
   sh: parseAsInteger.withDefault(0),
+  // box-only formats (I3S, LCC, LCC2, GeoSplats): tile errors from the density of the content (`&ge=density`)
+  ge: parseAsStringEnum<'box' | 'density'>(['box', 'density']).withDefault('box'),
   tiling: parseAsStringEnum<TilingMode>(['implicit', 'explicit']).withDefault('implicit'),
   renderer: parseAsStringEnum<ActiveRenderer>(['cesium', '3dtrjs']).withDefault('3dtrjs'),
   tool: parseAsStringEnum<ToolName>(['implicit-to-explicit', 'upgrade', 'packages']).withDefault('implicit-to-explicit'),

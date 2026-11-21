@@ -13,7 +13,8 @@
  * through, Cesium subdivides each face's latitude *linearly*, so deep tiles get wrong regions and are
  * culled (— "zoom to Rome shows nothing"). So we **convert to explicit lazy fragments**: walk Bing's
  * `st` subtree availability ourselves and emit explicit 3D Tiles tiles whose bounding `region` is computed
- * with the correct web-mercator math (lon linear, lat = atan(sinh(mercator-y))). Fragments are lazy —
+ * with the correct web-mercator math (lon linear, lat = atan(sinh(mercator-y))). A tile's geometric error is its
+ * face's own (read from td1), halved per level as implicit tiling says. Fragments are lazy —
  * each `/bing/fragment` covers a few levels and external-refs deeper fragments — so the tree builds on
  * demand. Tiles/subtrees are fetched from Bing with y→reverseY; no API key needed.
  *
@@ -57,15 +58,18 @@ async function getManifest(g) {
   const buf = await fetchBing('td1', g);
   if (!buf) throw new Error('bing td1 fetch failed');
   const td = JSON.parse(buf.toString('utf8').replace(/^﻿/, ''));
+  const rootGE = td.geometricError || 786432;
   const faces = [];
   for (const c of td.root.children || []) {
     const f = (c.content?.uri?.match(/mtx(\d+)-/) || [])[1];
     if (f == null) continue;
     const rg = c.boundingVolume.region;                  // [W,S,E,N,minH,maxH] radians
     faces.push({ face: +f, region: rg, subtreeLevels: c.implicitTiling?.subtreeLevels || 7,
-                 availableLevels: c.implicitTiling?.availableLevels || 21 });
+                 availableLevels: c.implicitTiling?.availableLevels || 21,
+                 // the face's own error in td1 (bingFaceError); a face without one gets half the tileset's, as before
+                 _rootGE: bingFaceError(c, rootGE) });
   }
-  const m = { faces, rootGE: td.geometricError || 786432 };
+  const m = { faces, rootGE };
   manifestCache.set(g, m);
   return m;
 }
@@ -105,7 +109,12 @@ function tileRegion(faceMeta, level, x, y) {
   const latS = invMerc(mB + (mT - mB) * (y / n)), latN = invMerc(mB + (mT - mB) * ((y + 1) / n));
   return [lonW, latS, lonE, latN, minH ?? -500, maxH ?? 9000];
 }
+// A face of td1 is an implicit quadtree: its tile's `geometricError` is the error of the face's level 0, and implicit
+// tiling halves it at every level (3D Tiles 1.1, implicit tiling: a tile's error is its parent's / 2). The subtree
+// files carry no error of their own (their metadata is the tiles' minimum and maximum height only).
 const geAt = (rootGE, level) => rootGE / 2 ** level;
+/** The level-0 error of a face, read from its tile in td1; half the tileset's when the tile states none. */
+export const bingFaceError = (faceTile, tilesetError) => (faceTile?.geometricError > 0 ? faceTile.geometricError : tilesetError / 2);
 
 // Build a lazy explicit fragment rooted at (face, L, x, y): emit up to LEVELS_PER_FRAGMENT levels of
 // explicit tiles from the subtree availability, external-ref deeper fragments at the cutoff.
@@ -158,7 +167,6 @@ export async function bingTileset(g = DEFAULT_G, globe = {}) {
   const globeQS = (globe.maxLevel != null ? `&globe=${globe.maxLevel}` : '')
                 + (globe.basemap ? `&basemap=${encodeURIComponent(globe.basemap)}` : '');
   const children = m.faces.map(f => {
-    f._rootGE = m.rootGE / 2;                            // face GE (half the world root)
     return { boundingVolume: { region: f.region }, geometricError: f._rootGE, refine: 'REPLACE',
              content: { uri: `/bing/fragment/${f.face}-0-0-0.json?g=${g}${globeQS}` } };
   });
@@ -205,7 +213,6 @@ export async function handleBing(req, res, u) {
       const m = await getManifest(g);
       const fm = m.faces.find(f => f.face === face);
       if (!fm) { sendErr(res, 404, 'no such face'); return true; }
-      fm._rootGE = m.rootGE / 2;
       const ts = await buildFragment(fm, L, x, y, g, L === 0, globe);
       if (!ts) { sendErr(res, 404, 'empty fragment'); return true; }
       sendJson(res, ts); return true;

@@ -8,6 +8,45 @@ Format loosely follows [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+### Added — 2026-11-21 (tile errors from density, as an option; a `.3tz` read in place; the COPC plugin, second pass)
+- **`&ge=density` on `/stream/tileset.json`, and a *density error* pill** in the viewer's top bar for **I3S, LCC,
+  LCC2 and GeoSplats**, whose tile errors come from the size of each box alone. With it, a tile's error is the
+  spacing of what it draws, `k × √(largest face of its box ÷ count)`, never above the box rule nor above its
+  parent's; I3S first uses its own `lodThreshold`. Off by default, and the default answers are unchanged (compared
+  with the previous code on 14 samples). It only lowers errors, so less is loaded: one level below the root, the
+  mean error goes from 4136 to 188 on the New York buildings (I3S), 18.8 to 5.3 on Tunis (LCC2), 741 to 9.2 on a
+  GeoSplats scene. Not compared by eye with a reference viewer of each format, and the factors for points (1.5)
+  and mesh vertices (1) are choices. Built for a VPC without an overview too, but not offered: there it hides the
+  set until the camera is very close. The page: [Geometric error](/docs/guide/geometric-error).
+- **A `.3tz` archive read in place** by 3DTilesRendererJS, with
+  [`Tiles3tzPlugin`](https://github.com/zalmoxes-laran/3d-tiles-renderer-3tz) by Emanuel Demetrescu (MIT, vendored
+  at its commit `4cc4536`, the package not being on npm): range requests on the archive itself, no tile server.
+  Any URL ending in `.3tz` loads this way in the 3DTilesRendererJS view, and the *Packages* row has an *in place*
+  pill beside each archive's server pill. Checked on the two sample archives (a mesh and a splat tileset); the dev
+  server ignores `Range`, so there the plugin took the whole file, which it handles.
+- **CopcPlugin, second pass** (Potree lab): chunks are decoded in workers (the page is held about 500 times less
+  on Autzen's first 3 M points; the decode itself costs the same); intensity, classification, returns, source id,
+  user data and GPS time are read, with a *colour by* control (also elevation) in `potree` and `copc` modes; and
+  *place on the globe* builds the root transform from the file's CRS with proj4 (Autzen lands on its stadium, feet
+  and grid convergence included; a file with no CRS stays local, with a note). Measured in headless Chrome only.
+- **Gizmo keys: G, R, S** choose move, rotate and scale while a gizmo is shown, as in Blender (not while typing,
+  nor in Fly mode).
+- **CI: the macOS and Linux desktop builds can join the release.** `desktop-unix.yml` now adds the builds that
+  pass its start-up test to `desktop-latest` (input `publish`, on by default), and the Windows workflow no longer
+  deletes files that are not its own.
+
+### Fixed — 2026-11-21 (geometric errors that disagreed)
+- **3MX** errors had no pixel factor: `diagonal × 16 ÷ maxScreenDiameter` now, as OSGB, so a node is refined at
+  the distance its source asks at a 16 px target (16 times earlier than before; expect more to load at an
+  unchanged target). The tile pointing at a finer file has its node's error (it had half).
+- **RAD, live**: no error rises across a fragment boundary any more (12 of 12 fragment roots were above the tile
+  pointing at them on the Coit sample; none now). Still not equal to the offline errors, which need every chunk.
+- **I3S**: the live stream and the offline converter give a node the same error, from its box in the index.
+- **Potree, offline**: tileset-level error and the no-spacing fallback as live. **Streamed SOG**: tileset-level
+  error the same live and offline. **Bing 3D**: the faces' errors are read (they were the assumed half).
+- **The tileset gizmo stands on the data**: a ray dropped through the centre of the data lands on what is loaded.
+  The root origin of an octree is the centre or a corner of its cube: on Autzen it was 2.3 km from the points.
+
 ### Added — 2026-11-19 (a COPC plugin for 3DTilesRendererJS, first attempt; uploaded manifests in the Potree lab; the geometric error page)
 - **CopcPlugin, a first attempt** (`apps/viewer/src/potree-lab/copcPlugin.js`, Potree lab, *load as: CopcPlugin*):
   a `.copc.laz` read from its bucket by 3DTilesRendererJS with no tile server. It is upstream's `PotreePlugin`

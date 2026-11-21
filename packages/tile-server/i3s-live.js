@@ -31,15 +31,15 @@
  * have no decoder here and are silently skipped (geometry still renders, untextured), same gating
  * philosophy as Draco.
  *
- *   GET /stream/tileset.json?format=i3s&url=<3dSceneLayer.json | .slpk | SceneServer URL>
+ *   GET /stream/tileset.json?format=i3s&url=<3dSceneLayer.json | .slpk | SceneServer URL>[&ge=density]
  *   GET /stream/tile/<nodeIndex>.glb?format=i3s&url=<same URL>
  */
 import zlib from 'node:zlib';
 import { parseSLPKArchive } from '@loaders.gl/i3s';
 import { DataViewReadableFile } from '@loaders.gl/zip';
-import { geodeticToEcef, obbToBox, childIndices } from '../i3s-to-3dtiles/src/i3sParse.js';
+import { geodeticToEcef, childIndices, obbToFrameBox, i3sBoxError, i3sNodeLod } from '../i3s-to-3dtiles/src/i3sParse.js';
 import { i3sNodeGlb } from './mesh-tile.js';
-import { tilePool, runTileTaskOr, ownBytes, enuFrame, memoizeAsync, requestSource, fetchSource as fetchBuf, fetchSourceRange } from '../core/index.js';
+import { tilePool, runTileTaskOr, ownBytes, enuFrame, memoizeAsync, requestSource, fetchSource as fetchBuf, fetchSourceRange, densityError, i3sLodError, DENSITY_K } from '../core/index.js';
 
 const MESH_TYPES  = new Set(['IntegratedMesh', '3DObject']);
 const POINT_TYPES = new Set(['PointCloud']);
@@ -254,6 +254,8 @@ const getCtx = memoizeAsync(async (url) => {
   return {
     getFile, nodes, schema, isGeographic, layerType, textureFormatFor, rgbAttrKey,
     isPoint: POINT_TYPES.has(layerType),
+    // how a node's lodThreshold reads (mesh layers: nodePages; point clouds: store.index), for &ge=density
+    lodMetric: sl.nodePages?.lodSelectionMetricType ?? sl.store?.index?.lodSelectionMetricType ?? null,
     bufIdx: uncompressedBufferIndex >= 0 ? uncompressedBufferIndex : 0,
     originEcef, EAST, NORTH, UP, toEnu,
     loadPages, get _allPagesLoaded() { return _allPagesLoaded; },
@@ -264,27 +266,37 @@ const getCtx = memoizeAsync(async (url) => {
 // Convert the node OBB to an axis-aligned box in the shared ENU frame by enclosing its 8 corners.
 // (Enclosing AABB always contains whatever the OBB contains, so the box ⊇ mesh regardless of the
 //  OBB orientation — avoids the offline draft's "rotated box doesn't contain mesh" pitfall.)
-function obbToEnuBox(ctx, obb) {
-  if (!ctx.isGeographic) {
-    const c = obb.center, h = obb.halfSize;
-    return [c[0], c[1], c[2], h[0],0,0, 0,h[1],0, 0,0,h[2]];
-  }
-  const e = obbToBox(obb, true); // [cx,cy,cz, ax(3), ay(3), az(3)] in ECEF
-  const c = [e[0], e[1], e[2]], ax = [e[3],e[4],e[5]], ay = [e[6],e[7],e[8]], az = [e[9],e[10],e[11]];
-  const min = [Infinity,Infinity,Infinity], max = [-Infinity,-Infinity,-Infinity];
-  for (const sx of [-1,1]) for (const sy of [-1,1]) for (const sz of [-1,1]) {
-    const corner = [ c[0]+sx*ax[0]+sy*ay[0]+sz*az[0], c[1]+sx*ax[1]+sy*ay[1]+sz*az[1], c[2]+sx*ax[2]+sy*ay[2]+sz*az[2] ];
-    const u = ctx.toEnu(corner);
-    for (let k=0;k<3;k++){ if(u[k]<min[k])min[k]=u[k]; if(u[k]>max[k])max[k]=u[k]; }
-  }
-  const cen=[0,1,2].map(k=>(min[k]+max[k])/2), hf=[0,1,2].map(k=>Math.max((max[k]-min[k])/2,0.5));
-  return [cen[0],cen[1],cen[2], hf[0],0,0, 0,hf[1],0, 0,0,hf[2]];
+// Shared with the offline converter (i3sParse.js), which derives its geometric errors from the same box.
+const obbToEnuBox = (ctx, obb) => obbToFrameBox(obb, ctx.isGeographic, ctx.toEnu);
+
+/**
+ * `&ge=density`: the error of every node with children, from the top down (core/geometric-error.js).
+ *   1. the layer's own answer, when the node has a `lodThreshold` the layer's `lodSelectionMetricType` explains:
+ *      the screen size of the node's bounding sphere above which it is refined, turned into the error that switches
+ *      at the same distance for a 16 px target. Node pages store an OBB and no sphere, so the sphere is the OBB's
+ *      (radius = the length of halfSize). Capped by the parent's error only.
+ *   2. else the density rule: min(k · √(largest face of the OBB / vertexCount), the box rule, the parent's error),
+ *      k = 1 for mesh vertices, 1.5 for points. A point cloud's `density-threshold` is the same rule with the
+ *      layer's own area in place of the face, and is capped the same way.
+ * Leaves stay at 0. `vertexCount` is in the node pages (`mesh.geometry.vertexCount`; top-level for a point cloud).
+ */
+function applyDensityRule(ctx, tile, nodeOf, parentError) {
+  if (!tile.children?.length) return;
+  const node = nodeOf.get(tile), half = node.obb?.halfSize;
+  const count = node.mesh?.geometry?.vertexCount ?? node.vertexCount;
+  const lod = i3sNodeLod(node, ctx.lodMetric);
+  const own = lod && half ? i3sLodError({ ...lod, radius: Math.hypot(...half), vertexCount: count }) : null;
+  const boxError = tile.geometricError;
+  if (own != null) tile.geometricError = Math.min(own, /density/i.test(lod.metricType) ? boxError : Infinity, parentError);
+  else tile.geometricError = densityError({ sides: half?.map((h) => 2 * h), count, k: ctx.isPoint ? DENSITY_K.points : DENSITY_K.mesh, boxError, parentError });
+  for (const c of tile.children) applyDensityRule(ctx, c, nodeOf, tile.geometricError);
 }
 
 const nodeHasGeometry = (n) => !!(n.mesh?.geometry) || Number.isInteger(n.resourceId);
 
-function buildTileset(ctx, urlParam) {
+function buildTileset(ctx, urlParam, geRule) {
   const enc = encodeURIComponent(urlParam);
+  const nodeOf = new Map();                               // tile → its node, for the density pass
 
   const buildTile = (idx, seen) => {
     const node = ctx.nodes[idx];
@@ -296,14 +308,15 @@ function buildTileset(ctx, urlParam) {
     const kids = [];
     for (const ci of childIndices(node)) { const c = buildTile(ci, seen); if (c) kids.push(c); }
     if (kids.length) tile.children = kids;
-    // GE shrinks with depth: half the box diagonal for interior nodes, 0 at leaves.
-    const diag = 2 * Math.hypot(box[3], box[7], box[11]);
-    tile.geometricError = kids.length ? diag * 0.5 : 0;
+    // GE shrinks with depth: half the box diagonal for interior nodes, 0 at leaves (the offline converter's rule too).
+    tile.geometricError = i3sBoxError(box, kids.length > 0);
+    nodeOf.set(tile, node);
     return tile;
   };
 
   const root = buildTile(0, new Set());
   if (!root) throw new Error('I3S root node (index 0) missing');
+  if (geRule === 'density') applyDensityRule(ctx, root, nodeOf, Infinity);
   if (ctx.isGeographic) {
     const { EAST:E, NORTH:N, UP:U, originEcef:o } = ctx;
     root.transform = [ E[0],E[1],E[2],0, N[0],N[1],N[2],0, U[0],U[1],U[2],0, o[0],o[1],o[2],1 ];
@@ -403,7 +416,7 @@ export async function i3sTileset(url, opts = {}) {
   const pages = ctx.loadPages();
   pages.catch(() => {});
   await (opts.hierarchy === 'eager' ? pages : Promise.race([pages, new Promise(r => setTimeout(r, 3000))]));
-  const ts = buildTileset(ctx, url);
+  const ts = buildTileset(ctx, url, opts.geRule);
   if (!ctx._allPagesLoaded) ts.asset.extras = { hierarchyIncomplete: true };
   return ts;
 }

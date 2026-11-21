@@ -100,12 +100,15 @@ build step then copies, so `electrobun build` dies with `CopySourceMissing`. `2.
 cottontail `0.7.0-canary.2`, which does ship it. Both `dev` and `build` were verified on that pin;
 revisit when 2.0.2 ships stable.
 
-### macOS and Linux: built in CI, not released
+### macOS and Linux: built in CI
 
 The release holds Windows files only. A second workflow, `desktop-unix.yml` (on demand), builds the app on Linux
 and macOS, starts it with the system Node hidden, asks its tile-server for a COPC tileset, and keeps what
-Electrobun packed as a workflow artifact for 14 days (Actions, the run, *Artifacts*). Nothing is added to the
-release or to the update feed. Runs of 2026-11-19:
+Electrobun packed as a workflow artifact for 14 days (Actions, the run, *Artifacts*). Since 2026-11-21 a
+platform that passes also adds its files to the `desktop-latest` release (input `publish`, on by default): their
+names start with the platform (`linux-x64-…`, `stable-linux-x64-…`), and the Windows workflow leaves them alone.
+The first runs kept them out of the release because nobody had opened the app on those systems; that is still
+true, and the release notes say so. Runs of 2026-11-19:
 
 | Platform | Result |
 |---|---|

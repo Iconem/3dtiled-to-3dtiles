@@ -35,7 +35,7 @@ import { gunzipSync } from 'node:zlib';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { localSourcesAllowed } from '../core/source-fetch.js';
-import { fetchSource, fetchSourceRange, crsToEcef, epsgOfCrs, ensureCrs, llhToEcef } from '../core/index.js';
+import { fetchSource, fetchSourceRange, crsToEcef, epsgOfCrs, ensureCrs, llhToEcef, densityError, DENSITY_K } from '../core/index.js';
 import { isGridVpc, parseGridVpc } from './vpc-grid.js';
 
 /** Past this extent a box is sampled on a grid: its faces follow the ellipsoid (as copc-live's curved placement does). */
@@ -483,15 +483,15 @@ const plans = new WeakMap();                       // set → Map<`${overview} $
  * it is cached for a day and shared by every request. → { set, extras } with `extras` for
  * `asset.extras.vpc`: `overview: { url, points, spacing, areaKm2 }`, `leafError`, or `overviewError`.
  */
-export function planOverview(set, report, { overview = true, leafError = null } = {}) {
-  const key = `${overview ? 1 : 0} ${leafError ?? 'auto'}`;
+export function planOverview(set, report, { overview = true, leafError = null, density = false } = {}) {
+  const key = `${overview ? 1 : 0} ${leafError ?? 'auto'}${density ? ' density' : ''}`;
   let byKey = plans.get(set);
   if (!byKey) plans.set(set, byKey = new Map());
-  if (!byKey.has(key)) byKey.set(key, planOverviewNow(set, report, { overview, leafError }));
+  if (!byKey.has(key)) byKey.set(key, planOverviewNow(set, report, { overview, leafError, density }));
   return byKey.get(key);
 }
 
-async function planOverviewNow(set, report, { overview, leafError }) {
+async function planOverviewNow(set, report, { overview, leafError, density }) {
   const extras = {};
   const url = overview ? report.overviews?.[0] ?? null : null;
   let error = leafError, placed = null;
@@ -513,10 +513,21 @@ async function planOverviewNow(set, report, { overview, leafError }) {
     }
   }
   if (error != null) extras.leafError = error;
+  // `&ge=density`, for a set that shows no overview and was given no leaf error: each file leaf gets the spacing of
+  // the file's own points, DENSITY_K.points × √(footprint / pc:count), the strict error staying as the ceiling
+  // (core/geometric-error.js). The footprint is the only face a VPC item gives. A file without a count keeps the
+  // strict error. NOTE what this number is: the spacing of the file at full depth, while the leaf itself draws
+  // nothing, so a file then opens only from very near (see the geometric error page before turning it on).
+  const byDensity = density && error == null;
+  if (byDensity) extras.leafErrorRule = 'density';
   const entries = set.entries.map((e) => {
     // a nested child places no overview of its own, and its leaves open at the same error as these
-    if (e.format === 'vpc') return { ...e, params: { ...(e.params ?? {}), overview: '0', ...(error != null ? { leafError: String(error) } : {}) } };
+    if (e.format === 'vpc') return { ...e, params: { ...(e.params ?? {}), overview: '0', ...(error != null ? { leafError: String(error) } : {}), ...(density ? { ge: 'density' } : {}) } };
     if (error != null && e.bounds && e.bounds.geometricError > error) return { ...e, bounds: { ...e.bounds, geometricError: error } };
+    if (byDensity && e.bounds && e.points > 0 && e.area > 0) {
+      const ge = +densityError({ area: e.area, count: e.points, k: DENSITY_K.points, boxError: e.bounds.geometricError }).toFixed(3);
+      if (ge < e.bounds.geometricError) return { ...e, bounds: { ...e.bounds, geometricError: ge } };
+    }
     return e;
   });
   if (placed) entries.unshift(placed);

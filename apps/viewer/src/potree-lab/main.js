@@ -16,8 +16,11 @@
  *            is released).
  *
  *   copc     CopcPlugin (./copcPlugin.js): a .copc.laz read in the browser by range requests, with no
- *            server, on upstream's PotreePlugin (same tiles, same adaptive size). A first attempt:
- *            drawn in the file's own coordinates, decoded on the main thread.
+ *            server, on upstream's PotreePlugin (same tiles, same adaptive size). Chunks are decoded
+ *            in workers (`&workers=0` decodes on the page, to compare). `&place=globe` puts the cloud
+ *            on the WGS84 ellipsoid from the CRS the file declares (./copcPlacement.js); the lab has
+ *            no globe, so it then turns that place back to its own frame (Y up, metres) and says
+ *            where it is in the HUD.
  *
  *   tileset  Any 3D Tiles URL as is — typically an /aggregate mosaic of point clouds (filter it with
  *            &only= so it stays regional) — with the same effects and sizing as `stream`.
@@ -26,7 +29,9 @@
  * declare no CRS (flai's open LiDAR).
  *
  * State lives in the query string so any view is shareable:
- *   /potree-lab?url=<cloud.js|.copc.laz|tileset.json>&mode=potree|stream|tileset&shape=round&edl=0.4&scale=1&sizing=adaptive|tile|fixed
+ *   /potree-lab?url=<cloud.js|.copc.laz|tileset.json>&mode=potree|copc|stream|tileset&shape=round&edl=0.4&scale=1&sizing=adaptive|tile|fixed
+ *   &color=elevation|intensity|classification|returnNumber|numberOfReturns|pointSourceId|userData|gpsTime
+ *   (potree and copc modes: ./colorModes.js)
  *
  * Dataset list = built-in public samples + the manifests uploaded in the viewer (Aggregate row, kept in
  * this browser's localStorage) + (dev server only) the Iconem share-link manifest at
@@ -35,13 +40,14 @@
 import { Scene, WebGLRenderer, PerspectiveCamera, Box3, Sphere, Vector2, Vector3, Raycaster } from 'three';
 import { PivotPointMesh } from '3d-tiles-renderer/src/three/renderer/controls/PivotPointMesh.js';
 import { installFilteredRaycast, pickPoint, pointerNdc } from '@/lib/picking';
-import { TilesRenderer, EnvironmentControls, GlobeControls } from '3d-tiles-renderer';
+import { TilesRenderer, EnvironmentControls, GlobeControls, OBJECT_FRAME } from '3d-tiles-renderer';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { DebugTilesPlugin, GLTFExtensionsPlugin, ImplicitTilingPlugin, ReorientationPlugin } from '3d-tiles-renderer/plugins';
 import { MeshoptDecoder } from 'three/addons/libs/meshopt_decoder.module.js';
 import { GUI } from 'three/addons/libs/lil-gui.module.min.js';
 import { PotreePlugin } from '@/lib/potreePlugin';
 import { CopcPlugin } from './copcPlugin.js';
+import { COLOR_MODES, createColorState, paint, setColorMode } from './colorModes.js';
 import { PointCloudEffectsPlugin } from './vendor/PointCloudEffectsPlugin.js';
 import { MW } from '@/lib/formats';
 
@@ -68,6 +74,11 @@ const params = {
   errorTarget: Number(q.get('error') ?? 1),
   pointScale: Number(q.get('scale') ?? 1),
   pointShape: q.get('shape') || 'round',
+  // potree and copc modes: the attribute the points are coloured by (./colorModes.js)
+  colorBy: q.get('color') in COLOR_MODES ? q.get('color') : 'rgb',
+  // copc mode: on the WGS84 ellipsoid from the file's CRS, and the number of decode workers (0: on the page)
+  place: q.get('place') === 'globe',
+  workers: q.has('workers') ? Math.max(0, Number(q.get('workers')) || 0) : undefined,
   minPointSize: Number(q.get('min') ?? 2),
   edl: (q.get('edl') ?? '0.4') !== '0',
   edlStrength: Number(q.get('edl') ?? 0.4) || 0.4,
@@ -94,6 +105,7 @@ addEventListener('error', (e) => LAB.errors.push(String(e.message)));
 addEventListener('unhandledrejection', (e) => LAB.errors.push(String(e.reason?.message ?? e.reason)));
 
 const renderer = new WebGLRenderer({ antialias: true });
+LAB.renderer = renderer;                         // headless checks stop the loop to time the loader alone
 renderer.setPixelRatio(devicePixelRatio);
 renderer.setClearColor(0x111111);
 document.body.appendChild(renderer.domElement);
@@ -111,6 +123,7 @@ camera.position.set(4, 2, 8);
 let controls = null;
 let radius = 10;                                 // of the loaded dataset's bounding sphere
 let tiles = null, effects = null;                // declared before the first makeControls() below reads them
+let colorState = createColorState();             // colour-by of the tile set on screen (potree and copc modes)
 
 /** A raycaster with the lab's point tolerance, aimed through a screen point (NDC). */
 function rayAt(ndc) {
@@ -291,10 +304,23 @@ function initTiles() {
   if (params.mode === 'potree' && /\.copc\.laz|tileset\.json|\/aggregate\//i.test(params.url)) params.mode = 'stream';
   if (inPlugin()) {
     tiles = new TilesRenderer();
-    const Plugin = params.mode === 'copc' ? CopcPlugin : PotreePlugin;
-    effects = new Plugin({ url: params.url.split('#')[0], pointScale: params.pointScale, ...effectOpts });
+    const [bare, frag = ''] = params.url.split('#');
+    effects = params.mode === 'copc'
+      // "<url>#crs=<proj string or WKT>" stands for the CRS of a file that declares none
+      ? new CopcPlugin({ url: bare, pointScale: params.pointScale, ...effectOpts, workers: params.workers, placement: params.place ? 'globe' : 'local', crs: new URLSearchParams(frag).get('crs') })
+      : new PotreePlugin({ url: bare, pointScale: params.pointScale, ...effectOpts });
     tiles.registerPlugin(effects);
     tiles.group.rotation.x = -Math.PI / 2;           // Potree is Z-up
+    // colour by an attribute: each tile is painted as it arrives
+    colorState = createColorState(params.colorBy);
+    const state = colorState;
+    tiles.addEventListener('load-model', ({ scene: model }) => {
+      if (state.mode === 'rgb') return;
+      model.traverse((o) => {
+        if (!o.isPoints || !o.geometry.attributes.position?.count) return;
+        if (paint(o, state)) { state.painted = true; state.missing = false; } else if (!state.painted) state.missing = true;
+      });
+    });
   } else {
     tiles = new TilesRenderer(streamUrl(params.url));
     tiles.registerPlugin(new ImplicitTilingPlugin());
@@ -324,8 +350,20 @@ function initTiles() {
   // several times too far away. A sphere is rotation-invariant, so both modes frame identically.
   tiles.addEventListener('load-root-tileset', () => {
     const sphere = new Sphere();
+    // A COPC placed on the globe is in earth-centred coordinates: bring its place back to the lab's
+    // frame (Y up), as ReorientationPlugin does for a georeferenced /stream.
+    const placed = effects.placement?.placed ? effects.placement : null;
+    if (placed) {
+      tiles.ellipsoid.getObjectFrame(placed.lat * Math.PI / 180, placed.lon * Math.PI / 180, 0, 0, 0, 0, tiles.group.matrix, OBJECT_FRAME);
+      tiles.group.matrix.invert().decompose(tiles.group.position, tiles.group.quaternion, tiles.group.scale);
+    }
+    LAB.placement = effects.placement ?? null;
     tiles.group.updateMatrixWorld();
-    tiles.getBoundingSphere(sphere);
+    // A COPC octree is a cube as wide as the cloud, far taller than it: frame the points (the header's
+    // box, through the root tile's transform), not the cube.
+    const header = params.mode === 'copc' ? effects.loader?.copc?.header : null;
+    if (header && tiles.root?.engineData?.transform) new Box3(new Vector3(...header.min), new Vector3(...header.max)).getBoundingSphere(sphere).applyMatrix4(tiles.root.engineData.transform);
+    else tiles.getBoundingSphere(sphere);
     sphere.applyMatrix4(tiles.group.matrixWorld);
     tiles.group.position.sub(sphere.center);
     radius = sphere.radius || 10;
@@ -364,6 +402,9 @@ function syncUrl() {
   const s = new URLSearchParams({ url: params.url, mode: params.mode, shape: params.pointShape,
     edl: params.edl ? String(params.edlStrength) : '0', scale: String(params.pointScale), error: String(params.errorTarget) });
   if (!inPlugin()) { s.set('sizing', params.sizing); if (params.sizing === 'fixed') s.set('fixed', String(params.fixedSize)); }
+  if (inPlugin() && params.colorBy !== 'rgb') s.set('color', params.colorBy);
+  if (params.mode === 'copc' && params.place) s.set('place', 'globe');
+  if (params.mode === 'copc' && params.workers !== undefined) s.set('workers', String(params.workers));
   if (params.debugColorMode !== 'none') s.set('debug', params.debugColorMode);
   if (params.displayBoxBounds) s.set('boxes', '1');
   if (params.controls !== 'env') s.set('controls', params.controls);
@@ -398,13 +439,15 @@ function onDatasetChange(name) {
   const mode = MODE_OF(params.url);
   if (mode) { params.mode = mode; modeCtl.updateDisplay(); streamFolder.show(true); }
   else if (params.mode === 'tileset') { params.mode = 'stream'; modeCtl.updateDisplay(); }
+  showModeCtls();
   urlCtl.updateDisplay();
   initTiles();
 }
 let datasetCtl = gui.add(params, 'dataset', Object.keys(datasets)).name('dataset').onChange(onDatasetChange);
 const urlCtl = gui.add(params, 'url').name('source url').onFinishChange(initTiles);
 const modeCtl = gui.add(params, 'mode', { 'PotreePlugin (adaptive size)': 'potree', 'CopcPlugin (COPC in the browser, no server)': 'copc', '/stream 3D Tiles + effects': 'stream', 'any 3D Tiles url + effects': 'tileset' })
-  .name('load as').onChange(() => { streamFolder.show(!inPlugin()); scaleCtl.name(inPlugin() ? 'point scale' : 'size multiplier'); initTiles(); });
+  .name('load as').onChange(() => { streamFolder.show(!inPlugin()); scaleCtl.name(inPlugin() ? 'point scale' : 'size multiplier'); showModeCtls(); initTiles(); });
+const placeCtl = gui.add(params, 'place').name('place on globe (file CRS)').onChange(initTiles);
 
 gui.add(params, 'controls', { 'EnvironmentControls (3DTRjs)': 'env', 'GlobeControls (3DTRjs)': 'globe', 'OrbitControls (three)': 'orbit' })
   .name('controls').onChange((v) => { makeControls(v); syncUrl(); });
@@ -422,6 +465,17 @@ const scaleCtl = points.add(params, 'pointScale', 0.1, 4, 0.05).name(inPlugin() 
   if (inPlugin()) effects.pointScale = v; else applyStreamSizes();
   syncUrl();
 });
+const colorCtl = points.add(params, 'colorBy', Object.fromEntries(Object.entries(COLOR_MODES).map(([k, v]) => [v, k]))).name('colour by').onChange((v) => {
+  setColorMode(colorState, v, (cb) => tiles.forEachLoadedModel((model) => model.traverse(cb)));
+  colorState.painted = v !== 'rgb' && !colorState.missing;
+  syncUrl();
+});
+/** The controls of one mode only: colour by an attribute (potree, copc), placement from the CRS (copc). */
+function showModeCtls() {
+  colorCtl.show(inPlugin());
+  placeCtl.show(params.mode === 'copc');
+}
+showModeCtls();
 points.add(params, 'pointShape', ['square', 'round', 'sphere']).name('shape').onChange((v) => { effects.pointShape = v; syncUrl(); });
 points.add(params, 'minPointSize', 0, 8, 0.5).name('min size (px)').onChange((v) => { effects.minPointSize = v; });
 points.add(params, 'edl').name('eye-dome lighting').onChange((v) => { effects.edlStrength = v ? params.edlStrength : 0; syncUrl(); });
@@ -503,8 +557,15 @@ function updateHud() {
   LAB.visibleTiles = vis;
   LAB.visiblePoints = pts;
   const cs = params.mode === 'copc' && effects?.loader?.stats;
-  hud.textContent = `${cs ? `CopcPlugin · no server · ${cs.requests} requests, ${(cs.bytes / 1048576).toFixed(1)} MB, ${cs.pages} hierarchy pages, decode ${cs.points ? (cs.decodeMs / cs.points * 1e6).toFixed(0) : 0} ms per M points` : inPlugin() ? 'PotreePlugin · adaptive size' : `${params.mode === 'tileset' ? '3D Tiles url' : '/stream 3D Tiles'} · ${{ adaptive: 'adaptive size', tile: 'size from tile GE', fixed: 'fixed size' }[params.sizing]}`}`
+  const perM = (ms) => (cs.points ? (ms / cs.points * 1e6).toFixed(0) : 0);
+  const workers = cs ? effects.loader.workerCount : 0;
+  const pl = params.mode === 'copc' && params.place ? effects?.placement : null;
+  const range = colorState.ranges[colorState.mode];
+  const fmt = (v) => (Number.isInteger(v) || Math.abs(v) >= 100 ? v.toFixed(0) : v.toPrecision(3));
+  hud.textContent = `${cs ? `CopcPlugin · no server · ${cs.requests} requests, ${(cs.bytes / 1048576).toFixed(1)} MB, ${cs.pages} hierarchy pages, decode ${perM(cs.decodeMs)} ms per M points ${workers ? `in ${workers} worker${workers > 1 ? 's' : ''}` : `on the page${effects.loader.workerNote ? ` (${effects.loader.workerNote})` : ''}`}, page held ${perM(cs.mainMs)} ms per M points` : inPlugin() ? 'PotreePlugin · adaptive size' : `${params.mode === 'tileset' ? '3D Tiles url' : '/stream 3D Tiles'} · ${{ adaptive: 'adaptive size', tile: 'size from tile GE', fixed: 'fixed size' }[params.sizing]}`}`
     + ` · ${vis} tiles · ${pts.toLocaleString('en-US')} points · ${tiles.downloadQueue.currJobs ?? 0}↓ ${tiles.parseQueue.currJobs ?? 0}⚙ · cache ${(tiles.lruCache.cachedBytes / 1048576).toFixed(0)} MB`
+    + (pl ? (pl.placed ? ` · placed at ${Math.abs(pl.lat).toFixed(5)}°${pl.lat < 0 ? 'S' : 'N'} ${Math.abs(pl.lon).toFixed(5)}°${pl.lon < 0 ? 'W' : 'E'}, ${pl.height.toFixed(0)} m (${pl.crsName}: 1 unit = ${pl.unit.toFixed(4)} m, grid north ${pl.convergence.toFixed(2)}° from true north; ${pl.note})` : ` · not placed, drawn in its own coordinates: ${pl.note}`) : '')
+    + (inPlugin() && colorState.mode !== 'rgb' ? (colorState.missing ? ` · no ${COLOR_MODES[colorState.mode]} in this source: file colours` : ` · colour: ${COLOR_MODES[colorState.mode]}${range ? ` ${fmt(range[0])} to ${fmt(range[1])}` : ''}`) : '')
     + (hud.dataset.listed ? ` · ${hud.dataset.listed} datasets from manifests` : '')
     + (LAB.errors.length ? ` · ${LAB.errors.length} error(s)` : '');
 }

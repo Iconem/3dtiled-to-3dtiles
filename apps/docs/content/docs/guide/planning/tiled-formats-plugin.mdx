@@ -40,13 +40,13 @@ formats: **Nexus, 3MX, I3S, OSGB**.
 
 ## Plugins that exist, outside upstream
 
-Looked up on 2026-11-19. None is used by the viewer except the first.
+Looked up on 2026-11-19. The viewer uses the first, and the 3tz plugin since 2026-11-21.
 
 | Plugin | What it reads | Notes |
 |---|---|---|
 | [3d-tiles-rendererjs-3dgs-plugin](https://github.com/WilliamLiu-1997/3d-tiles-rendererjs-3dgs-plugin) (William Liu) | Gaussian splats in 3D Tiles (`KHR_gaussian_splatting`) | the viewer's splat plugin (0.3.1), drawing with his [Gaussian Splat Lite](https://github.com/WilliamLiu-1997/Gaussian-Splat-Lite) |
 | Gaussian Splat Lite's own schedulers | RAD, streamed SOG (`lod-meta.json`), LCC2 | three.js, outside `TilesRenderer`: streamed SOG since 2026-09-07, RAD since 2026-09-08, LCC2 since 1.6.1 (2026-11-02). Not used by the viewer, which goes through the server's 3D Tiles for these |
-| [3d-tiles-renderer-3tz](https://github.com/zalmoxes-laran/3d-tiles-renderer-3tz) (Emanuel Demetrescu, MIT) | a `.3tz` archive, in place | `Tiles3tzPlugin`: reads the ZIP directory by range request, then one request per tile; uses the `@3dtilesIndex1@` index for large archives; takes a local file too. **Not added to the viewer**: `.3tz` goes through the server's `/3dtiles-self-contained` here. Worth trying for the no-server case; a young repository (4 commits when read) |
+| [3d-tiles-renderer-3tz](https://github.com/zalmoxes-laran/3d-tiles-renderer-3tz) (Emanuel Demetrescu, MIT) | a `.3tz` archive, in place | `Tiles3tzPlugin`: reads the ZIP directory by range request, then one request per tile; uses the `@3dtilesIndex1@` index for large archives; takes a local file too. **In the viewer since 2026-11-21** (vendored at commit `4cc4536`, not being on npm): any `.3tz` URL in the 3DTilesRendererJS view, and the *in place* pills of the Packages row. The server path (`/stream?format=3tz`) stays for Cesium. A young repository (4 commits when read) |
 | The PlayCanvas renderer of 3DTilesRendererJS (#1765, merged 2026-10-28) | 3D Tiles in a PlayCanvas scene | makes a streamed-SOG plugin plausible, PlayCanvas owning that format; nobody has asked for it that we know of |
 
 ## What it gives, what it costs
@@ -171,6 +171,21 @@ the Namur overview draw from their buckets with no server, with the adaptive siz
 hierarchy stays lazy. Reader: [copc.js](https://github.com/connormanning/copc.js) with laz-perf, which Potree and
 Giro3D also use; no faster reader was found, and none was measured. **Still owed by phase 0**: the numbers (time
 to first tile, tiles per second, main-thread stalls) beside the server path, on a machine with a GPU.
+
+**Second pass, 2026-11-21**: decoding in workers, the other attributes, and placement on the globe from the CRS
+(see the [Potree lab](/docs/guide/potree-lab)). Still owed: the numbers on a machine with a GPU.
+
+**Should Potree and COPC derive from one octree point cloud plugin?** Yes for the plugin, no for the loaders.
+Read in 3DTilesRendererJS 0.5.4: `PotreePlugin.js` is format-neutral almost throughout (the octree turned into
+tiles, the error halved per level, the bounds, the adaptive point size); what is Potree's in it is one line that
+builds the loader and five uses of the literal `potree` extension. The two loaders share no code, so the loader is
+an interface, which `CopcLoader` already satisfies: `load(url)` leaving `metadata = { spacing, boundingBox }`,
+`hierarchy.get(key)` giving `{ childMask }`, `loadNodeData(key)` and `parsePointData(buffer, key, min, max)`.
+What the subclass has to work around today says what an upstream change would need: a hook to supply the loader
+(ours replaces it after `init` has built a Potree one), a guard for a node the hierarchy does not hold yet (lazy
+hierarchy pages), a hook to give the root a transform and a unit scale, and a name other than `.potree` for the
+nodes. It overlaps the active-nodes texture of upstream PR #1792, so it would be proposed after that one. Nothing
+has been proposed upstream.
 
 Phase 0 decides whether the rest is worth it: if a COPC from a bucket is not at least as quick to a first view as
 through the server on the same machine, the project stops there. Phases 2 and 3 are independent once 1 is done.

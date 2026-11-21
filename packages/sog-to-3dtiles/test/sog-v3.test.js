@@ -240,3 +240,19 @@ test('live: the mixed scene served through sog-live, a tile from the v2 chunk an
   const sameDepth = chains.find((c) => key(c) === key(threeLevels));
   assert.equal(threeLevels.geometricError, sameDepth.geometricError, 'the coarsest level keeps the error of its depth');
 });
+
+test('offline and live write the same tileset-level error, collapsed or one tile per run', async (t) => {
+  quiet(t);
+  const { dir } = await mixedScene(t);
+  const base = await host(t, dir);
+  for (const splatBudget of [undefined, 0]) {
+    const out = await mkdtemp(path.join(tmpdir(), 'sog-tiles-'));
+    t.after(() => rm(out, { recursive: true, force: true }));
+    await convert(dir, out, splatBudget === 0 ? { splatBudget } : {});
+    const offline = JSON.parse(await readFile(path.join(out, 'tileset.json'), 'utf8'));
+    const live = await sogTileset(`${base}/lod-meta.json`, splatBudget === 0 ? { splatBudget } : {});
+    assert.equal(offline.geometricError, live.geometricError, `tileset-level, splatBudget ${splatBudget ?? 'default'}`);
+    assert.equal(offline.root.geometricError, live.root.geometricError, 'root tile');
+    assert.ok(offline.geometricError >= offline.root.geometricError);
+  }
+});

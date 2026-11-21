@@ -7,8 +7,10 @@ A 3D Tiles viewer decides to load a tile's children from one number per tile, it
 source formats stores that number as such, so each reader derives it. This page says from what, format by format,
 with the line of code, so that a scene that loads too much or too little can be traced to its cause.
 
-Cross-checked against the code on 2026-11-19 (live stream and offline converter, each line read). Not re-run on
-data for this page: the per-format pages hold the measurements.
+Cross-checked against the code on 2026-11-19 (live stream and offline converter, each line read). The six
+inconsistencies that reading found were worked on on 2026-11-21, and the rule proposed for the box-only formats was
+built as an option (`&ge=density`): both sections below say what was done, what was measured on public samples,
+and what was not checked. No scene was compared by eye with a reference viewer of its format.
 
 ## How a viewer uses it
 
@@ -29,82 +31,157 @@ viewer for point clouds). Two things follow.
   every time. This is what made a streamed SOG with a sky box load its finest level everywhere: every tile above a
   sky leaf had the 40 km cube as its box. Tight boxes matter as much as the error itself.
 
+A source that says "replace this node once its bounding sphere is N pixels across" is reproduced by
+`geometricError = 2 × radius × 16 ÷ N`: the sphere is N pixels across at the distance where that error is 16 px
+on screen. OSGB, 3MX and I3S (under `&ge=density`) are read this way, with one shared function
+(`core/geometric-error.js`). A viewer whose target is not 16 px switches earlier or later than the source by that
+ratio.
+
 ## The table
 
 | Error comes from | Formats |
 |---|---|
-| **A value the source stores** | Potree, COPC, Nexus, OSGB, 3MX, Bing 3D (partly), streamed SOG when asked (`lodErrors`) |
-| **The density of points or splats** | RAD, streamed SOG (default), a VPC with an overview |
-| **The size of the box alone** | I3S, LCC, LCC2, GeoSplats, a VPC without an overview |
+| **A value the source stores** | Potree, COPC, Nexus, OSGB, 3MX, Bing 3D, streamed SOG when asked (`lodErrors`), I3S under `&ge=density` |
+| **The density of points or splats** | RAD, streamed SOG (default), a VPC with an overview; LCC, LCC2, GeoSplats and I3S nodes without a threshold under `&ge=density` |
+| **The size of the box alone** | I3S, LCC, LCC2, GeoSplats, a VPC without an overview (all by default) |
 
 ### From a value the source stores
 
 | Format | Tile error | Where |
 |---|---|---|
-| **Potree** 1.x, 2.0 | `spacing ÷ 2^depth`; without a spacing, the cube ÷ 128 | `tile-server/potree-live.js`, `potree-to-3dtiles/src/index.js` |
+| **Potree** 1.x, 2.0 | `spacing ÷ 2^depth`; without a spacing, the cube diagonal ÷ 128. Tileset-level: the cube diagonal | `tile-server/potree-live.js`, `potree-to-3dtiles/src/index.js` (the same since 2026-11-21) |
 | **COPC** | `info.spacing ÷ 2^level`; without one, the cube diagonal ÷ 128 | `tile-server/copc-live.js`, `copc-to-3dtiles/src/index.js` (the same since 2026-11-19) |
 | **Nexus** | the node `error` × 8 (the largest of its level in the default mode; the node's own in `paths` mode); leaves 0 | `nexus-to-3dtiles/src/nexus-tileset.js` |
-| **OSGB** | from the `RangeList` of each paged LOD: `2 × radius × 16 ÷ range` in pixel mode, `16 × range ÷ 935` in distance mode | `tile-server/osgb-live.js` |
-| **3MX** | node box diagonal ÷ `maxScreenDiameter` | `tile-server/threemx-live.js` |
-| **Bing 3D** | the tileset-level error of its own 3D Tiles; the six faces are given half of it, halved per level (their own values are not read) | `tile-server/bing-live.js` |
+| **OSGB** | from the `RangeList` of each paged LOD: `2 × radius × 16 ÷ range` in pixel mode, `16 × range ÷ 935` in distance mode; a unit with no finer file 0 | `tile-server/osgb-live.js` |
+| **3MX** | `box diagonal × 16 ÷ maxScreenDiameter`; a node without children 0; never above the node it refines | `tile-server/threemx-live.js` |
+| **Bing 3D** | each face's own error from its tile in `td1`, halved per level as implicit tiling says | `tile-server/bing-live.js` |
 
 ### From density
 
 | Format | Tile error | Where |
 |---|---|---|
 | **RAD** | `2 × box diagonal ÷ ∛count`, averaged per depth, never rising with depth | `rad-to-3dtiles/src/tilesetBuilder.js` |
-| **Streamed SOG** (`lod-meta.json`) | the smaller of `0.1 × diagonal × (1/√2)^k × √stride` and `8 × √(largest face ÷ splats)`, never above the parent's; stray leaves left out of the box | `sog-to-3dtiles/src/lodMeta.js` |
+| **Streamed SOG** (`lod-meta.json`) | the smaller of `0.1 × diagonal × (1/√2)^k × √stride` and `8 × √(largest face ÷ splats)`, never above the parent's; stray leaves left out of the box. Tileset-level: the larger of 5 % of the scene diagonal and the root tile's error | `sog-to-3dtiles/src/lodMeta.js`, `sog-to-3dtiles/src/index.js`, `tile-server/sog-live.js` |
 | **VPC with an overview** | file leaves capped at `max(1 m, √(set area ÷ overview points))` | `tile-server/vpc-live.js` |
 
 ### From the size of the box alone
 
-| Format | Tile error | What the source has that is not used |
+| Format | Tile error (default) | The count `&ge=density` uses, and where it is read |
 |---|---|---|
-| **I3S** | half the node's box diagonal; leaves 0 | `lodThreshold` per node with the layer's `lodSelectionMetricType`; `vertexCount` per node. Neither is read |
-| **LCC** (version 1) | 5 % of the scene diagonal for the coarsest level, halved per level | splats per unit per level, cell size (parsed) |
-| **LCC2** | the same rule from the root | per node: splat count, bounding box (parsed) |
-| **GeoSplats** | the octant's diagonal (a quarter of it for the 64-cell grid) | total and per-level counts, cell boxes (parsed, used only to pick a level) |
-| **VPC without an overview** | the larger of the longest box side × √3 and the sphere radius | `pc:count` per file, footprint area (parsed) |
+| **I3S** | half the diagonal of the box that encloses the node's OBB; leaves 0 | `lodThreshold` per node, with the layer's `lodSelectionMetricType`; else `vertexCount` per node. Both in the node pages |
+| **LCC** (version 1) | 5 % of the scene diagonal for the coarsest level, halved per level | splats per level per unit, in `index.bin` |
+| **LCC2** | the same rule from the root | `data.3dgs.count` per node, in the manifest |
+| **GeoSplats** | the octant's diagonal (a quarter of it for the 64-cell grid) | `counts` per cell and per LOD, in each sub-model's `metadata.json` (cumulative: a tile holds one LOD's own splats, so the count is a difference of two entries) |
+| **VPC without an overview** | the larger of the longest box side × √3 and the sphere radius | `pc:count` and the footprint per file, in the `.vpc` |
 
-These share the weakness streamed SOG had: a box inflated by outliers inflates the error, and nothing ties the
-error to how dense the content is.
+None of these counts needs a tile to be downloaded: each is in the file the tileset is built from. That was checked
+for each format in the code, and for GeoSplats against two tiles (below).
 
-## What is known to be inconsistent
+By default these formats share the weakness streamed SOG had: a box inflated by outliers inflates the error, and
+nothing ties the error to how dense the content is.
 
-Found by the cross-check, not fixed yet. Most important first.
+## The six inconsistencies, and what was done (2026-11-21)
 
-1. **3MX has no pixel factor where OSGB has 16.** OSGB writes errors that reproduce the source's switch distances
-   at a 16 px target; 3MX writes `diagonal ÷ maxScreenDiameter`, which does so at a 1 px target. At 16 px a 3MX
-   node is refined when it is 16 times larger on screen than the source asks.
-2. **RAD, live.** The live stream builds the tree in fragments of 3 levels, and each fragment averages only its
-   own nodes with depth restarting at 0. The same node can get a different error live and offline, and the error
-   can rise across a fragment boundary.
-3. **I3S.** `lodThreshold` is ignored; live uses the node's oriented box, offline the box of the decoded geometry,
-   so the two give different numbers.
-4. **Potree, offline.** The tileset-level error is the spacing (the root diagonal live), and the fallback without
-   a spacing is the X width ÷ 128 (the diagonal ÷ 128 live).
-5. **Streamed SOG.** The tileset-level error differs live and offline.
-6. **Bing 3D.** The faces' errors are assumed, not read.
+1. **3MX had no pixel factor where OSGB has 16. Fixed.** The error is now `diagonal × 16 ÷ maxScreenDiameter`.
+   `maxScreenDiameter` is the diameter in pixels that the node's bounding sphere may reach on screen; a `.3mxb`
+   stores a box and no sphere, so the sphere is the box's and its diameter is the box diagonal. A node without
+   children has error 0, as an OSGB unit without a finer file. Two more things were made as OSGB has them: the
+   tile that points at a finer file has its node's error (it had half, so the finer file showed only from twice as
+   near), and the finer file's root repeats that error and that box, so no node has a larger error than the node
+   it refines. Measured on two public scenes (BYU campus, Tende): a node 135.7 m across went from 4.0 to 64.0, one
+   320.1 m across from 8.0 to 128.0. The old values were exactly 8, 4, 2, 1 down the levels: the exporter writes
+   `maxScreenDiameter = diagonal ÷ resolution in metres`, which supports reading the diagonal as the sphere's
+   diameter. There is no offline 3MX converter in this repository (`threemx-to-3dtiles` holds the mesh decoder
+   only), so there was nothing to align.
+2. **RAD, live. Made monotone; not made equal to offline.** A fragment is now told the depth of its root in the
+   whole tree and the error that root has in the fragment above. Its root repeats that error, the tile that points
+   at it has it too (it had half), and every level below stays under the level above. Measured on the Coit sample:
+   25 fragments read, no tile above its parent, the 139 tiles that point at fragments all at their node's error.
+   The errors are still not the offline ones, and cannot be without reading every chunk: a level's error is a
+   mean over all the nodes of that depth, and RAD's chunks form a graph in which the offline walk places each
+   chunk once, under the first parent it meets. On Coit 14 of the first fragment's 174 nodes have the offline
+   error. `cache=hierarchy` reads every chunk and gives the offline tileset.
+3. **I3S. Fixed.** Live and offline now derive the error from the same thing, the node's own bounding volume in
+   the index: half the diagonal of the box enclosing its OBB, by one shared function. The offline converter used
+   the box of the decoded geometry and of every descendant; that box still is its tiles' bounding volume. Checked
+   by a test that builds one small layer and compares the two tilesets tile by tile. `lodThreshold` is read under
+   `&ge=density` (next section).
+4. **Potree, offline. Fixed.** The tileset-level error is the cube diagonal and the fallback without a spacing is
+   the diagonal ÷ 128, as live. Checked by a test on a small Potree 1.8 cloud, implicit and explicit, with and
+   without a spacing.
+5. **Streamed SOG. Fixed.** The offline tileset-level error is now the live one, the larger of 5 % of the scene
+   diagonal and the root tile's error. On the test scene the two were already equal (2.57), the root tile's error
+   being the larger: the difference only shows on a scene whose root error is under 5 % of its diagonal, and no
+   such scene was run.
+6. **Bing 3D. Fixed, and the numbers do not change.** The faces' errors are read from `td1`. Read on 2026-11-21:
+   the tileset says 786 432 and each of the four faces 393 216, which is the half that was assumed. The subtree
+   files carry no per-tile error (their metadata is the tiles' minimum and maximum height), so below a face the
+   error is the implicit rule, halved per level. One thing was seen and left as it is: the tile that points at a
+   deeper fragment has half its tile's error, as 3MX and RAD had.
 
-## A rule for the box-only formats
+## The density rule for the box-only formats: `&ge=density`
 
-Proposed, not built. The error of a tile should be **the spacing of what it draws**, with the box rule kept only
-as a ceiling:
+Built on 2026-11-21 as an option of `/stream/tileset.json`. Without the parameter every format answers as before.
 
 ```
-spacing = √(largest face of the node's own box ÷ count)        surfaces: scans, splats, meshes
-error   = min(k × spacing, the box rule, the parent's error)   k = 8 for splats, 1 to 2 for points
+spacing = √(largest face of the node's own box ÷ count)
+error   = min(k × spacing, the box rule, the parent's error)   k = 8 for splats, 1.5 for points, 1 for mesh vertices
 ```
 
 - The largest face rather than the volume, because this data lies on surfaces: a cube root of the volume
   overstates the spacing of a flat scene.
-- The box rule stays as a ceiling so that a node with few splats in a large box is not given a huge error.
-- Each format has the count without downloading a tile (last column above), so this costs nothing at request time.
-- **I3S first uses its own answer**: `lodThreshold` with `maxScreenThresholdSQ` is the screen area, in square
-  pixels, above which a node is refined, so `error = 2 × radius × 16 ÷ √(4 × lodThreshold ÷ π)` reproduces the
-  source's switch distance at a 16 px target, as OSGB does. The density rule is its fallback.
-- Dividing the diagonal by the root of the density, as one might first write it, mixes units; the spacing itself
-  is the error, and the diagonal only bounds it.
+- The box rule stays as a ceiling so that a node with few splats in a large box is not given a huge error. With
+  the parent's error as a second ceiling, the rule can only lower an error, never raise it.
+- Leaves keep the rule they have today, capped by their parent's error.
+- k = 8 for splats is the factor streamed SOG already uses. 1.5 for points and 1 for mesh vertices are choices,
+  not measurements: no reference was found for them.
+- **I3S first uses its own answer.** A node's `lodThreshold` under `maxScreenThresholdSQ` is the screen area, in
+  square pixels, of its bounding sphere above which it is refined, so `error = 2 × radius × 16 ÷ √(4 ×
+  lodThreshold ÷ π)`; under `maxScreenThreshold` it is the diameter, `error = 2 × radius × 16 ÷ lodThreshold`.
+  Node pages store an OBB and no sphere: the radius is the length of the OBB's half size. On the Rancho mesh the
+  thresholds are 196 349.5 and 785 398.2, the areas of discs 500 and 1 000 px across, which fits that reading. A
+  point cloud layer says `density-threshold`: its `lodThreshold` is the node's effective area, and the error is
+  `1.5 × √(lodThreshold ÷ vertexCount)`. A node without a threshold (the root of the New York buildings) falls
+  back to the density rule on `vertexCount`, and without a count to the box rule. The legacy index
+  (`3dNodeIndexDocument`, with `lodSelection`) is not read, by the live stream or offline; the conversion accepts
+  its `metricType` and `maxError` for when it is.
+- The parameter changes tileset JSON only, so it is carried to child tileset URLs (a VPC's cells and nested VPCs)
+  and not to tile URLs. I3S, LCC, LCC2 and GeoSplats answer with one tileset and have no child tileset.
 
-Each change needs one scene per format checked against a reference viewer of that format, since it moves how much
-is loaded.
+Measured on public samples, default → `&ge=density` (the boxes, the tree and the tile URLs are identical; every
+change is a lower error; no tile is above its parent):
+
+| Sample | Tiles changed | Root tile | Mean error one level below the root |
+|---|---|---|---|
+| I3S, Rancho mesh | 20 of 81 | 110.6 → 6.99 | 56.1 → 1.75 |
+| I3S, New York buildings | 1 694 of 5 866 | 49 803 (no threshold, no count) | 4 136 → 188 |
+| I3S point cloud, Moro Bay | 2 794 of 13 775 | 1 556 → 19.0 | 752 → 9.47 |
+| LCC, Unreal example | 4 of 16 | 4.98 | 2.49 → 1.94 |
+| LCC, Sutro Tower | 84 of 121 | 7.13 | 3.57 → 1.07 |
+| LCC, Big Mirror | 2 of 3 | 6.62 | 3.31 → 0.60 |
+| LCC2, Tunis | 300 of 571 | 37.5 | 18.8 → 5.27 |
+| LCC2, Unreal street | 2 of 18 | 8.62 | 4.31 → 2.02 |
+| GeoSplats, Jastrzębia Góra | 1 734 of 1 892 | 7 771 | 741 → 9.24 |
+| GeoSplats, Miami hotel | 44 of 45 | 878 | 558 → 11.6 |
+| VPC, AHN5 Amsterdam (no overview) | 12 of 12 | 6 929 → 1.94 | 3 464 → 0.79 |
+
+What the numbers say, and what they do not:
+
+- A lower error means a tile is refined from nearer, so less is loaded. Whether what is then shown is fine enough
+  was not looked at. Each format needs one scene checked against a reference viewer of that format before the
+  option becomes a default.
+- **I3S** moves most: by default the root of the Rancho mesh (220 m across, error 110.6) is refined from 6 km at a
+  16 px target on a 1080 px screen, where the layer asks for it to be 500 px across.
+- **GeoSplats**: the count of a tile is the splats of the LOD it is cut at. Two tiles were downloaded to check
+  that: 200 704 and 73 984 splats, for 191 993 and 66 108 in `counts` (the rest fills the last rows of the SOG
+  image).
+- **LCC**: a unit's box is its grid cell over the whole scene's height, so its largest face can be a wall of the
+  cell rather than its floor.
+- **A VPC without an overview should not be opened with it as it stands.** The rule gives each file leaf the
+  spacing of the file at full depth (0.31 m for AHN5), but the leaf itself draws nothing: at a 16 px target the
+  mosaic's root is then refined only from about 110 m (1080 px screen), so nothing shows from afar. The count that would be needed
+  is that of the file's root node, which the `.vpc` does not give. A VPC with an overview, or with `&leafError=`,
+  is not changed by the parameter.
+
+Formats for which `&ge=density` changes the answer: `i3s`, `lcc`, `lcc2`, `geosplats`, and `vpc` when the set shows
+no overview and has no `&leafError=`. All others ignore it (for Nexus, `ge` is a number, its own error factor).
