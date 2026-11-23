@@ -12,11 +12,15 @@
  *   node scripts/openheritage3d-manifest.mjs            # rewrite the manifest (≈ 460 × 3 requests)
  *   node scripts/openheritage3d-manifest.mjs --limit 20 # a quick sample
  *
+ * Then runs scripts/aggregate-bake-bounds.mjs on it (new entries only, through the tile server at
+ * --server=, default http://localhost:3001), unless --no-bake.
+ *
  * Hand-set fields of the previous manifest (alt, a corrected lon/lat) survive for entries whose URL is
  * unchanged. Projects without a Potree config or without coordinates are listed in the summary.
  */
 import { readFile, writeFile } from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
+import { bakeAfterWrite } from './lib/bake-after-write.mjs';
 
 const OUT = fileURLToPath(new URL('../packages/tile-server/aggregate-sets/openheritage3d.json', import.meta.url));
 const SITE = 'https://openheritage3d.org';
@@ -135,3 +139,4 @@ if (noData.length) console.log(`config names clouds that do not exist (404): ${n
 if (noConfig.length) console.log(`no Potree config: ${noConfig.length} (${noConfig.slice(0, 10).join(', ')}…)`);
 if (noCoords.length) console.log(`no coordinates: ${noCoords.length} (${noCoords.slice(0, 10).join(', ')}…)`);
 if (failed.length) console.log(`failed: ${failed.length}\n  ${failed.slice(0, 10).join('\n  ')}`);
+if (!process.argv.includes('--limit')) process.exitCode = await bakeAfterWrite(OUT);

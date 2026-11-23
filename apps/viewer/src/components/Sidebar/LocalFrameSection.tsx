@@ -82,6 +82,8 @@ export default function LocalFrameSection({ activeHandleRef }: { activeHandleRef
   // (a drag moves it without touching the store), and the two ways to keep it.
   const gizmoMode = useViewerStore((s) => s.gizmoMode);
   const setGizmoMode = useViewerStore((s) => s.setGizmoMode);
+  const gizmoAnchor = useViewerStore((s) => s.gizmoAnchor);
+  const setGizmoAnchor = useViewerStore((s) => s.setGizmoAnchor);
   const [placed, setPlaced] = useState<TilesetPlacement | null>(null);
   useEffect(() => {
     if (!gizmoOn) { setPlaced(null); return; }
@@ -181,6 +183,19 @@ export default function LocalFrameSection({ activeHandleRef }: { activeHandleRef
             {(['translate', 'rotate', 'scale'] as const).map((m) => (
               <Button key={m} size="sm" className="flex-1" variant={gizmoMode === m ? 'default' : 'outline'} onClick={() => setGizmoMode(m)}>
                 {m === 'translate' ? 'Move' : m === 'rotate' ? 'Turn' : 'Scale'}
+              </Button>
+            ))}
+          </div>
+          <div className="flex items-center gap-1" title="Where the gizmo stands: the point it moves from, turns about and scales about">
+            <Label className="text-xs w-12 shrink-0">Pivot</Label>
+            {([
+              ['auto', 'Auto', 'The data under the centre; when none is hit, the bottom face of an octree, else the origin or the centre'],
+              ['centre', 'Centre', 'The centre of the bounds'],
+              ['bottom', 'Bottom', 'The centre of the bottom face of the root box'],
+              ['origin', 'Origin', "The root tile's own origin"],
+            ] as const).map(([a, label, tip]) => (
+              <Button key={a} size="sm" className="flex-1 px-1" title={tip} variant={gizmoAnchor === a ? 'default' : 'outline'} onClick={() => setGizmoAnchor(a)}>
+                {label}
               </Button>
             ))}
           </div>

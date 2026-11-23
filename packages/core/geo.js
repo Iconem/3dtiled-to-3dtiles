@@ -23,7 +23,7 @@ export const enuMatrix = (lon, lat, cx, cy, cz) => {
 // (the vertical component is just height, already carried by origin[2]).
 // The same for WKT2's COMPOUNDCRS[…, PROJCRS|GEOGCRS|GEODCRS[…], VERTCRS[…]] (what PDAL writes into a
 // VPC's proj:wkt2 for AHN: "Amersfoort / RD New + NAP height") and for a PROJJSON CompoundCRS object.
-function unwrapCompoundWkt(crs) {
+export function unwrapCompoundWkt(crs) {
   if (crs && typeof crs === 'object' && Array.isArray(crs.components) && crs.components.length) return crs.components[0];
   if (typeof crs !== 'string' || !/^\s*(COMPD_CS|COMPOUNDCRS)/i.test(crs)) return crs;
   const first = (...res) => { for (const re of res) { const i = crs.search(re); if (i >= 0) return i; } return -1; };

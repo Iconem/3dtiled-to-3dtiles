@@ -133,6 +133,11 @@ interface ViewerStore {
   // explicit UI control instead of only being reachable via keyboard shortcuts a user wouldn't know about.
   gizmoMode: 'translate' | 'rotate' | 'scale';
   setGizmoMode: (v: ViewerStore['gizmoMode']) => void;
+  // Where the tileset gizmo stands, which is also the point it turns and scales about: `auto` the data under
+  // the centre (else the bottom face of an octree's cube, else the root origin or the centre), `centre` the
+  // centre of the bounds, `bottom` the centre of the root box's bottom face, `origin` the root tile's origin.
+  gizmoAnchor: 'auto' | 'centre' | 'bottom' | 'origin';
+  setGizmoAnchor: (v: ViewerStore['gizmoAnchor']) => void;
 
   // Navigation
   collisionEnabled: boolean;
@@ -266,6 +271,8 @@ export const useViewerStore = create<ViewerStore>((set, get) => ({
   setCropGizmoOn: (v) => set({ cropGizmoOn: v }),
   gizmoMode: 'translate',
   setGizmoMode: (v) => set({ gizmoMode: v }),
+  gizmoAnchor: 'auto',
+  setGizmoAnchor: (v) => set({ gizmoAnchor: v }),
 
   collisionEnabled: true,
   setCollisionEnabled: (v) => set({ collisionEnabled: v }),

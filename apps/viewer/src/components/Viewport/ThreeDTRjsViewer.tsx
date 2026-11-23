@@ -511,6 +511,7 @@ const PLACEMENT_SET_EVENT = 'tileset-placement-set';
 function TilesetGizmo({ tilesRef, pickScene }: { tilesRef: React.MutableRefObject<TilesRendererImpl | null>; pickScene: THREE.Object3D | null }) {
   const on = useViewerStore((s) => s.tilesetGizmoOn);
   const mode = useViewerStore((s) => s.gizmoMode);
+  const anchor = useViewerStore((s) => s.gizmoAnchor);
   const [proxy, setProxy] = useState<THREE.Object3D | null>(null);
   const [setFromOutside, setSetFromOutside] = useState(0);
   useEffect(() => {
@@ -543,15 +544,35 @@ function TilesetGizmo({ tilesRef, pickScene }: { tilesRef: React.MutableRefObjec
     const radius = sphere.radius * world.getMaxScaleOnAxis();
     const rt: number[] | undefined = (tiles.root as any)?.transform;
     const origin = rt ? new THREE.Vector3(rt[12], rt[13], rt[14]).applyMatrix4(world) : null;
-    const pivot = origin && centre && origin.distanceTo(centre) <= radius ? origin
-      : centre ?? tiles.group.getWorldPosition(new THREE.Vector3());
+    const groupPos = tiles.group.getWorldPosition(new THREE.Vector3());
     const onGlobe = camera.position.length() > 6378137 * 0.5;
-    // Better than either: the data itself, under the centre. An octree's root origin is the centre of its
-    // cube (COPC) or a corner of it (Potree), often far above or below the points; a ray dropped along the
-    // vertical through the centre lands on what is loaded, which is where a hand would grab the model.
-    // Skipped for a mosaic (its centre is inside the Earth); when nothing is hit, the rule above stands.
-    if (centre && radius > 0 && !(onGlobe && centre.length() < 6.0e6)) {
-      const up = onGlobe ? WGS84_ELLIPSOID.getPositionToNormal(centre, new THREE.Vector3()) : camera.up.clone().normalize();
+    const up = centre && onGlobe ? WGS84_ELLIPSOID.getPositionToNormal(centre, new THREE.Vector3()) : camera.up.clone().normalize();
+    // The centre of the root box's bottom face (the face lowest along the vertical), in world space; null
+    // without a box. `cube`: its three sides equal, as the root of an octree (Potree, COPC) is.
+    let bottom: THREE.Vector3 | null = null, cube = false;
+    const rb: number[] | undefined = (tiles.root as any)?.boundingVolume?.box;
+    if (rb) {
+      const m = world.clone();
+      if (rt) m.multiply(new THREE.Matrix4().fromArray(rt));
+      const m3 = new THREE.Matrix3().setFromMatrix4(m);
+      const axes = [0, 1, 2].map((i) => new THREE.Vector3(rb[3 + 3 * i], rb[4 + 3 * i], rb[5 + 3 * i]).applyMatrix3(m3));
+      const halfUp = axes.reduce((s, a) => s + Math.abs(a.dot(up)), 0);
+      bottom = new THREE.Vector3(rb[0], rb[1], rb[2]).applyMatrix4(m).addScaledVector(up, -halfUp);
+      const sides = axes.map((a) => a.length());
+      cube = Math.max(...sides) <= Math.min(...sides) * 1.01;
+    }
+    const pivot = (anchor === 'origin' ? origin
+      : anchor === 'bottom' ? bottom
+      : anchor === 'centre' ? centre
+      : cube && bottom ? bottom
+      : origin && centre && origin.distanceTo(centre) <= radius ? origin : centre)?.clone() ?? groupPos;
+    // `auto`: better than any of those, the data itself, under the centre. An octree's root origin is the
+    // centre of its cube (COPC) or a corner of it (Potree), often far above or below the points; a ray
+    // dropped along the vertical through the centre lands on what is loaded, which is where a hand would
+    // grab the model. Skipped for a mosaic (its centre is inside the Earth); when nothing is hit, the rule
+    // above stands: the bottom face of an octree's cube, else the root origin when it lies in the data,
+    // else the centre.
+    if (anchor === 'auto' && centre && radius > 0 && !(onGlobe && centre.length() < 6.0e6)) {
       const rc = new THREE.Raycaster(centre.clone().addScaledVector(up, radius * 1.01), up.clone().negate(), 0, radius * 2.02);
       (rc as any).firstHitOnly = true;
       rc.params.Points = { threshold: Math.max(0.05, radius * 0.004) };
@@ -584,7 +605,7 @@ function TilesetGizmo({ tilesRef, pickScene }: { tilesRef: React.MutableRefObjec
     proxy.updateMatrixWorld(true);
     get().invalidate();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [on, mode, proxy, setFromOutside]);
+  }, [on, mode, anchor, proxy, setFromOutside]);
 
   const handleChange = useCallback(() => {
     const tiles = tilesRef.current;

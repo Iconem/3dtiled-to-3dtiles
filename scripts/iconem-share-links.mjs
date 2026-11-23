@@ -6,6 +6,10 @@
  *   ICONEM_EMAIL=… ICONEM_PASSWORD=… node scripts/iconem-share-links.mjs --apply    # create missing links
  *     [--types=pointcloud,tiles]  [--include-copc]  [--name=single-meta-tileset]
  *     [--api=https://api.iconem.com/api]  [--out=.local/aggregate-sets/iconem.json]
+ *     [--server=http://localhost:3001]  [--no-bake]
+ *
+ * After writing the manifest it runs scripts/aggregate-bake-bounds.mjs on it (new entries only; Potree
+ * and COPC ones need the tile server at --server running), unless --no-bake.
  *
  * The API contract comes from reading iconem/Backend (share.route.js, share.schema.js, share.model.js,
  * authentication.js) and iconem/Frontend (ShareLinksSection.js), not from guessing:
@@ -31,6 +35,7 @@
  */
 import fs from 'node:fs/promises';
 import path from 'node:path';
+import { bakeAfterWrite } from './lib/bake-after-write.mjs';
 
 const argv = process.argv.slice(2);
 const flag = (n) => argv.includes(`--${n}`);
@@ -206,3 +211,4 @@ await fs.writeFile(OUT, JSON.stringify({ label: `Iconem — ${NAME} (${entries.l
 console.log(`\n${projects.length} projects · reused ${counts.reused} · created ${counts.created} · would-create ${counts.wouldCreate} · failed ${counts.failed}`);
 console.log(`manifest → ${OUT}  (gitignored — share URLs are bearer credentials)`);
 if (!APPLY && counts.wouldCreate) console.log('Dry run only. Re-run with --apply to create the missing links.');
+process.exitCode = await bakeAfterWrite(OUT, argv);

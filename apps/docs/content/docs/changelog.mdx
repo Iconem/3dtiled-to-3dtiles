@@ -8,6 +8,29 @@ Format loosely follows [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+### Added — 2026-11-23 (gizmo pivot choice; manifests baked on write; box-only options documented)
+- **Where the tileset gizmo stands is now a choice** (sidebar, *Pivot*): *Auto* (the data under the centre, as
+  before; when the ray hits nothing, the centre of the bottom face for an octree, whose root box is a cube, else the
+  root origin or the centre), *Centre*, *Bottom* (the centre of the root box's bottom face) or *Origin* (the root
+  tile's own origin). It is also the point the gizmo turns and scales about.
+- **The manifest generators bake bounds themselves**: `scripts/iconem-share-links.mjs` and
+  `scripts/openheritage3d-manifest.mjs` run `aggregate-bake-bounds.mjs` after writing the manifest (new entries only;
+  Potree and COPC entries through the tile server at `--server=`, default `http://localhost:3001`; `--no-bake` skips).
+- **[Geometric error](/docs/guide/geometric-error)**: the other options for the box-only formats (the source's own
+  switch rule, a factor or a target per format, fitted boxes, errors measured from decoded tiles), and which
+  formats have boxes larger than their content.
+- **GeoSplats at 2, 4 and 8 px**, box rule against `&ge=density`: both end on the same 37 tiles, but density
+  settles at 62 to 114 s with 111 MB, the box rule at 145 s with 247 MB (8 px) or not within 180 s (2 and 4 px).
+  The viewer's 0.5 px splat target, not the density errors, is what made density load more.
+
+### Changed — 2026-11-23
+- **The COPC plugin of the Potree lab, rewritten in 3DTilesRendererJS's code style** (tabs, spaced parentheses, a
+  blank line inside each block): the decoder reads its attributes from one table, the worker pool copies chunks
+  instead of transferring them (so a worker that fails hands its jobs back to the page without the earlier
+  bookkeeping), and the CRS helpers come from `packages/core/geo.js`. 454 lines of code instead of 482, 119 of
+  comments instead of 165; with the style's blank lines the files are longer (784 lines instead of 694, the
+  lab's colour modes apart).
+
 ### Added — 2026-11-21 (hosted `.3tz` samples read in place; loading measured with `&ge=density`)
 - **Two `.3tz` archives that open in place on any deployment**: loaders.gl's test archive, and Potree's lion as
   an implicit octree, packed and added to [3dtiles-samples](https://github.com/jo-chemla/3dtiles-samples). Both are

@@ -227,8 +227,11 @@ share one selection function and one cached mosaic.
   fetching any child root, even on a fresh server with no cache: the 692-dataset Iconem index
   answered in 60 ms cold with zero root fetches. The bake reuses the persisted cache, so it takes
   under a second when the cache is warm. Every committed manifest is baked, and the Iconem and Open
-  Heritage 3D generators carry bounds over when they regenerate. `&ttl=0` and `&curved=` ignore baked
-  bounds and probe. Re-bake after re-georeferencing a dataset.
+  Heritage 3D generators carry bounds over when they regenerate, and since 2026-11-23 they run the bake
+  themselves after writing the manifest (`scripts/lib/bake-after-write.mjs`): only the new entries are probed,
+  Potree and COPC ones through the tile server at `--server=` (default `http://localhost:3001`; without one
+  running they stay unbaked and the script says so), and `--no-bake` skips the step. `&ttl=0` and `&curved=`
+  ignore baked bounds and probe. Re-bake after re-georeferencing a dataset.
 - **Every `/stream` child of a mosaic opens lazily.** The server never asks a child for
   `cache=hierarchy`, which drains the whole hierarchy before the root answers (measured below), for
   every dataset the client merely sees from afar. The top bar's cache pills reach a mosaic as:
@@ -689,6 +692,7 @@ manifest above.
 $env:ICONEM_EMAIL = "…"; $env:ICONEM_PASSWORD = "…"          # env only — never arguments
 node scripts/iconem-share-links.mjs                            # dry run: lists what it would create
 node scripts/iconem-share-links.mjs --apply                    # create missing links, write manifest
+# both then bake the new entries' bounds (start the tile server first for the Potree and COPC ones)
 # → http://localhost:3001/aggregate/tileset.json?set=iconem&nest=geodetic
 ```
 
