@@ -94,7 +94,8 @@ jobs:
             cp -R "$app" "$staging/"
             ln -s /Applications "$staging/Applications"
             rm -f "$dmg"
-            hdiutil create -volname 3DTiled -srcfolder "$staging" -ov -format UDZO "$dmg"
+            # hdiutil fails now and then with "Resource busy" on the runners (Iconem run of 2026-11-23): try again
+            for i in 1 2 3 4 5; do hdiutil create -volname 3DTiled -srcfolder "$staging" -ov -format UDZO "$dmg" && break; [ "$i" = 5 ] && exit 1; sleep 10; done
             ls -la artifacts
           fi
 
