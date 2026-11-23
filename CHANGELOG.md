@@ -6,11 +6,13 @@ Format loosely follows [Keep a Changelog](https://keepachangelog.com/).
 ## [Unreleased]
 
 ### Fixed — 2026-11-23
-- **macOS: the DMG's app no longer reports itself "damaged"** ("« 3DTiled » est endommagé…"). Electrobun left the
-  .app without a valid signature of its own, which macOS refuses outright once downloaded. The CI build now signs it
-  ad hoc (`codesign --sign -`, no Apple identity) and makes the DMG again around it, so the first launch asks for
-  *Open Anyway* (System Settings › Privacy & Security) instead. An app from an earlier DMG opens after
-  `xattr -cr /Applications/3DTiled.app`.
+- **macOS: the DMG's app carries a valid signature** (ad hoc, `codesign --sign -`, no Apple identity; the DMG is made
+  again around it, with a retry when `hdiutil` says "Resource busy"). Electrobun's own signature was broken (`code has
+  no resources but signature indicates they must be present`). It does **not** get past Gatekeeper: a downloaded copy
+  is still refused as "damaged" ("« 3DTiled » est endommagé…", seen on a Mac on 2026-11-23). Open it with
+  `xattr -cr /Applications/3DTiled.app`; only a Developer ID and notarization remove the step.
+- **Desktop builds are released on both repositories**: each `desktop-latest` (jo-chemla and Iconem) has the
+  Windows, Linux and macOS files of the same commit.
 
 ### Added — 2026-11-23 (gizmo pivot choice; manifests baked on write; box-only options documented)
 - **Where the tileset gizmo stands is now a choice** (sidebar, *Pivot*): *Auto* (the data under the centre, as
