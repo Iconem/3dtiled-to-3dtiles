@@ -8,6 +8,13 @@ Format loosely follows [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+### Fixed — 2026-11-23
+- **macOS: the DMG's app no longer reports itself "damaged"** ("« 3DTiled » est endommagé…"). Electrobun left the
+  .app without a valid signature of its own, which macOS refuses outright once downloaded. The CI build now signs it
+  ad hoc (`codesign --sign -`, no Apple identity) and makes the DMG again around it, so the first launch asks for
+  *Open Anyway* (System Settings › Privacy & Security) instead. An app from an earlier DMG opens after
+  `xattr -cr /Applications/3DTiled.app`.
+
 ### Added — 2026-11-23 (gizmo pivot choice; manifests baked on write; box-only options documented)
 - **Where the tileset gizmo stands is now a choice** (sidebar, *Pivot*): *Auto* (the data under the centre, as
   before; when the ray hits nothing, the centre of the bottom face for an octree, whose root box is a cube, else the

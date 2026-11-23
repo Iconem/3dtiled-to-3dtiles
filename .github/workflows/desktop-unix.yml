@@ -72,6 +72,32 @@ jobs:
           echo "--- artifacts"; ls -la artifacts || true
           echo "--- build"; find build -maxdepth 3 | head -60
 
+      # Electrobun leaves the .app without a valid signature of its own (its binaries are only linker-signed), and a
+      # downloaded .app in that state is refused by macOS as "damaged", with no way past it but the Terminal. Signed ad
+      # hoc (no Apple identity), it is refused as "from an unidentified developer" instead, which System Settings ›
+      # Privacy & Security › Open Anyway lifts. The DMG is made again around the signed .app.
+      - name: Sign ad hoc and remake the DMG (macOS)
+        if: runner.os == 'macOS'
+        working-directory: apps/desktop
+        run: |
+          app="$(find build -maxdepth 2 -name '*.app' -type d | head -1)"
+          echo "--- before"; codesign -dv --verbose=2 "$app" 2>&1 || true
+          codesign --verify --deep --strict --verbose=2 "$app" 2>&1 || true
+          codesign --force --deep --sign - "$app"
+          echo "--- after"; codesign -dv --verbose=2 "$app" 2>&1
+          codesign --verify --deep --strict --verbose=2 "$app"
+          dmg="$(ls artifacts/*.dmg | head -1)"
+          if [ -n "$dmg" ]; then
+            # the layout of Electrobun's DMG, for the record
+            mnt="$(mktemp -d)"; hdiutil attach -nobrowse -readonly -mountpoint "$mnt" "$dmg" > /dev/null && { ls -la "$mnt"; hdiutil detach "$mnt" > /dev/null; } || true
+            staging="$(mktemp -d)"
+            cp -R "$app" "$staging/"
+            ln -s /Applications "$staging/Applications"
+            rm -f "$dmg"
+            hdiutil create -volname 3DTiled -srcfolder "$staging" -ov -format UDZO "$dmg"
+            ls -la artifacts
+          fi
+
       # What a user does: launch. The system Node is hidden, so a pass means the bundled one ran.
       - name: Smoke test the built app
         working-directory: apps/desktop
