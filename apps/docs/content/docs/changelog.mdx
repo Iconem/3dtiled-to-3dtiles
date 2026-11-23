@@ -31,6 +31,12 @@ Format loosely follows [Keep a Changelog](https://keepachangelog.com/).
   The viewer's 0.5 px splat target, not the density errors, is what made density load more.
 
 ### Changed — 2026-11-23
+- **The vendored `.3tz` plugin carries the fix proposed upstream**
+  ([zalmoxes-laran/3d-tiles-renderer-3tz#2](https://github.com/zalmoxes-laran/3d-tiles-renderer-3tz/pull/2), issue #1)
+  instead of our first patch: the suffix range is tried first, and only when it gets no response (a static host
+  refusing the CORS preflight) does a HEAD give the size and a plain range the tail. A server that answers the suffix
+  range now costs one request to open instead of two. Checked against raw.githubusercontent.com with a fetch that
+  behaves as a browser on another origin: suffix refused, HEAD, then plain ranges.
 - **The COPC plugin of the Potree lab, rewritten in 3DTilesRendererJS's code style** (tabs, spaced parentheses, a
   blank line inside each block): the decoder reads its attributes from one table, the worker pool copies chunks
   instead of transferring them (so a worker that fails hands its jobs back to the page without the earlier

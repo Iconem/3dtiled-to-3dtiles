@@ -87,7 +87,6 @@ export function httpSource( url, options = {} ) {
 	let requests = 0;
 	let bytes = 0;
 	let etag = null;
-	let headTried = false; // 3dtiled: the size from a HEAD, once (see tail)
 	const pending = new Set();
 
 	// Every error leaves with the range asked and, when a response came, its
@@ -138,9 +137,10 @@ export function httpSource( url, options = {} ) {
 			ranges = true;
 			const match = /^bytes (\d+)-(\d+)\/(\d+)\s*$/.exec( res.headers.get( 'content-range' ) || '' );
 			const bad = () => new Error( `${ url }: the answer to Range ${ range } does not match it (Content-Range: ${ res.headers.get( 'content-range' ) }).` );
-			// 3dtiled: a cross-origin host that does not list Content-Range in Access-Control-Expose-Headers
-			// (GitHub Pages, raw.githubusercontent.com) hides it from the page. For a plain `bytes=a-b` asked
-			// at a known offset, the 206 and the length of its body are then the check.
+			// 3dtiled: (upstream PR #2) a cross-origin host that does not list Content-Range in
+			// Access-Control-Expose-Headers (GitHub Pages, raw.githubusercontent.com)
+			// hides it from the page. For a plain `bytes=a-b` the status and the
+			// length of the body are then the check.
 			if ( ! match && offset !== null && res.headers.get( 'content-range' ) === null ) {
 
 				const expected = size !== null ? Math.min( length, size - offset ) : length;
@@ -187,39 +187,52 @@ export function httpSource( url, options = {} ) {
 
 	};
 
+	// The size of the file from a HEAD, or null when there is no usable answer.
+	const headSize = async () => {
+
+		requests ++;
+		try {
+
+			const res = await fetchFn( url, { ...baseOptions, method: 'HEAD' } );
+			const n = Number( res.headers.get( 'content-length' ) );
+			return res.ok && Number.isSafeInteger( n ) && n > 0 ? n : null;
+
+		} catch {
+
+			return null;
+
+		}
+
+	};
+
 	return {
 		async tail( length ) {
-
-			// 3dtiled: the size first, from a HEAD (Content-Length is readable across origins), then the
-			// tail as a plain `bytes=a-b`. A suffix range (`bytes=-n`) is not a CORS-safelisted header, so
-			// across origins it costs a preflight, which static hosts such as GitHub Pages refuse (405).
-			if ( ! whole && size === null && ! headTried ) {
-
-				headTried = true;
-				try {
-
-					requests ++;
-					const h = await fetchFn( url, { ...baseOptions, method: 'HEAD' } );
-					const n = Number( h.headers.get( 'content-length' ) );
-					if ( h.ok && Number.isFinite( n ) && n > 0 ) size = n;
-
-				} catch { /* no HEAD: the suffix range below */ }
-
-			}
-
-			if ( ! whole && size !== null ) {
-
-				const start = Math.max( 0, size - length );
-				const out = await ask( `bytes=${ start }-${ size - 1 }`, { offset: start, length: size - start } );
-				if ( out ) return { bytes: out, size };
-
-			}
 
 			if ( ! whole ) {
 
 				// a "suffix" range: the last `length` bytes, and the total size
 				// in the Content-Range header
-				const out = await ask( `bytes=-${ length }`, { suffix: length } );
+				let out;
+				try {
+
+					out = await ask( `bytes=-${ length }`, { suffix: length } );
+
+				} catch ( error ) {
+
+					// 3dtiled: (upstream PR #2) no response at all: across origins, a suffix range is not a
+					// CORS-safelisted Range, so it costs a preflight, which static
+					// hosts (GitHub Pages, raw.githubusercontent.com) refuse. Then the
+					// size from a HEAD (Content-Length is readable across origins) and
+					// the tail as a plain `bytes=a-b`, which needs no preflight.
+					if ( error === null || typeof error !== 'object' || 'status' in error ) throw error;
+					const total = await headSize();
+					if ( total === null ) throw error;
+					size = total;
+					const start = Math.max( 0, total - length );
+					out = await ask( `bytes=${ start }-${ total - 1 }`, { offset: start, length: total - start } );
+
+				}
+
 				if ( out ) {
 
 					if ( size === null ) throw new Error( `${ url }: the server did not say the file size` );
