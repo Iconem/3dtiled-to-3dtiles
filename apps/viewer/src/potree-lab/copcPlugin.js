@@ -128,13 +128,18 @@ export class CopcLoader {
 
 			if ( ! res.ok ) throw new Error( `COPC: HTTP ${ res.status } on bytes ${ begin }-${ end - 1 }` );
 
-			// a server that ignores Range answers 200 with the whole file: refuse rather than read 10 GB
-			const bytes = new Uint8Array( await res.arrayBuffer() );
-			if ( res.status === 200 && bytes.length > end - begin ) throw new Error( 'COPC: the server ignored the Range header' );
+			// a server that ignores Range answers 200 with the whole file: refuse it before reading it, not after 10 GB
+			if ( res.status === 200 && ! ( Number( res.headers.get( 'content-length' ) ) <= end ) ) {
 
+				await res.body?.cancel().catch( () => {} );
+				throw new Error( 'COPC: the server ignores the Range header and sends the whole file: refused' );
+
+			}
+
+			const bytes = new Uint8Array( await res.arrayBuffer() );
 			this.stats.requests ++;
 			this.stats.bytes += bytes.length;
-			return bytes;
+			return res.status === 200 ? bytes.subarray( begin, end ) : bytes; // a 200 here: a file that ends within the range
 
 		};
 

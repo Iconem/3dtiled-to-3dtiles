@@ -150,7 +150,7 @@ mkdir -p sample-data/input/LCC2/unreal-example && cd sample-data/input/LCC2/unre
 curl -L -o Content.zip https://github.com/xgrids/3dgs-unreal-example/releases/download/v1.0/Content.zip
 unzip -q Content.zip                     # Content/3DGSData/{lcc2, LCC2_1, lcc, scene, Strawberry.sog, R12.spz}
 cd ../../../..
-node scripts/static-server.mjs 3016 sample-data &   # any static host will do; this one ignores Range, which the adapter allows for
+node scripts/static-server.mjs 3016 sample-data &   # any static host that answers Range will do
 PORT=3014 node packages/tile-server/server.js &
 curl "http://localhost:3014/stream/tileset.json?format=lcc2&url=http://localhost:3016/input/LCC2/unreal-example/Content/3DGSData/lcc2/LCC2.lcc2"
 curl "http://localhost:3014/stream/tileset.json?format=lcc2&url=http://localhost:3016/input/LCC2/unreal-example/Content/3DGSData/LCC2_1/LCC2.lcc2"

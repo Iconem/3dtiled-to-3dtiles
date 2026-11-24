@@ -319,7 +319,7 @@ the same rules against each format (`stream-contract.test.js`):
 | Says the file is not there: 403, 404, 410 | `/stream` answers **404**. A subtree or a tile the source lacks stays a gap in the source |
 | Gets a burst | Paced at 32 requests at a time per host (`TILED_RANGE_MAX_PER_HOST`), not refused; range reads of one file issued in the same tick (COPC, Potree 2.0, LCC, LCC2, Nexus) are merged when less than 64 KB apart (`TILED_RANGE_COALESCE_MS` widens the tick) |
 | Fails under load: a 429, a 503, a reset | The cap for that host halves, down to 4, and climbs back by one for every window of reads that all passed |
-| Ignores `Range` and sends the whole file | The right bytes are cut out of it |
+| Ignores `Range` and sends the whole file | Refused, not downloaded: the read fails (`/stream` answers 502, saying so) as soon as the answer is longer than the range asked. A file that fits in the range is taken whole |
 
 A dataset whose first read failed is tried again a minute later, not marked as broken until the server restarts. A hierarchy
 is complete or an error: subtrees wait for the chunks they cover, also those another request is already reading. One

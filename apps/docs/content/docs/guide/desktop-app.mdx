@@ -114,15 +114,15 @@ true, and the release notes say so. Runs of 2026-11-19:
 |---|---|
 | Linux x64 (Ubuntu 24.04) | passes: built, installed for the user, started, the tile-server answers from the bundled Node. Artifact `linux-x64-3DTiled-Setup.tar.gz`, 203 MB |
 | Linux arm64 (Ubuntu 24.04) | passes, the same. 207 MB |
-| macOS arm64 (Apple silicon, M1 and later) | passes since the run of 2026-11-21 (GitHub handed no runner on 2026-11-19): built, started, the tile-server answers from the bundled Node. Since the run of 2026-11-21 (afternoon), `macos-arm64-3DTiled.dmg` (185 MB): open it and drag 3DTiled to Applications. The app is signed ad hoc only (no Apple identity), and macOS refuses a downloaded copy as "damaged" (seen on a Mac on 2026-11-23): drag it to Applications, then run `xattr -cr /Applications/3DTiled.app` in Terminal. Only a Developer ID and notarization remove that step. `stable-macos-arm64-3DTiled.app.tar.zst` beside it is Electrobun's update archive. Nobody has opened it on a Mac yet |
+| macOS arm64 (Apple silicon, M1 and later) | passes since the run of 2026-11-21 (GitHub handed no runner on 2026-11-19): built, started, the tile-server answers from the bundled Node. Since the run of 2026-11-21 (afternoon), `macos-arm64-3DTiled.dmg` (185 MB): open it and drag 3DTiled to Applications. The app is signed ad hoc only (no Apple identity), and macOS refuses a downloaded copy as "damaged" (seen on a Mac on 2026-11-23): drag it to Applications, then run `xattr -cr /Applications/3DTiled.app` in Terminal. Without Terminal: `macos-arm64-3DTiled.pkg`, an unsigned installer. macOS blocks it once; System Settings › Privacy & Security › *Open Anyway* lets it run, and what it installs in Applications carries no quarantine, so 3DTiled then opens normally (CI installs it from a quarantined copy and checks that). Only a Developer ID and notarization remove both steps. `stable-macos-arm64-3DTiled.app.tar.zst` beside it is Electrobun's update archive. Nobody has opened it on a Mac yet |
 | macOS x64 (Intel) | cannot be built: Electrobun 2.0.2 has no development kit for it (`ElectrobunArtifactPlatformMissing`) |
 
 What a pass does not cover: the window was never looked at (the runner has no screen; Linux runs under Xvfb), and
 the native file and folder pickers were not tried off Windows (on Windows they go through PowerShell because
 Electrobun's own did not answer; the other platforms still call Electrobun's). On Linux the app needs the system
-webview: `libwebkit2gtk-4.1-0`, `libgtk-3-0`, `libayatana-appindicator3-1`. An unsigned macOS build downloaded
-with a browser is quarantined until *Open Anyway* (or `xattr -cr 3DTiled.app`); only a Developer ID and notarization
-remove that step (see below).
+webview: `libwebkit2gtk-4.1-0`, `libgtk-3-0`, `libayatana-appindicator3-1`. An unsigned macOS app downloaded
+with a browser is refused as "damaged" until `xattr -cr 3DTiled.app`; the unsigned `.pkg` asks for *Open Anyway* instead.
+Only a Developer ID and notarization remove that step (see below).
 
 ### Signing — configured, not done
 

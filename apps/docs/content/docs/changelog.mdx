@@ -8,6 +8,22 @@ Format loosely follows [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+### Changed — 2026-11-24
+- **A host that ignores `Range` is refused, not downloaded** (tile server and the Potree lab's COPC plugin). A range
+  read answered with 200 and more bytes than asked fails at once, with the body cancelled: `/stream` answers 502 and
+  says why. Before, every such read downloaded the whole file again (COPC, Potree 2, LCC, Nexus, zipped OSGB), or
+  once (RAD, SLPK). A file that fits in the range asked is still taken whole. `scripts/static-server.mjs` now answers
+  `Range`.
+- **GeoSplats uses the density rule by default** (`&ge=box` for the box rule; the viewer's pill starts on). Under the
+  box rule the viewer asked for all ~1 560 leaves, filled its 1 GB tile cache with coarse stand-ins and never showed a
+  leaf ([Geometric error](/docs/guide/geometric-error)).
+
+### Added — 2026-11-24
+- **macOS: an unsigned `.pkg`** beside the DMG (`macos-arm64-3DTiled.pkg`). macOS blocks it once, *Open Anyway* in
+  System Settings › Privacy & Security lets it run, and the app it installs carries no quarantine, so it opens without
+  Terminal. CI installs it from a quarantined copy and checks that. The DMG still needs `xattr -cr`. Terrain Viewer's
+  macOS build was checked on the same runner: it is refused the same way (ad hoc signature, Gatekeeper rejects it).
+
 ### Fixed — 2026-11-23
 - **macOS: the DMG's app carries a valid signature** (ad hoc, `codesign --sign -`, no Apple identity; the DMG is made
   again around it, with a retry when `hdiutil` says "Resource busy"). Electrobun's own signature was broken (`code has

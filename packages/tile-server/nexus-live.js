@@ -10,8 +10,8 @@
  *   GET /stream/tileset.json?format=nexus&url=<….nxs | ….nxz>[&dag=levels|paths][&ge=<scale, default 8>]
  *   GET /stream/tile/<node>.glb?format=nexus&url=<same>
  *
- * `url` is an http(s) URL or a local path. A host that ignores Range answers the header request with the whole file,
- * which is then kept and sliced (core's fetchSourceRange), so such a host still works, at the cost of one download.
+ * `url` is an http(s) URL or a local path. A host that ignores Range is refused (core's fetchSourceRange): the file is
+ * not downloaded whole.
  */
 import fs from 'node:fs/promises';
 import { memoizeAsync, tilePool, runTileTaskOr } from '../core/index.js';

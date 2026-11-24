@@ -225,13 +225,18 @@ include the network to each source, so the ratios matter, not the seconds.
 
   Both end on the same 37 tiles on screen (6.9 million splats): from this view, nothing finer is wanted at 2 px or
   above. The box rule downloads 1.3 to 2.2 times more to show them: its larger errors make the renderer fetch
-  deeper tiles that do not reach the screen (why they do not was not traced). So the density errors are not too high; 0.5 px is a target that asks for detail far below a
+  deeper tiles that do not reach the screen: traced on 2026-11-24, they are the depth-1 and depth-2 stand-ins of a
+  wanted depth 3 that never loads before the tile cache is full (next paragraph). So the density errors are not too high; 0.5 px is a target that asks for detail far below a
   pixel.
 - Not measured: frame rate (no GPU), a moving camera, and whether the picture at the density target is fine
   enough.
 
 Formats for which `&ge=density` changes the answer: `i3s`, `lcc`, `lcc2`, `geosplats`, and `vpc` when the set shows
-no overview and has no `&leafError=`. All others ignore it (for Nexus, `ge` is a number, its own error factor).
+no overview and has no `&leafError=`. **GeoSplats takes it by default** since 2026-11-24 (`&ge=box` for the box rule):
+its box errors are about 80 times the density ones (depth 1: 596 to 1 082 against 6.8 to 14.8), so under the box rule
+the viewer asks for every leaf of the scene (about 1 560 tiles of about 12 MB decoded each), fills its 1 GB tile cache
+with coarse stand-ins after about 85 tiles and refuses the rest: the leaves never load, and the same 37 tiles stay on
+screen. The pill in the viewer starts on for GeoSplats. All others ignore it (for Nexus, `ge` is a number, its own error factor).
 
 ## Other options for the box-only formats
 

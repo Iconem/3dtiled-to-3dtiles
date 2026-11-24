@@ -1,7 +1,7 @@
 /**
  * geosplats-live.js — **MapTiler GeoSplats → OGC 3D Tiles** live stream converter.
  *
- *   GET /stream/tileset.json?url=<model.json URL>&format=geosplats[&lod=1..8][&ge=density]
+ *   GET /stream/tileset.json?url=<model.json URL>&format=geosplats[&lod=1..8][&ge=box]   (density errors by default)
  *   GET /stream/tile/<m>-<grid>-<oct>-<lod>.glb?url=<model.json URL>&format=geosplats
  *
  * GeoSplats (https://www.maptiler.com/geosplats/) is a georeferenced HLOD splat format: a `model.json`

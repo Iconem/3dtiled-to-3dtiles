@@ -31,9 +31,13 @@ export function streamParams(f: FormatMeta | undefined, p: Pick<MiddlewareParams
   let q = f?.octree ? `&tiling=${p.tilingMode}` : '';
   if (canCentroids(p.selectedFormat) && p.centroidsOnly) q += '&centroids=1';
   else if (canSh(p.selectedFormat) && p.shDegree) q += `&sh=${p.shDegree}`;
-  if (canDensityError(p.selectedFormat) && p.densityError) q += '&ge=density';
+  if (p.selectedFormat === 'geosplats') q += `&ge=${p.densityError ? 'density' : 'box'}`; // density is the server's default there
+  else if (canDensityError(p.selectedFormat) && p.densityError) q += '&ge=density';
   return q;
 }
+
+/** The density rule is on: asked for, or GeoSplats when nothing was asked (its default). */
+export const densityErrorOn = (format: string, ge: 'box' | 'density' | null | undefined) => ge === 'density' || (ge == null && format === 'geosplats');
 
 export function buildMiddlewareUrl(rawSrc: string, p: MiddlewareParams, fOverride?: FormatMeta) {
   const f = fOverride ?? fmtMeta(p.selectedFormat);
@@ -164,7 +168,7 @@ export function currentPresets(p: MiddlewareParams & { toolName: ToolName; tiles
     ];
   }
   if (p.selectedFormat === 'geosplats') {
-    const gs = (mdl: string) => `${MW}/stream/tileset.json?format=geosplats&url=${encodeURIComponent(mdl)}&lod=5${p.densityError ? '&ge=density' : ''}`;
+    const gs = (mdl: string) => `${MW}/stream/tileset.json?format=geosplats&url=${encodeURIComponent(mdl)}&lod=5&ge=${p.densityError ? 'density' : 'box'}`;
     // Same rawSrc fix as threemx above — the raw source is the MapTiler splats model.json URL.
     return [
       { id: 'gs-1', label: '✨ Jastrzębia Góra, Poland', type: 'splat', url: gs('https://api.maptiler.com/splats/019e67bf-b89b-743d-91dd-79f7f4b4bd4e/model.json?key=GKF1QdQ4MpjgqtKiQuxR'), rawSrc: 'https://api.maptiler.com/splats/019e67bf-b89b-743d-91dd-79f7f4b4bd4e/model.json?key=GKF1QdQ4MpjgqtKiQuxR' },

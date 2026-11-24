@@ -107,3 +107,20 @@ test('source-fetch: a file: URL is read whole or by range, only where local sour
   assert.equal(await localSourceUrl('https://host/a.copc.laz'), 'https://host/a.copc.laz');
   assert.equal(await localSourceUrl(file, () => false), file);
 });
+test('source-fetch: a host that ignores Range is refused, not downloaded; a file shorter than the range is taken whole', async (t) => {
+  quiet(t);
+  const http = await import('node:http');
+  const big = Buffer.alloc(4 << 20, 1), small = Buffer.from('tiny file');
+  let sent = 0;
+  const server = http.createServer((req, res) => {
+    const body = req.url === '/big.bin' ? big : small;
+    res.writeHead(200, { 'Content-Length': body.length });         // Range ignored
+    res.end(body); sent += body.length;
+  });
+  server.listen(0, '127.0.0.1'); await once(server, 'listening');
+  t.after(() => server.close());
+  const base = `http://127.0.0.1:${server.address().port}`;
+  await assert.rejects(fetchSourceRange(`${base}/big.bin`, 1000, 100), (e) => e.rangeIgnored === true && e.transient === false && /ignores Range/.test(e.message));
+  await assert.rejects(openZip(`${base}/big.bin`), (e) => e.rangeIgnored === true);
+  assert.equal((await fetchSourceRange(`${base}/small.bin`, 5, 4)).toString(), 'file');
+});

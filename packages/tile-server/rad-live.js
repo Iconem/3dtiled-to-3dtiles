@@ -108,7 +108,8 @@ const getHeaderCtx = memoizeAsync(async (url) => {
   // Probe the header region with a ranged GET — also tells us file size + range support.
   let { buf: headBuf, rangeSupported, total } = await src.probe(HEADER_PROBE);
   let fileBuf = null;                                    // set only in the no-range fallback
-  if (!rangeSupported) { fileBuf = headBuf; total = headBuf.length; }   // server ignored Range → whole file
+  // a 200 here is a file no longer than the probe (a host that ignores Range for a longer one is refused: core/source-fetch.js)
+  if (!rangeSupported) { fileBuf = headBuf; total = headBuf.length; }
 
   if (headBuf.toString('utf8', 0, 4) !== 'RAD0') throw new Error(`${url}: not a RAD0 file`);
   const jsonLen = headBuf.readUInt32LE(4);

@@ -87,9 +87,10 @@ test('a dropped connection is retried like a 503', async (t) => {
   assert.equal((await fetchSource(`http://127.0.0.1:${server.address().port}/f`)).toString(), 'data');
 });
 
-test('a range read returns the bytes asked for, from a host that ignores Range too', async (t) => {
+test('a host that ignores Range is refused, unless the whole file fits in the range asked', async (t) => {
   const h = await host(t, { '/f': Buffer.from('0123456789') }, { noRange: true });
-  assert.equal((await fetchSourceRange(`${h.base}/f`, 3, 4)).toString(), '3456');
+  await assert.rejects(fetchSourceRange(`${h.base}/f`, 3, 4), (e) => e.rangeIgnored === true && e.transient === false);
+  assert.equal((await fetchSourceRange(`${h.base}/f`, 3, 7)).toString(), '3456789');
 });
 
 test('reads to one host are capped, however many are asked for', async (t) => {

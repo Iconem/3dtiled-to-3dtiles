@@ -10,7 +10,9 @@
  *   • A THROWN ERROR on anything else, never an error body taken for data. `err.status` is the host's answer, and
  *     `err.transient` says a retry might yet work: an adapter may treat a file the host lacks as optional, never one it
  *     could not read.
- *   • A range read returns the bytes asked for, even from a host that ignores Range and answers with the whole file.
+ *   • A HOST THAT IGNORES RANGE is refused, not downloaded: a range read answered with 200 and more than the bytes asked
+ *     for (the whole file) throws `err.rangeIgnored`, with the body cancelled as soon as that is known. A file small enough
+ *     to fit in the range asked is taken whole. The client gets an error, not a server busy downloading gigabytes.
  *   • A HOST WHOSE HEADERS `fetch` REFUSES is read with Node's own client in lenient mode. Some servers fold a long header
  *     over several lines (pdmap.pland.gov.hk's Content-Security-Policy, the Hong Kong 3D model host): obsolete line folding,
  *     which undici rejects as malformed HTTP. Once a host has failed that way, every read of it goes the lenient way.
@@ -58,6 +60,33 @@ export const httpStatusOf = (e) => (!e.status && !e.transient ? 500 : isAbsent(e
 
 /** The url for a message or a log: its query may hold a token. */
 const shortUrl = (url) => url.split('?')[0].slice(-120);
+
+/** For a Range header, the most bytes a 200 (the whole file) may hold and still be what was asked: the file is no longer
+ *  than the range. `bytes=a-b` → b + 1, `bytes=-n` → n, `bytes=a-` → no limit. Null when there is no Range. */
+function wholeFileLimit(range) {
+  if (!range) return null;
+  const m = /^bytes=(\d*)-(\d*)$/.exec(range.trim());
+  if (!m) return null;
+  if (m[1] === '') return Number(m[2]);
+  return m[2] === '' ? Infinity : Number(m[2]) + 1;
+}
+
+/** The body of an answer, or null as soon as it passes `limit` bytes (declared, then received): then cancelled. */
+async function bodyUpTo(r, limit) {
+  const declared = Number(r.headers.get('content-length'));
+  if (declared > limit) { await r.body?.cancel().catch(() => {}); return null; }
+  if (!r.body || limit === Infinity) { const b = Buffer.from(await r.arrayBuffer()); return b.length > limit ? null : b; }
+  const reader = r.body.getReader(), parts = [];
+  let total = 0;
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    total += value.length;
+    if (total > limit) { await reader.cancel().catch(() => {}); return null; }
+    parts.push(value);
+  }
+  return Buffer.concat(parts, total);
+}
 
 // ── the lenient client ───────────────────────────────────────────────────────────────────────────────────────────
 const lenientHosts = new Set();
@@ -163,12 +192,24 @@ export async function requestSource(url, { headers, signal, attempts = 3, timeou
           r = await lenientFetch(url, opts);
         }
       }
+      const range = headers?.Range ?? headers?.range;
+      if (r.status === 200 && range) {
+        const body = await bodyUpTo(r, wholeFileLimit(range) ?? Infinity);
+        if (body === null) {
+          noteOutcome(host, false);
+          const size = Number(r.headers.get('content-length'));
+          throw Object.assign(new Error(`read ${shortUrl(url)} [${range}] → the host ignores Range and answers with the whole file${size > 0 ? ` (${size} bytes)` : ''}: refused rather than downloaded`),
+            { status: 200, rangeIgnored: true, transient: false, headers: r.headers });
+        }
+        noteOutcome(host, false);
+        return { status: r.status, headers: r.headers, body };
+      }
       if (ok(r.status)) { noteOutcome(host, false); return { status: r.status, headers: r.headers, body: Buffer.from(await r.arrayBuffer()) }; }
       await r.arrayBuffer().catch(() => {});        // drain so the connection can be reused
       err = Object.assign(new Error(`read ${shortUrl(url)}${headers?.Range ? ` [${headers.Range}]` : ''} → HTTP ${r.status}`), { status: r.status, transient: r.status === 429 || r.status >= 500 });
     } catch (e) { err = e; }
     finally { release(); }
-    if (signal?.aborted) throw err;
+    if (signal?.aborted || err.rangeIgnored) throw err;
     err.transient = isTransient(err);
     if (!isAbsent(err.status)) noteOutcome(host, err.transient);
     if (!err.transient || attempt >= attempts) throw err;
@@ -183,7 +224,8 @@ export const fetchSource = async (url, opts) => (await requestSource(url, opts))
 /** A whole JSON file. Decoded as `Response.json()` does, which drops a BOM. */
 export const fetchSourceJson = async (url, opts) => JSON.parse(new TextDecoder().decode(await fetchSource(url, opts)));
 
-/** `[begin, begin + length)` → Buffer of exactly those bytes. */
+/** `[begin, begin + length)` → Buffer of exactly those bytes. A whole file in answer is taken only when it is no longer
+ *  than `begin + length` (requestSource refuses a longer one). */
 export async function fetchSourceRange(url, begin, length, opts = {}) {
   if (begin < 0 || length < 0) throw new Error(`Invalid range ${begin}+${length}`);
   if (length === 0) return Buffer.alloc(0);

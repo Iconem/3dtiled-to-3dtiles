@@ -36,7 +36,7 @@
  * The tileset's relative content URIs (`tile/<key>.glb?url=…`) get `&format=<fmt>` appended so the
  * follow-up `/stream/tile/...` requests carry the format and dispatch to the same adapter.
  *
- * `&ge=density` (opt-in; i3s, lcc, lcc2, geosplats, and a vpc without an overview) derives each tile's geometric error
+ * `&ge=density` (opt-in; i3s, lcc, lcc2, and a vpc without an overview; geosplats by default, `&ge=box` to opt out) derives each tile's geometric error
  * from the spacing of what the tile draws, the format's box rule kept as a ceiling (core/geometric-error.js). I3S
  * first uses the layer's own lodThreshold. It changes tileset JSON only, never a tile's bytes, so it is carried to
  * child TILESET URLs (a VPC's cells and nested VPCs) and not to tile URLs. Other formats ignore it; for Nexus `ge` is
@@ -293,8 +293,10 @@ export async function handleStream(req, res, u) {
     // depth=0: the root tile only (no children, no hierarchy drain) — what /aggregate needs to place a
     // child; honoured by copc-live's curved explicit tree, ignored where the root is already cheap.
     const depth = u.searchParams.has('depth') ? Math.max(0, Math.trunc(Number(u.searchParams.get('depth')))) : undefined;
-    // ge=density: the opt-in density rule for the box-only formats (see the header); anything else leaves the rules as they are
-    const geRule = geRuleParam(u.searchParams.get('ge'));
+    // ge=density: the opt-in density rule for the box-only formats (see the header); anything else leaves the rules as they are.
+    // GeoSplats takes it by default (&ge=box for its box rule): its box errors are about 80 × the density ones, so the box
+    // rule asks for every leaf of the scene and stalls once the tile cache is full (measured 2026-11-23).
+    const geRule = fmt === 'geosplats' && !u.searchParams.has('ge') ? 'density' : geRuleParam(u.searchParams.get('ge'));
     const ts = await adapter.tileset(url, { tiling: u.searchParams.get('tiling'), lazy, hierarchy, prefetch, centroids, sh, crs, curved, depth, geRule, ...geosplatsOpts, ...nexusOpts, splatBudget: u.searchParams.get('splatBudget'), up: u.searchParams.get('up') || undefined, center: u.searchParams.get('center') === '1', strays: u.searchParams.get('strays') || undefined });
     // User-directed globe placement (&lon=&lat=[&alt=][&heading=][&scale=]): attach a LOCAL dataset to
     // a real location so ANY 3D Tiles client (Cesium for Unreal/Unity, QGIS, native CesiumJS) streams

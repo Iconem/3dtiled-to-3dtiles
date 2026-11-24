@@ -48,8 +48,8 @@ opt-in/off by default).
 so the tree build must touch **every chunk** — both the topology (child columns) and the bounds (center
 column) live per-chunk. That's inherent, not a wart: a 100 M-splat `.rad` (~1500+ chunks) requires
 reading + decompressing every chunk's center+child columns before the first tile appears. The adapter
-mitigates this with (a) **HTTP range requests** (never buffers the whole multi-GB file; falls back to a
-single full download only if the host ignores `Range`), (b) a **single parallel pass** (one decode per
+mitigates this with (a) **HTTP range requests** (never buffers the whole multi-GB file; a host that ignores
+`Range` is refused), (b) a **single parallel pass** (one decode per
 chunk, bounded concurrency) instead of two sequential passes, and (c) per-URL caching of the result.
 But the *first* load of a very large `.rad` is still bound by reading all chunk centers — for clouds
 that big, **`/convert` (preprocess + cache once)** is the better mode, or persist a bounds/topology

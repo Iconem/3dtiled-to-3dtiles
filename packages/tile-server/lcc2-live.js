@@ -41,8 +41,9 @@ const getCtx = memoizeAsync(async (url) => {
 async function fetchBundle(url, sh = 0) {
   const keep = sh > 0 ? withShN : withoutShN;
   const { status, headers, body } = await requestSource(url, { headers: { Range: `bytes=-${TAIL_BYTES}` }, ok: (s) => (s >= 200 && s < 300) || s === 416 });
-  // A host that ignores Range answers with the whole bundle, which is then all there is to read. One that refuses a
-  // suffix range (416), or does not say how long the file is, is asked for the whole bundle.
+  // A 200 is a bundle no longer than the tail (a host that ignores Range for a longer one is refused: core/source-fetch.js),
+  // which is then all there is to read. One that refuses a suffix range (416), or does not say how long the file is, is
+  // asked for the whole bundle.
   const total = status === 206 ? Number(headers.get('content-range')?.match(/\/(\d+)\s*$/)?.[1]) : status === 416 ? NaN : body.length;
   if (!Number.isFinite(total)) { const whole = await fetchBuf(url); return bundledSogFiles(whole, whole.length, undefined, keep); }
   // The spans missing from the tail are asked for together, through the bundle's shared getter (range-getter.js): the

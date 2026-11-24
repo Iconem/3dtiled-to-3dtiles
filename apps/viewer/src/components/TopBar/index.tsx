@@ -6,7 +6,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { useUrlState } from '@/state/urlState';
 import { useViewerStore } from '@/state/store';
 import { PSEUDO_FORMATS, FORMAT_PILL_ORDER, STREAM_ONLY_FORMATS, pillMeta, fmtMeta, canCentroids, canSh, canDensityError, MW } from '@/lib/formats';
-import { buildMiddlewareUrl, currentPresets, type MiddlewareParams, type Preset } from '@/lib/middleware';
+import { buildMiddlewareUrl, currentPresets, densityErrorOn, type MiddlewareParams, type Preset } from '@/lib/middleware';
 import type { ViewerHandle } from '@/lib/viewer-handle';
 import { formatPose, parsePose, type CameraPose } from '@/lib/cameraPose';
 import { GOOGLE_MAPS_API_KEY } from '@/lib/google';
@@ -198,7 +198,7 @@ export default function TopBar({ activeHandleRef }: { activeHandleRef: React.Ref
     centroidsOnly: url.centroids,
     tilingMode: url.tiling,
     shDegree: url.sh,
-    densityError: url.ge === 'density',
+    densityError: densityErrorOn(url.format, url.ge),
   };
 
   const availableSets = useAvailableSets();
@@ -485,7 +485,7 @@ export default function TopBar({ activeHandleRef }: { activeHandleRef: React.Ref
                 <Pill tint="emerald" active={url.sh > 0} onClick={() => setUrl({ sh: url.sh > 0 ? 0 : 3 })} title="View-dependent colour: keep the splats' spherical harmonics, up to the degree the file holds (tiles get larger). Off: base colour only.">✦ harmonics</Pill>
               )}
               {url.mode === 'stream' && canDensityError(url.format) && (
-                <Pill tint="emerald" active={url.ge === 'density'} onClick={() => setUrl({ ge: url.ge === 'density' ? 'box' : 'density' })} title="Experimental. This format's tile errors come from the size of each box alone. On: from the density of what the tile draws (for I3S, from its own lodThreshold first), never above the box rule. Tiles refine later, so less is loaded; compare the two.">◇ density error</Pill>
+                <Pill tint="emerald" active={densityErrorOn(url.format, url.ge)} onClick={() => setUrl({ ge: densityErrorOn(url.format, url.ge) ? 'box' : 'density' })} title={`${url.format === 'geosplats' ? 'On by default for GeoSplats. ' : 'Experimental. '}This format's tile errors come from the size of each box alone. On: from the density of what the tile draws (for I3S, from its own lodThreshold first), never above the box rule. Tiles refine later, so less is loaded; compare the two.`}>◇ density error</Pill>
               )}
               {url.mode === 'stream' && canCentroids(url.format) && (
                 <Pill tint="emerald" active={url.centroids} onClick={() => setUrl({ centroids: !url.centroids })} title="Render splat centres as glTF POINTS instead of full gaussians">◦ centroids</Pill>

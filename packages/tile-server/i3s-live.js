@@ -36,7 +36,6 @@
  */
 import zlib from 'node:zlib';
 import { parseSLPKArchive } from '@loaders.gl/i3s';
-import { DataViewReadableFile } from '@loaders.gl/zip';
 import { geodeticToEcef, childIndices, obbToFrameBox, i3sBoxError, i3sNodeLod } from '../i3s-to-3dtiles/src/i3sParse.js';
 import { i3sNodeGlb } from './mesh-tile.js';
 import { tilePool, runTileTaskOr, ownBytes, enuFrame, memoizeAsync, requestSource, fetchSource as fetchBuf, fetchSourceRange, densityError, i3sLodError, DENSITY_K } from '../core/index.js';
@@ -67,7 +66,7 @@ function arcgisSceneServerReader(url) {
 // URL path, so a pure extension check misses it — fall back to sniffing the local-file-header PKZIP
 // magic (0x50 0x4B, "PK") in the first bytes. `Content-Range: bytes 0-3/<total>` on a real 206 gives
 // the archive's total size AND proves range support, both needed for HttpRangeReadableFile below.
-async function probeSlpk(url) {
+async function probeSlpk(url, slpkByName = false) {
   try {
     const r = await requestSource(url, { headers: { Range: 'bytes=0-3' } });
     const cd = r.headers.get('content-disposition') || '';
@@ -77,7 +76,11 @@ async function probeSlpk(url) {
     const cr = r.headers.get('content-range');
     const total = cr && r.status === 206 ? Number(cr.split('/')[1]) : NaN;
     return { supportsRange: r.status === 206 && Number.isFinite(total), size: total };
-  } catch (e) { if (e.transient) throw e; return null; }
+  } catch (e) {
+    // a host that ignores Range is refused (core/source-fetch.js): fatal for an archive, named so or declared so
+    if (e.transient || slpkByName || (e.rangeIgnored && /\.slpk"?\s*$/i.test(e.headers?.get('content-disposition') || ''))) throw e;
+    return null;
+  }
 }
 
 // Minimal loaders.gl ReadableFile backed by ranged HTTP GETs instead of an in-memory buffer — lets
@@ -103,17 +106,12 @@ async function makeFileReader(url) {
   if (/\/SceneServer(\/|$|\?)/i.test(url)) return arcgisSceneServerReader(url);
   const looksLikeJson = /\.json(\.gz)?(\?|$)/i.test(url);
   const looksLikeSlpkUrl = /\.slpk(\?|$)/i.test(url);
-  const probe = !looksLikeJson ? await probeSlpk(url) : null;
+  const probe = !looksLikeJson ? await probeSlpk(url, looksLikeSlpkUrl) : null;
   if (looksLikeSlpkUrl || probe) {
-    // Prefer range reads (only pulls the ZIP central directory + whichever nodes/textures a request
-    // actually needs); fall back to buffering the whole archive only if the host doesn't honor Range.
-    let fileProvider;
-    if (probe?.supportsRange) {
-      fileProvider = new HttpRangeReadableFile(url, probe.size);
-    } else {
-      const buf = await fetchBuf(url);
-      fileProvider = new DataViewReadableFile(new DataView(buf.buffer.slice(buf.byteOffset, buf.byteOffset + buf.byteLength)));
-    }
+    // Range reads only (the ZIP central directory + whichever nodes/textures a request actually needs): an archive on
+    // a host that does not answer Range with its size is refused, not downloaded whole.
+    if (!probe?.supportsRange) throw Object.assign(new Error(`${url.split('?')[0].slice(-120)}: the host does not answer range requests with the file size, and an SLPK is not downloaded whole`), { status: 502 });
+    const fileProvider = new HttpRangeReadableFile(url, probe.size);
     const archive = await parseSLPKArchive(fileProvider, undefined, 'slpk');
     return async (rel) => {
       let last;

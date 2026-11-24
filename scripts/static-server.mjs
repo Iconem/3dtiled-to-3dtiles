@@ -19,10 +19,20 @@ http.createServer((req, res) => {
   if (prefix && p.startsWith(prefix)) p = p.slice(prefix.length);
   p = p.replace(/^\/+/, '').replace(/\/+$/, '');
   let f = path.join(root, p || 'index.html');
+  // Range answered (bytes=a-b, a-, -n), as a real host does: the tile server refuses hosts that ignore it
   const serve = (file) => fs.readFile(file, (e, d) => {
     if (e) { res.writeHead(404); res.end('nf: ' + file); return; }
-    res.writeHead(200, { 'Content-Type': TYPES[path.extname(file)] || 'application/octet-stream' });
-    res.end(d);
+    const type = TYPES[path.extname(file)] || 'application/octet-stream';
+    const m = /^bytes=(\d*)-(\d*)$/.exec(req.headers.range || '');
+    if (m && (m[1] !== '' || m[2] !== '')) {
+      const a = m[1] === '' ? Math.max(0, d.length - Number(m[2])) : Number(m[1]);
+      const b = m[1] === '' || m[2] === '' ? d.length - 1 : Math.min(Number(m[2]), d.length - 1);
+      if (a > b || a >= d.length) { res.writeHead(416, { 'Content-Range': `bytes */${d.length}` }); res.end(); return; }
+      res.writeHead(206, { 'Content-Type': type, 'Accept-Ranges': 'bytes', 'Content-Range': `bytes ${a}-${b}/${d.length}`, 'Content-Length': b - a + 1 });
+      res.end(req.method === 'HEAD' ? undefined : d.subarray(a, b + 1)); return;
+    }
+    res.writeHead(200, { 'Content-Type': type, 'Accept-Ranges': 'bytes', 'Content-Length': d.length });
+    res.end(req.method === 'HEAD' ? undefined : d);
   });
   fs.stat(f, (e, st) => {
     if (!e && st.isDirectory()) f = path.join(f, 'index.html');
