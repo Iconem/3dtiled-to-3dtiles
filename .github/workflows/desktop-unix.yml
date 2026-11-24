@@ -73,10 +73,12 @@ jobs:
           echo "--- build"; find build -maxdepth 3 | head -60
 
       # Electrobun leaves the .app without a valid signature of its own (its binaries are only linker-signed), and a
-      # downloaded .app in that state is refused by macOS as "damaged", with no way past it but the Terminal. Signed ad
-      # hoc (no Apple identity), it is refused as "from an unidentified developer" instead, which System Settings ›
-      # Privacy & Security › Open Anyway lifts. The DMG is made again around the signed .app.
-      - name: Sign ad hoc and remake the DMG (macOS)
+      # downloaded .app in that state is refused by macOS as "damaged". Signed ad hoc (no Apple identity) it is still
+      # refused once downloaded (Gatekeeper rejects it, seen on a Mac on 2026-11-23): the DMG then needs
+      # `xattr -cr /Applications/3DTiled.app`. Hence also an unsigned .pkg: macOS blocks the package itself, which
+      # System Settings › Privacy & Security › Open Anyway lifts, and what Installer writes carries no quarantine, so the
+      # installed app then opens like any other (runner probe of 2026-11-24: no quarantine attribute after install).
+      - name: Sign ad hoc, remake the DMG, make a .pkg (macOS)
         if: runner.os == 'macOS'
         working-directory: apps/desktop
         run: |
@@ -98,6 +100,21 @@ jobs:
             for i in 1 2 3 4 5; do hdiutil create -volname 3DTiled -srcfolder "$staging" -ov -format UDZO "$dmg" && break; [ "$i" = 5 ] && exit 1; sleep 10; done
             ls -la artifacts
           fi
+          # The .pkg installs 3DTiled.app into /Applications (unsigned: see above)
+          version="$(date -u +%Y.%-m.%-d)"
+          # not relocatable: otherwise Installer updates whichever copy it finds (in Downloads, on the DMG) instead of /Applications
+          root="$(mktemp -d)"; cp -R "$app" "$root/"
+          pkgbuild --analyze --root "$root" component.plist
+          plutil -replace 0.BundleIsRelocatable -bool NO component.plist
+          pkgbuild --root "$root" --component-plist component.plist --install-location /Applications --identifier com.iconem.3dtiled.desktop.pkg --version "$version" artifacts/macos-arm64-3DTiled.pkg
+          pkgutil --payload-files artifacts/macos-arm64-3DTiled.pkg | head -5
+          # as downloaded by a browser: a copy of the package with a quarantine; what it installs must have none
+          cp artifacts/macos-arm64-3DTiled.pkg /tmp/q.pkg
+          xattr -w com.apple.quarantine "0083;$(printf %x "$(date +%s)");Safari;$(uuidgen)" /tmp/q.pkg
+          sudo installer -pkg /tmp/q.pkg -target / | tail -1
+          if xattr -r -l /Applications/3DTiled.app | grep -q com.apple.quarantine; then echo "the installed app is quarantined"; exit 1; fi
+          echo "installed from the quarantined package, no quarantine on /Applications/3DTiled.app"
+          ls -la artifacts
 
       # What a user does: launch. The system Node is hidden, so a pass means the bundled one ran.
       - name: Smoke test the built app
