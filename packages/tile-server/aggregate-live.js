@@ -26,6 +26,8 @@ import { readdir, readFile, writeFile, mkdir } from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createHash, randomUUID } from 'node:crypto';
+import { gzip } from 'node:zlib';
+import { promisify } from 'node:util';
 import { datasetGroundSamples, offsetFromSamples } from '../core/dataset-ground.js';
 import { sampleTerrain, TERRAINS } from '../core/terrain.js';
 import { llhToEcef, ecefToLlh, curvedParam, httpStatusOf, geRuleParam } from '../core/index.js';
@@ -668,8 +670,10 @@ const DATASET_SCHEMA = {
   classes: {
     dataset: {
       description: 'One source dataset referenced by an /aggregate mosaic',
+      // `id` and `name` carry the 3D Tiles 1.1 general semantics ID and NAME, so a reader that knows the
+      // standard (rather than this schema's property names) finds them: the convention to agree on.
       properties: Object.fromEntries(['id', 'name', 'project', 'scene', 'date', 'format', 'licence', 'provider', 'attribution', 'country']
-        .map((k) => [k, { type: 'STRING' }])),
+        .map((k) => [k, { type: 'STRING', ...(k === 'id' ? { semantic: 'ID' } : k === 'name' ? { semantic: 'NAME' } : {}) }])),
     },
   },
 };
@@ -919,7 +923,12 @@ const aggregateCached = ttlCache(async (key) => {
 // that must never be committed — and because hundreds of them could not travel in a query string
 // anyway (that would blow straight past the HTTP header size limit).
 //
-// Manifest shape: { label, entries: [{ url, format: 'potree'|'copc'|'3dtiles', name?, project?, scene? }] }
+// Manifest shape: { label, unlisted?, entries: [{ url, format: 'potree'|'copc'|'3dtiles', name?, project?, scene? }] }
+//
+// `unlisted: true` keeps a set out of demo.json and out of every "try one of …" message: only who knows
+// its file name can open it. That makes a durable private mosaic: put the manifest on the server under
+// an unguessable name (`iconem-<random>.json`), and `?set=iconem-<random>` works with no expiry and
+// survives restarts, while the share links inside stay as unlisted as the name.
 const LOCAL_SETS_DIR = process.env.AGGREGATE_SETS_DIR
   || fileURLToPath(new URL('../../.local/aggregate-sets/', import.meta.url));
 // Committed manifests of PUBLIC data, same shape (flai open LiDAR, Aerometrex previews): no secrets,
@@ -937,7 +946,7 @@ async function readSetsDir(dir, local) {
       // a set that needs a secret (VEXCEL_API_KEY …) only exists where that secret is configured
       if (m.requiresEnv && !process.env[m.requiresEnv]) continue;
       if (Array.isArray(m.entries)) sets[f.replace(/\.json$/, '')] = { label: m.label ?? f, entries: m.entries, manifest: true, local,
-        provider: m.provider ?? null, attribution: m.attribution ?? null };
+        provider: m.provider ?? null, attribution: m.attribution ?? null, ...(m.unlisted ? { unlisted: true } : {}) };
     } catch (e) { console.warn(`[aggregate] ignoring unreadable set ${f}: ${e.message}`); }
   }
   return sets;
@@ -1133,20 +1142,55 @@ async function handleDraft(req, res, u, origin) {
 // The name is a hash of the manifest: re-sending the same file gives the same URL, so a client that
 // kept the file can restore a mosaic link after a server restart just by POSTing it again. Without the
 // file the hash is unguessable, and uploads are never listed in demo.json or in error messages —
-// their URLs are share links. In memory, bounded like drafts (count, size, age since last use).
-const UPLOAD_MAX = 20;
-const UPLOAD_TTL_MS = 24 * 3600 * 1000;
+// their URLs are share links. Bounded like drafts (count, size), kept a week since last use, and
+// saved to disk so a restart keeps them.
+const UPLOAD_MAX = 50;
+const UPLOAD_TTL_MS = 7 * 24 * 3600 * 1000;       // a week since the mosaic was last opened
 const UPLOAD_MAX_BYTES = 10 * 1024 * 1024;
 const UPLOAD_FORMATS = new Set(['potree', 'copc', '3dtiles']);
 const uploads = new Map();                         // name → { at, set }; Map order = LRU order
 const UPLOAD_NAME = /^upload-[0-9a-f]{32}$/;
+// Mirrored to disk, so a restart or a new image keeps every link alive. The file holds share links:
+// it lives under CACHE_DIR, next to the cached child roots, which hold the same URLs already. In
+// Docker, mount a volume on that directory (AGGREGATE_CACHE_DIR) or a new container starts empty.
+const UPLOADS_FILE = path.join(CACHE_DIR, 'uploads.json');
+const UPLOAD_SAVE_MS = 60 * 1000;                  // a sliding expiry rewritten at most once a minute
+let uploadsLoaded = null, uploadsSaveTimer = null;
 
-function getUpload(name) {
+function loadUploads() {
+  uploadsLoaded ??= (async () => {
+    try {
+      const saved = JSON.parse(await readFile(UPLOADS_FILE, 'utf8'));
+      const now = Date.now();
+      for (const [name, d] of [...Object.entries(saved)].sort((a, b) => a[1].at - b[1].at)) {
+        if (UPLOAD_NAME.test(name) && d?.set && now - d.at <= UPLOAD_TTL_MS && !uploads.has(name)) uploads.set(name, { at: d.at, set: d.set });
+      }
+    } catch { /* no file yet, or unreadable: start empty */ }
+  })();
+  return uploadsLoaded;
+}
+
+function saveUploads(now = false) {
+  if (uploadsSaveTimer && !now) return;
+  clearTimeout(uploadsSaveTimer);
+  const write = async () => {
+    uploadsSaveTimer = null;
+    try { await mkdir(CACHE_DIR, { recursive: true }); await writeFile(UPLOADS_FILE, JSON.stringify(Object.fromEntries(uploads))); }
+    catch (e) { console.warn(`[aggregate] could not save uploads: ${e.message}`); }
+  };
+  if (now) { uploadsSaveTimer = null; return write(); }
+  uploadsSaveTimer = setTimeout(write, UPLOAD_SAVE_MS);
+  uploadsSaveTimer.unref?.();
+}
+
+async function getUpload(name) {
+  await loadUploads();
   const d = uploads.get(name);
   if (!d) return null;
-  if (Date.now() - d.at > UPLOAD_TTL_MS) { uploads.delete(name); return null; }
+  if (Date.now() - d.at > UPLOAD_TTL_MS) { uploads.delete(name); saveUploads(); return null; }
   uploads.delete(name);
   uploads.set(name, { ...d, at: Date.now() });     // sliding expiry: a mosaic in use stays
+  saveUploads();
   return d.set;
 }
 
@@ -1172,15 +1216,39 @@ async function handleUpload(req, res, origin) {
   // `bounds` is left out of the hash: baking a manifest (scripts/aggregate-bake-bounds.mjs) keeps its
   // set name, so links and the browser's stored copy keep working; the newest upload's bounds win.
   const name = 'upload-' + createHash('sha256').update(JSON.stringify(set.entries.map(({ bounds, ...e }) => e))).digest('hex').slice(0, 32);
+  await loadUploads();
   const now = Date.now();
   for (const [k, d] of uploads) if (now - d.at > UPLOAD_TTL_MS) uploads.delete(k);
   uploads.delete(name);
   while (uploads.size >= UPLOAD_MAX) uploads.delete(uploads.keys().next().value);
   uploads.set(name, { at: now, set });
+  await saveUploads(true);
   res.writeHead(201, { 'Content-Type': 'application/json', ...CORS });
   res.end(JSON.stringify({ set: name, label: set.label, count: set.entries.length,
     url: `${origin}/aggregate/tileset.json?set=${name}&nest=geodetic`, expiresInS: UPLOAD_TTL_MS / 1000 }));
 }
+
+const gzipAsync = promisify(gzip);
+/**
+ * A JSON answer, gzipped when the client takes it. The server sends no compression of its own, nor
+ * does the production proxy (checked 2026-11-24), and mosaic roots and indexes are JSON that shrinks
+ * several times over. Asynchronous: a large root compressed in line would hold the event loop.
+ */
+async function sendJson(req, res, status, headers, body) {
+  const text = typeof body === 'string' ? body : JSON.stringify(body);
+  const base = { 'Content-Type': 'application/json', ...CORS, ...headers, Vary: 'Accept-Encoding' };
+  if (text.length > 1024 && /\bgzip\b/.test(req.headers['accept-encoding'] || '')) {
+    const z = await gzipAsync(text, { level: 6 });
+    res.writeHead(status, { ...base, 'Content-Encoding': 'gzip', 'Content-Length': z.length });
+    res.end(z);
+    return;
+  }
+  res.writeHead(status, base);
+  res.end(text);
+}
+
+/** Set names that may be shown: uploads and `unlisted` manifests are opened by name only. */
+const listedSets = (sets) => Object.keys(sets).filter((k) => !sets[k].unlisted && !UPLOAD_NAME.test(k));
 
 /** Try to handle an /aggregate/* request. Returns true iff it owned the response. */
 export async function handleAggregate(req, res, u) {
@@ -1200,8 +1268,8 @@ export async function handleAggregate(req, res, u) {
   // an uploaded manifest joins the lookup only when asked for by name: never listed
   const setParam = u.searchParams.get('set') ?? '';
   if (UPLOAD_NAME.test(setParam)) {
-    const up = getUpload(setParam);
-    if (!up) { res.writeHead(404, CORS); res.end('no such uploaded manifest (uploads live in memory for 24 h, and a restart clears them): POST it to /aggregate/set again'); return true; }
+    const up = await getUpload(setParam);
+    if (!up) { res.writeHead(404, CORS); res.end('no such uploaded manifest (an upload lives a week after it was last opened): POST it to /aggregate/set again'); return true; }
     sets[setParam] = up;
   }
 
@@ -1210,13 +1278,14 @@ export async function handleAggregate(req, res, u) {
   // easier place to scrape them from than a mosaic.
   if (u.pathname === '/aggregate/demo.json') {
     res.writeHead(200, { 'Content-Type': 'application/json', ...CORS });
-    res.end(JSON.stringify(Object.fromEntries(Object.entries(sets).map(([k, v]) => [k, v.local
+    res.end(JSON.stringify(Object.fromEntries(Object.entries(sets).filter(([, v]) => !v.unlisted).map(([k, v]) => [k, v.local
       ? { label: v.label, count: v.entries.length, local: true, names: v.entries.map((e) => e.name ?? null) }
       : { label: v.label, count: v.entries.length + (v.include || []).reduce((n, i) => n + (sets[i]?.entries.length ?? 0), 0), entries: v.entries, ...(v.include ? { include: v.include } : {}) }]))));
     return true;
   }
   const isTileset = u.pathname === '/aggregate/tileset.json';
-  const isIndex = u.pathname === '/aggregate/index.json';
+  const isGeojson = u.pathname === '/aggregate/index.geojson';
+  const isIndex = u.pathname === '/aggregate/index.json' || isGeojson;
   const isSnapStream = u.pathname === '/aggregate/snap.ndjson';
   if (!isTileset && !isIndex && !isSnapStream) return false;
 
@@ -1338,11 +1407,19 @@ export async function handleAggregate(req, res, u) {
       }
       for (const c of t.children || []) walk(c, depth + 1);
     })(ts.root);
-    res.writeHead(200, { 'Content-Type': 'application/json', ...CORS, ...(vpc?.headers ?? {}) });
-    res.end(JSON.stringify({
+    if (isGeojson) {
+      // The same rows as a GeoJSON FeatureCollection (RFC 7946: lon, lat, ellipsoidal height in metres),
+      // for a GIS, a map library or a Blender add-on that wants the dataset roots as points.
+      await sendJson(req, res, 200, { 'Content-Type': 'application/geo+json', ...(vpc?.headers ?? {}) }, {
+        type: 'FeatureCollection',
+        features: datasets.map(({ lon, lat, height, ...props }) => ({ type: 'Feature', id: props.id, geometry: { type: 'Point', coordinates: [lon, lat, height] }, properties: props })),
+      });
+      return true;
+    }
+    await sendJson(req, res, 200, vpc?.headers ?? {}, {
       count: datasets.length, build: ts.asset.extras.build, ...(vpc ? { vpc: vpc.extras } : {}), datasets,
       unplaced: ts.asset.extras.unplaced ?? [], failed: ts.asset.extras.failed ?? [],
-    }));
+    });
     return true;
   }
 
@@ -1364,8 +1441,7 @@ export async function handleAggregate(req, res, u) {
   }
   // the mosaic is cached and shared: a VPC's report (items streamed, skipped and why) goes on a copy
   if (vpc) out = { ...out, asset: { ...out.asset, extras: { ...out.asset.extras, vpc: vpc.extras } } };
-  res.writeHead(200, { 'Content-Type': 'application/json', ...CORS, ...(vpc?.headers ?? {}) });
-  res.end(JSON.stringify(out));
+  await sendJson(req, res, 200, vpc?.headers ?? {}, out);
   return true;
 }
 
@@ -1448,7 +1524,7 @@ function selectChildren(req, u, sets) {
   // ?set=<name> expands to a curated or local list; it composes with ?url= so you can add your own
   // dataset to a demo mosaic without retyping the other 33.
   const setName = u.searchParams.get('set');
-  if (setName && !sets[setName]) return { error: `unknown set "${setName}" — try one of: ${Object.keys(sets).join(', ')}` };
+  if (setName && !sets[setName]) return { error: `unknown set "${setName}" — try one of: ${listedSets(sets).join(', ')}` };
   const proto = (req.headers['x-forwarded-proto'] || 'http').split(',')[0].trim();
   const origin = `${proto}://${req.headers['x-forwarded-host'] || req.headers.host}`;
   // Every /stream child of a mosaic opens lazily: a child is never asked for cache=hierarchy, which
@@ -1497,7 +1573,7 @@ function selectChildren(req, u, sets) {
     ...u.searchParams.getAll('url').map(adhoc),
     ...(u.searchParams.get('urls') || '').split(',').map(s => s.trim()).filter(Boolean).map(decodeURIComponent).map(adhoc),
   ];
-  if (!items.length) return { error: `missing ?urls=<u1>,<u2>,… (each URL-encoded), repeated ?url=, or ?set=<${Object.keys(sets).join('|')}>` };
+  if (!items.length) return { error: `missing ?urls=<u1>,<u2>,… (each URL-encoded), repeated ?url=, or ?set=<${listedSets(sets).join('|')}>` };
 
   // ── selection ──────────────────────────────────────────────────────────────────────────────────
   //

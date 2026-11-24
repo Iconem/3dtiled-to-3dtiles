@@ -88,7 +88,8 @@ interface ViewerStore {
   /** X-ray: opacity of the points (meshes draw at 60 % of it) and whether points keep their colours or go white. */
   xrayOpacity: number;
   setXrayOpacity: (v: number) => void;
-  pointColorMode: 'rgb' | 'color' | 'height';
+  /** Points: their own colours, one colour, by height, or by a LAS attribute the tiles carry (lib/pointColorBy.ts). */
+  pointColorMode: 'rgb' | 'color' | 'height' | 'intensity' | 'classification';
   setPointColorMode: (v: ViewerStore['pointColorMode']) => void;
   /** Points in one colour (`pointColorMode: 'color'`), CSS hex. */
   pointColor: string;

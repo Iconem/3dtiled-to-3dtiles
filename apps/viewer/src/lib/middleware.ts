@@ -1,6 +1,7 @@
 // Ported as pure functions from viewer.html's buildMiddlewareUrl/streamParams/assetUrl/srcUrl
 // (lines ~694-797) — same algorithms, but read an explicit params object instead of globals.
-import { MW, SDATA, ORIGIN, FORMATS, DIRECT, TOOLS_DATASETS, PSEUDO_FORMATS, STREAM_ONLY_FORMATS, fmtMeta, canCentroids, canSh, canDensityError, type Asset, type AssetType, type FormatMeta } from './formats';
+import { MW, SDATA, ORIGIN, FORMATS, DIRECT, TOOLS_DATASETS, PSEUDO_FORMATS, STREAM_ONLY_FORMATS, fmtMeta, canCentroids, canSh, canDensityError, canPointAttributes, type Asset, type AssetType, type FormatMeta } from './formats';
+import { COLOR_BY_DIMENSION, isColorBy } from './pointColorBy';
 import { GOOGLE_MAPS_API_KEY } from './google';
 
 export type TilesetOp = 'implicit-to-explicit' | 'upgrade' | '';
@@ -25,6 +26,8 @@ export interface MiddlewareParams {
   shDegree?: number;
   /** box-only formats (I3S, LCC, LCC2, GeoSplats): tile errors from the density of the content (`&ge=density`) */
   densityError?: boolean;
+  /** point formats: the LAS dimensions the tiles carry besides colour (`&attributes=`), for colouring by them; '' = none */
+  pointAttributes?: string;
 }
 
 export function streamParams(f: FormatMeta | undefined, p: Pick<MiddlewareParams, 'tilingMode' | 'centroidsOnly' | 'selectedFormat' | 'shDegree' | 'densityError'>) {
@@ -35,6 +38,9 @@ export function streamParams(f: FormatMeta | undefined, p: Pick<MiddlewareParams
   else if (canDensityError(p.selectedFormat) && p.densityError) q += '&ge=density';
   return q;
 }
+
+/** `&attributes=` for the side panel's point colour (`pcolor`): the dimension that mode reads, '' for RGB, one colour, height. */
+export const pointAttributesFor = (format: string, pcolor: string) => (canPointAttributes(format) && isColorBy(pcolor) ? COLOR_BY_DIMENSION[pcolor] : '');
 
 /** The density rule is on: asked for, or GeoSplats when nothing was asked (its default). */
 export const densityErrorOn = (format: string, ge: 'box' | 'density' | null | undefined) => ge === 'density' || (ge == null && format === 'geosplats');
@@ -48,6 +54,7 @@ export function buildMiddlewareUrl(rawSrc: string, p: MiddlewareParams, fOverrid
   let q = `&cache=${p.cacheScope === 'all' ? 'hierarchy' : p.cacheScope}`;
   if (p.cacheScope === 'none') q += `&prefetch=${p.prefetchN}`;
   if (p.transformOp) q += `&transform=${p.transformOp}`;
+  if (p.pointAttributes && canPointAttributes(p.selectedFormat)) q += `&attributes=${p.pointAttributes}`;
   return `${MW}/stream/tileset.json?format=${fmt}&url=${enc}${q}${streamParams(f, p)}`;
 }
 

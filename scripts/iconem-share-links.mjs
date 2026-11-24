@@ -6,7 +6,10 @@
  *   ICONEM_EMAIL=… ICONEM_PASSWORD=… node scripts/iconem-share-links.mjs --apply    # create missing links
  *     [--types=pointcloud,tiles]  [--include-copc]  [--name=single-meta-tileset]
  *     [--api=https://api.iconem.com/api]  [--out=.local/aggregate-sets/iconem.json]
- *     [--server=http://localhost:3001]  [--no-bake]
+ *     [--server=http://localhost:3001]  [--no-bake]  [--create-in=<regex>]
+ *
+ * `--create-in=<regex>` limits --apply to projects whose name matches (case-insensitive): links are
+ * created there only, while every other project's existing links are still reused into the manifest.
  *
  * After writing the manifest it runs scripts/aggregate-bake-bounds.mjs on it (new entries only; Potree
  * and COPC ones need the tile server at --server running), unless --no-bake.
@@ -48,6 +51,7 @@ const INCLUDE_COPC = flag('include-copc');
 const TYPES = new Set(opt('types', 'pointcloud,tiles').split(',').map((s) => s.trim()).filter(Boolean));
 if (INCLUDE_COPC) TYPES.add('las');
 const OUT = opt('out', '.local/aggregate-sets/iconem.json');
+const CREATE_IN = opt('create-in', null) ? new RegExp(opt('create-in'), 'i') : null;
 const PAGE = 100;                                  // backend caps `limit` at 100
 
 const email = process.env.ICONEM_EMAIL, password = process.env.ICONEM_PASSWORD;
@@ -167,8 +171,9 @@ for (const p of projects) {
         try {
           const { shares = [] } = await api('GET', route);
           let share = shares.find(liveShare);
-          const wasCreated = !share && APPLY;
-          if (!share && APPLY) share = await api('POST', route, { name: NAME });
+          const mayCreate = APPLY && (!CREATE_IN || CREATE_IN.test(p.name));
+          const wasCreated = !share && mayCreate;
+          if (!share && mayCreate) share = await api('POST', route, { name: NAME });
           else if (!share) { counts.wouldCreate++; console.log(`  would create  [${type}] ${label}`); continue; }
           // The backend's formatShareForClient always adds `url`; if a response ever lacks it, skip the
           // entry loudly rather than writing `url: undefined` into a manifest that /aggregate then serves.

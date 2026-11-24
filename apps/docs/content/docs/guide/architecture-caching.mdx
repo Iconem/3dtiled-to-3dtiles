@@ -152,7 +152,7 @@ Composability goal: `source → convert → [centroids] → [gltf: draco/ktx2 de
 | `/3dtiles-tools/tileset.json?tool=<t>&dir=<path>\|url=<tileset>` | per-tile tileset transforms | `tool=implicit-to-explicit` · `tool=upgrade` (b3dm/pnts→glb, glTF 1.0→2.0, `CESIUM_RTC` bake) |
 | `/gltf/tileset.json?url=<tileset>&ops=<ops>[&tex=jpg\|webp\|png\|ktx2]` (+ `/gltf/tile.glb?url=<glb>&ops=`) | generic per-tile **glTF-Transform** pipeline (proxies an explicit tileset, recurses external refs) | `ops=decompress` (= `draco,meshopt,ktx`) · or any of `draco` · `meshopt` · `ktx` (decode); KTX2 decodes to `tex=jpg` (default, the fastest), `webp` (smallest), `png`, or is kept with `tex=ktx2`. A tile with nothing to decode passes through untouched; with `TILED_WORKERS` the decode runs on a tile worker ([timings](/docs/guide/planning/benchmarks)) |
 | `/bing/tileset.json?root=<quadkey>&g=<genid>&maxLevel=<L>[&decompress=1]` | Bing Maps 3D (`tf=3dv4`) → 3D Tiles | `root` quadkey, `g` genid (default 15340), `maxLevel`, `decompress` |
-| `/3dtiles-self-contained/tileset.json?url=<path\|URL.3tz\|.3dtiles>` | serve a `.3tz`/`.3dtiles` package in-place, no extraction | local path or `http(s)://`; `.3tz` local-only, `.3dtiles` local + remote via sql.js |
+| `/3dtiles-self-contained/tileset.json?url=<path\|URL.3tz\|.3dtiles>` | serve a `.3tz`/`.3dtiles` package in-place, no extraction | local path or `http(s)://`; `.3tz` local-only; `.3dtiles` local (sql.js) or remote, read by HTTP range requests a few SQLite pages per tile, never downloaded whole (a host that ignores Range is refused) |
 
 > The `/gltf` pipeline runs per-tile **only on explicit tilesets** (concrete tile URIs — 3MX/Bing/RAD/I3S
 > outputs and external mesh 3D Tiles); it recurses external-tileset refs. **Implicit** COPC/Potree octree
@@ -324,7 +324,7 @@ measured cold start.
 | **Potree 1.4 inline** (`cloud.js`) | ✅ per-node | ➖ tree inline in `cloud.js` | n/a (one file) | per-node | ➖ no-op (single file) | instant |
 | **streamed-SOG** (`lod-meta.json`) | ✅ per-chunk WebP | ➖ full tree in one JSON | n/a (one file) | per-tile | ➖ no-op (`none`≡`hierarchy`) | fast — nothing to defer |
 | **LCC** (`meta.lcc`) | ✅ range `data.bin` | ➖ flat grid (`index.bin`) | n/a (one file) | ✅ per-tile | ➖ no-op (`none`≡`hierarchy`) | fast — flat grid |
-| **Packages** (`.3tz`/`.3dtiles`) | ✅ range / sql.js | ➖ passthrough | n/a | ✅ / ➖ | ➖ as authored | instant |
+| **Packages** (`.3tz`/`.3dtiles`) | ✅ range / SQLite pages by range | ➖ passthrough | n/a | ✅ / ➖ | ➖ as authored | instant |
 
 Legend: ✅ done · ➖ not applicable / single-index (nothing to parallelize or defer) · "lazy implicit" =
 tiny implicit root, each `.subtree` built on demand from only the chunk(s) it needs · "lazy explicit" =
@@ -489,10 +489,13 @@ in the ZIP, enabling O(1) random-access reads (no full-file scan). This project 
 first open, then serves each tile with a single `fs.read()` at the stored offset — equivalent to
 `npx 3d-tiles-tools serve` but in-process, with CORS open and no additional CLI.
 
-`.3dtiles` is an SQLite database (`key TEXT, content BLOB`). Requires `better-sqlite3`:
-```sh
-pnpm add -w better-sqlite3   # needs C++ build toolchain
-```
+`.3dtiles` is an SQLite database (`key TEXT, content BLOB`). A remote one is queried in place by HTTP range
+requests ([sqlite-wasm-http](https://github.com/mmomtchev/sqlite-wasm-http): the official SQLite WASM build with an
+HTTP VFS, in `packages/tile-server/sqlite-http.js`): opening it and serving `tileset.json` reads a few pages, about
+25 KB of a 10 MB package, and a tile its own pages plus some read-ahead. Its pages go through
+`packages/core/source-fetch.js`, so retries, the per-host cap and the refusal of hosts that ignore Range apply. A
+local one is opened in sql.js. Smaller SQLite pages (`PRAGMA page_size = 1024; VACUUM;`) make the index lookups
+cheaper still; the in-repo packer writes 4096-byte pages.
 
 **Create packages** — this repo ships a dependency-free packer (`scripts/pack-3dtiles.mjs`, ZIP+STORED
 for `.3tz`, sql.js for `.3dtiles`), or use the official `3d-tiles-tools`:

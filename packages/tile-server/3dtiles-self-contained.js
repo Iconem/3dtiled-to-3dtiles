@@ -19,14 +19,15 @@
  *               fflate for DEFLATE entries — no native deps, browser-compatible in principle.
  *               Spec: Maxar MAXAR_content_3tz + CesiumGS/3d-tiles-tools#86.
  *
- * .3dtiles format: SQLite `media` table (key TEXT, content BLOB). Uses sql.js (pure WASM —
- *               works for both local files and remote URLs via fetch + arrayBuffer load).
+ * .3dtiles format: SQLite `media` table (key TEXT, content BLOB). A remote one is read by HTTP range requests, a few
+ *               database pages per tile (sqlite-http.js, sqlite-wasm-http): never downloaded whole, and a host that
+ *               ignores Range is refused. A local one is opened in sql.js (pure WASM).
  */
 import fs from 'node:fs';
 import fsp from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { fetchSource } from '../core/index.js';
+import { queryRemoteSqlite } from './sqlite-http.js';
 
 const CORS = { 'Access-Control-Allow-Origin': '*', 'Access-Control-Allow-Headers': '*' };
 
@@ -178,7 +179,7 @@ async function read3tz(filePath, key) {
   return readZipEntry(ctx.fd, dirEntry.localOffset, dirEntry.compSize);
 }
 
-// ── .3dtiles (SQLite via sql.js — pure WASM, works local + remote) ────────────────────────────
+// ── .3dtiles (SQLite: remote by range requests, local via sql.js) ─────────────────────────────
 
 let _sqljs = null;
 async function getSqlJs() {
@@ -188,26 +189,29 @@ async function getSqlJs() {
   return _sqljs;
 }
 
-// Cache db per resolved URL / path (key = urlParam string).
+// A local file, held in memory by sql.js: cached per path, the least recently used closed past a few.
 const _sqlCache = new Map();
-async function getSqliteDb(urlParam) {
-  if (_sqlCache.has(urlParam)) return _sqlCache.get(urlParam);
+const LOCAL_DB_LIMIT = 4;
+async function getLocalSqliteDb(urlParam) {
+  const hit = _sqlCache.get(urlParam);
+  if (hit) { _sqlCache.delete(urlParam); _sqlCache.set(urlParam, hit); return hit; }
   const SQL = await getSqlJs();
-  let buf;
-  if (/^https?:\/\//i.test(urlParam)) {
-    buf = new Uint8Array(await fetchSource(urlParam));
-  } else {
-    const abs = urlParam.startsWith('file://') ? fileURLToPath(urlParam) : path.resolve(urlParam);
-    buf = new Uint8Array(await fsp.readFile(abs));
-  }
-  const db = new SQL.Database(buf);
+  const abs = urlParam.startsWith('file://') ? fileURLToPath(urlParam) : path.resolve(urlParam);
+  const db = new SQL.Database(new Uint8Array(await fsp.readFile(abs)));
   _sqlCache.set(urlParam, db);
+  while (_sqlCache.size > LOCAL_DB_LIMIT) { const [k, old] = _sqlCache.entries().next().value; _sqlCache.delete(k); old.close(); }
   console.log(`[3dtiles-self-contained] .3dtiles loaded: ${urlParam}`);
   return db;
 }
 
 async function read3dtiles(urlParam, key) {
-  const db = await getSqliteDb(urlParam);
+  if (/^https?:\/\//i.test(urlParam)) {
+    const rows = await queryRemoteSqlite(urlParam, 'SELECT content FROM media WHERE key = ?', [key]);
+    if (!rows.length || rows[0][0] == null) return null;
+    const v = rows[0][0];
+    return typeof v === 'string' ? Buffer.from(v) : Buffer.from(v.buffer, v.byteOffset, v.byteLength);
+  }
+  const db = await getLocalSqliteDb(urlParam);
   const rows = db.exec('SELECT content FROM media WHERE key = ?', [key]);
   if (!rows.length || !rows[0].values.length) return null;
   return Buffer.from(rows[0].values[0][0]);
@@ -253,7 +257,7 @@ export async function handleSelfContained(req, res, u) {
   let buf;
   if (ext === '.3tz') {
     // For remote .3tz we would need to download the whole file first (no HTTP range for 3tz index).
-    // For now, only local paths for .3tz; remote .3dtiles is fully supported via sql.js fetch.
+    // For now, only local paths for .3tz here; remote .3dtiles is read by range requests (sqlite-http.js).
     if (/^https?:\/\//i.test(urlParam)) {
       res.writeHead(501, CORS);
       res.end('.3tz remote URLs require downloading the full file — use a local path or the /convert endpoint instead.');

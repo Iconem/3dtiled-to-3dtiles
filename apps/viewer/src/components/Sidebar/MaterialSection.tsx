@@ -6,6 +6,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Slider } from '@/components/ui/slider';
 import { useViewerStore } from '@/state/store';
 import { useUrlState } from '@/state/urlState';
+import { canPointAttributes } from '@/lib/formats';
 import type { ViewerHandle } from '@/lib/viewer-handle';
 import { SidebarCollapsibleSection } from './SidebarSection';
 
@@ -14,6 +15,8 @@ export default function MaterialSection({ activeHandleRef }: { activeHandleRef: 
   const [url] = useUrlState();
   const s = useViewerStore();
   const h = () => activeHandleRef.current;
+  // intensity / classification: asked of the server with the tiles (`&attributes=`), so where it can ship them
+  const byAttribute = (url.mode === 'stream' && canPointAttributes(url.format)) || s.pointColorMode === 'intensity' || s.pointColorMode === 'classification';
 
   return (
     <SidebarCollapsibleSection title="Material & Points" defaultOpen>
@@ -45,7 +48,7 @@ export default function MaterialSection({ activeHandleRef }: { activeHandleRef: 
       {url.renderer === '3dtrjs' && s.currentType !== 'splat' && (
         <>
           <div className="flex items-center justify-between">
-            <Label className="text-xs" title="Points only; meshes keep their textures. RGB: their own colours. One colour: every point the same (white by default; in X-ray, density alone reads as brightness). Height: a blue-to-red ramp over the range below.">Point colour</Label>
+            <Label className="text-xs" title="Points only; meshes keep their textures. RGB: their own colours. One colour: every point the same (white by default; in X-ray, density alone reads as brightness). Height: a blue-to-red ramp over the range below. Intensity (a grey ramp over the 2nd to 98th percentile of the loaded values) and Classification (the ASPRS palette: ground brown, vegetation green, buildings orange-red, water blue): COPC and Potree streams, which then reload with that attribute in their tiles.">Point colour</Label>
             <div className="flex items-center gap-2">
               {s.pointColorMode === 'color' && (
                 <input type="color" aria-label="Point colour" value={s.pointColor} onChange={(e) => s.setPointColor(e.target.value)}
@@ -57,6 +60,8 @@ export default function MaterialSection({ activeHandleRef }: { activeHandleRef: 
                   <SelectItem value="rgb">RGB</SelectItem>
                   <SelectItem value="color">One colour</SelectItem>
                   <SelectItem value="height">Height</SelectItem>
+                  {byAttribute && <SelectItem value="intensity">Intensity</SelectItem>}
+                  {byAttribute && <SelectItem value="classification">Classification</SelectItem>}
                 </SelectContent>
               </Select>
             </div>

@@ -83,7 +83,7 @@ const TRANSFORMS = new Set(['meshopt', 'draco', 'ktx', 'ktx-uastc', 'decompress'
 
 // Package formats are already 3D Tiles inside a single file — they don't "convert" geometry, they
 // stream a tileset out of a .3tz/.3dtiles container. /stream delegates them to the self-contained
-// handler (range-reads for .3tz, sql.js for .3dtiles). Accept explicit format= aliases or the extension.
+// handler (range-reads for .3tz, SQLite pages by range for .3dtiles). Accept explicit format= aliases or the extension.
 const PACKAGE_FORMATS = new Set(['3tz', '3dtiles-pkg', '3dtiles', 'package', 'pkg']);
 const isPackageUrl = (url) => /\.(3tz|3dtiles)(\?|$)/i.test(url);
 
@@ -223,7 +223,7 @@ export async function handleStream(req, res, u) {
 
   // Package formats (.3tz / .3dtiles): delegate to the self-contained handler. We remap the
   // /stream/<key> path to /3dtiles-self-contained/<key> and hand off; that handler reads the
-  // container (range-reads for .3tz, sql.js for .3dtiles) and rewrites content URIs to itself.
+  // container (range-reads for .3tz, SQLite pages by range for .3dtiles) and rewrites content URIs to itself.
   if (PACKAGE_FORMATS.has(fmt) || isPackageUrl(url)) {
     const key = u.pathname.slice('/stream/'.length) || 'tileset.json';
     const u2 = new URL(u.href);

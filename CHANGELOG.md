@@ -5,6 +5,28 @@ Format loosely follows [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+### Added — 2026-11-24 (2)
+- **Viewer: colour points by intensity or classification** from the Point colour select (`pcolor=intensity|classification`).
+  COPC and Potree streams then reload with `&attributes=Intensity` or `&attributes=Classification`, so each tile ships
+  that attribute. Intensity is a grey ramp over the 2nd–98th percentile of the loaded values; classification uses the
+  ASPRS palette. The colouring is a self-contained module (`lib/pointColorBy.ts`), written to move upstream later.
+- **Desktop: a Streams list** under the tileset URL. Every URL you add, copy or preview gets a row, kept across restarts.
+  Each row can be renamed, copied, reordered, removed (with undo), or loaded back into the form with the cog and saved
+  to the same row. Pause greys a row and hides its URL in the app; the server still answers clients that have the URL.
+- **`/aggregate/index.geojson`**: the index rows as a GeoJSON FeatureCollection of points. Aggregate JSON answers are
+  gzipped for clients that accept it (the 710-dataset Iconem index: 413 KB → 65 KB).
+- **`unlisted` set manifests**: a manifest in the server's sets directory with `"unlisted": true` opens by name and is
+  never listed, a private set with no expiry.
+- The aggregate's `dataset` metadata class marks `id` and `name` with the 3D Tiles semantics `ID` and `NAME`.
+
+### Changed — 2026-11-24 (2)
+- **Remote `.3dtiles` packages are read by range requests**, a few SQLite pages per tile, through sqlite-wasm-http
+  (official SQLite WASM with an HTTP VFS), instead of being downloaded whole. Opening a 10 MB package and serving its
+  `tileset.json` reads 26 KB in 8 requests. A host that ignores Range is refused; local files still open in sql.js.
+- **Uploaded aggregate manifests last a week after last use and survive restarts** (saved to `uploads.json` in
+  `AGGREGATE_CACHE_DIR`; up to 50). Before: 24 h, in memory only.
+- `scripts/iconem-share-links.mjs --create-in=<regex>` limits `--apply` to the matching projects.
+
 ### Changed — 2026-11-24
 - **A host that ignores `Range` is refused, not downloaded** (tile server and the Potree lab's COPC plugin). A range
   read answered with 200 and more bytes than asked fails at once, with the body cancelled: `/stream` answers 502 and

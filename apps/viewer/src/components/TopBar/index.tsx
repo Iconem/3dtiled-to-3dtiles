@@ -6,7 +6,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { useUrlState } from '@/state/urlState';
 import { useViewerStore } from '@/state/store';
 import { PSEUDO_FORMATS, FORMAT_PILL_ORDER, STREAM_ONLY_FORMATS, pillMeta, fmtMeta, canCentroids, canSh, canDensityError, MW } from '@/lib/formats';
-import { buildMiddlewareUrl, currentPresets, densityErrorOn, type MiddlewareParams, type Preset } from '@/lib/middleware';
+import { buildMiddlewareUrl, currentPresets, densityErrorOn, pointAttributesFor, type MiddlewareParams, type Preset } from '@/lib/middleware';
 import type { ViewerHandle } from '@/lib/viewer-handle';
 import { formatPose, parsePose, type CameraPose } from '@/lib/cameraPose';
 import { GOOGLE_MAPS_API_KEY } from '@/lib/google';
@@ -199,6 +199,8 @@ export default function TopBar({ activeHandleRef }: { activeHandleRef: React.Ref
     tilingMode: url.tiling,
     shDegree: url.sh,
     densityError: densityErrorOn(url.format, url.ge),
+    // colour by intensity / classification (side panel, `pcolor`): the tiles must carry that attribute
+    pointAttributes: pointAttributesFor(url.format, url.pcolor),
   };
 
   const availableSets = useAvailableSets();
@@ -332,7 +334,8 @@ export default function TopBar({ activeHandleRef }: { activeHandleRef: React.Ref
   // keystroke would be jarring; its value is just read fresh the next time something else reloads.
   // The startup `?load=` wins only for the mode/format/… the page opened with: keyed on those deps
   // rather than a run-once flag, because StrictMode runs this effect twice on mount.
-  const depsKey = [url.mode, url.format, url.tool, url.tilesetOp, url.cache, url.tiling, url.centroids, url.sh, url.ge, url.transform, url.curved].join('|');
+  // The point attributes asked of the server (`&attributes=`, from the side panel's point colour) reload too.
+  const depsKey = [url.mode, url.format, url.tool, url.tilesetOp, url.cache, url.tiling, url.centroids, url.sh, url.ge, url.transform, url.curved, params.pointAttributes].join('|');
   const startKey = useRef(depsKey);
   useEffect(() => {
     if (START_LOAD && depsKey === startKey.current) {
@@ -364,7 +367,7 @@ export default function TopBar({ activeHandleRef }: { activeHandleRef: React.Ref
     const target = wanted || presets.find((p) => p.url);
     if (target) selectPreset(target, depsKey === startKey.current);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [url.mode, url.format, url.tool, url.tilesetOp, url.cache, url.tiling, url.centroids, url.sh, url.ge, url.transform, url.curved, setsKnown]);
+  }, [url.mode, url.format, url.tool, url.tilesetOp, url.cache, url.tiling, url.centroids, url.sh, url.ge, url.transform, url.curved, params.pointAttributes, setsKnown]);
 
   const manifestButton = (
     <>
@@ -385,7 +388,7 @@ export default function TopBar({ activeHandleRef }: { activeHandleRef: React.Ref
         variant="outline"
         className={cn('h-7 px-2 text-xs', HOVER_TINT.fuchsia)}
         onClick={() => manifestRef.current?.click()}
-        title="Load your own set manifest from a local file ({ label, entries: [{ url, format: 'potree'|'copc'|'3dtiles', name? }] }, the .local/aggregate-sets/<name>.json shape) as an /aggregate mosaic. The file goes to the tile-server's memory (24 h) and this browser's storage, nowhere else."
+        title="Load your own set manifest from a local file ({ label, entries: [{ url, format: 'potree'|'copc'|'3dtiles', name? }] }, the .local/aggregate-sets/<name>.json shape) as an /aggregate mosaic. The file goes to the tile-server (kept a week after last use) and this browser's storage, nowhere else."
         data-testid="open-manifest"
       >
         📂 manifest…
@@ -517,7 +520,7 @@ export default function TopBar({ activeHandleRef }: { activeHandleRef: React.Ref
                   aria-label={`Remove ${uploads[i].label}`}
                   onClick={() => forgetUploadedSet(p.id.slice(4))}
                   className={cn('-ml-px h-7 w-5 rounded-l-none px-0 text-xs opacity-60 hover:opacity-100', HOVER_TINT.fuchsia)}
-                  title="Remove this manifest from the row and this browser's storage (the server forgets it after 24 h)"
+                  title="Remove this manifest from the row and this browser's storage (the server forgets it a week after last use)"
                   data-testid="forget-upload"
                 >
                   ×

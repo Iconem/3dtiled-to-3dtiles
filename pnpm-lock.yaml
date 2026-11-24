@@ -407,6 +407,9 @@ importers:
       '@loaders.gl/zip':
         specifier: ^4.4.3
         version: 4.4.3(@loaders.gl/core@4.4.3)
+      '@mmomtchev/web-worker':
+        specifier: 1.3.0
+        version: 1.3.0
       '@playcanvas/splat-transform':
         specifier: ^3.11.1
         version: 3.11.1(patch_hash=4d2eac7afddeb3fb292e3f546cf1f98dc60b2fd21ed81fc4e4114a4ce1cc0a78)(playcanvas@2.19.7)
@@ -422,6 +425,9 @@ importers:
       proj4:
         specifier: ^2.11.0
         version: 2.20.9
+      sqlite-wasm-http:
+        specifier: 1.2.0
+        version: 1.2.0
 
   packages/tilers:
     dependencies:
@@ -1408,6 +1414,9 @@ packages:
 
   '@mermaid-js/parser@1.2.0':
     resolution: {integrity: sha512-oYPyv8A4As1yH5Bx+04iQEQxXuIQDe0GKCNSRgao6z8AM9jixXIfP0vsppRLvGf+nKIOb9/LdpWA4YuJiVvESA==}
+
+  '@mmomtchev/web-worker@1.3.0':
+    resolution: {integrity: sha512-joxWltufHUCw4RvhnnITcY14Anne7hA4/hYBcr6+fowH23A+8CIOAjvfVqKi+FHgiXc7n08jVm08oIok+X79jw==}
 
   '@monogrid/gainmap-js@3.4.0':
     resolution: {integrity: sha512-2Z0FATFHaoYJ8b+Y4y4Hgfn3FRFwuU5zRrk+9dFWp4uGAdHGqVEdP7HP+gLA3X469KXHmfupJaUbKo1b/aDKIg==}
@@ -4722,6 +4731,7 @@ packages:
   image-size@0.7.5:
     resolution: {integrity: sha512-Hiyv+mXHfFEP7LzUL/llg9RwFxxY+o9N3JVLIeG5E7iFIFAalxvRU9UZthBdYDEVnzHMgjnKJPPpay5BWf1g9g==}
     engines: {node: '>=6.9.0'}
+    deprecated: Please migrate to image-size@2.x
     hasBin: true
 
   immediate@3.0.6:
@@ -5197,6 +5207,10 @@ packages:
 
   lru-cache@5.1.1:
     resolution: {integrity: sha512-KpNARQA3Iwv+jTA0utUVVbrh+Jlrr1Fv0e56GGzAFOXN7dk/FviaDW8LHmK52DlcH4WP2n6gI8vN1aesBFgo9w==}
+
+  lru-cache@7.18.3:
+    resolution: {integrity: sha512-jumlc0BIUrS3qJGgIkWZsyfAM7NCWiBcCDhnd+3NNM5KbBmLTgHVfWBcg6W+rLUsIpzpERPsvwUP7CckAQSOoA==}
+    engines: {node: '>=12'}
 
   lucide-react@1.23.0:
     resolution: {integrity: sha512-38BpJcD0JhFosxHApP/BYsBetLpQFRoTRzEzstM/XCc3jsAG7wqaY1lgVwxiUe3xqYE+lNxo2PkCmYwXWrwwIw==}
@@ -6296,6 +6310,10 @@ packages:
 
   sql.js@1.14.1:
     resolution: {integrity: sha512-gcj8zBWU5cFsi9WUP+4bFNXAyF1iRpA3LLyS/DP5xlrNzGmPIizUeBggKa8DbDwdqaKwUcTEnChtd2grWo/x/A==}
+
+  sqlite-wasm-http@1.2.0:
+    resolution: {integrity: sha512-mTZw4MHSw/dsO7PhAZeV14WIiVw/e8ECJSDV5oMEgInbCw+ITP/Y8YqbzggDiWRoPpbJ+uPoOXe5myIQbX6XxQ==}
+    engines: {node: '>=18.0.0'}
 
   sshpk@1.18.0:
     resolution: {integrity: sha512-2p2KJZTSqQ/I3+HX42EpYOa2l3f8Erv8MWKsy2I9uf4wA7yFIkXRffYdsx86y6z4vHtV8u7g+pPlr8/4ouAxsQ==}
@@ -8044,6 +8062,8 @@ snapshots:
   '@mermaid-js/parser@1.2.0':
     dependencies:
       '@chevrotain/types': 11.1.2
+
+  '@mmomtchev/web-worker@1.3.0': {}
 
   '@monogrid/gainmap-js@3.4.0(three@0.187.0)':
     dependencies:
@@ -12266,6 +12286,8 @@ snapshots:
     dependencies:
       yallist: 3.1.1
 
+  lru-cache@7.18.3: {}
+
   lucide-react@1.23.0(react@19.2.7):
     dependencies:
       react: 19.2.7
@@ -13855,6 +13877,10 @@ snapshots:
   sprintf-js@1.0.3: {}
 
   sql.js@1.14.1: {}
+
+  sqlite-wasm-http@1.2.0:
+    dependencies:
+      lru-cache: 7.18.3
 
   sshpk@1.18.0:
     dependencies:

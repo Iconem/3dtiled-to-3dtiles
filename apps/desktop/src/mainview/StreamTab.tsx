@@ -2,8 +2,8 @@
  * The tiled dataset (DatasetCard), shared by the Stream live and Export tabs, and the Stream live tab itself: a
  * paste-ready URL. Raw input that is not tiled yet has its own top-level tab (TilerCard), with its own input field.
  */
-import { ChevronDownIcon, MapPinIcon, MoreHorizontalIcon, StarIcon } from 'lucide-react';
-import { useState } from 'react';
+import { ChevronDownIcon, MapPinIcon, MoreHorizontalIcon, PlusIcon, StarIcon } from 'lucide-react';
+import { useRef, useState } from 'react';
 import { Button } from '@/components/ui/button';
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuRadioGroup, DropdownMenuRadioItem, DropdownMenuTrigger } from '@/components/ui/dropdown-menu';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
@@ -13,6 +13,7 @@ import { cn } from '@/lib/utils';
 import { Actions, CopyField, Field, Info, Result, Segmented, TextInput, Tip, UrlBar, type Message } from './components/bits';
 import { base, pickDataset, pickerAvailable, readClipboard, viewerUrl } from './host';
 import { newId } from './library';
+import { sameStream, StreamsCard, useStreams, type StreamEntry } from './StreamsList';
 import { guessFormat, nameFor, PLACEMENT, typeOfFormat } from './urls';
 
 /** How many threads the app's server builds tiles on: one setting (next to the dataset, and in Settings), for the tiles it streams and the exports it runs. */
@@ -222,6 +223,41 @@ export function StreamTab({ app }: { app: AppModel }) {
   const { form, url } = app;
   const [checking, setChecking] = useState(false);
   const [checked, setChecked] = useState<{ url: string; message: Message } | null>(null);
+  const streams = useStreams();
+  // The row whose settings are in the form, and the form as it was before, for Cancel.
+  const [editing, setEditing] = useState<string | null>(null);
+  const before = useRef<StreamEntry | null>(null);
+  const current = url ? streams.list.find((e) => sameStream(e, app.dataset())) : undefined;
+  const editedRow = editing ? streams.list.find((e) => e.id === editing) : undefined;
+  if (editing && !editedRow) setEditing(null);   // removed while in the form
+
+  /** Copied, previewed or tested: noted in the history, and added to the streams unless a row is being edited or it is there already. */
+  function served() {
+    app.noteServedNow();
+    if (url && !editing && !current) streams.add(app.dataset());
+  }
+  function add() {
+    if (!url) return;
+    if (current) return app.say(`Already in the list as ${current.name}.`);
+    streams.add(app.dataset());
+  }
+  /** The cog: the row's input and settings go into the form; Save writes the form back to the row. */
+  function edit(e: StreamEntry) {
+    if (editing === e.id) return cancelEdit();
+    if (!editing) before.current = { ...app.dataset(), id: '', name: '', addedAt: 0 };
+    setEditing(e.id);
+    app.loadIntoBuilder(e);
+  }
+  function saveEdit() {
+    if (!editing || !url) return;
+    streams.patch(editing, app.dataset());
+    setEditing(null);
+  }
+  function cancelEdit() {
+    setEditing(null);
+    if (before.current) app.loadIntoBuilder(before.current);
+    before.current = null;
+  }
 
   async function check() {
     setChecking(true);
@@ -233,7 +269,7 @@ export function StreamTab({ app }: { app: AppModel }) {
       const ms = Math.round(performance.now() - t0);
       if (!r.ok) return report(`HTTP ${r.status}: ${(await r.text()).slice(0, 300)}`, 'err');
       const j = await r.json();
-      app.noteServedNow();
+      served();
       const root = j.root ?? {};
       const bv = root.boundingVolume ?? {};
       const kind = bv.region ? 'region' : bv.box ? 'box' : bv.sphere ? 'sphere' : 'none';
@@ -244,7 +280,7 @@ export function StreamTab({ app }: { app: AppModel }) {
   }
 
   function preview(renderer: Renderer) {
-    app.noteServedNow();
+    served();
     app.previewIn(renderer, url, typeOfFormat(form.format || guessFormat(form.src)), nameFor(form.src.trim()));
   }
 
@@ -266,9 +302,17 @@ export function StreamTab({ app }: { app: AppModel }) {
             <p className="m-0"><strong>Point cloud in Cesium for Unreal:</strong> set the tileset's <em>Maximum Screen Space Error</em> to 1 or 2 (its default, 16, suits meshes), then turn on <em>Attenuation</em> under <em>Point Cloud Shading</em>, or every point stays 1 px.</p>
           </Info>
         </div>
-        <CopyField id="url" copyId="copy" value={url} placeholder="Enter a dataset above" label="Copy URL" onCopied={() => app.noteServedNow()} />
+        <CopyField id="url" copyId="copy" value={url} placeholder="Enter a dataset above" label="Copy URL" onCopied={served} />
         <Actions>
           <PreviewControl id="preview" disabled={!url} onPreview={preview} />
+          {editedRow
+            ? <>
+                <Tip text={`Write the form back to ${editedRow.name}`}><Button id="stream-save" variant="default" disabled={!url} onClick={saveEdit}>Save</Button></Tip>
+                <Button id="stream-cancel" variant="ghost" onClick={cancelEdit}>Cancel</Button>
+              </>
+            : <Tip text={current ? `In the list as ${current.name}` : 'Add to the streams below. Copying or previewing adds it too'}>
+                <Button id="stream-add" size="icon" className="size-9" aria-label="Add to the streams" disabled={!url || !!current} onClick={add}><PlusIcon className="size-4" /></Button>
+              </Tip>}
           <span className="flex-1" />
           <DropdownMenu>
             <DropdownMenuTrigger render={<Button id="stream-more" variant="ghost" className="gap-1.5 px-2" />}><MoreHorizontalIcon className="size-4" />More</DropdownMenuTrigger>
@@ -282,6 +326,7 @@ export function StreamTab({ app }: { app: AppModel }) {
         {/* the answer of a test stays while it is this URL's */}
         <Result id="result" message={checked?.url === url ? checked.message : null} />
       </Card>
+      <StreamsCard streams={streams} editing={editing} current={current?.id} onEdit={edit} />
     </section>
   );
 }

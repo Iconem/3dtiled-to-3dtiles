@@ -48,7 +48,7 @@ const SETTINGS: Setting[] = [
   flag('asset', (s) => s.assetVisible, (s, v) => s.setAssetVisible(v)),
   choice('material', ['default', 'xray', 'wireframe', 'features'] as const, (s) => s.materialMode, (s, v) => s.setMaterialMode(v)),
   number('xray', (s) => s.xrayOpacity, (s, v) => s.setXrayOpacity(v)),
-  choice('pcolor', ['rgb', 'color', 'height'] as const, (s) => s.pointColorMode, (s, v) => s.setPointColorMode(v)),
+  choice('pcolor', ['rgb', 'color', 'height', 'intensity', 'classification'] as const, (s) => s.pointColorMode, (s, v) => s.setPointColorMode(v)),
   { key: 'color', read: (s) => s.pointColor, write: (s, v) => { if (/^#[0-9a-f]{6}$/i.test(v)) s.setPointColor(v); } },
   number('psize', (s) => s.pointSize, (s, v) => s.setPointSize(v)),
   choice('pshape', ['square', 'round', 'sphere'] as const, (s) => s.pointShape, (s, v) => s.setPointShape(v)),

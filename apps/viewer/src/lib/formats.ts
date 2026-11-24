@@ -377,6 +377,9 @@ export const canSh = (fmt: string) => fmt === 'rad' || fmt === 'sog' || fmt === 
 /** Formats whose tile error comes from the size of the box alone, and for which the server can derive it from the
  *  density of the content instead (`&ge=density`; for I3S, from its own `lodThreshold` first). */
 export const canDensityError = (fmt: string) => fmt === 'i3s' || fmt === 'lcc' || fmt === 'lcc2' || fmt === 'geosplats';
+/** Formats whose /stream point tiles can carry LAS attributes (the server's `&attributes=`, packages/core/points-glb.js):
+ *  COPC and Potree. A VPC mosaic does not pass it on to its COPC children yet. */
+export const canPointAttributes = (fmt: string) => fmt === 'copc' || fmt === 'potree';
 
 export const SNIPPETS: Record<string, { title: string; code: string; note: string }> = {
   pointcloud: {

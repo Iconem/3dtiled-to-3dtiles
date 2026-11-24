@@ -80,6 +80,7 @@ export function applyHeightColors(o: any, range: HeightRange, stop: THREE.Object
   const key = range.join('|');
   if (o.userData.__heightKey === key) return;
   o.userData.__heightKey = key;
+  delete o.userData.__colorByKey;                              // lib/pointColorBy.ts repaints when it comes back
   if (!('__origColor' in o.userData)) o.userData.__origColor = g.attributes.color ?? null;
   const out = new Uint16Array(pos.count * 3);
   const span = range[1] - range[0] || 1, last = RAMP.length - 1;
@@ -102,4 +103,5 @@ export function restoreHeightColors(o: any) {
   else o.geometry.deleteAttribute('color');
   delete o.userData.__origColor;
   delete o.userData.__heightKey;
+  delete o.userData.__colorByKey;
 }

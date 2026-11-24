@@ -20,7 +20,12 @@ GET /aggregate/tileset.json?vpc=<url of a .vpc>         # a PDAL/QGIS virtual po
     [&format=…] [&only=…] [&exclude=…] [&hide=<id>] [&latest=1] [&from=…] [&to=…]
 GET /aggregate/snap.ndjson?<same query, with &snap=>  # the snap offsets, one line per dataset as each resolves
 GET /aggregate/index.json?<same query>                 # one row per dataset, for UIs
+GET /aggregate/index.geojson?<same query>              # the same rows as a GeoJSON FeatureCollection of points
 ```
+
+JSON answers (`tileset.json`, `index.json`, `index.geojson`) are gzipped for clients that send
+`Accept-Encoding: gzip`, as browsers do. For the 710 Iconem datasets the index goes from 413 KB to
+65 KB, and the mosaic root from 504 KB to 85 KB.
 
 ## How a mosaic is built, step by step
 
@@ -172,6 +177,17 @@ Whenever an `/aggregate` tileset is loaded, the demo app shows a search box over
 (`id`, `name`, `project`, `scene`, `group`, `date`, `format`, `lon`, `lat`, `height`, `radius`), plus
 the `unplaced` and `failed` lists. The two can never disagree about which datasets a URL means: they
 share one selection function and one cached mosaic.
+
+The index is plain JSON rows rather than a vector format because its first reader is the search box,
+which needs every field at once. For GIS tools and map libraries, `index.geojson` gives the same rows
+as a FeatureCollection: one `Point` per dataset root (longitude, latitude, ellipsoidal height), the
+other fields as properties. Gzipped, a few hundred datasets weigh tens of kilobytes; a GeoParquet
+file would save little at that size and need a Parquet reader in every client.
+
+**Dataset names, by standard.** In the mosaic itself, each leaf's tile metadata uses the `dataset`
+class, whose `id` and `name` properties carry the 3D Tiles 1.1 general semantics `ID` and `NAME`.
+A reader that looks the name up by semantic, not by property name, works on any tileset that follows
+the standard, not only on 3dtiled's.
 
 - **Search** matches dataset name, project, scene, format and date as you type — accent-insensitive,
   every word must match, and **typo-tolerant**: one edit for words of 4–6 letters, two from 7
@@ -612,7 +628,7 @@ so this applies to the `/stream` reader only.
 | Mosaic tree and index | memory | 24 h | full query string |
 | `/stream` source context (Potree hierarchy read so far) | memory | process lifetime, no eviction | source URL |
 | Point tiles | not kept on the server | per request | — |
-| Uploaded manifests | memory (20 max, 24 h sliding) and the browser's localStorage | until evicted; the browser re-sends | hash of the entries without `bounds` |
+| Uploaded manifests | memory and `.local/aggregate-cache/uploads.json` (50 max, a week sliding), and the browser's localStorage | a week after last use, across restarts; the browser re-sends | hash of the entries without `bounds` |
 
 `&ttl=0` bypasses the mosaic, the child-root cache and baked bounds for one request.
 
@@ -650,8 +666,11 @@ curl -X POST --data-binary @.local/aggregate-sets/iconem.json https://<server>/a
 # → { "set": "upload-9a03e7bc…", "count": 692, "url": "https://<server>/aggregate/tileset.json?set=upload-9a03e7bc…&nest=geodetic" }
 ```
 
-- **Kept in memory, 24 h after last use.** A restart clears it, like builder drafts. Up to 20
-  manifests of 10 MB each; the oldest goes first.
+- **Kept a week after last use, across restarts.** Every opening of the mosaic pushes the expiry a
+  week further. Uploads are saved to `uploads.json` in the aggregate cache directory
+  (`AGGREGATE_CACHE_DIR`, `.local/aggregate-cache/` by default), so in Docker that directory needs a
+  volume, or a new container starts without them. Up to 50 manifests of 10 MB each; the least
+  recently used goes first.
 - **The set name is a hash of the entries.** Re-sending the same file gives the same URL. The viewer
   keeps the file in the browser's localStorage and re-sends it before loading the pill, so a server
   restart goes unnoticed. A `?load=<mosaic URL>` link opened in another browser also shows the pill
@@ -659,6 +678,19 @@ curl -X POST --data-binary @.local/aggregate-sets/iconem.json https://<server>/a
 - **Never listed.** Uploads do not appear in `/aggregate/demo.json` or in "unknown set" errors, and
   without the file the hash cannot be guessed. Anyone given the mosaic URL can still read the share
   links inside it, as with any mosaic.
+
+### A private set with no expiry: `unlisted`
+
+For a mosaic that should never expire, put the manifest on the server itself, in its sets directory
+(`AGGREGATE_SETS_DIR`), under a name nobody can guess, with `"unlisted": true`:
+
+```json
+{ "label": "Iconem", "unlisted": true, "entries": [ … ] }
+```
+
+Saved as `iconem-7f3c9a….json`, it opens as `?set=iconem-7f3c9a…`. An unlisted set is left out of
+`/aggregate/demo.json` and of the "try one of …" messages, so its name is the only key, as an upload's
+hash is. It is re-read on every request, so replacing the file needs no restart.
 
 ### A virtual point cloud is a manifest: `?vpc=`
 

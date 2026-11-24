@@ -74,6 +74,7 @@ import { MotionLodPlugin, flight, motionLodPlugins, setMotionLodInvalidate } fro
 import { fetchOutlines, outlineColor, type TileOutline } from '@/lib/mosaicOutlines';
 import { datasetGroundSamples, offsetFromSamples, type GroundSample } from '@/lib/datasetGround';
 import { applyHeightColors, fitHeightRange, restoreHeightColors, type HeightRange } from '@/lib/pointColors';
+import { applyColorBy, createColorByState, fitColorByRange, isColorBy, type ColorByState } from '@/lib/pointColorBy';
 import { NativeLeavesPlugin, withNativeLeaves } from '@/lib/nativeLeaves';
 import { AddRefinePointSizePlugin } from '@/lib/addRefinePointSize';
 // Vendored from 3DTilesRendererJS master (unreleased), with local patches (size cap, child boxes).
@@ -198,10 +199,11 @@ function makeClearDepthHook(): THREE.Mesh {
  *              3D Tiles 1.0 b3dm's `_BATCHID` (`_batchid` once loaded) the same way as a feature-ID attribute; a
  *              primitive with neither gets one colour per tile mesh, so tile boundaries show.
  * The original mesh material is kept on the object and restored by `default`. Points take their colour
- * independently, in every mode: their own (`rgb`), one colour, or by height (lib/pointColors.ts).
+ * independently, in every mode: their own (`rgb`), one colour, by height (lib/pointColors.ts), or by the intensity or
+ * classification the tiles carry (lib/pointColorBy.ts; a tile without it keeps its own colours).
  */
 type MaterialMode = 'default' | 'xray' | 'wireframe' | 'features';
-type MaterialOpts = { mode: MaterialMode; opacity: number; points: 'rgb' | 'color' | 'height'; color: string; range: HeightRange | null; stop: THREE.Object3D | null };
+type MaterialOpts = { mode: MaterialMode; opacity: number; points: 'rgb' | 'color' | 'height' | 'intensity' | 'classification'; color: string; range: HeightRange | null; stop: THREE.Object3D | null; colorBy: ColorByState };
 const XRAY_MESH = new THREE.MeshBasicMaterial({ color: 0x9ad8ff, transparent: true, opacity: 0.22, blending: THREE.AdditiveBlending, depthWrite: false, side: THREE.DoubleSide });
 const WIRE_MESH = new THREE.MeshBasicMaterial({ color: 0xdddddd, wireframe: true, transparent: true, opacity: 0.6, depthWrite: false });
 const featureColor = (id: number, out: THREE.Color) => out.setHSL((((id + 1) * 2654435761) >>> 0) / 4294967296, 0.7, 0.55);
@@ -225,7 +227,7 @@ function featureMaterial(o: any): THREE.Material {
   o.userData.__featureMaterial = mat;
   return mat;
 }
-function applyMaterialMode(o: any, { mode, opacity, points, color, range, stop }: MaterialOpts) {
+function applyMaterialMode(o: any, { mode, opacity, points, color, range, stop, colorBy }: MaterialOpts) {
   if (o.isMesh && !o.isPoints) {
     if (mode !== 'features' && o.userData.__origColor !== undefined) {
       if (o.userData.__origColor) o.geometry.setAttribute('color', o.userData.__origColor); else o.geometry.deleteAttribute('color');
@@ -246,18 +248,19 @@ function applyMaterialMode(o: any, { mode, opacity, points, color, range, stop }
     const xray = mode === 'xray';
     // per object, unlike the rest: the colours live on the geometry, and a material can be shared
     const byHeight = points === 'height' && !!range;
+    const byAttr = !byHeight && isColorBy(points) && applyColorBy(o, points, colorBy);
     if (byHeight) applyHeightColors(o, range!, stop);
-    else restoreHeightColors(o);
-    const key = `${xray ? opacity : ''}|${byHeight ? 'height+' : points}|${points === 'color' ? color : ''}`;
+    else if (!byAttr) restoreHeightColors(o);
+    const key = `${xray ? opacity : ''}|${byHeight || byAttr ? 'painted+' : points}|${points === 'color' ? color : ''}`;
     if ((m.userData.__xray ?? '|rgb|') === key) return;
     m.userData.__xray = key;
     if (m.userData.__vertexColors === undefined) { m.userData.__vertexColors = m.vertexColors; m.userData.__color = m.color.getHex(); }
     m.transparent = xray; m.opacity = xray ? opacity : 1; m.depthWrite = !xray;
     m.blending = xray ? THREE.AdditiveBlending : THREE.NormalBlending;
     const flat = points === 'color';                           // one colour for every point (picker)
-    m.vertexColors = flat ? false : byHeight ? true : (m.userData.__vertexColors ?? m.vertexColors);
+    m.vertexColors = flat ? false : byHeight || byAttr ? true : (m.userData.__vertexColors ?? m.vertexColors);
     if (flat) m.color.set(color);
-    else if (byHeight) m.color.setHex(0xffffff);
+    else if (byHeight || byAttr) m.color.setHex(0xffffff);
     else if (m.userData.__color !== undefined) m.color.setHex(m.userData.__color);
     m.needsUpdate = true;                                       // vertexColors toggles the program
   }
@@ -886,6 +889,8 @@ const Scene = forwardRef<ViewerHandle, { loadArgs: LoadArgs; tooltip: TooltipCha
   // scene's own size; on for everything else, where it keeps the camera out of the ground.
   const [adjustHeight, setAdjustHeight] = useState(true);
   useEffect(() => { setPickScene(null); store.getState().setPointHeightRange(null); }, [tilesUrl]);
+  // colour by intensity: the ramp's range, per tileset (lib/pointColorBy.ts fits it from the first tiles)
+  const colorByState = useMemo(() => createColorByState(), [tilesUrl]);
 
   // GlobeControls/EnvironmentControls default to raycasting the WHOLE R3F scene (3d-tiles-renderer's
   // own ControlsBaseComponent falls back to useThree's default scene when no `scene` prop is given) to
@@ -1507,7 +1512,7 @@ const Scene = forwardRef<ViewerHandle, { loadArgs: LoadArgs; tooltip: TooltipCha
   const pointColorMode = useViewerStore((s) => s.pointColorMode);
   const pointColor = useViewerStore((s) => s.pointColor);
   const pointHeightRange = useViewerStore((s) => s.pointHeightRange);
-  const materialOpts = useMemo((): MaterialOpts => ({ mode: materialMode, opacity: xrayOpacity, points: pointColorMode, color: pointColor, range: pointHeightRange, stop: tilesRef.current?.group ?? null }), [materialMode, xrayOpacity, pointColorMode, pointColor, pointHeightRange, pickScene]);
+  const materialOpts = useMemo((): MaterialOpts => ({ mode: materialMode, opacity: xrayOpacity, points: pointColorMode, color: pointColor, range: pointHeightRange, stop: tilesRef.current?.group ?? null, colorBy: colorByState }), [materialMode, xrayOpacity, pointColorMode, pointColor, pointHeightRange, pickScene, colorByState]);
   const materialModeRef = useRef(materialOpts);
   materialModeRef.current = materialOpts;
   /**
@@ -1760,9 +1765,17 @@ const Scene = forwardRef<ViewerHandle, { loadArgs: LoadArgs; tooltip: TooltipCha
   // single shared style set, not a per-mesh JS traversal, so it doesn't have this cost). Collapse any
   // number of rapid pointSize changes into at most one traversal per animation frame.
   // Material mode: every loaded model, the native children included, then redraw.
+  const lastPointColorMode = useRef(materialOpts.points);
   useEffect(() => {
     const tiles = tilesRef.current;
     if (!tiles) return;
+    // picking intensity again fits its range over what is loaded now
+    if (materialOpts.points !== lastPointColorMode.current && isColorBy(materialOpts.points)) {
+      const pts: THREE.Object3D[] = [];
+      tiles.forEachLoadedModel((sc: THREE.Object3D) => sc.traverse((o: any) => { if (o.isPoints) pts.push(o); }));
+      fitColorByRange(materialOpts.colorBy, materialOpts.points, pts);
+    }
+    lastPointColorMode.current = materialOpts.points;
     tiles.forEachLoadedModel((sc: THREE.Object3D) => sc.traverse((o: any) => applyMaterialMode(o, materialOpts)));
     (tiles as any).getPluginByName?.('NATIVE_LEAVES_PLUGIN')?.forEachChildModel((sc: THREE.Object3D) => sc.traverse((o: any) => applyMaterialMode(o, materialOpts)));
     invalidate();
