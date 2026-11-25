@@ -5,12 +5,13 @@ description: "Where the 3D Tiles 2.0 drafts and cesium-native stand, what they m
 
 # Directions: 3D Tiles 2.0 on glTF 2.1
 
-> Read on **2026-11-02**. Every spec below is a draft and the streaming work in cesium-native is
-> not merged, so names and details may change. For glTF 2.1 core, see
+> Read on **2026-11-02**, cesium-native updated **2026-11-26**. Every spec below is still a draft,
+> so names and details may change. For glTF 2.1 core, see
 > [glTF 2.1 — Complex Scenes](/docs/references/3dtiles-gltf/gltf-2.1).
 
 **Nothing needs to change in 3dtiled today.** Its 3D Tiles 1.1 output is the format to keep writing,
-and a 2.0 writer should wait until cesium-native's loader leaves draft.
+cesium-native can now stream glTF 2.1 tilesets (v0.67.0), so a 2.0 writer can be tested against
+it, but the extensions are drafts and no other client has been checked.
 
 ## What 3D Tiles 2.0 is
 
@@ -37,8 +38,9 @@ glTF 2.1 core is tracked in [KhronosGroup/glTF#2585](https://github.com/KhronosG
 and write these extensions through generated classes
 ([#1451](https://github.com/CesiumGS/cesium-native/pull/1451)), but it cannot stream such a tileset yet.
 
-Streaming is tracked in [#1453](https://github.com/CesiumGS/cesium-native/issues/1453), as a stack of
-open pull requests:
+Streaming was tracked in [#1453](https://github.com/CesiumGS/cesium-native/issues/1453). It was closed on
+2026-11-23 when [#1508](https://github.com/CesiumGS/cesium-native/pull/1508) merged the `3d-tiles-2.0`
+staging branch into `main`, a stack of these pull requests:
 
 | PR | Change |
 |---|---|
@@ -46,7 +48,12 @@ open pull requests:
 | [#1467](https://github.com/CesiumGS/cesium-native/pull/1467) | Subtrees on `3DTILES_subtree`; 1.1 subtrees converted through `SubtreeInterop` |
 | [#1473](https://github.com/CesiumGS/cesium-native/pull/1473) | Splits `Cesium3DTilesContent` into two libraries |
 | [#1477](https://github.com/CesiumGS/cesium-native/pull/1477) | Bounding volumes from glTF shapes |
-| [#1478](https://github.com/CesiumGS/cesium-native/pull/1478) | Draft: loads glTF 2.1 models as tilesets |
+| [#1493](https://github.com/CesiumGS/cesium-native/pull/1493) | Test data reorganised into `1.1` and `quantized-mesh` folders |
+| [#1478](https://github.com/CesiumGS/cesium-native/pull/1478) | Loads glTF 2.1 models as tilesets |
+
+They ship in [v0.67.0](https://github.com/CesiumGS/cesium-native/blob/main/CHANGES.md): `Tileset` loads a
+glTF 2.1 tileset from a URL, and `SubtreeAvailability::fromGltf` reads a glTF 2.1 subtree. The release
+also renames `Cesium3DTiles` to `CesiumTilesetJson` and `Cesium3DTilesContent` to `Cesium3DTiles`.
 
 External assets are tracked separately in [#1465](https://github.com/CesiumGS/cesium-native/issues/1465).
 
@@ -57,7 +64,7 @@ This page only covers cesium-native. Support in CesiumJS and 3DTilesRendererJS h
 **1.1 output.** Every converter and live endpoint writes `asset.version: '1.1'`, and `core/tiling.js`
 writes binary `.subtree` files. #1467 replaces cesium-native's subtree class and converts the old
 format on the way in, so regressions there would hit implicit tilesets first. COPC and Potree output
-would make good test cases once it lands.
+are good test cases now that it has landed.
 
 **Where each draft would land:**
 
