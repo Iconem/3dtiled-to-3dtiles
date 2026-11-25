@@ -8,6 +8,19 @@ Format loosely follows [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+### Added — 2026-11-25
+- **Desktop: a status pill on each Streams row.** The row's tileset URL is requested once when it appears or its port
+  changes: green *OK* when it answers a tileset, red *Error* with the reason in its tooltip. A click checks again.
+  A *Convert once* row is checked only on a click, since its first request starts the conversion.
+- **Viewer: Google Satellite basemap** (imagery without labels, `lyrs=s`), beside Google Hybrid.
+
+### Fixed — 2026-11-25
+- **Viewer (3DTRJS): a `view=` link or a city fly-to no longer opens on the empty sky away from the equator.** The
+  orbit pivot is now the ground the camera looks at (its view ray against the WGS84 ellipsoid), not a point stretched
+  out to the equatorial radius, which sat above any camera lower than about 10 km (11 km up at Autzen).
+- **Changing how the same dataset is streamed keeps the view** (point colour intensity/classification, implicit or
+  explicit tiling, centroids, harmonics, density error, cache) instead of re-framing the whole tileset.
+
 ### Added — 2026-11-24 (2)
 - **Viewer: colour points by intensity or classification** from the Point colour select (`pcolor=intensity|classification`).
   COPC and Potree streams then reload with `&attributes=Intensity` or `&attributes=Classification`, so each tile ships

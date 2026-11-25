@@ -5,7 +5,7 @@
  * key. Esri tiles are addressed {z}/{y}/{x}. "Esri + labels" adds the World Boundaries and Places
  * layer on top. Mapbox Satellite is listed when `VITE_MAPBOX_TOKEN` is set at build time.
  */
-export type BasemapId = 'esri-sat' | 'esri' | 'mapbox' | 'google' | 'osm' | 'none';
+export type BasemapId = 'esri-sat' | 'esri' | 'mapbox' | 'google-sat' | 'google' | 'osm' | 'none';
 
 export interface RasterLayer { url: string; maxZoom: number; credit: string; proxy?: boolean }
 export interface Basemap { label: string; layers: RasterLayer[] }
@@ -31,6 +31,12 @@ export const BASEMAPS: { [K in Exclude<BasemapId, 'none'>]?: Basemap } = {
       layers: [{ url: `https://api.mapbox.com/v4/mapbox.satellite/{z}/{x}/{y}@2x.jpg90?access_token=${MAPBOX_TOKEN}`, maxZoom: 22, credit: '© Mapbox © Maxar' }],
     },
   } : {}),
+  // lyrs=s: imagery alone, no labels or roads (lyrs=y is the hybrid below). Same keyless public tile
+  // host as the hybrid, so the same /proxy for 3DTRjs.
+  'google-sat': {
+    label: 'Google Satellite',
+    layers: [{ url: 'https://mt1.google.com/vt/lyrs=s&x={x}&y={y}&z={z}', maxZoom: 21, credit: 'Google Satellite', proxy: true }],
+  },
   google: {
     label: 'Google Hybrid',
     layers: [{ url: 'https://mt1.google.com/vt/lyrs=y&x={x}&y={y}&z={z}', maxZoom: 21, credit: 'Google Hybrid', proxy: true }],

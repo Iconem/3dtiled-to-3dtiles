@@ -250,8 +250,10 @@ export default function TopBar({ activeHandleRef }: { activeHandleRef: React.Ref
 
   // fromStart: the load the page opens with (the effect below), as opposed to a click on a pill. Only that one
   // takes the page's `view=`; it can run twice (StrictMode), so the view is dropped by the first click instead.
-  function selectPreset(p: Preset, fromStart = false) {
+  // keepView: the same dataset again, streamed another way (point colour, tiling, centroids…): the camera stays.
+  function selectPreset(p: Preset, fromStart = false, keepView = false) {
     if (!fromStart) startViewRef.current = null;
+    shownRef.current = { datasetKey, depsKey, preset: p.id };
     setUrl({ preset: p.id });
     if (p.custom) {
       store.getState().setUrlField('');
@@ -267,6 +269,7 @@ export default function TopBar({ activeHandleRef }: { activeHandleRef: React.Ref
     // From one whole globe to another (Bing 3D to Google 3D, or its "world" pill again): stay exactly where the
     // camera is, so the two can be compared at the same place.
     const pose = fromStart && startViewRef.current ? startViewRef.current
+      : keepView ? activeHandleRef.current?.getCameraPose?.() ?? null
       : p.global && lastGlobalRef.current && !p.flyTo ? activeHandleRef.current?.getCameraPose?.() ?? null : null;
     lastGlobalRef.current = !!p.global;
     const field = rawUrlMode && p.rawSrc ? p.rawSrc : p.url;
@@ -275,9 +278,9 @@ export default function TopBar({ activeHandleRef }: { activeHandleRef: React.Ref
     // an uploaded manifest's mosaic: the server may have restarted since, so re-send the file first
     // a `?load=…&fly=` link to an uploaded set reaches here through its pill: keep its viewpoint
     // a link's own `view=` is where its author was looking: it wins over the pill's city
-    const flyTo = fromStart && startViewRef.current ? undefined : p.flyTo ?? (uploadedSetOf(loadUrl) && startFlyRef.current ? startFlyRef.current : undefined);
+    const flyTo = (fromStart && startViewRef.current) || (keepView && pose) ? undefined : p.flyTo ?? (uploadedSetOf(loadUrl) && startFlyRef.current ? startFlyRef.current : undefined);
     startFlyRef.current = undefined;
-    if (uploadedSetOf(loadUrl)) restoreUploadedSet(loadUrl).finally(() => doLoad(loadUrl, p.type, flyTo));
+    if (uploadedSetOf(loadUrl)) restoreUploadedSet(loadUrl).finally(() => doLoad(loadUrl, p.type, flyTo, keepView ? pose : null));
     else doLoad(loadUrl, p.type, flyTo, pose);
   }
 
@@ -337,6 +340,11 @@ export default function TopBar({ activeHandleRef }: { activeHandleRef: React.Ref
   // The point attributes asked of the server (`&attributes=`, from the side panel's point colour) reload too.
   const depsKey = [url.mode, url.format, url.tool, url.tilesetOp, url.cache, url.tiling, url.centroids, url.sh, url.ge, url.transform, url.curved, params.pointAttributes].join('|');
   const startKey = useRef(depsKey);
+  // What picks the dataset itself, as opposed to how it is streamed (cache, tiling, centroids, harmonics, density
+  // error, point attributes): a change of only the latter reloads the same preset and keeps the camera where it is.
+  // Not a second run with nothing changed (StrictMode on mount): the camera is still at its default there.
+  const datasetKey = [url.mode, url.format, url.tool, url.tilesetOp, url.transform, url.curved].join('|');
+  const shownRef = useRef<{ datasetKey: string; depsKey: string; preset: string } | null>(null);
   useEffect(() => {
     if (START_LOAD && depsKey === startKey.current) {
       // A shared link to an uploaded manifest's mosaic becomes its pill in the Aggregate row (even
@@ -365,7 +373,10 @@ export default function TopBar({ activeHandleRef }: { activeHandleRef: React.Ref
     if (url.format === 'aggregate' && !setsKnown) return;
     const wanted = url.preset && presets.find((p) => p.id === url.preset && p.url);
     const target = wanted || presets.find((p) => p.url);
-    if (target) selectPreset(target, depsKey === startKey.current);
+    if (!target) return;
+    const shown = shownRef.current;
+    const fromStart = depsKey === startKey.current;
+    selectPreset(target, fromStart, shown?.datasetKey === datasetKey && shown.depsKey !== depsKey && shown.preset === target.id);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [url.mode, url.format, url.tool, url.tilesetOp, url.cache, url.tiling, url.centroids, url.sh, url.ge, url.transform, url.curved, params.pointAttributes, setsKnown]);
 

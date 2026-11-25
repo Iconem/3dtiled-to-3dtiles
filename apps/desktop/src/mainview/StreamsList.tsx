@@ -10,7 +10,7 @@
  * Paused greys the row and takes its URL out of reach here (no copy, no select), so it is not handed out again.
  */
 import { ArrowDownIcon, ArrowUpIcon, PauseIcon, PlayIcon, Settings2Icon, Trash2Icon } from 'lucide-react';
-import { useCallback, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { toast } from 'sonner';
 import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
@@ -90,12 +90,57 @@ export function StreamsCard({ streams, editing, current, onEdit }: { streams: St
   );
 }
 
+type Health = { state: 'checking' | 'ok' | 'err' | 'idle'; detail: string };
+
+/**
+ * Does the row's URL answer a tileset? One GET of its tileset.json when the row appears or its URL changes (the
+ * port moves after a restart), and again on a click of the pill. A `cache=full` row is not checked by itself:
+ * its first request starts a whole conversion, so that waits for a click.
+ */
+function useHealth(url: string, paused: boolean, auto: boolean): [Health, () => void] {
+  const [h, setH] = useState<Health>({ state: 'idle', detail: '' });
+  const [nonce, setNonce] = useState(auto ? 1 : 0);
+  useEffect(() => { if (auto) setNonce((n) => n + 1); }, [url, auto]);
+  useEffect(() => {
+    if (!nonce || paused || !url) return;
+    const ac = new AbortController();
+    let timedOut = false, gone = false;
+    const timer = setTimeout(() => { timedOut = true; ac.abort(); }, 30_000);
+    setH({ state: 'checking', detail: 'Requesting the tileset…' });
+    (async () => {
+      try {
+        const t0 = performance.now();
+        const r = await fetch(url, { signal: ac.signal });
+        const ms = Math.round(performance.now() - t0);
+        if (gone) return;
+        if (!r.ok) return setH({ state: 'err', detail: `HTTP ${r.status}: ${(await r.text()).slice(0, 300)}` });
+        const j = await r.json();
+        if (!j?.root || !j?.asset) return setH({ state: 'err', detail: 'The answer is JSON but not a tileset (no asset or root).' });
+        setH({ state: 'ok', detail: `Answers in ${ms} ms: 3D Tiles ${j.asset.version ?? '?'}, ${j.root.children?.length ?? 0} root children. Click to check again.` });
+      } catch (e) {
+        if (!gone) setH({ state: 'err', detail: timedOut ? 'No answer in 30 s.' : `Request failed: ${e}` });
+      } finally { clearTimeout(timer); }
+    })();
+    return () => { gone = true; clearTimeout(timer); ac.abort(); };
+  }, [nonce, url, paused]);
+  return [h, () => setNonce((n) => n + 1)];
+}
+
+const HEALTH_LOOK: Record<Health['state'], { label: string; cls: string }> = {
+  ok: { label: 'OK', cls: 'border-emerald-600/40 bg-emerald-500/15 text-emerald-600 dark:text-emerald-400' },
+  err: { label: 'Error', cls: 'border-red-600/40 bg-red-500/15 text-red-600 dark:text-red-400' },
+  checking: { label: 'Checking', cls: '' },
+  idle: { label: 'Check', cls: '' },
+};
+
 const roField = 'h-8 min-w-0 flex-1 rounded-md border border-input bg-muted/40 px-2.5 font-mono text-xs text-foreground outline-none focus-visible:border-ring focus-visible:ring-2 focus-visible:ring-ring/25';
 
 function StreamRow({ entry: e, first, last, editing, current, streams, onEdit, onRemove }: {
   entry: StreamEntry; first: boolean; last: boolean; editing: boolean; current: boolean; streams: Streams; onEdit: () => void; onRemove: () => void;
 }) {
   const url = buildUrlFrom(e);
+  const [health, recheck] = useHealth(url, !!e.paused, e.cache !== 'full');
+  const look = HEALTH_LOOK[health.state];
   const [name, setName] = useState(e.name);
   const commit = () => { const n = name.trim() || nameFor(e.src); setName(n); if (n !== e.name) streams.patch(e.id, { name: n }); };
   const icon = (label: string, onClick: () => void, child: React.ReactNode, opts: { disabled?: boolean; pressed?: boolean; id?: string } = {}) => (
@@ -110,6 +155,13 @@ function StreamRow({ entry: e, first, last, editing, current, streams, onEdit, o
         <input aria-label="Stream name" value={name} spellCheck={false} onChange={(ev) => setName(ev.target.value)} onBlur={commit}
           onKeyDown={(ev) => { if (ev.key === 'Enter') ev.currentTarget.blur(); if (ev.key === 'Escape') { setName(e.name); ev.currentTarget.blur(); } }}
           className={cn('h-7 min-w-0 flex-1 rounded border border-transparent bg-transparent px-1.5 text-sm font-medium text-foreground outline-none hover:border-input focus-visible:border-ring', e.paused && 'text-muted-foreground')} />
+        {!e.paused && url && (
+          <Tip text={health.detail || 'Request the tileset once to see that it answers'}>
+            <button type="button" data-health={health.state} aria-label={`Status: ${look.label}. Check again`} onClick={recheck} className="cursor-pointer rounded-full">
+              <Chip className={look.cls}>{look.label}</Chip>
+            </button>
+          </Tip>
+        )}
         {e.paused && <Chip>Paused</Chip>}
         {editing && <Chip>Editing</Chip>}
         {icon(e.paused ? 'Resume' : 'Pause', () => streams.patch(e.id, { paused: !e.paused }), e.paused ? <PlayIcon /> : <PauseIcon />, { pressed: !!e.paused, id: 'pause' })}

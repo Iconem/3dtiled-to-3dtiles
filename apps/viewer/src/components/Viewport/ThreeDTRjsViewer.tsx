@@ -2268,11 +2268,25 @@ const Scene = forwardRef<ViewerHandle, { loadArgs: LoadArgs; tooltip: TooltipCha
     camera.updateMatrixWorld();
     invalidate();
   }
+  // The orbit pivot once a pose or a fly-to has placed the camera: the ground it looks at, its view ray against the
+  // ellipsoid; looking above the horizon, a point ahead at the camera's height. It used to be the camera position
+  // stretched to the equatorial radius: away from the equator that point is above any camera lower than ~10 km
+  // (11 km up at Autzen, 44 deg N), and the orbit target turned the view to the empty sky. No raycast of the
+  // tileset: its tiles have barely started loading here.
+  function groundAhead(): THREE.Vector3 {
+    const dir = camera.getWorldDirection(new THREE.Vector3());
+    const hit = WGS84_ELLIPSOID.intersectRay(new THREE.Ray(camera.position.clone(), dir), new THREE.Vector3());
+    if (hit) return hit;
+    const height = Math.abs(WGS84_ELLIPSOID.getPositionToCartographic(camera.position, {} as any).height);
+    return camera.position.clone().addScaledVector(dir, Math.max(height, 100));
+  }
   const pendingPoseRef = useRef<CameraPose | null>(null);
   useEffect(() => {
     if (!pendingPose) return;
     pendingPoseRef.current = pendingPose;
     applyCameraPose(pendingPose);
+    // the controls' old target would otherwise turn the camera back to it on their next tick
+    setControlsPivot(groundAhead(), true);
     setPendingPose(null);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [pendingPose, loadArgs]);
@@ -2348,13 +2362,13 @@ const Scene = forwardRef<ViewerHandle, { loadArgs: LoadArgs; tooltip: TooltipCha
             pendingFlyToRef.current = null;
             if (fly && loadArgs?.skipAutoFrame) {
               flyToLocalFrameInternal(fly.lon, fly.lat, fly.height, 800);
-              setControlsPivot(camera.position.clone().setLength(6378137), true);
+              setControlsPivot(groundAhead(), true);
             }
             const pose = pendingPoseRef.current;
             pendingPoseRef.current = null;
             if (pose && loadArgs?.skipAutoFrame) {
               applyCameraPose(pose);
-              setControlsPivot(camera.position.clone().setLength(6378137), true);
+              setControlsPivot(groundAhead(), true);
             }
           }}
           onLoadModel={onLoadContentModel}
