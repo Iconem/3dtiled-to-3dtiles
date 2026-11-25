@@ -1,0 +1,23 @@
+{
+  "name": "3dtiled-slides",
+  "private": true,
+  "version": "0.0.0",
+  "type": "module",
+  "license": "MIT",
+  "packageManager": "pnpm@10.20.0",
+  "scripts": {
+    "dev": "open-slide dev",
+    "build": "open-slide build",
+    "preview": "open-slide preview",
+    "sync:skills": "open-slide sync:skills"
+  },
+  "dependencies": {
+    "@open-slide/core": "2.3.2",
+    "react": "19.2.9",
+    "react-dom": "19.2.9"
+  },
+  "devDependencies": {
+    "@types/react": "19.2.18",
+    "@types/react-dom": "19.2.7"
+  }
+}

@@ -1,0 +1,6 @@
+# This deck is its own pnpm root, outside the repository's workspace (whose globs are packages/* and apps/*):
+# its dependencies and lockfile stay here, and `pnpm install` in this folder never touches the root lockfile.
+packages:
+  - '.'
+# Only resolve package versions published at least 14 days ago (in minutes).
+minimumReleaseAge: 20160
