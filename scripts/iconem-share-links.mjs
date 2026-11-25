@@ -8,7 +8,7 @@
  *     [--api=https://api.iconem.com/api]  [--out=.local/aggregate-sets/iconem.json]
  *     [--server=http://localhost:3001]  [--no-bake]  [--create-in=<regex>]
  *
- * `--create-in=<regex>` limits --apply to projects whose name matches (case-insensitive): links are
+ * `--create-in=<regex>` limits --apply to assets whose `project / scene / asset` label matches (case-insensitive): links are
  * created there only, while every other project's existing links are still reused into the manifest.
  *
  * After writing the manifest it runs scripts/aggregate-bake-bounds.mjs on it (new entries only; Potree
@@ -171,7 +171,7 @@ for (const p of projects) {
         try {
           const { shares = [] } = await api('GET', route);
           let share = shares.find(liveShare);
-          const mayCreate = APPLY && (!CREATE_IN || CREATE_IN.test(p.name));
+          const mayCreate = APPLY && (!CREATE_IN || CREATE_IN.test(label));
           const wasCreated = !share && mayCreate;
           if (!share && mayCreate) share = await api('POST', route, { name: NAME });
           else if (!share) { counts.wouldCreate++; console.log(`  would create  [${type}] ${label}`); continue; }
