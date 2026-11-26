@@ -341,24 +341,18 @@ const P1Cover: Page = () => (
       <p style={{ fontSize: 34, color: ink.soft, margin: '44px 0 0', maxWidth: 860, lineHeight: 1.4 }}>
         Tiled point clouds, meshes and Gaussian splats, streamed as OGC 3D Tiles.
       </p>
-      <p style={{ fontFamily: mono, fontSize: 22, color: ink.muted, margin: '40px 0 0' }}>github.com/jo-chemla/3dtiled-to-3dtiles</p>
+      <p style={{ fontFamily: mono, fontSize: 22, color: ink.muted, margin: '40px 0 0' }}>github.com/Iconem/3dtiled-to-3dtiles</p>
     </div>
-    <img
-      src={viewerOsgb}
-      style={{
-        position: 'absolute',
-        left: 1120,
-        top: 200,
-        width: 680,
-        height: 640,
-        objectFit: 'cover',
-        objectPosition: '55% 50%',
-        borderRadius: 12,
-        boxShadow: shadow.window,
-        display: 'block',
-        background: ink.panel,
-      }}
-    />
+    <div style={{ position: 'absolute', left: 1100, top: 235, width: 700, display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 14 }}>
+      {SHAPES.slice(0, 9).map((x) => (
+        <div key={x.title} style={{ background: ink.panel, borderRadius: 10, padding: '16px 14px 12px', boxSizing: 'border-box' }}>
+          <svg width="100%" viewBox="0 0 268 128" style={{ display: 'block' }}>
+            {x.svg}
+          </svg>
+          <div style={{ fontFamily: mono, fontSize: 15, color: ink.muted, marginTop: 10, whiteSpace: 'nowrap' }}>{x.formats}</div>
+        </div>
+      ))}
+    </div>
     <Footer />
   </div>
 );
@@ -610,116 +604,185 @@ const Shape = ({ title, formats, children }: { title: string; formats: string; c
   </div>
 );
 
+/** The source hierarchies, drawn on a 268×128 canvas: the Shapes slide, and the first nine on the cover. */
+const SHAPES: { title: string; formats: string; svg: ReactNode }[] = [
+  {
+    title: 'Octree',
+    formats: 'COPC · Potree',
+    svg: (
+      <>
+      <g fill="none" stroke={PTS} strokeWidth={2}>
+        <rect x={70} y={4} width={120} height={120} />
+        <path d="M130 4 V124 M70 64 H190" />
+        <path d="M160 64 V124 M130 94 H190" />
+        <path d="M175 94 V124 M160 109 H190" />
+      </g>
+      </>
+    ),
+  },
+  {
+    title: 'Binary AABB tree',
+    formats: 'Streamed SOG',
+    svg: (
+      <>
+      <g stroke={SPLAT} strokeWidth={2} fill="#fff">
+        <path d="M134 18 L80 64 M134 18 L188 64 M80 64 L52 110 M80 64 L108 110 M188 64 L160 110 M188 64 L216 110" fill="none" />
+        <circle cx={134} cy={18} r={11} />
+        <circle cx={80} cy={64} r={11} />
+        <circle cx={188} cy={64} r={11} />
+        <circle cx={52} cy={110} r={11} />
+        <circle cx={108} cy={110} r={11} />
+        <circle cx={160} cy={110} r={11} />
+        <circle cx={216} cy={110} r={11} />
+      </g>
+      </>
+    ),
+  },
+  {
+    title: 'Grid × LOD',
+    formats: 'LCC',
+    svg: (
+      <>
+      <g fill="none" stroke={SPLAT} strokeWidth={2}>
+        <path d="M40 100 L120 120 L228 92 L148 72 Z" />
+        <path d="M80 110 L188 82 M94 86 L174 106" />
+        <path d="M40 72 L120 92 L228 64 L148 44 Z" opacity={0.6} />
+        <path d="M40 44 L120 64 L228 36 L148 16 Z" opacity={0.35} />
+      </g>
+      </>
+    ),
+  },
+  {
+    title: 'Manifest tree',
+    formats: 'LCC2',
+    svg: (
+      <>
+      <g stroke={SPLAT} strokeWidth={2} fill="#fff">
+        <path d="M134 16 L54 64 M134 16 L134 64 M134 16 L214 64 M54 64 L30 110 M54 64 L78 110 M134 64 L134 110 M214 64 L190 110 M214 64 L238 110" fill="none" />
+        <rect x={122} y={6} width={24} height={20} rx={4} />
+        <rect x={42} y={54} width={24} height={20} rx={4} />
+        <rect x={122} y={54} width={24} height={20} rx={4} />
+        <rect x={202} y={54} width={24} height={20} rx={4} />
+        <rect x={18} y={100} width={24} height={20} rx={4} />
+        <rect x={66} y={100} width={24} height={20} rx={4} />
+        <rect x={122} y={100} width={24} height={20} rx={4} />
+        <rect x={178} y={100} width={24} height={20} rx={4} />
+        <rect x={226} y={100} width={24} height={20} rx={4} />
+      </g>
+      </>
+    ),
+  },
+  {
+    title: 'Merge tree',
+    formats: 'RAD',
+    svg: (
+      <>
+      <g stroke={SPLAT} strokeWidth={2} fill="#fff">
+        <path d="M134 16 L70 64 M134 16 L198 64 M70 64 L28 112 M70 64 L58 112 M70 64 L88 112 M70 64 L118 112 M198 64 L170 112 M198 64 L226 112" fill="none" />
+        <circle cx={134} cy={16} r={10} />
+        <circle cx={70} cy={64} r={10} />
+        <circle cx={198} cy={64} r={10} />
+        <circle cx={28} cy={112} r={8} />
+        <circle cx={58} cy={112} r={8} />
+        <circle cx={88} cy={112} r={8} />
+        <circle cx={118} cy={112} r={8} />
+        <circle cx={170} cy={112} r={8} />
+        <circle cx={226} cy={112} r={8} />
+      </g>
+      </>
+    ),
+  },
+  {
+    title: 'DAG',
+    formats: 'Nexus',
+    svg: (
+      <>
+      <g stroke={MESH} strokeWidth={2} fill="#fff">
+        <path d="M134 16 L80 64 M134 16 L188 64 M80 64 L134 112 M188 64 L134 112 M80 64 L50 112 M188 64 L218 112" fill="none" />
+        <circle cx={134} cy={16} r={11} />
+        <circle cx={80} cy={64} r={11} />
+        <circle cx={188} cy={64} r={11} />
+        <circle cx={50} cy={112} r={11} />
+        <circle cx={134} cy={112} r={11} fill={MESH} />
+        <circle cx={218} cy={112} r={11} />
+      </g>
+      </>
+    ),
+  },
+  {
+    title: 'Paged LOD files',
+    formats: 'OSGB · 3MX',
+    svg: (
+      <>
+      <g stroke={MESH} strokeWidth={2} fill="#fff">
+        <path d="M40 30 h50 l12 12 v58 h-62 Z" />
+        <path d="M128 18 h50 l12 12 v58 h-62 Z" />
+        <path d="M128 52 h50 l12 12 v58 h-62 Z" />
+        <path d="M210 40 h40 M210 80 h40" fill="none" strokeDasharray="5 5" />
+        <path d="M102 64 L124 50 M102 70 L124 86" fill="none" />
+      </g>
+      </>
+    ),
+  },
+  {
+    title: 'Node pages',
+    formats: 'I3S / SLPK',
+    svg: (
+      <>
+      <g stroke={MESH} strokeWidth={2} fill="#fff">
+        <rect x={30} y={14} width={90} height={104} rx={6} />
+        <rect x={148} y={14} width={90} height={104} rx={6} />
+        <path d="M46 40 h58 M46 62 h58 M46 84 h40 M164 40 h58 M164 62 h58 M164 84 h40" fill="none" />
+      </g>
+      </>
+    ),
+  },
+  {
+    title: 'Quadkeys',
+    formats: 'Bing Maps 3D',
+    svg: (
+      <>
+      <g fill="none" stroke={MESH} strokeWidth={2}>
+        <rect x={74} y={4} width={120} height={120} />
+        <path d="M134 4 V124 M74 64 H194 M104 4 V64 M74 34 H134" />
+      </g>
+      <g fill={ink.muted} fontSize={14} fontFamily={mono}>
+        <text x={160} y={38}>1</text>
+        <text x={98} y={98}>2</text>
+        <text x={160} y={98}>3</text>
+      </g>
+      </>
+    ),
+  },
+  {
+    title: 'Voxel grids × LOD',
+    formats: 'GeoSplats',
+    svg: (
+      <>
+      <g fill="none" stroke={SPLAT} strokeWidth={2}>
+        <rect x={20} y={44} width={60} height={60} />
+        <rect x={104} y={44} width={60} height={60} />
+        <path d="M134 44 V104 M104 74 H164" />
+        <rect x={188} y={44} width={60} height={60} />
+        <path d="M203 44 V104 M218 44 V104 M233 44 V104 M188 59 H248 M188 74 H248 M188 89 H248" />
+      </g>
+      </>
+    ),
+  },
+];
+
 const P9Shapes: Page = () => (
   <Frame eyebrow="Source trees" title="Ten source trees, one 3D Tiles tree">
     <div style={{ display: 'flex', flexDirection: 'column', gap: 24 }}>
-      <div style={{ display: 'flex', gap: 25 }}>
-        <Shape title="Octree" formats="COPC · Potree">
-          <g fill="none" stroke={PTS} strokeWidth={2}>
-            <rect x={70} y={4} width={120} height={120} />
-            <path d="M130 4 V124 M70 64 H190" />
-            <path d="M160 64 V124 M130 94 H190" />
-            <path d="M175 94 V124 M160 109 H190" />
-          </g>
-        </Shape>
-        <Shape title="Binary AABB tree" formats="Streamed SOG">
-          <g stroke={SPLAT} strokeWidth={2} fill="#fff">
-            <path d="M134 18 L80 64 M134 18 L188 64 M80 64 L52 110 M80 64 L108 110 M188 64 L160 110 M188 64 L216 110" fill="none" />
-            <circle cx={134} cy={18} r={11} />
-            <circle cx={80} cy={64} r={11} />
-            <circle cx={188} cy={64} r={11} />
-            <circle cx={52} cy={110} r={11} />
-            <circle cx={108} cy={110} r={11} />
-            <circle cx={160} cy={110} r={11} />
-            <circle cx={216} cy={110} r={11} />
-          </g>
-        </Shape>
-        <Shape title="Grid × LOD" formats="LCC">
-          <g fill="none" stroke={SPLAT} strokeWidth={2}>
-            <path d="M40 100 L120 120 L228 92 L148 72 Z" />
-            <path d="M80 110 L188 82 M94 86 L174 106" />
-            <path d="M40 72 L120 92 L228 64 L148 44 Z" opacity={0.6} />
-            <path d="M40 44 L120 64 L228 36 L148 16 Z" opacity={0.35} />
-          </g>
-        </Shape>
-        <Shape title="Manifest tree" formats="LCC2">
-          <g stroke={SPLAT} strokeWidth={2} fill="#fff">
-            <path d="M134 16 L54 64 M134 16 L134 64 M134 16 L214 64 M54 64 L30 110 M54 64 L78 110 M134 64 L134 110 M214 64 L190 110 M214 64 L238 110" fill="none" />
-            <rect x={122} y={6} width={24} height={20} rx={4} />
-            <rect x={42} y={54} width={24} height={20} rx={4} />
-            <rect x={122} y={54} width={24} height={20} rx={4} />
-            <rect x={202} y={54} width={24} height={20} rx={4} />
-            <rect x={18} y={100} width={24} height={20} rx={4} />
-            <rect x={66} y={100} width={24} height={20} rx={4} />
-            <rect x={122} y={100} width={24} height={20} rx={4} />
-            <rect x={178} y={100} width={24} height={20} rx={4} />
-            <rect x={226} y={100} width={24} height={20} rx={4} />
-          </g>
-        </Shape>
-        <Shape title="Merge tree" formats="RAD">
-          <g stroke={SPLAT} strokeWidth={2} fill="#fff">
-            <path d="M134 16 L70 64 M134 16 L198 64 M70 64 L28 112 M70 64 L58 112 M70 64 L88 112 M70 64 L118 112 M198 64 L170 112 M198 64 L226 112" fill="none" />
-            <circle cx={134} cy={16} r={10} />
-            <circle cx={70} cy={64} r={10} />
-            <circle cx={198} cy={64} r={10} />
-            <circle cx={28} cy={112} r={8} />
-            <circle cx={58} cy={112} r={8} />
-            <circle cx={88} cy={112} r={8} />
-            <circle cx={118} cy={112} r={8} />
-            <circle cx={170} cy={112} r={8} />
-            <circle cx={226} cy={112} r={8} />
-          </g>
-        </Shape>
-      </div>
-      <div style={{ display: 'flex', gap: 25 }}>
-        <Shape title="DAG" formats="Nexus">
-          <g stroke={MESH} strokeWidth={2} fill="#fff">
-            <path d="M134 16 L80 64 M134 16 L188 64 M80 64 L134 112 M188 64 L134 112 M80 64 L50 112 M188 64 L218 112" fill="none" />
-            <circle cx={134} cy={16} r={11} />
-            <circle cx={80} cy={64} r={11} />
-            <circle cx={188} cy={64} r={11} />
-            <circle cx={50} cy={112} r={11} />
-            <circle cx={134} cy={112} r={11} fill={MESH} />
-            <circle cx={218} cy={112} r={11} />
-          </g>
-        </Shape>
-        <Shape title="Paged LOD files" formats="OSGB · 3MX">
-          <g stroke={MESH} strokeWidth={2} fill="#fff">
-            <path d="M40 30 h50 l12 12 v58 h-62 Z" />
-            <path d="M128 18 h50 l12 12 v58 h-62 Z" />
-            <path d="M128 52 h50 l12 12 v58 h-62 Z" />
-            <path d="M210 40 h40 M210 80 h40" fill="none" strokeDasharray="5 5" />
-            <path d="M102 64 L124 50 M102 70 L124 86" fill="none" />
-          </g>
-        </Shape>
-        <Shape title="Node pages" formats="I3S / SLPK">
-          <g stroke={MESH} strokeWidth={2} fill="#fff">
-            <rect x={30} y={14} width={90} height={104} rx={6} />
-            <rect x={148} y={14} width={90} height={104} rx={6} />
-            <path d="M46 40 h58 M46 62 h58 M46 84 h40 M164 40 h58 M164 62 h58 M164 84 h40" fill="none" />
-          </g>
-        </Shape>
-        <Shape title="Quadkeys" formats="Bing Maps 3D">
-          <g fill="none" stroke={MESH} strokeWidth={2}>
-            <rect x={74} y={4} width={120} height={120} />
-            <path d="M134 4 V124 M74 64 H194 M104 4 V64 M74 34 H134" />
-          </g>
-          <g fill={ink.muted} fontSize={14} fontFamily={mono}>
-            <text x={160} y={38}>1</text>
-            <text x={98} y={98}>2</text>
-            <text x={160} y={98}>3</text>
-          </g>
-        </Shape>
-        <Shape title="Voxel grids × LOD" formats="GeoSplats">
-          <g fill="none" stroke={SPLAT} strokeWidth={2}>
-            <rect x={20} y={44} width={60} height={60} />
-            <rect x={104} y={44} width={60} height={60} />
-            <path d="M134 44 V104 M104 74 H164" />
-            <rect x={188} y={44} width={60} height={60} />
-            <path d="M203 44 V104 M218 44 V104 M233 44 V104 M188 59 H248 M188 74 H248 M188 89 H248" />
-          </g>
-        </Shape>
-      </div>
+      {[SHAPES.slice(0, 5), SHAPES.slice(5)].map((row, r) => (
+        <div key={r} style={{ display: 'flex', gap: 25 }}>
+          {row.map((x) => (
+            <Shape key={x.title} title={x.title} formats={x.formats}>
+              {x.svg}
+            </Shape>
+          ))}
+        </div>
+      ))}
     </div>
   </Frame>
 );
@@ -927,19 +990,12 @@ const P16Terrain: Page = () => (
           <Li k="Any DEM">a library id, a tile template, a COG, a VRT</Li>
           <Li k="Terrain">a quantized-mesh layer.json</Li>
           <Li k="Analyses">hillshade, slope, sky-view factor, TPI, TRI, contours</Li>
+          <Li k="Viewer link">paste a Terrain Viewer link, keep its modes, ramp and range</Li>
           <Li k="Local">Terrain Viewer&apos;s tile service, each tile computed on request</Li>
         </Bullets>
       }
     />
   </Frame>
-);
-
-const PR = ({ n, state, children }: { n: string; state: 'merged' | 'open'; children: ReactNode }) => (
-  <div style={{ display: 'flex', gap: 14, alignItems: 'baseline', padding: '8px 0', borderTop: `1px solid ${ink.rule}`, fontSize: 21 }}>
-    <span style={{ fontFamily: mono, width: 70, flex: 'none' }}>{n}</span>
-    <span style={{ color: ink.soft, flex: 1 }}>{children}</span>
-    <span style={{ fontFamily: mono, fontSize: 17, color: state === 'merged' ? 'var(--osd-accent)' : ink.muted }}>{state}</span>
-  </div>
 );
 
 const A = ({ href, children }: { href: string; children: ReactNode }) => (
@@ -948,7 +1004,7 @@ const A = ({ href, children }: { href: string; children: ReactNode }) => (
 
 const Repo = ({ repo, color, children }: { repo: string; color: string; children: ReactNode }) => (
   <A href={`https://github.com/${repo}`}>
-    <div style={{ display: 'flex', gap: 22, alignItems: 'center', padding: '16px 0', borderTop: `1px solid ${ink.rule}` }}>
+    <div style={{ display: 'flex', gap: 22, alignItems: 'center', padding: '30px 0', borderTop: `1px solid ${ink.rule}` }}>
       <Dot color={color} />
       <span style={{ fontFamily: mono, fontSize: 24, width: 700, flex: 'none', color: 'var(--osd-accent)' }}>github.com/{repo}</span>
       <span style={{ fontSize: 22, color: ink.soft }}>{children}</span>
@@ -959,26 +1015,10 @@ const Repo = ({ repo, color, children }: { repo: string; color: string; children
 const P17Ecosystem: Page = () => (
   <Frame eyebrow="Ecosystem" title="Around 3dtiled">
     <div style={{ borderBottom: `1px solid ${ink.rule}` }}>
-      <Repo repo="jo-chemla/blender_ogc3dtiles" color={MESH}>3D Tiles in Blender through cesium-native</Repo>
-      <Repo repo="jo-chemla/terrain-viewer" color={PTS}>terrain sources compared; the Terrain tab&apos;s tile service</Repo>
+      <Repo repo="Iconem/blender_ogc3dtiles" color={MESH}>3D Tiles in Blender through cesium-native</Repo>
+      <Repo repo="Iconem/terrain-viewer" color={PTS}>terrain sources compared; the Terrain tab&apos;s tile service</Repo>
       <Repo repo="jo-chemla/3dtiles-samples" color={ink.dim}>public reproducers and sample packages</Repo>
       <Repo repo="WilliamLiu-1997/Gaussian-Splat-Lite" color={SPLAT}>the viewer&apos;s splat renderer, and two tilers</Repo>
-    </div>
-    <div style={{ display: 'flex', gap: 60, marginTop: 44 }}>
-      <div style={{ flex: 1 }}>
-        <Label>NASA-AMMOS/3DTilesRendererJS</Label>
-        <div style={{ borderBottom: `1px solid ${ink.rule}` }}>
-          <A href="https://github.com/NASA-AMMOS/3DTilesRendererJS/pull/1780"><PR n="#1780" state="merged">point-cloud fixes</PR></A>
-          <A href="https://github.com/NASA-AMMOS/3DTilesRendererJS/pull/1782"><PR n="#1782" state="merged">additive traversal skip</PR></A>
-          <A href="https://github.com/NASA-AMMOS/3DTilesRendererJS/pull/1792"><PR n="#1792" state="open">adaptive point size, ADD octrees</PR></A>
-        </div>
-      </div>
-      <div style={{ flex: 1 }}>
-        <Label>donmccurdy/glTF-Transform</Label>
-        <div style={{ borderBottom: `1px solid ${ink.rule}` }}>
-          <A href="https://github.com/donmccurdy/glTF-Transform/pull/1877"><PR n="#1877" state="open">GLB writer, 88 ms to 13 ms</PR></A>
-        </div>
-      </div>
     </div>
   </Frame>
 );
@@ -1032,7 +1072,7 @@ const P19Close: Page = () => (
         ['docs.3dtiled.iconem.com', 'documentation'],
         ['demo.3dtiled.iconem.com', 'web viewer'],
         ['3dtiled.iconem.com', 'tile-server'],
-        ['github.com/jo-chemla/3dtiled-to-3dtiles', 'source, MIT'],
+        ['github.com/Iconem/3dtiled-to-3dtiles', 'source, MIT'],
       ].map(([url, what], i) => (
         <div
           key={url}
@@ -1094,7 +1134,7 @@ export const notes: (string | undefined)[] = [
   'Export writes a folder; Tile raw input runs the one-stop tilers; the Library keeps a source plus its options.',
   'Terrain Viewer tile service, downloaded on first use and run on this machine. Blender add-on as the client.',
   'Public demo; any preset loads live through 3dtiled.iconem.com.',
-  'Every line links to its repository or PR. PR states as of 2026-11-26.',
+  'Every line links to its repository.',
   'From the TODO / future work page and the planning pages.',
   undefined,
 ];

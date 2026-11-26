@@ -26,7 +26,8 @@
  * variable works on every platform.
  *
  * `favorite` marks the two tools offered first for each kind: for points untwine (COPC) and PotreeConverter, for
- * meshes Obj2Tiles and mago 3D Tiler, for splats splat-transform (PlayCanvas's own) and Gaussian Splat Lite
+ * meshes fanvanzh's 3dtile (OSGB) and mago 3D Tiler, with Obj2Tiles and rusty-tiles listed next (the order here is
+ * the order offered), for splats splat-transform (PlayCanvas's own) and Gaussian Splat Lite
  * build-sog (William Liu's, merged levels).
  *
  * `kind` is what the tool tiles (pointcloud, mesh, splat); `inputs` the extensions it takes; `dir` whether the input
@@ -599,67 +600,34 @@ export const TOOLS = [
 
   // ── meshes ─────────────────────────────────────────────────────────────────────────────────────────────────────
   {
-    id: 'obj2tiles',
-    name: 'Obj2Tiles',
+    id: 'fanvanzh-3dtiles',
+    name: '3dtile (fanvanzh/3dtiles)',
     kind: 'mesh',
     favorite: true,
-    summary: 'A textured OBJ mesh to 3D Tiles with levels of detail: it decimates, splits and tiles. OpenDroneMap\'s tool, self-contained.',
-    homepage: 'https://github.com/OpenDroneMap/Obj2Tiles',
-    licence: 'AGPL-3.0',
-    inputs: ['obj'],
+    summary: 'An OSGB oblique-photography folder (metadata.xml and Data/) to 3D Tiles (b3dm), offline. The released binary is from 2021. This app also streams OSGB live with its own reader, without a conversion.',
+    homepage: 'https://github.com/fanvanzh/3dtiles',
+    licence: 'Apache-2.0',
+    inputs: ['osgb'],
+    dir: 'only',
     output: tileset,
-    provide: {
-      env: 'OBJ2TILES_BIN', path: ['Obj2Tiles'],
-      download: {
-        version: '1.10.2',
-        'win32-x64': {
-          url: 'https://github.com/OpenDroneMap/Obj2Tiles/releases/download/v1.10.2/Obj2Tiles-Win64.zip',
-          sha256: 'f1ada6c4713ed0913fdba8c4c17a1652ab2ce4a5571163f940364c5b61e8e47b', bytes: 23715330, exe: 'Obj2Tiles.exe',
-        },
-        'linux-x64': {
-          url: 'https://github.com/OpenDroneMap/Obj2Tiles/releases/download/v1.10.2/Obj2Tiles-Linux64.zip',
-          sha256: '039a6fcf34bb29bf887ae5e8da6bc74044f731c75aaffe8a59dc8dca0fd9a2e3', bytes: 12494615, exe: 'Obj2Tiles',
-        },
-        'linux-arm64': {
-          url: 'https://github.com/OpenDroneMap/Obj2Tiles/releases/download/v1.10.2/Obj2Tiles-LinuxArm64.zip',
-          sha256: 'ff73e5bfdc728972f54df2104a56f388ed3db6c66642204ced15219a62f66b36', bytes: 12037034, exe: 'Obj2Tiles',
-        },
-        'darwin-arm64': {
-          url: 'https://github.com/OpenDroneMap/Obj2Tiles/releases/download/v1.10.2/Obj2Tiles-OsxArm64.zip',
-          sha256: 'c6170fde67959ea6005adaf71ceab63fde3f6abac4b035cbb1aa30edcf7cebf4', bytes: 11351374, exe: 'Obj2Tiles',
-        },
-        'darwin-x64': {
-          url: 'https://github.com/OpenDroneMap/Obj2Tiles/releases/download/v1.10.2/Obj2Tiles-Osx64.zip',
-          sha256: '7e0fd7ee742ac4027a7f1911b4d0963f77b5ff294bbd936728927cc1ad06ff4e', bytes: 12225524, exe: 'Obj2Tiles',
-        },
-      },
-    },
+    provide: FANVANZH,
     options: [
-      { key: 'lods', label: 'Levels of detail', type: 'int', min: 1, max: 10, default: 3, help: '--lods' },
-      { key: 'divisions', label: 'Divisions', type: 'int', min: 0, max: 8, default: 2, help: '--divisions: how many levels of spatial splitting the coarsest level sits at.' },
-      ...placement({ lon: '--lon', lat: '--lat', alt: '--alt' }).map((o) => ({ ...o, help: `${o.help} Without them the tileset is local (--local).` })),
-      { key: 'glb', label: 'GLB tiles (3D Tiles 1.1)', type: 'bool', default: true, help: '--glb: plain GLB tile content instead of b3dm. The tool\'s own default is b3dm.' },
-      { key: 'octree', label: 'Octree hierarchy', type: 'bool', default: true, help: '--octree: each finer level is split once more, a proper tile hierarchy. The tool\'s own default is the same split at every level.' },
-      { key: 'yUp', label: 'Input is Y-up', type: 'bool', default: false, help: '--y-up-to-z-up: for an OBJ exported with Y as the up axis.' },
-      { key: 'unlit', label: 'Unlit materials', type: 'bool', default: false, help: '--unlit: for photogrammetry, where the lighting is already in the textures.' },
-      { key: 'textureFormat', label: 'Textures', type: 'enum', values: ['Jpeg', 'Webp', 'Ktx2'], default: 'Jpeg', advanced: true, help: '--texture-format: Webp and Ktx2 need a viewer that reads them.' },
-      { key: 'decimation', label: 'Decimation', type: 'enum', values: ['Standard', 'Quality', 'Aggressive'], default: 'Standard', advanced: true, help: '--decimation-mode' },
-      { key: 'maxTextureSize', label: 'Largest texture (px)', type: 'int', min: 0, max: 16384, default: 4096, advanced: true, help: '--max-texture-size: 0 for no limit.' },
-      { key: 'scale', label: 'Scale', type: 'number', min: 0.000001, max: 1000000, default: 1, advanced: true, help: '--scale: for a model that is not in metres.' },
+      { key: 'lon', label: 'Longitude', type: 'number', min: -180, max: 180, default: '', placeholder: 'from metadata.xml', help: 'the "x" of the tile config: overrides the origin in metadata.xml. Give latitude too.' },
+      { key: 'lat', label: 'Latitude', type: 'number', min: -90, max: 90, default: '', placeholder: 'from metadata.xml', help: 'the "y" of the tile config.' },
+      { key: 'offset', label: 'Height offset (m)', type: 'number', min: -10000, max: 10000, default: 0, help: 'the "offset" of the tile config: added to the model\'s height.' },
+      { key: 'maxLevel', label: 'Deepest level', type: 'int', min: 1, max: 30, default: '', advanced: true, placeholder: 'all', help: 'the "max_lvl" of the tile config: stop at this level of the OSGB pyramid.' },
+      { key: 'pbr', label: 'PBR materials', type: 'bool', default: false, advanced: true, help: 'the "pbr" of the tile config. Off: unlit, as photogrammetry wants.' },
     ],
     steps(ctx) {
       const { exe, input, outDir, opt } = ctx;
-      const cmd = [...exe, '--lods', String(opt.lods), '--divisions', String(opt.divisions), '--texture-format', opt.textureFormat,
-        '--decimation-mode', opt.decimation, '--max-texture-size', String(opt.maxTextureSize)];
-      if (opt.lon !== '' && opt.lat !== '') cmd.push('--lon', String(opt.lon), '--lat', String(opt.lat), '--alt', String(opt.alt === '' ? 0 : opt.alt));
-      else cmd.push('--local');
-      if (opt.glb) cmd.push('--glb');
-      if (opt.octree) cmd.push('--octree');
-      if (opt.yUp) cmd.push('--y-up-to-z-up');
-      if (opt.unlit) cmd.push('--unlit');
-      if (opt.scale !== 1) cmd.push('--scale', String(opt.scale));
-      cmd.push(input, outDir);
-      return [{ cmd, label: 'OBJ → 3D Tiles' }];
+      const cmd = [...exe, '-f', 'osgb', '-i', input, '-o', outDir];
+      const config = {};
+      if (opt.lon !== '' && opt.lat !== '') { config.x = opt.lon; config.y = opt.lat; }
+      if (opt.offset) config.offset = opt.offset;
+      if (opt.maxLevel !== '') config.max_lvl = opt.maxLevel;
+      if (opt.pbr) config.pbr = true;
+      if (Object.keys(config).length) cmd.push('-c', JSON.stringify(config));
+      return [{ cmd, label: 'OSGB → 3D Tiles' }];
     },
   },
   {
@@ -739,33 +707,91 @@ export const TOOLS = [
     },
   },
   {
-    id: 'fanvanzh-3dtiles',
-    name: '3dtile (fanvanzh/3dtiles)',
+    id: 'obj2tiles',
+    name: 'Obj2Tiles',
     kind: 'mesh',
-    summary: 'An OSGB oblique-photography folder (metadata.xml and Data/) to 3D Tiles (b3dm), offline. The released binary is from 2021. This app also streams OSGB live with its own reader, without a conversion.',
-    homepage: 'https://github.com/fanvanzh/3dtiles',
-    licence: 'Apache-2.0',
-    inputs: ['osgb'],
-    dir: 'only',
+    summary: 'A textured OBJ mesh to 3D Tiles with levels of detail: it decimates, splits and tiles. OpenDroneMap\'s tool, self-contained.',
+    homepage: 'https://github.com/OpenDroneMap/Obj2Tiles',
+    licence: 'AGPL-3.0',
+    inputs: ['obj'],
     output: tileset,
-    provide: FANVANZH,
+    provide: {
+      env: 'OBJ2TILES_BIN', path: ['Obj2Tiles'],
+      download: {
+        version: '1.10.2',
+        'win32-x64': {
+          url: 'https://github.com/OpenDroneMap/Obj2Tiles/releases/download/v1.10.2/Obj2Tiles-Win64.zip',
+          sha256: 'f1ada6c4713ed0913fdba8c4c17a1652ab2ce4a5571163f940364c5b61e8e47b', bytes: 23715330, exe: 'Obj2Tiles.exe',
+        },
+        'linux-x64': {
+          url: 'https://github.com/OpenDroneMap/Obj2Tiles/releases/download/v1.10.2/Obj2Tiles-Linux64.zip',
+          sha256: '039a6fcf34bb29bf887ae5e8da6bc74044f731c75aaffe8a59dc8dca0fd9a2e3', bytes: 12494615, exe: 'Obj2Tiles',
+        },
+        'linux-arm64': {
+          url: 'https://github.com/OpenDroneMap/Obj2Tiles/releases/download/v1.10.2/Obj2Tiles-LinuxArm64.zip',
+          sha256: 'ff73e5bfdc728972f54df2104a56f388ed3db6c66642204ced15219a62f66b36', bytes: 12037034, exe: 'Obj2Tiles',
+        },
+        'darwin-arm64': {
+          url: 'https://github.com/OpenDroneMap/Obj2Tiles/releases/download/v1.10.2/Obj2Tiles-OsxArm64.zip',
+          sha256: 'c6170fde67959ea6005adaf71ceab63fde3f6abac4b035cbb1aa30edcf7cebf4', bytes: 11351374, exe: 'Obj2Tiles',
+        },
+        'darwin-x64': {
+          url: 'https://github.com/OpenDroneMap/Obj2Tiles/releases/download/v1.10.2/Obj2Tiles-Osx64.zip',
+          sha256: '7e0fd7ee742ac4027a7f1911b4d0963f77b5ff294bbd936728927cc1ad06ff4e', bytes: 12225524, exe: 'Obj2Tiles',
+        },
+      },
+    },
     options: [
-      { key: 'lon', label: 'Longitude', type: 'number', min: -180, max: 180, default: '', placeholder: 'from metadata.xml', help: 'the "x" of the tile config: overrides the origin in metadata.xml. Give latitude too.' },
-      { key: 'lat', label: 'Latitude', type: 'number', min: -90, max: 90, default: '', placeholder: 'from metadata.xml', help: 'the "y" of the tile config.' },
-      { key: 'offset', label: 'Height offset (m)', type: 'number', min: -10000, max: 10000, default: 0, help: 'the "offset" of the tile config: added to the model\'s height.' },
-      { key: 'maxLevel', label: 'Deepest level', type: 'int', min: 1, max: 30, default: '', advanced: true, placeholder: 'all', help: 'the "max_lvl" of the tile config: stop at this level of the OSGB pyramid.' },
-      { key: 'pbr', label: 'PBR materials', type: 'bool', default: false, advanced: true, help: 'the "pbr" of the tile config. Off: unlit, as photogrammetry wants.' },
+      { key: 'lods', label: 'Levels of detail', type: 'int', min: 1, max: 10, default: 3, help: '--lods' },
+      { key: 'divisions', label: 'Divisions', type: 'int', min: 0, max: 8, default: 2, help: '--divisions: how many levels of spatial splitting the coarsest level sits at.' },
+      ...placement({ lon: '--lon', lat: '--lat', alt: '--alt' }).map((o) => ({ ...o, help: `${o.help} Without them the tileset is local (--local).` })),
+      { key: 'glb', label: 'GLB tiles (3D Tiles 1.1)', type: 'bool', default: true, help: '--glb: plain GLB tile content instead of b3dm. The tool\'s own default is b3dm.' },
+      { key: 'octree', label: 'Octree hierarchy', type: 'bool', default: true, help: '--octree: each finer level is split once more, a proper tile hierarchy. The tool\'s own default is the same split at every level.' },
+      { key: 'yUp', label: 'Input is Y-up', type: 'bool', default: false, help: '--y-up-to-z-up: for an OBJ exported with Y as the up axis.' },
+      { key: 'unlit', label: 'Unlit materials', type: 'bool', default: false, help: '--unlit: for photogrammetry, where the lighting is already in the textures.' },
+      { key: 'textureFormat', label: 'Textures', type: 'enum', values: ['Jpeg', 'Webp', 'Ktx2'], default: 'Jpeg', advanced: true, help: '--texture-format: Webp and Ktx2 need a viewer that reads them.' },
+      { key: 'decimation', label: 'Decimation', type: 'enum', values: ['Standard', 'Quality', 'Aggressive'], default: 'Standard', advanced: true, help: '--decimation-mode' },
+      { key: 'maxTextureSize', label: 'Largest texture (px)', type: 'int', min: 0, max: 16384, default: 4096, advanced: true, help: '--max-texture-size: 0 for no limit.' },
+      { key: 'scale', label: 'Scale', type: 'number', min: 0.000001, max: 1000000, default: 1, advanced: true, help: '--scale: for a model that is not in metres.' },
     ],
     steps(ctx) {
       const { exe, input, outDir, opt } = ctx;
-      const cmd = [...exe, '-f', 'osgb', '-i', input, '-o', outDir];
-      const config = {};
-      if (opt.lon !== '' && opt.lat !== '') { config.x = opt.lon; config.y = opt.lat; }
-      if (opt.offset) config.offset = opt.offset;
-      if (opt.maxLevel !== '') config.max_lvl = opt.maxLevel;
-      if (opt.pbr) config.pbr = true;
-      if (Object.keys(config).length) cmd.push('-c', JSON.stringify(config));
-      return [{ cmd, label: 'OSGB → 3D Tiles' }];
+      const cmd = [...exe, '--lods', String(opt.lods), '--divisions', String(opt.divisions), '--texture-format', opt.textureFormat,
+        '--decimation-mode', opt.decimation, '--max-texture-size', String(opt.maxTextureSize)];
+      if (opt.lon !== '' && opt.lat !== '') cmd.push('--lon', String(opt.lon), '--lat', String(opt.lat), '--alt', String(opt.alt === '' ? 0 : opt.alt));
+      else cmd.push('--local');
+      if (opt.glb) cmd.push('--glb');
+      if (opt.octree) cmd.push('--octree');
+      if (opt.yUp) cmd.push('--y-up-to-z-up');
+      if (opt.unlit) cmd.push('--unlit');
+      if (opt.scale !== 1) cmd.push('--scale', String(opt.scale));
+      cmd.push(input, outDir);
+      return [{ cmd, label: 'OBJ → 3D Tiles' }];
+    },
+  },
+  {
+    id: 'rusty-tiles',
+    name: 'rusty-tiles mesh',
+    kind: 'mesh',
+    summary: 'A glTF or GLB mesh, or a folder of them, streamed into one 3D Tiles 1.1 archive (.3tz) with implicit tiling. One Rust binary, young (version 0.4).',
+    homepage: 'https://github.com/BenDyson-Arch/rusty-tiles',
+    licence: 'MIT',
+    inputs: ['glb', 'gltf'],
+    dir: true,
+    output: archive,
+    provide: RUSTY,
+    options: [
+      { key: 'profile', label: 'Profile', type: 'enum', values: ['balanced', 'fast', 'quality', 'lossless'], default: 'balanced', help: '--profile: how much the tool simplifies and compresses.' },
+      ...placement({ lon: '--anchor', lat: '--anchor', alt: '--anchor' }).map((o) => ({ ...o, help: `${o.help} For a model in local metres.` })),
+      { key: 'sourceCrs', label: 'Source CRS', type: 'text', default: '', advanced: true, placeholder: 'local', help: '--sourceCrs: an EPSG code when the coordinates are in a projected CRS. Empty: local metres, glTF Y up.' },
+      { key: 'sourceAxes', label: 'Axes in that CRS', type: 'enum', values: ['y-up', 'xyz'], default: 'y-up', advanced: true, help: '--sourceAxes: with a source CRS, y-up (east, height, minus north) or xyz (east, north, height).' },
+    ],
+    steps(ctx) {
+      const { exe, input, outDir, name, opt } = ctx;
+      const cmd = [...exe, 'mesh', '--force', '--input', input, '--output', path.join(outDir, `${name}.3tz`), '--profile', opt.profile];
+      if (opt.lon !== '' && opt.lat !== '') cmd.push('--anchor', String(opt.lon), String(opt.lat), String(opt.alt === '' ? 0 : opt.alt));
+      if (opt.sourceCrs) cmd.push('--sourceCrs', opt.sourceCrs, '--sourceAxes', opt.sourceAxes);
+      return [{ cmd, label: 'glTF → 3D Tiles archive' }];
     },
   },
   {
@@ -850,31 +876,6 @@ export const TOOLS = [
     },
   },
 
-  {
-    id: 'rusty-tiles',
-    name: 'rusty-tiles mesh',
-    kind: 'mesh',
-    summary: 'A glTF or GLB mesh, or a folder of them, streamed into one 3D Tiles 1.1 archive (.3tz) with implicit tiling. One Rust binary, young (version 0.4).',
-    homepage: 'https://github.com/BenDyson-Arch/rusty-tiles',
-    licence: 'MIT',
-    inputs: ['glb', 'gltf'],
-    dir: true,
-    output: archive,
-    provide: RUSTY,
-    options: [
-      { key: 'profile', label: 'Profile', type: 'enum', values: ['balanced', 'fast', 'quality', 'lossless'], default: 'balanced', help: '--profile: how much the tool simplifies and compresses.' },
-      ...placement({ lon: '--anchor', lat: '--anchor', alt: '--anchor' }).map((o) => ({ ...o, help: `${o.help} For a model in local metres.` })),
-      { key: 'sourceCrs', label: 'Source CRS', type: 'text', default: '', advanced: true, placeholder: 'local', help: '--sourceCrs: an EPSG code when the coordinates are in a projected CRS. Empty: local metres, glTF Y up.' },
-      { key: 'sourceAxes', label: 'Axes in that CRS', type: 'enum', values: ['y-up', 'xyz'], default: 'y-up', advanced: true, help: '--sourceAxes: with a source CRS, y-up (east, height, minus north) or xyz (east, north, height).' },
-    ],
-    steps(ctx) {
-      const { exe, input, outDir, name, opt } = ctx;
-      const cmd = [...exe, 'mesh', '--force', '--input', input, '--output', path.join(outDir, `${name}.3tz`), '--profile', opt.profile];
-      if (opt.lon !== '' && opt.lat !== '') cmd.push('--anchor', String(opt.lon), String(opt.lat), String(opt.alt === '' ? 0 : opt.alt));
-      if (opt.sourceCrs) cmd.push('--sourceCrs', opt.sourceCrs, '--sourceAxes', opt.sourceAxes);
-      return [{ cmd, label: 'glTF → 3D Tiles archive' }];
-    },
-  },
   {
     id: 'rusty-tiles-vector',
     name: 'rusty-tiles vector',

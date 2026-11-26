@@ -75,7 +75,7 @@ test('which tools take a file or a folder', () => {
   assert.deepEqual(toolsFor('C:\\scans\\site.LAS'), ['pdal', 'untwine', 'potreeconverter', 'potreeconverter1', 'gocesiumtiler', 'point-tiler', 'py3dtiles', 'rusty-tiles-points', 'mago-3d-tiler']);
   assert.deepEqual(toolsFor('/data/scan.e57'), ['pdal', 'gocesiumtiler']);
   assert.deepEqual(toolsFor('already.copc.laz'), [], 'a COPC is tiled already: it is streamed, not tiled again');
-  assert.deepEqual(toolsFor('model.obj'), ['obj2tiles', 'mago-3d-tiler', 'nexus']);
+  assert.deepEqual(toolsFor('model.obj'), ['mago-3d-tiler', 'obj2tiles', 'nexus']);
   assert.deepEqual(toolsFor('model.glb'), ['mago-3d-tiler', 'rusty-tiles']);
   assert.deepEqual(toolsFor('part.stl'), ['mago-3d-tiler', 'nexus']);
   assert.deepEqual(toolsFor('building.ifc'), ['mago-3d-tiler']);

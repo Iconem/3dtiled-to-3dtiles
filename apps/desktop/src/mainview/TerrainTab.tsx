@@ -11,23 +11,34 @@
  *
  * A row keeps the source and its encoding, never the built URL: the URL follows the port the service got this time.
  * The list lives in localStorage, like the Streams.
+ *
+ * Keys: a library source that needs an API key (its `key` in /terrain-sources: mapboxKey, maptilerKey, cesiumIonKey)
+ * gets a key field; the key is kept in localStorage by its name, shared by every row of that provider, and sent as that
+ * query parameter (the service's own way), so it is in the copied URL.
+ *
+ * Output "From a Terrain Viewer link": the service's /view reads a share link (its modes on, their settings: colour
+ * ramp, range, hillshade method...) and the row offers those modes to pick from, stacked in one tile URL with the
+ * link's settings, on the row's own source.
  */
 import { Autocomplete } from '@base-ui/react/autocomplete';
 import { ExternalLinkIcon, KeyRoundIcon, MoreHorizontalIcon, PlusIcon, Trash2Icon } from 'lucide-react';
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react';
 import { toast } from 'sonner';
 import { Button } from '@/components/ui/button';
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from '@/components/ui/dropdown-menu';
+import { ToggleGroup, ToggleGroupItem } from '@/components/ui/toggle-group';
 import { cn } from '@/lib/utils';
 import type { TerrainServiceStatus } from '../shared/rpc-schema';
 import type { AppModel } from './App';
 import { Card, CardHead, CardHeadActions, CardTitle } from './components/Card';
-import { Chip, Choice, CopyButton, Hint, Info, Tip, UrlBar } from './components/bits';
+import { Chip, Choice, CopyButton, Hint, Info, TextInput, Tip, UrlBar } from './components/bits';
 import { openExternal, pickerAvailable, pickerRpc } from './host';
 import { newId } from './library';
 import { HEALTH_LOOK, type Health } from './StreamsList';
 
 const KEY = '3dtiled-desktop-terrain-sources-v1';
+/** API keys by the service's parameter name ({ mapboxKey: 'pk…' }), on this machine only. */
+const KEYS = '3dtiled-desktop-terrain-keys-v1';
 const TILER_CLI = 'packages/tilers/cli.js';
 /** The ports the main process tries (TERRAIN_PORTS in src/bun/terrain-service.ts); in a plain browser, where one may already run. */
 const PORTS = [3400, 3401, 3402, 3403];
@@ -54,9 +65,37 @@ const OUTPUTS = [
   { value: 'tri', label: 'TRI' },
   { value: 'colorRelief', label: 'Colour relief' },
   { value: 'contours', label: 'Contours (vector)' },
+  { value: 'link', label: 'Terrain Viewer link', title: 'Paste a Terrain Viewer link: pick among the modes it shows, with its settings' },
 ];
 
-export interface TerrainSource { id: string; name: string; src: string; encoding: string; output: string; addedAt: number }
+/** A Terrain Viewer share link read by the service's /view: the modes it shows, their settings, and its own source. */
+export interface LinkView { link: string; active: string[]; modes: string[]; params: Record<string, string>; opacity: Record<string, number>; source?: string }
+
+const MODE_LABELS: Record<string, string> = {
+  hillshade: 'Hillshade', colorRelief: 'Colour relief', contours: 'Contours', slope: 'Slope', aspect: 'Aspect', curvature: 'Curvature',
+  tpi: 'TPI', tri: 'TRI', roughness: 'Roughness', svf: 'Sky-view factor', openness: 'Openness', lrm: 'Local relief', localDominance: 'Local dominance',
+  phong: 'Phong', matcap: 'Matcap', shadows: 'Shadows', buildingShadows: 'Building shadows', isoline: 'Isolines', graticules: 'Graticules',
+  planeSlicer: 'Plane slicer', moundDetector: 'Mounds', shapeIndex: 'Shape index', blobness: 'Blobness', eigenRatio: 'Eigen ratio', orientation: 'Orientation',
+};
+/** A mode's opacity parameter (the app's: shadows and buildingShadows are named apart). */
+const opacityKey = (m: string) => (m === 'shadows' ? 'shadowOpacity' : m === 'buildingShadows' ? 'buildingShadowOpacity' : `${m}Opacity`);
+/** A Terrain Viewer share link (or the desktop app's), rather than a source. */
+const isViewerLink = (v: string) => /^(https?|views):\/\/[^?]*\?(.*&)?(terrainSource[A-H]?|sourceA|viewMode|showHillshade|zoom)=/i.test(v.trim());
+
+/** Ask the service to read a share link. */
+async function readLink(base: string, link: string): Promise<LinkView> {
+  const r = await fetch(`${base}/view?url=${encodeURIComponent(link.trim())}`, { signal: AbortSignal.timeout(15000) });
+  if (!r.ok) throw new Error(`HTTP ${r.status}: ${(await r.text()).slice(0, 200)}`);
+  const j = await r.json() as { active?: string[]; params?: Record<string, string>; opacity?: Record<string, number> };
+  const active = (j.active ?? []).filter((m) => m !== 'basemap');
+  if (!active.length) throw new Error('The link shows no terrain mode.');
+  const { terrainSource, ...params } = j.params ?? {};
+  return { link: link.trim(), active, modes: active, params, opacity: j.opacity ?? {}, source: terrainSource };
+}
+
+export interface TerrainSource { id: string; name: string; src: string; encoding: string; output: string; addedAt: number; view?: LinkView }
+/** The API key a row sends: the parameter's name and its value ('' when not entered yet). */
+export interface KeyParam { name: string; value: string }
 
 /** A source given as a configuration, the fields of a library entry: {"url": "...", "type": "cog", ...}. */
 const isJson = (src: string) => src.trim().startsWith('{');
@@ -69,25 +108,36 @@ const nameOf = (src: string): string => {
 };
 
 /** `{source}` in the service's paths, and the query that names a source given by address. */
-function sourceRef(s: Pick<TerrainSource, 'src' | 'encoding'>): { path: string; query: string } {
+function sourceRef(s: Pick<TerrainSource, 'src' | 'encoding'>, key?: KeyParam): { path: string; query: string } {
   const src = s.src.trim();
-  if (isId(src)) return { path: encodeURIComponent(src), query: '' };
+  const k = key?.value ? `${key.name}=${encodeURIComponent(key.value.trim())}` : '';
+  const q = (...parts: string[]) => parts.filter(Boolean).join('&');
+  if (isId(src)) return { path: encodeURIComponent(src), query: k };
   if (isJson(src)) {
     let value = src;
     try { const j = JSON.parse(src); value = JSON.stringify(s.encoding && !j.type ? { ...j, type: s.encoding } : j); } catch { /* sent as typed: the service says what is wrong */ }
-    return { path: 'custom', query: `terrainSource=${encodeURIComponent(value)}` };
+    return { path: 'custom', query: q(`terrainSource=${encodeURIComponent(value)}`, k) };
   }
   const value = s.encoding ? JSON.stringify({ url: src, type: s.encoding }) : src;
-  return { path: 'custom', query: `terrainSource=${encodeURIComponent(value)}` };
+  return { path: 'custom', query: q(`terrainSource=${encodeURIComponent(value)}`, k) };
 }
-export function layerJsonUrl(base: string, s: Pick<TerrainSource, 'src' | 'encoding'>) {
-  const r = sourceRef(s);
+export function layerJsonUrl(base: string, s: Pick<TerrainSource, 'src' | 'encoding'>, key?: KeyParam) {
+  const r = sourceRef(s, key);
   return `${base}/quantized-mesh/${r.path}/layer.json${r.query ? `?${r.query}` : ''}`;
 }
-export function terrainUrl(base: string, s: Pick<TerrainSource, 'src' | 'encoding' | 'output'>) {
+/** The query of a link row: the modes picked, the link's settings, and, for a stack, each mode's opacity from the link. */
+function linkQuery(v: LinkView) {
+  const modes = v.modes.length ? v.modes : v.active;
+  const q = new URLSearchParams({ modes: modes.join(','), ...v.params });
+  if (modes.length > 1) for (const m of modes) if (typeof v.opacity[m] === 'number' && v.opacity[m] !== 1) q.set(opacityKey(m), String(v.opacity[m]));
+  return q.toString().replace(/%2C/g, ',');
+}
+export function terrainUrl(base: string, s: Pick<TerrainSource, 'src' | 'encoding' | 'output' | 'view'>, key?: KeyParam) {
   if (!base || !s.src.trim()) return '';
-  if (s.output === 'qm') return layerJsonUrl(base, s);
-  const r = sourceRef(s), ext = s.output === 'contours' ? 'pbf' : 'png';
+  if (s.output === 'qm') return layerJsonUrl(base, s, key);
+  const r = sourceRef(s, key);
+  if (s.output === 'link') return s.view ? `${base}/terrain-tiles/${r.path}/{z}/{x}/{y}.png?${linkQuery(s.view)}${r.query ? `&${r.query}` : ''}` : '';
+  const ext = s.output === 'contours' ? 'pbf' : 'png';
   return `${base}/terrain-tiles/${r.path}/{z}/{x}/{y}.${ext}?modes=${s.output}${r.query ? `&${r.query}` : ''}`;
 }
 /** The same source in Terrain Viewer's web app (its share link names a source by address, its type for the whole link). */
@@ -115,6 +165,43 @@ function useLibrary(base: string) {
     return () => { stale = true; };
   }, [base]);
   return base ? groups : [];
+}
+
+function loadKeys(): Record<string, string> {
+  try { const k = JSON.parse(localStorage.getItem(KEYS) ?? '{}'); return k && typeof k === 'object' ? k : {}; } catch { return {}; }
+}
+/** The API keys entered, by parameter name, kept on this machine. */
+function useKeys() {
+  const [keys, setKeys] = useState<Record<string, string>>(loadKeys);
+  const set = useCallback((name: string, value: string) => setKeys((k) => {
+    const next = { ...k, [name]: value };
+    if (!value) delete next[name];
+    try { localStorage.setItem(KEYS, JSON.stringify(next)); } catch { /* kept for this session */ }
+    return next;
+  }), []);
+  return [keys, set] as const;
+}
+/** The key a source needs: its library entry's `key`, or cesiumIonKey for a Cesium ion asset given as JSON. */
+function keyNameOf(src: string, library: LibraryGroup[]): string | null {
+  const v = src.trim();
+  if (isId(v)) return library.flatMap((g) => g.items).find((x) => x.id === v)?.key ?? null;
+  if (isJson(v)) { try { const j = JSON.parse(v); return j.key ?? (/^ion\//.test(String(j.url ?? '')) ? 'cesiumIonKey' : null); } catch { return null; } }
+  return null;
+}
+
+/** The API key field of a provider: a password field, kept by its parameter name and shared by its rows. */
+function KeyField({ name, value, onChange, id }: { name: string; value: string; onChange: (v: string) => void; id?: string }) {
+  const [draft, setDraft] = useState(value);
+  useEffect(() => setDraft(value), [value]);
+  return (
+    <label className="flex items-center gap-2 text-xs text-muted-foreground">
+      <KeyRoundIcon className="size-3.5 flex-none" />
+      <span className="w-24 flex-none font-mono">{name}</span>
+      <TextInput id={id} type="password" aria-label={`API key (${name})`} value={draft} placeholder="Needed by this source: kept on this machine, sent in the URL"
+        onChange={(e) => setDraft(e.target.value)} onBlur={() => draft !== value && onChange(draft.trim())}
+        onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); e.currentTarget.blur(); } }} className="h-8 min-w-0 flex-1 text-xs" />
+    </label>
+  );
 }
 
 const matches = (x: LibrarySource, q: string) => {
@@ -176,7 +263,7 @@ function save(list: TerrainSource[]) {
   try { localStorage.setItem(KEY, JSON.stringify(list)); } catch { /* the list lasts this session */ }
 }
 
-const OFF: TerrainServiceStatus = { state: 'stopped', url: null, port: null, owned: false, pid: null, installed: false, version: null, downloadable: false, bytes: null, hint: null, log: [] };
+const OFF: TerrainServiceStatus = { state: 'stopped', url: null, port: null, preferredPort: 3400, owned: false, pid: null, installed: false, version: null, downloadable: false, bytes: null, hint: null, log: [] };
 
 /**
  * The service's status: from the main process in the app, polled while the tab is open (faster while it starts); in a
@@ -185,16 +272,16 @@ const OFF: TerrainServiceStatus = { state: 'stopped', url: null, port: null, own
 function useService(active: boolean) {
   const host = pickerAvailable() && !!pickerRpc;
   const [st, setSt] = useState<TerrainServiceStatus | null>(null);
-  const ask = useCallback(async (action: 'status' | 'start' | 'stop' | 'refresh' = 'status') => {
+  const ask = useCallback(async (action: 'status' | 'start' | 'stop' | 'refresh' = 'status', port?: number) => {
     if (host) {
-      const s = await pickerRpc!.request.terrainService({ action }).catch(() => null);
+      const s = await pickerRpc!.request.terrainService(port ? { action, port } : { action }).catch(() => null);
       if (s) setSt(s);
       return s;
     }
     for (const p of PORTS) {
       try {
         const r = await fetch(`http://127.0.0.1:${p}/health`, { signal: AbortSignal.timeout(1500) });
-        if (r.ok && (await r.text()).includes('"direct"')) { const s = { ...OFF, state: 'running' as const, url: `http://127.0.0.1:${p}`, port: p, installed: true }; setSt(s); return s; }
+        if (r.ok && (await r.text()).includes('"direct"')) { const s = { ...OFF, state: 'running' as const, url: `http://127.0.0.1:${p}`, port: p, preferredPort: p, installed: true }; setSt(s); return s; }
       } catch { /* next port */ }
     }
     setSt({ ...OFF, hint: 'Start and stop it from the desktop app.' });
@@ -212,6 +299,7 @@ function useService(active: boolean) {
 function ServiceCard({ svc, say }: { svc: ReturnType<typeof useService>; say: AppModel['say'] }) {
   const { st, ask, host } = svc;
   const [install, setInstall] = useState<{ id: string; line: string } | null>(null);
+  const [portDraft, setPortDraft] = useState<string | null>(null);
   const installRef = useRef(install);
   installRef.current = install;
 
@@ -247,6 +335,18 @@ function ServiceCard({ svc, say }: { svc: ReturnType<typeof useService>; say: Ap
     checking: { label: '…', cls: '' },
   };
   const look = pill[state]!;
+
+  async function savePort() {
+    const p = Number(portDraft);
+    if (!Number.isInteger(p) || p < 1024 || p > 65535) return say('A port is a whole number from 1024 to 65535.', 'err');
+    setPortDraft(null);
+    if (p === st?.preferredPort) return;
+    // a service this app started moves to the new port; an adopted one is only let go of
+    const restart = st?.state === 'running' || st?.state === 'starting';
+    if (restart) await ask('stop');
+    await ask(restart ? 'start' : 'status', p);
+    say(`Terrain service port: ${p} (then ${p + 1} to ${p + 3} if taken).`, 'ok');
+  }
   const mb = st?.bytes ? `${Math.round(st.bytes / 1e6)} MB` : '';
   const detail = st?.state === 'running'
     ? `${st.owned ? `Started by this app${st.pid ? ` (process ${st.pid})` : ''}` : 'Already running, not started by this app: left running on Stop'}. Listens on 127.0.0.1 only.`
@@ -259,7 +359,7 @@ function ServiceCard({ svc, say }: { svc: ReturnType<typeof useService>; say: Ap
         <Tip text={detail || undefined}><span data-state={state} id="terrain-state"><Chip className={look.cls}>{look.label}</Chip></span></Tip>
         <Info label="About the terrain service">
           <p className="m-0">Terrain Viewer's tile service (Iconem, MIT): any DEM as <strong>quantized-mesh</strong> terrain and as tiles of its analyses, computed per tile on this machine.</p>
-          <p className="m-0">Downloaded once from its GitHub release ({st?.version ?? 'pinned'}), checked against a pinned SHA-256, kept in this app's tools folder. A service already running on port 3400 (Terrain Viewer's desktop app) is used as it is.</p>
+          <p className="m-0">Downloaded once from its GitHub release ({st?.version ?? 'pinned'}), checked against a pinned SHA-256, kept in this app's tools folder. It listens on port {st?.preferredPort ?? 3400} (or the next three if taken; change it in the menu). A Terrain Viewer service already running there (its desktop app's) is used as it is.</p>
         </Info>
         <CardHeadActions>
           {install ? (
@@ -273,18 +373,31 @@ function ServiceCard({ svc, say }: { svc: ReturnType<typeof useService>; say: Ap
           ) : (
             <Button id="terrain-start" disabled={!host || state === 'checking'} onClick={() => void ask('start')}>Start</Button>
           )}
-          {st?.url && (
+          {(st?.url || host) && (
             <DropdownMenu>
               <Tip text="More"><DropdownMenuTrigger render={<Button id="terrain-menu" size="icon" variant="ghost" aria-label="More" />}><MoreHorizontalIcon className="size-4" /></DropdownMenuTrigger></Tip>
               <DropdownMenuContent align="end" className="min-w-48">
-                <DropdownMenuItem onClick={() => openExternal(`${st.url}/docs`)}>API and quick start</DropdownMenuItem>
-                <DropdownMenuItem onClick={() => openExternal(`${st.url}/terrain-sources`)}>Library sources (JSON)</DropdownMenuItem>
-                <DropdownMenuItem onClick={() => { void navigator.clipboard.writeText(st.url!).then(() => toast.success('Address copied')); }}>Copy address</DropdownMenuItem>
+                {st?.url && <>
+                  <DropdownMenuItem onClick={() => openExternal(`${st.url}/docs`)}>API and quick start</DropdownMenuItem>
+                  <DropdownMenuItem onClick={() => openExternal(`${st.url}/terrain-sources`)}>Library sources (JSON)</DropdownMenuItem>
+                  <DropdownMenuItem onClick={() => { void navigator.clipboard.writeText(st.url!).then(() => toast.success('Address copied')); }}>Copy address</DropdownMenuItem>
+                </>}
+                {host && <DropdownMenuItem id="terrain-port-item" onClick={() => setPortDraft(String(st?.preferredPort ?? 3400))}>Port, {st?.preferredPort ?? 3400}…</DropdownMenuItem>}
               </DropdownMenuContent>
             </DropdownMenu>
           )}
         </CardHeadActions>
       </CardHead>
+      {portDraft !== null && (
+        <form className="mt-2 flex items-center gap-2" onSubmit={(e) => { e.preventDefault(); void savePort(); }}>
+          <label htmlFor="terrain-port" className="text-xs text-muted-foreground">Port</label>
+          <TextInput id="terrain-port" inputMode="numeric" autoFocus value={portDraft} onChange={(e) => setPortDraft(e.target.value.replace(/\D/g, ''))}
+            onKeyDown={(e) => { if (e.key === 'Escape') setPortDraft(null); }} className="h-8 w-24 font-mono text-xs" />
+          <Button id="terrain-port-save" type="submit" variant="outline" size="sm">{st?.state === 'running' ? 'Save and restart' : 'Save'}</Button>
+          <Button type="button" variant="ghost" size="sm" onClick={() => setPortDraft(null)}>Cancel</Button>
+          <Hint>Tried first, then the next three. Terrain Viewer&apos;s desktop app uses 3400.</Hint>
+        </form>
+      )}
       {install && <Hint id="terrain-install-line" className="truncate font-mono">{install.line}</Hint>}
       {!install && st?.url && <Hint id="terrain-url" className="font-mono">{st.url}</Hint>}
       {!install && st?.state === 'error' && st.message && <Hint className="text-destructive">{st.message}</Hint>}
@@ -322,9 +435,50 @@ function useLayerHealth(url: string): [Health, () => void] {
   return [h, () => setNonce((n) => n + 1)];
 }
 
-function SourceRow({ s, base, onPatch, onRemove }: { s: TerrainSource; base: string; onPatch: (p: Partial<TerrainSource>) => void; onRemove: () => void }) {
-  const url = terrainUrl(base, s);
-  const [health, recheck] = useLayerHealth(base ? layerJsonUrl(base, s) : '');
+/** The output "From a Terrain Viewer link": the link, then the modes it shows, to pick from. */
+function LinkPanel({ s, base, onPatch, say }: { s: TerrainSource; base: string; onPatch: (p: Partial<TerrainSource>) => void; say: AppModel['say'] }) {
+  const [draft, setDraft] = useState(s.view?.link ?? '');
+  const [busy, setBusy] = useState(false);
+  async function read() {
+    if (!draft.trim()) return say('Paste a Terrain Viewer link first.', 'err');
+    if (!base) return say('Start the terrain service: it reads the link.', 'err');
+    setBusy(true);
+    try { onPatch({ view: await readLink(base, draft) }); }
+    catch (e) { say(`Could not read the link: ${e instanceof Error ? e.message : e}`, 'err'); }
+    finally { setBusy(false); }
+  }
+  const v = s.view;
+  return (
+    <div className="flex flex-col gap-1.5" data-field="link">
+      <form className="flex items-center gap-1.5" onSubmit={(e) => { e.preventDefault(); void read(); }}>
+        <TextInput aria-label="Terrain Viewer link" value={draft} onChange={(e) => setDraft(e.target.value)} placeholder="https://terrain-viewer.iconem.com/?…: its modes and their settings"
+          onPaste={(e) => { const t = e.clipboardData.getData('text'); if (t) { setDraft(t); } }} className="h-8 min-w-0 flex-1 text-xs" />
+        <Button type="submit" variant="outline" size="sm" disabled={busy}>{busy ? 'Reading…' : v ? 'Read again' : 'Read'}</Button>
+      </form>
+      {v && (
+        <div className="flex flex-wrap items-center gap-1.5">
+          <span className="text-xs text-muted-foreground">Modes</span>
+          <ToggleGroup multiple spacing={1} size="sm" variant="outline" value={v.modes} aria-label="Modes from the link"
+            onValueChange={(m: string[]) => onPatch({ view: { ...v, modes: v.active.filter((a) => m.includes(a)) } })}>
+            {v.active.map((m) => <ToggleGroupItem key={m} value={m} data-mode={m} className="h-7 px-2 text-xs">{MODE_LABELS[m] ?? m}</ToggleGroupItem>)}
+          </ToggleGroup>
+          {Object.keys(v.params).length > 0 && (
+            <Tip text={Object.entries(v.params).map(([k, x]) => `${k} = ${x}`).join('\n')}><span className="text-xs text-muted-foreground underline decoration-dotted underline-offset-2">{Object.keys(v.params).length} settings</span></Tip>
+          )}
+        </div>
+      )}
+      {v?.source && v.source !== s.src.trim() && (
+        <Hint>The link shows <span className="font-mono">{nameOf(v.source)}</span>; this row keeps its own source. <button type="button" className="cursor-pointer border-0 bg-transparent p-0 text-xs text-foreground underline-offset-2 hover:underline" onClick={() => onPatch({ src: v.source!, encoding: '', name: nameOf(v.source!) })}>Use the link&apos;s</button></Hint>
+      )}
+    </div>
+  );
+}
+
+function SourceRow({ s, base, keyParam, keyField, say, onPatch, onRemove }: {
+  s: TerrainSource; base: string; keyParam?: KeyParam; keyField?: ReactNode; say: AppModel['say']; onPatch: (p: Partial<TerrainSource>) => void; onRemove: () => void;
+}) {
+  const url = terrainUrl(base, s, keyParam);
+  const [health, recheck] = useLayerHealth(base && (!keyParam || keyParam.value) ? layerJsonUrl(base, s, keyParam) : '');
   const look = HEALTH_LOOK[health.state];
   const [name, setName] = useState(s.name);
   const commit = () => { const n = name.trim() || nameOf(s.src); setName(n); if (n !== s.name) onPatch({ name: n }); };
@@ -349,9 +503,11 @@ function SourceRow({ s, base, onPatch, onRemove }: { s: TerrainSource; base: str
       </div>
       <div className="mt-1 flex flex-col gap-1.5">
         <Tip text={s.src}><input aria-label="Source" readOnly value={s.src} spellCheck={false} className={cn(roField, 'border-transparent bg-transparent text-muted-foreground')} /></Tip>
+        {keyField}
+        {s.output === 'link' && <LinkPanel s={s} base={base} onPatch={onPatch} say={say} />}
         <UrlBar>
           <Choice value={s.output} onChange={(v) => onPatch({ output: v })} options={OUTPUTS} className="h-8 w-40 flex-none text-xs" />
-          <input aria-label="Terrain URL" readOnly value={url} placeholder="Start the service" spellCheck={false} data-field="url"
+          <input aria-label="Terrain URL" readOnly value={url} placeholder={!base ? 'Start the service' : s.output === 'link' ? 'Read a link above' : ''} spellCheck={false} data-field="url"
             onFocus={(e) => e.target.select()} className={cn(roField, 'placeholder:font-sans placeholder:text-muted-foreground/70')} />
           <CopyButton text={url} title={s.output === 'qm' ? 'Copy layer.json URL' : 'Copy tile URL'} variant="outline" className="size-8" />
         </UrlBar>
@@ -368,10 +524,25 @@ export function TerrainTab({ app, active }: { app: AppModel; active: boolean }) 
   const [src, setSrc] = useState('');
   const [encoding, setEncoding] = useState('');
   const library = useLibrary(base);
+  const [keys, setKey] = useKeys();
+  const keyOf = (v: string): KeyParam | undefined => { const n = keyNameOf(v, library); return n ? { name: n, value: keys[n] ?? '' } : undefined; };
+  const newKey = keyOf(src);
+
+  async function addLink(link: string) {
+    if (!base) return app.say('Start the terrain service: it reads Terrain Viewer links.', 'err');
+    try {
+      const view = await readLink(base, link);
+      const v = view.source ?? 'mapterhorn';
+      const known = library.flatMap((g) => g.items).find((x) => x.id === v);
+      change((l) => [...l, { id: newId(), name: known?.name ?? nameOf(v), src: v, encoding: '', output: 'link', view, addedAt: Date.now() }]);
+      setSrc('');
+    } catch (e) { app.say(`Could not read the link: ${e instanceof Error ? e.message : e}`, 'err'); }
+  }
 
   function add(value = src, enc = encoding) {
     const v = value.trim();
     if (!v) return app.say('Pick a library source, or enter a tile template, a COG address or a source as JSON.', 'err');
+    if (isViewerLink(v)) return void addLink(v);
     if (isJson(v)) { try { JSON.parse(v); } catch { return app.say('That JSON does not parse.', 'err'); } }
     if (list.some((e) => e.src === v && e.encoding === enc)) return app.say('That source is already in the list.');
     const known = library.flatMap((g) => g.items).find((x) => x.id === v);
@@ -393,7 +564,8 @@ export function TerrainTab({ app, active }: { app: AppModel; active: boolean }) 
           {list.length > 0 && <span className="text-xs text-muted-foreground">{list.length}</span>}
           <Info label="About terrain sources">
             <p className="m-0">Pick one of the service's <strong>library</strong> sources (the list opens on click, filtered as you type; a key icon marks one that needs an API key), or type a <strong>tile template</strong> (Terrarium or Terrain-RGB, with {'{z}/{x}/{y}'}), a <strong>COG</strong> or <strong>VRT</strong> address, or a source as <strong>JSON</strong>: {'{"url": "…", "type": "cog"}'}.</p>
-            <p className="m-0">Each row gives the <strong>layer.json</strong> for Cesium clients, or the XYZ tiles of one analysis. Heights are on the WGS84 ellipsoid (the EGM96 geoid added).</p>
+            <p className="m-0">Each row gives the <strong>layer.json</strong> for Cesium clients, or the XYZ tiles of one analysis, or, from a pasted <strong>Terrain Viewer link</strong> (here or in a row's output menu), the modes it shows with their settings (colour ramp and range, hillshade method…). Heights are on the WGS84 ellipsoid (the EGM96 geoid added).</p>
+            <p className="m-0">A source that needs an API key (Mapbox, MapTiler, Cesium ion) gets a key field: the key stays on this machine and goes into the URL as the service expects.</p>
           </Info>
         </CardHead>
         <form className="flex items-stretch gap-2" onSubmit={(e) => { e.preventDefault(); add(); }}>
@@ -401,12 +573,15 @@ export function TerrainTab({ app, active }: { app: AppModel; active: boolean }) 
           <Choice id="terrain-encoding" value={encoding} onChange={setEncoding} options={ENCODINGS} title="How the source is encoded" className="w-32 flex-none" />
           <Button id="terrain-add" type="submit" variant="outline" className="gap-1.5"><PlusIcon className="size-4" />Add</Button>
         </form>
+        {newKey && <div className="mt-2"><KeyField id="terrain-new-key" name={newKey.name} value={newKey.value} onChange={(x) => setKey(newKey.name, x)} /></div>}
         {list.length === 0 ? (
           <Hint className="mt-2">Nothing yet. <button type="button" id="terrain-sample" className="cursor-pointer border-0 bg-transparent p-0 text-xs text-foreground underline-offset-2 hover:underline" onClick={() => add(SAMPLE, 'terrarium')}>Add AWS Terrain Tiles</button></Hint>
         ) : (
           <ul id="terrain-list" className="m-0 mt-3 flex list-none flex-col gap-2 p-0">
             {list.map((s) => (
-              <SourceRow key={s.id} s={s} base={base} onPatch={(p) => change((l) => l.map((e) => (e.id === s.id ? { ...e, ...p } : e)))} onRemove={() => remove(s)} />
+              <SourceRow key={s.id} s={s} base={base} say={app.say} keyParam={keyOf(s.src)}
+                keyField={(() => { const k = keyOf(s.src); return k ? <KeyField name={k.name} value={k.value} onChange={(x) => setKey(k.name, x)} /> : null; })()}
+                onPatch={(p) => change((l) => l.map((e) => (e.id === s.id ? { ...e, ...p } : e)))} onRemove={() => remove(s)} />
             ))}
           </ul>
         )}

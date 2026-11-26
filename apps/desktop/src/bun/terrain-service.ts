@@ -13,10 +13,16 @@
  * and stopping by itself when its standard input closes (TV_EXIT_WITH_STDIN), so a crashed or killed app leaves no
  * orphan on the port. A Terrain Viewer service already answering on one of the ports (its desktop app's, 3400 by
  * default) is adopted rather than doubled, and left running on Stop.
+ *
+ * PORTS. The preferred port (3400 unless set in the tab, kept in `terrain-service.json` next to the app's other state,
+ * like Terrain Viewer's desktop app keeps its own) and the three after it.
  */
+import { readFileSync } from "node:fs";
 import type { TerrainServiceStatus } from "../shared/rpc-schema";
 
-export const TERRAIN_PORTS = [3400, 3401, 3402, 3403];
+export const DEFAULT_TERRAIN_PORT = 3400;
+const portsFrom = (p: number) => [p, p + 1, p + 2, p + 3].filter((x) => x <= 65535);
+const validPort = (p: unknown): p is number => Number.isInteger(p) && (p as number) >= 1024 && (p as number) <= 65535;
 
 type Child = { pid?: number; kill: () => void; closeStdin: () => void; exited: Promise<number | null> };
 
@@ -32,8 +38,27 @@ async function probe(port: number): Promise<"terrain" | "other" | null> {
 	}
 }
 
-export function createTerrainService(opts: { root: string; node: string }) {
+export function createTerrainService(opts: { root: string; node: string; stateDir?: string }) {
 	let state: TerrainServiceStatus["state"] = "stopped";
+	const settingsFile = opts.stateDir ? `${opts.stateDir}/terrain-service.json` : null;
+	let preferredPort = DEFAULT_TERRAIN_PORT;
+	if (settingsFile) {
+		try {
+			const p = JSON.parse(readFileSync(settingsFile, "utf8"))?.port;
+			if (validPort(p)) preferredPort = p;
+		} catch { /* the default */ }
+	}
+	async function setPort(p: number) {
+		if (!validPort(p) || p === preferredPort) return;
+		preferredPort = p;
+		if (!settingsFile) return;
+		try {
+			const { mkdirSync, writeFileSync } = await import("node:fs");
+			const { dirname } = await import("node:path");
+			mkdirSync(dirname(settingsFile), { recursive: true });
+			writeFileSync(settingsFile, JSON.stringify({ port: p }));
+		} catch { /* kept for this session */ }
+	}
 	let port: number | null = null;
 	let owned = false;
 	let message: string | undefined;
@@ -97,7 +122,8 @@ export function createTerrainService(opts: { root: string; node: string }) {
 		const d = await detect();
 		if (gen !== generation) return;
 		if (!d.installed || !d.exe) { state = "stopped"; message = d.hint ?? "Not installed."; return; }
-		for (const p of TERRAIN_PORTS) {
+		const ports = portsFrom(preferredPort);
+		for (const p of ports) {
 			const there = await probe(p);
 			if (gen !== generation) return;
 			if (there === "terrain") { port = p; owned = false; state = "running"; message = `A Terrain Viewer tile service was already running on port ${p}: this app uses it and leaves it running.`; return; }
@@ -123,7 +149,7 @@ export function createTerrainService(opts: { root: string; node: string }) {
 			state = "error"; message = `No answer on port ${p} within 60 s. ${tail.slice(-3).join(" ")}`.trim();
 			return;
 		}
-		state = "error"; message = `Ports ${TERRAIN_PORTS.join(", ")} are all taken by other programs.`;
+		state = "error"; message = `Ports ${ports.join(", ")} are all taken by other programs.`;
 	}
 
 	function stopChild() {
@@ -151,7 +177,7 @@ export function createTerrainService(opts: { root: string; node: string }) {
 			port = null;
 		}
 		return {
-			state, port, owned, message,
+			state, port, preferredPort, owned, message,
 			url: state === "running" && port ? `http://127.0.0.1:${port}` : null,
 			pid: owned && child ? child.pid ?? null : null,
 			installed: !!found?.installed, version: found?.version ?? null, downloadable: !!found?.downloadable, bytes: found?.bytes ?? null,
@@ -161,7 +187,8 @@ export function createTerrainService(opts: { root: string; node: string }) {
 	}
 
 	return {
-		async request(action: "status" | "start" | "stop" | "refresh"): Promise<TerrainServiceStatus> {
+		async request(action: "status" | "start" | "stop" | "refresh", port?: number): Promise<TerrainServiceStatus> {
+			if (port !== undefined) await setPort(port);
 			if (action === "refresh") await detect().catch(() => null);
 			if (action === "start") void start();   // answered at once: the view polls the status while it starts
 			if (action === "stop") stop();

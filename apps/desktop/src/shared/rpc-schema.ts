@@ -12,6 +12,8 @@ export interface TerrainServiceStatus {
   /** Its address while it runs: http://127.0.0.1:<port>. */
   url: string | null;
   port: number | null;
+  /** The first port tried (3400, Terrain Viewer's desktop app's, unless set in the tab): it and the next three. */
+  preferredPort: number;
   /** Started by this app (false: one already running was adopted, and is left running on Stop). */
   owned: boolean;
   pid: number | null;
@@ -113,10 +115,11 @@ export interface DesktopRPC {
       };
       /**
        * The Terrain tab's service: its status, or start / stop it, or look again for an install (`refresh`, after the
-       * view ran `packages/tilers/cli.js install terrain-service`). `start` answers at once, state `starting`.
+       * view ran `packages/tilers/cli.js install terrain-service`). `start` answers at once, state `starting`. `port`
+       * sets the first port tried (1024 to 65535), with `start` or alone.
        */
       terrainService: {
-        params: { action: 'status' | 'start' | 'stop' | 'refresh' };
+        params: { action: 'status' | 'start' | 'stop' | 'refresh'; port?: number };
         response: TerrainServiceStatus;
       };
       /** Stop the servers and restart into the downloaded update. */

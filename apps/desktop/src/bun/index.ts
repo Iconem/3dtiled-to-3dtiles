@@ -261,12 +261,13 @@ const WIN = { x: 100, y: 40, width: 800, height: 940, maxWidth: 1600, maxHeight:
 const cli = createCliRunner({ spawn: await defaultSpawn(), cwd: root, node });
 children.push({ kill: () => cli.killAll() });
 
-/** The Terrain tab's tile service (Terrain Viewer's), started only when the tab asks: see terrain-service.ts. */
-const terrain = createTerrainService({ root, node });
-children.push({ kill: () => terrain.kill() });
-
 // The library outlives the app's folder, which every update replaces, and is shared by a portable copy.
 const libraryDir = env.LOCALAPPDATA ? `${env.LOCALAPPDATA}/3D Tiled` : `${env.HOME ?? "."}/.3dtiled`;
+
+/** The Terrain tab's tile service (Terrain Viewer's), started only when the tab asks: see terrain-service.ts. Its port setting sits beside the library. */
+const terrain = createTerrainService({ root, node, stateDir: libraryDir });
+children.push({ kill: () => terrain.kill() });
+
 const libraryFile = `${libraryDir}/library.json`;
 
 const rpc = defineElectrobunRPC<DesktopRPC, "bun">("bun", {
@@ -298,7 +299,7 @@ const rpc = defineElectrobunRPC<DesktopRPC, "bun">("bun", {
 			runCli: ({ args, then }) => ({ id: cli.run(then ? [args, then] : [args]) }),
 			cliStatus: ({ id }) => cli.status(id),
 			cancelCli: ({ id }) => cli.cancel(id),
-			terrainService: ({ action }) => terrain.request(action),
+			terrainService: ({ action, port }) => terrain.request(action, port),
 
 			readLibrary: async () => {
 				const { readFile } = await import("node:fs/promises");

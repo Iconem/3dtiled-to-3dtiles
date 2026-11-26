@@ -26,12 +26,24 @@ Format loosely follows [Keep a Changelog](https://keepachangelog.com/).
   id, name and type as you type; or free text: a template, a COG or VRT address, or a source as JSON
   (`{"url": "…", "type": "cog"}`). A library pick keeps the library's name.
 - **Tilers: favourites.** Two tools per kind are starred and offered first, and the first starred tool already on the
-  machine is chosen for an input: untwine and PotreeConverter, Obj2Tiles and mago 3D Tiler, splat-transform and
+  machine is chosen for an input: untwine and PotreeConverter, fanvanzh's 3dtile and mago 3D Tiler (then Obj2Tiles
+  and rusty-tiles), splat-transform and
   Gaussian Splat Lite build-sog (`favorite` in `tools.js` and `cli.js list --json`).
 - **Docs: the home page opens on the slide deck's cover**, linked to the deck, its presenter view and the PDF; the
   Terrain tab section has a picture of it with Blender.
 
+- **Desktop, Terrain tab: API keys.** A library source that needs one (Mapbox, MapTiler, Cesium ion) gets a key
+  field; the key stays on this machine, is shared by that provider's rows, and goes into the URL as the service's
+  `mapboxKey` / `maptilerKey` / `cesiumIonKey` parameter.
+- **Desktop, Terrain tab: a Terrain Viewer link as a row's output.** The service's `/view` reads the link; pick any
+  of the modes it shows, stacked in one tile URL with the link's settings (colour ramp and range, hillshade method…).
+  A link pasted in the source field adds such a row.
+- **Desktop, Terrain tab: the service's port** is set in the card's menu (*Port…*, 3400 by default, then the next
+  three), kept in `terrain-service.json` beside the library.
+
 ### Changed — 2026-11-26
+- **Slides:** the cover shows nine of the source trees in a 3×3 grid; GitHub links point to the Iconem repositories;
+  *Around 3dtiled* lists repositories only.
 - **Remote `.3dtiles` packages are read with wa-sqlite** (`@journeyapps/wa-sqlite`, Asyncify build) and a small HTTP
   VFS on the server's own thread: no worker; sqlite-wasm-http and `@mmomtchev/web-worker` are gone. Same requests per
   tile, about 20% fewer bytes read, repeat reads from the cache. URLs over 64 characters (presigned, GitHub release
@@ -42,7 +54,7 @@ Format loosely follows [Keep a Changelog](https://keepachangelog.com/).
 - **Docs: 3D Tiles 2.0 on glTF 2.1** updated: cesium-native streams glTF 2.1 tilesets since v0.67.0 (#1508).
 - **Slides reordered (20):** the source trees and the formats come right after the overview; the desktop app comes
   before the viewer, over three slides (Stream live with the Streams pills; Export, Tile raw input and Library;
-  Terrain); every repository and PR on *Around 3dtiled* is a link; sources are labelled points, meshes, splats.
+  Terrain); every repository on *Around 3dtiled* is a link; sources are labelled points, meshes, splats.
 - **Roadmap: browser plugins for COPC, then perhaps VPC, only.** Nexus, 3MX, I3S and OSGB stay on the tile server
   (plan page and future work updated). The point tiler item is now a point and splat tiler.
 - **Docs: Gaussian Splat Lite section rewritten** as a table against the official tools, then its options.

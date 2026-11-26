@@ -367,8 +367,9 @@ folder, or a table of a PostGIS database. It runs one of the third-party tilers 
 gocesiumtiler, Obj2Tiles, splat-transform…), then streams or previews the result. Its input field is not the dataset
 of the two other tabs.
 
-Two tilers per kind are **starred** and offered first: untwine and PotreeConverter for point clouds, Obj2Tiles and
-mago 3D Tiler for meshes, splat-transform and Gaussian Splat Lite build-sog for splats. With an input, the first
+Two tilers per kind are **starred** and offered first: untwine and PotreeConverter for point clouds, fanvanzh's
+3dtile (OSGB) and mago 3D Tiler for meshes, with Obj2Tiles and rusty-tiles next, splat-transform and Gaussian Splat
+Lite build-sog for splats. With an input, the first
 starred tool already on the machine is chosen.
 
 It has a page of its own: **[Tile raw input](/docs/guide/desktop-tile-raw-input)**.
@@ -385,12 +386,22 @@ A DEM as Cesium terrain and as analysis tiles, computed on this machine by the t
   `node packages/tilers/cli.js install terrain-service` does the same. No bundle is published for Linux arm64.
 - **Start runs it on 127.0.0.1**, on the first free port from 3400 to 3403. A Terrain Viewer service already
   running there (its desktop app's, or its QGIS plugin's) is used as it is, and *Disconnect* leaves it running.
+  *Port…* in the card's menu sets the first port tried (kept in `terrain-service.json` beside the library), as in
+  Terrain Viewer's desktop app; a running service moves to it.
 - **Sources** come from a combo box: pick one of the service's library sources (Mapterhorn, Esri, AWS, Copernicus
   GLO-30, national LiDAR DEMs and so on, listed by the running service at `/terrain-sources`), or type your own: a
   Terrarium or Terrain-RGB template, a COG or VRT address, or a source as JSON (`{"url": "…", "type": "cog"}`).
   Each row has a health pill and gives its `layer.json` (quantized-mesh-1.0, heights on the WGS84 ellipsoid), or
   the XYZ tiles of hillshade, slope, aspect, sky-view factor, TPI, TRI or colour relief, or contours as vector
   tiles. The list is kept in the app, like the Streams list.
+- **API keys.** A library source that needs one (Mapbox, MapTiler, Cesium ion) gets a key field under it. The key is
+  kept on this machine by its name (`mapboxKey`, `maptilerKey`, `cesiumIonKey`), shared by the rows of that provider,
+  and sent as that query parameter, which is how the service takes it: it is in the URL you copy.
+- **A Terrain Viewer link as the output.** Choose *Terrain Viewer link* in a row's output menu, or paste the link
+  in the source field: the service's `/view` reads it, and the row lists the modes the link shows (hillshade, colour
+  relief, contours, slope…). Pick any of them: they are stacked in one tile URL with the link's settings (colour
+  ramp and range, hillshade method and light, contour interval…) and, for a stack, each mode's opacity. Set a
+  hypsometric tint up in Terrain Viewer, paste its link, copy the URL.
 - **Open** goes to the Terrain Viewer website with the source: 3dtiled's viewer has no custom terrain URL yet.
 
 <figure className="not-prose my-6">
