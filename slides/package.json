@@ -7,9 +7,11 @@
   "packageManager": "pnpm@10.20.0",
   "scripts": {
     "dev": "open-slide dev",
-    "build": "open-slide build",
+    "build": "open-slide build && node scripts/static-routes.mjs",
     "preview": "open-slide preview",
-    "sync:skills": "open-slide sync:skills"
+    "sync:skills": "open-slide sync:skills",
+    "static": "node scripts/publish.mjs --serve",
+    "pdf": "node scripts/publish.mjs --pdf"
   },
   "dependencies": {
     "@open-slide/core": "2.3.2",
@@ -18,6 +20,8 @@
   },
   "devDependencies": {
     "@types/react": "19.2.18",
-    "@types/react-dom": "19.2.7"
+    "@types/react-dom": "19.2.7",
+    "pdf-lib": "1.17.1",
+    "playwright-core": "1.63.0"
   }
 }

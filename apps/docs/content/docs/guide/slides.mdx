@@ -1,0 +1,36 @@
+---
+title: Slides
+description: The 3dtiled deck, live with a presenter view, and as a PDF
+---
+
+One deck of 19 slides on 3dtiled: where it came from, push and pull, hierarchy and geometry, the formats, aggregate sets,
+the viewer, the desktop app and what comes next. It is written as React pages with [open-slide](https://open-slide.dev)
+in the repository's `slides/` folder.
+
+- **Live**, with speaker notes and a presenter view: [docs.3dtiled.iconem.com/docs/slides/s/3dtiled/](https://docs.3dtiled.iconem.com/docs/slides/s/3dtiled/)
+- **PDF**, one page per slide: [3dtiled.pdf](https://github.com/jo-chemla/3dtiled-to-3dtiles/releases/download/slides/3dtiled.pdf), on the [`slides` release](https://github.com/jo-chemla/3dtiled-to-3dtiles/releases/tag/slides)
+
+## Presenting
+
+Open the deck, then **F** for full screen and **P** for the presenter window: the current slide, the next one, the
+notes and a timer, kept in step with the audience window in the same browser. Arrows, Space or Page Down move on;
+**O** shows every page, **B** and **W** blank the screen, **L** is a laser pointer, **?** lists the keys.
+
+The online deck is read-only: the inspector, its comments and inline edits write back to the slide sources, so they only
+run with `pnpm dev` on a checkout.
+
+## Working on it
+
+`slides/` is its own pnpm root with its own lockfile, outside the repository's workspace:
+
+```bash
+cd slides
+pnpm install
+pnpm dev          # editor with the inspector: http://localhost:3210/docs/slides/
+pnpm static       # the built site as it is served online: http://localhost:4180/docs/slides/
+pnpm pdf          # the built site and dist/pdf/3dtiled.pdf
+pnpm pdf --release   # the same, then the PDF uploaded to the slides release (needs gh)
+```
+
+The docs image builds the deck and serves it at `/docs/slides/` beside these pages (see the `slides-build` stage of the
+`Dockerfile`). The PDF is never committed: it lives on the release.

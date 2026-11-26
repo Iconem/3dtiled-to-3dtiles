@@ -8,3 +8,4 @@ dist
 *.md
 !CHANGELOG.md
 docs-references
+slides/dist

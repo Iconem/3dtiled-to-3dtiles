@@ -2,7 +2,7 @@
 #   - tile-server: the live <format> -> OGC 3D Tiles middleware (packages/tile-server)
 #   - viewer:      apps/viewer ("3D Tiled", React + vite build) — also serves the legacy standalone
 #                  vanilla-viewer.html at /vanilla-viewer, built into the same dist/
-#   - docs:        apps/docs (Fumadocs/Next) — kept as its OWN service; its search API needs a live
+#   - docs:        apps/docs (Fumadocs/Next), with the slides/ deck served at /docs/slides/ — kept as its OWN service; its search API needs a live
 #                  Node server, not just static files, so it can't fold into the viewer's static
 #                  dist/ the way vanilla-viewer.html does. If you put a reverse proxy in front of all
 #                  three, route /docs + its asset/API routes (see docker-compose.yml's comment) at
@@ -84,11 +84,25 @@ ENV DOCS_STATIC_EXPORT=1
 ENV DOCS_BASE_PATH=""
 RUN pnpm --filter docs build
 
+# ---- slides: the open-slide deck (slides/) -> static files, served by the docs image at /docs/slides/ ----
+# slides/ is its own pnpm root with its own lockfile, outside the workspace installed in `deps`, so it
+# gets its own install. SLIDES_BASE is the sub-path its assets and routes are built for; `pnpm build`
+# also copies index.html onto every route of the single-page app (scripts/static-routes.mjs), since
+# `serve` below has no rewrite to it. No route of the docs site lives under /docs/slides/.
+FROM base AS slides-build
+WORKDIR /app/slides
+COPY slides/package.json slides/pnpm-lock.yaml slides/pnpm-workspace.yaml ./
+RUN pnpm install --frozen-lockfile
+COPY slides ./
+ENV SLIDES_BASE=/docs/slides/
+RUN pnpm build
+
 # Every page, the search index and the og images are files by now; no Next.js server runs.
 FROM node:22-slim AS docs
 RUN npm install -g serve@14
 WORKDIR /app
 COPY --from=docs-build /app/apps/docs/out ./out
+COPY --from=slides-build /app/slides/dist ./out/docs/slides
 EXPOSE 3002
 # `out/serve.json` (apps/docs/public/serve.json) redirects / and sets the search index's type.
 CMD ["serve", "-l", "3002", "out"]
