@@ -142,7 +142,7 @@ export function TilerCard({ app, onStream }: { app: AppModel; onStream: () => vo
   }, [src]);
 
   // The tools that take this input: the server's answer once it is in, the extension meanwhile. Offered first: a
-  // favourite (two per kind, starred) that is on this machine already, then any tool that is, so that nothing is
+  // favourite (starred: two per kind, three for meshes) that is on this machine already, then any tool that is, so that nothing is
   // downloaded unless the user picks a tool that needs it.
   const ext = extOf(src);
   const known = info?.src === src ? info : null;
@@ -347,7 +347,7 @@ export function TilerCard({ app, onStream }: { app: AppModel; onStream: () => vo
               <ComboboxTrigger id="tiler-tool" data-value={tool?.id ?? ''} aria-label="Tool" className="min-w-0 flex-1">
                 {tool
                   ? <span className="flex min-w-0 flex-1 items-center gap-2">
-                      {tool.favorite && <StarIcon aria-label="Favourite" className="size-3.5 flex-none fill-current text-amber-500" />}
+                      {tool.favorite && <StarIcon aria-label="Favourite" className="size-3.5 flex-none fill-current text-foreground" />}
                       <span className="truncate font-medium">{tool.name}</span>
                       <span className="truncate text-xs text-muted-foreground">→ {tool.output.label}</span>
                       <span className={cn('ml-auto flex-none text-xs', stateClass(tool))}>{state(tool)}</span>
@@ -364,7 +364,7 @@ export function TilerCard({ app, onStream }: { app: AppModel; onStream: () => vo
                       <ComboboxCollection>
                         {(t: Tool) => (
                           <ComboboxItem key={t.id} value={t} data-tool={t.id} data-favorite={t.favorite || undefined}>
-                            {t.favorite ? <StarIcon aria-label="Favourite" className="size-3.5 flex-none fill-current text-amber-500" /> : <span className="size-3.5 flex-none" />}
+                            {t.favorite ? <StarIcon aria-label="Favourite" className="size-3.5 flex-none fill-current text-foreground" /> : <span className="size-3.5 flex-none" />}
                             <span className="truncate font-medium">{t.name}</span>
                             <span className="truncate text-xs text-muted-foreground">→ {t.output.label}</span>
                             <span className={cn('ml-auto flex-none text-xs', stateClass(t))}>{state(t)}</span>

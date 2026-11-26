@@ -220,7 +220,7 @@ function SourceField({ value, onChange, groups }: { value: string; onChange: (v:
     <Autocomplete.Root items={groups} value={value} onValueChange={(v) => onChange(v)} openOnInputClick
       itemToStringValue={(x: LibrarySource) => x.id} filter={(x: LibrarySource, q) => !q || isId(q) ? matches(x, q) : false}>
       <Autocomplete.Input id="terrain-src" aria-label="Terrain source" spellCheck={false}
-        placeholder={count ? `${count} library sources, or a template, COG, VRT or JSON` : 'https://…/{z}/{x}/{y}.png, a .tif, or mapterhorn'}
+        placeholder={count ? `${count} library sources, a template, COG, VRT, JSON, or a Terrain Viewer link` : 'https://…/{z}/{x}/{y}.png, a .tif, mapterhorn, or a Terrain Viewer link'}
         className="h-9 min-w-0 flex-1 rounded-md border border-input bg-transparent px-3 text-sm shadow-xs outline-none placeholder:text-muted-foreground/70 focus-visible:border-ring focus-visible:ring-2 focus-visible:ring-ring/25" />
       {count > 0 && (
         <Autocomplete.Portal>
@@ -541,7 +541,7 @@ export function TerrainTab({ app, active }: { app: AppModel; active: boolean }) 
 
   function add(value = src, enc = encoding) {
     const v = value.trim();
-    if (!v) return app.say('Pick a library source, or enter a tile template, a COG address or a source as JSON.', 'err');
+    if (!v) return app.say('Pick a library source, or enter a tile template, a COG address, a source as JSON or a Terrain Viewer link.', 'err');
     if (isViewerLink(v)) return void addLink(v);
     if (isJson(v)) { try { JSON.parse(v); } catch { return app.say('That JSON does not parse.', 'err'); } }
     if (list.some((e) => e.src === v && e.encoding === enc)) return app.say('That source is already in the list.');

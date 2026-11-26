@@ -83,6 +83,25 @@ const TAB_TITLES = {
 } as const;
 const TAB_LABELS = { stream: 'Stream live', export: 'Export', tile: 'Tile raw input', terrain: 'Terrain', library: 'Library' } as const;
 
+/** The body of the "Update available" toast: a bar with the percentage, or a line until the download reports one. */
+function UpdateProgress({ name, progress, bytes }: { name: string; progress?: number; bytes?: number }) {
+  const pct = progress == null ? null : Math.max(0, Math.min(100, progress));
+  const size = bytes ? ` (${Math.round(bytes / 1e6)} MB)` : '';
+  return (
+    <div id="update-progress" className="min-w-0 space-y-1.5">
+      <p className="m-0">{name} is downloading{size}. You choose when to restart into it.</p>
+      {pct == null ? <p className="m-0 text-xs">Starting the download…</p> : (
+        <>
+          <div className="h-1.5 w-full overflow-hidden rounded-full bg-muted" role="progressbar" aria-label="Update download" aria-valuemin={0} aria-valuemax={100} aria-valuenow={Math.round(pct)}>
+            <div className="h-full rounded-full bg-primary transition-[width] duration-300" style={{ width: `${pct}%` }} />
+          </div>
+          <p className="m-0 font-mono text-[11px] tabular-nums">{pct >= 100 ? 'unpacking…' : `${Math.round(pct)}%`}</p>
+        </>
+      )}
+    </div>
+  );
+}
+
 export function App() {
   const [theme, , setTheme] = useTheme();
   const [tab, setTab] = useState('stream');
@@ -170,20 +189,56 @@ export function App() {
     })();
   }, [replaceLib]);
 
-  // A downloaded update waits for this button: restarting by itself could end a running conversion.
-  useEffect(() => {
-    const poll = setInterval(async () => {
-      const status = await pickerRpc?.request.updateStatus({}).catch(() => null);
-      if (status?.version == null) return;
-      setUpdate({ title: `Restart into ${buildLabel(status.version, status.hash)}`, applying: false });
-      clearInterval(poll);
-    }, 30_000);
-    return () => clearInterval(poll);
-  }, []);
-  const applyUpdate = () => {
+  // The update the app looks for at start: a toast while it downloads, then one offering to restart into it (also
+  // the header button). Restarting by itself could end a running conversion, so it waits for the click.
+  const applyUpdate = useCallback(() => {
     setUpdate((u) => (u ? { ...u, applying: true } : u));
-    void pickerRpc?.request.applyUpdate({});
-  };
+    toast.loading('Restarting into the update…', { id: 'update', description: 'About half a minute: the app closes, installs it and opens again.', duration: Infinity });
+    void pickerRpc?.request.applyUpdate({}).then((ok) => {
+      if (ok) return;
+      setUpdate((u) => (u ? { ...u, applying: false } : u));
+      toast.error('The update could not be installed', { id: 'update', description: 'It will be offered again at the next launch.', duration: 8000 });
+    });
+  }, []);
+  useEffect(() => {
+    if (!pickerAvailable()) return;
+    let stop = false, timer: ReturnType<typeof setTimeout> | undefined;
+    const poll = async () => {
+      const s = await pickerRpc!.request.updateStatus({}).catch(() => null);
+      if (stop || !s) return;
+      const name = s.version ? `3D Tiled ${buildLabel(s.version, s.hash)}` : 'A new 3D Tiled build';
+      if (s.state === 'downloading') {
+        toast('Update available', { id: 'update', description: <UpdateProgress name={name} progress={s.progress} bytes={s.bytes} />, duration: Infinity, closeButton: true });
+      } else if (s.state === 'ready') {
+        setUpdate({ title: `Restart into ${name}`, applying: false });
+        toast('Update downloaded', {
+          id: 'update', duration: Infinity, closeButton: true,
+          description: `${name} is ready. Restart and install now (about half a minute, the app opens again by itself), or later from the button at the top.`,
+          action: { label: 'Restart and install', onClick: applyUpdate },
+        });
+        return;
+      } else if (s.state === 'error') {
+        // A failed check (offline, the release unreachable) says nothing; a failed download does.
+        if (s.version) toast.error('The update did not download', { id: 'update', description: s.message, duration: 8000 });
+        return;
+      } else if (s.state !== 'checking') {
+        return;   // none, or applying
+      }
+      timer = setTimeout(poll, s.state === 'downloading' ? 1000 : 2000);
+    };
+    void poll();
+    return () => { stop = true; clearTimeout(timer); };
+  }, [applyUpdate]);
+  // After an update: say so once, at the first launch of the new build.
+  useEffect(() => {
+    if (!pickerAvailable()) return;
+    void pickerRpc!.request.appInfo({}).then((info) => {
+      if (!info?.hash) return;
+      let last: string | null = null;
+      try { last = localStorage.getItem('3dtiled.build'); localStorage.setItem('3dtiled.build', info.hash); } catch { /* storage off */ }
+      if (last && last !== info.hash) toast.success(`Updated to 3D Tiled ${buildLabel(info.version ?? "", info.hash)}`, { duration: 8000 });
+    }).catch(() => {});
+  }, []);
 
   const app: AppModel = { form, patchForm, dataset, url, lib, updateLib, replaceLib, say, showTab: setTab, previewIn, openTool, loadIntoBuilder, noteServedNow, workers, setWorkers };
 
@@ -225,7 +280,7 @@ export function App() {
           <h1 className="m-0 text-lg font-semibold tracking-tight">3D Tiled</h1>
           <Tip text={status.title} side="bottom"><div id="status" className="ml-2 flex items-center gap-1.5 text-xs text-muted-foreground"><span className={cn('size-2 rounded-full', status.dot)} />{status.text}</div></Tip>
           <span className="flex-1" />
-          <Tip text={update?.title} side="bottom"><Button id="update" variant="default" hidden={!update} disabled={update?.applying} onClick={applyUpdate}>Update ready: restart</Button></Tip>
+          <Tip text={update?.title} side="bottom"><Button id="update" variant="default" hidden={!update} disabled={update?.applying} onClick={applyUpdate}>Restart and install</Button></Tip>
 
           <DropdownMenu>
             <Tip text="Help and links" side="bottom"><DropdownMenuTrigger render={<Button id="help" size="icon" variant="ghost" aria-label="Help and links" />}><CircleHelpIcon /></DropdownMenuTrigger></Tip>

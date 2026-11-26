@@ -25,9 +25,9 @@
  * Windows first: the download entries and the QGIS layouts below are Windows'. Detection by PATH and by environment
  * variable works on every platform.
  *
- * `favorite` marks the two tools offered first for each kind: for points untwine (COPC) and PotreeConverter, for
- * meshes fanvanzh's 3dtile (OSGB) and mago 3D Tiler, with Obj2Tiles and rusty-tiles listed next (the order here is
- * the order offered), for splats splat-transform (PlayCanvas's own) and Gaussian Splat Lite
+ * `favorite` marks the tools offered first for each kind (two, three for meshes): for points untwine (COPC) and PotreeConverter, for
+ * meshes fanvanzh's 3dtile (OSGB only), rusty-tiles (glTF) and mago 3D Tiler (every other mesh format), three since
+ * fanvanzh's takes OSGB alone, with Obj2Tiles next (the order here is the order offered), for splats splat-transform (PlayCanvas's own) and Gaussian Splat Lite
  * build-sog (William Liu's, merged levels).
  *
  * `kind` is what the tool tiles (pointcloud, mesh, splat); `inputs` the extensions it takes; `dir` whether the input
@@ -149,28 +149,32 @@ export const RUNTIMES = {
  * XYZ tiles of its analyses (hillshade, slope, sky-view factor, TPI, contours…), computed per tile. Its authors publish
  * it as one zip per platform holding Node and the service (`bin/node`, `server.mjs`, `node_modules` with that platform's
  * sharp), the bundle its QGIS plugin installs; these are the hashes that plugin pins (`service_pins.json`, the release's
- * SHA256SUMS). No Linux arm64 bundle is published. The desktop app's Terrain tab starts it (`node server.mjs`, in its folder).
+ * SHA256SUMS), Linux arm64 included. The desktop app's Terrain tab starts it (`node server.mjs`, in its folder).
  */
 export const SERVICES = {
   'terrain-service': {
     id: 'terrain-service', name: 'Terrain Viewer tile service', licence: 'MIT', homepage: 'https://github.com/Iconem/terrain-viewer/tree/main/tile-server',
     download: {
-      version: 'qgis-plugins-2026-11-26b',
+      version: 'qgis-plugins-2026-11-26e',
       'win32-x64': {
-        url: 'https://github.com/Iconem/terrain-viewer/releases/download/qgis-plugins-2026-11-26b/terrain-viewer-tile-service-windows-x64.zip',
-        sha256: 'beacfd8bab50e110b60b2e9c3aa8c4a5259e6ceb9066c604cbf4950b3404580b', bytes: 52253086, exe: 'bin/node.exe',
+        url: 'https://github.com/Iconem/terrain-viewer/releases/download/qgis-plugins-2026-11-26e/terrain-viewer-tile-service-windows-x64.zip',
+        sha256: '02fccfc5ffae93a1e0b83726e9da6f2d46f4266a377005e98b95c26567123ce5', bytes: 52270095, exe: 'bin/node.exe',
       },
       'linux-x64': {
-        url: 'https://github.com/Iconem/terrain-viewer/releases/download/qgis-plugins-2026-11-26b/terrain-viewer-tile-service-linux-x64.zip',
-        sha256: '79d31e87f99e646cb5d214d6c3ad45b498d0ad9fcf89aa9f4ed77a56f39f90c8', bytes: 62842660, exe: 'bin/node',
+        url: 'https://github.com/Iconem/terrain-viewer/releases/download/qgis-plugins-2026-11-26e/terrain-viewer-tile-service-linux-x64.zip',
+        sha256: 'b0c9486730c7fff26eab30431c91050156479975455bcd85dcea26c03599458f', bytes: 62859564, exe: 'bin/node',
+      },
+      'linux-arm64': {
+        url: 'https://github.com/Iconem/terrain-viewer/releases/download/qgis-plugins-2026-11-26e/terrain-viewer-tile-service-linux-arm64.zip',
+        sha256: '85e3e55c741fb672ceeb38dc89829eac731993fcbf79b62997571f414cb8e2f1', bytes: 62785358, exe: 'bin/node',
       },
       'darwin-arm64': {
-        url: 'https://github.com/Iconem/terrain-viewer/releases/download/qgis-plugins-2026-11-26b/terrain-viewer-tile-service-macos-arm64.zip',
-        sha256: '7bcc00b3b1afcca008e12f2588826831099d38cd613e27a9dd068f7c7119a52e', bytes: 55867364, exe: 'bin/node',
+        url: 'https://github.com/Iconem/terrain-viewer/releases/download/qgis-plugins-2026-11-26e/terrain-viewer-tile-service-macos-arm64.zip',
+        sha256: '7f50eece420c1023edd9750f82e0ed7b6b8d65d739e845b95f7d680aa58d9bc0', bytes: 55884268, exe: 'bin/node',
       },
       'darwin-x64': {
-        url: 'https://github.com/Iconem/terrain-viewer/releases/download/qgis-plugins-2026-11-26b/terrain-viewer-tile-service-macos-x64.zip',
-        sha256: '07ef6a03763cf26d7545212669988eafd33fe22e8daa8be286eb9702daecb65d', bytes: 57830669, exe: 'bin/node',
+        url: 'https://github.com/Iconem/terrain-viewer/releases/download/qgis-plugins-2026-11-26e/terrain-viewer-tile-service-macos-x64.zip',
+        sha256: '00f9e972aa0e94feb5ea6f41c2c32d05491b1b9a20b71512f13da1e5fcdbc262', bytes: 57847574, exe: 'bin/node',
       },
     },
   },
@@ -631,6 +635,32 @@ export const TOOLS = [
     },
   },
   {
+    id: 'rusty-tiles',
+    name: 'rusty-tiles mesh',
+    kind: 'mesh',
+    favorite: true,
+    summary: 'A glTF or GLB mesh, or a folder of them, streamed into one 3D Tiles 1.1 archive (.3tz) with implicit tiling. One Rust binary, young (version 0.4).',
+    homepage: 'https://github.com/BenDyson-Arch/rusty-tiles',
+    licence: 'MIT',
+    inputs: ['glb', 'gltf'],
+    dir: true,
+    output: archive,
+    provide: RUSTY,
+    options: [
+      { key: 'profile', label: 'Profile', type: 'enum', values: ['balanced', 'fast', 'quality', 'lossless'], default: 'balanced', help: '--profile: how much the tool simplifies and compresses.' },
+      ...placement({ lon: '--anchor', lat: '--anchor', alt: '--anchor' }).map((o) => ({ ...o, help: `${o.help} For a model in local metres.` })),
+      { key: 'sourceCrs', label: 'Source CRS', type: 'text', default: '', advanced: true, placeholder: 'local', help: '--sourceCrs: an EPSG code when the coordinates are in a projected CRS. Empty: local metres, glTF Y up.' },
+      { key: 'sourceAxes', label: 'Axes in that CRS', type: 'enum', values: ['y-up', 'xyz'], default: 'y-up', advanced: true, help: '--sourceAxes: with a source CRS, y-up (east, height, minus north) or xyz (east, north, height).' },
+    ],
+    steps(ctx) {
+      const { exe, input, outDir, name, opt } = ctx;
+      const cmd = [...exe, 'mesh', '--force', '--input', input, '--output', path.join(outDir, `${name}.3tz`), '--profile', opt.profile];
+      if (opt.lon !== '' && opt.lat !== '') cmd.push('--anchor', String(opt.lon), String(opt.lat), String(opt.alt === '' ? 0 : opt.alt));
+      if (opt.sourceCrs) cmd.push('--sourceCrs', opt.sourceCrs, '--sourceAxes', opt.sourceAxes);
+      return [{ cmd, label: 'glTF → 3D Tiles archive' }];
+    },
+  },
+  {
     id: 'mago-3d-tiler',
     name: 'mago 3DTiler',
     kind: 'mesh',
@@ -767,31 +797,6 @@ export const TOOLS = [
       if (opt.scale !== 1) cmd.push('--scale', String(opt.scale));
       cmd.push(input, outDir);
       return [{ cmd, label: 'OBJ → 3D Tiles' }];
-    },
-  },
-  {
-    id: 'rusty-tiles',
-    name: 'rusty-tiles mesh',
-    kind: 'mesh',
-    summary: 'A glTF or GLB mesh, or a folder of them, streamed into one 3D Tiles 1.1 archive (.3tz) with implicit tiling. One Rust binary, young (version 0.4).',
-    homepage: 'https://github.com/BenDyson-Arch/rusty-tiles',
-    licence: 'MIT',
-    inputs: ['glb', 'gltf'],
-    dir: true,
-    output: archive,
-    provide: RUSTY,
-    options: [
-      { key: 'profile', label: 'Profile', type: 'enum', values: ['balanced', 'fast', 'quality', 'lossless'], default: 'balanced', help: '--profile: how much the tool simplifies and compresses.' },
-      ...placement({ lon: '--anchor', lat: '--anchor', alt: '--anchor' }).map((o) => ({ ...o, help: `${o.help} For a model in local metres.` })),
-      { key: 'sourceCrs', label: 'Source CRS', type: 'text', default: '', advanced: true, placeholder: 'local', help: '--sourceCrs: an EPSG code when the coordinates are in a projected CRS. Empty: local metres, glTF Y up.' },
-      { key: 'sourceAxes', label: 'Axes in that CRS', type: 'enum', values: ['y-up', 'xyz'], default: 'y-up', advanced: true, help: '--sourceAxes: with a source CRS, y-up (east, height, minus north) or xyz (east, north, height).' },
-    ],
-    steps(ctx) {
-      const { exe, input, outDir, name, opt } = ctx;
-      const cmd = [...exe, 'mesh', '--force', '--input', input, '--output', path.join(outDir, `${name}.3tz`), '--profile', opt.profile];
-      if (opt.lon !== '' && opt.lat !== '') cmd.push('--anchor', String(opt.lon), String(opt.lat), String(opt.alt === '' ? 0 : opt.alt));
-      if (opt.sourceCrs) cmd.push('--sourceCrs', opt.sourceCrs, '--sourceAxes', opt.sourceAxes);
-      return [{ cmd, label: 'glTF → 3D Tiles archive' }];
     },
   },
   {

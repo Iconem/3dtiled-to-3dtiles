@@ -29,6 +29,15 @@ export interface TerrainServiceStatus {
   log: string[];
 }
 
+export interface UpdateStatus {
+  state: 'checking' | 'none' | 'downloading' | 'ready' | 'applying' | 'error';
+  version: string | null;
+  hash: string | null;
+  progress?: number;
+  bytes?: number;
+  message?: string;
+}
+
 export interface DesktopRPC {
   bun: RPCSchema<{
     requests: {
@@ -103,15 +112,19 @@ export interface DesktopRPC {
         params: { json: string };
         response: boolean;
       };
-      /** The version of a downloaded update ready to apply, null when there is none. */
       /** This build. The version is only the build day, so the hash is what tells two builds apart. */
       appInfo: {
         params: Record<string, never>;
         response: { version: string | null; hash: string | null };
       };
+      /**
+       * The update checked for at start: `checking`, then `none` (or not updatable: portable, dev, installed by hand),
+       * `downloading` (with `progress`, 0 to 100, and `bytes` when known), `ready` (downloaded, waits for Restart),
+       * `applying` or `error`. `version` and `hash` are the update's.
+       */
       updateStatus: {
         params: Record<string, never>;
-        response: { version: string | null; hash: string | null };
+        response: UpdateStatus;
       };
       /**
        * The Terrain tab's service: its status, or start / stop it, or look again for an install (`refresh`, after the

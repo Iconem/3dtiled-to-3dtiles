@@ -22,7 +22,7 @@
  * we ADOPT it instead of starting a second copy, and leave it running on quit.
  */
 import Electrobun, { BrowserWindow, Updater, Utils, defineElectrobunRPC } from "electrobun/main";
-import type { DesktopRPC } from "../shared/rpc-schema";
+import type { DesktopRPC, UpdateStatus } from "../shared/rpc-schema";
 import { createCliRunner, defaultSpawn } from "./cli-runner";
 import { createTerrainService } from "./terrain-service";
 
@@ -317,10 +317,17 @@ const rpc = defineElectrobunRPC<DesktopRPC, "bun">("bun", {
 				const local = await Updater.getLocalInfo().catch(() => null);
 				return { version: local?.version ?? null, hash: local?.hash ?? null };
 			},
-			updateStatus: () => ({ version: updateVersion, hash: updateHash }),
+			updateStatus: () => update,
 			applyUpdate: async () => {
+				if (update.state !== "ready") return false;
+				update = { ...update, state: "applying" };
 				stopChildren();   // the bundled node.exe is locked for as long as it runs
-				await Updater.applyUpdate();
+				try {
+					await Updater.applyUpdate();   // quits; the launcher starts the new build
+				} catch (e) {
+					update = { ...update, state: "error", message: String((e as Error)?.message ?? e) };
+					return false;
+				}
 				return true;
 			},
 
@@ -410,8 +417,9 @@ Electrobun.events.on("before-quit", stopChildren);
 Electrobun.events.on("close", stopChildren);   // the window itself, should the quit not follow
 
 /**
- * Download a newer build in the background; the launcher offers to restart into it. Never restarts by
- * itself, as a conversion may be running. Not in a portable copy (package-windows.mjs leaves portable.txt
+ * At start, look for a newer build and download it in the background, the view showing the progress in a toast;
+ * once it is ready, the toast offers *Restart and install*. Never restarts by itself, as a conversion may be
+ * running; an update downloaded and not applied is offered again at the next launch. Not in a portable copy (package-windows.mjs leaves portable.txt
  * beside bin/): the updater only knows the installed folder. Not in a build installed by hand either
  * (no-update.txt beside bin/).
  *
@@ -426,17 +434,18 @@ export function olderVersion(a: unknown, b: unknown) {   // is a older than b
 	for (let i = 0; i < Math.max(x.length, y.length); i++) { const d = (x[i] ?? 0) - (y[i] ?? 0); if (d) return d < 0; }
 	return false;
 }
-let updateVersion: string | null = null;
-let updateHash: string | null = null;
+let update: UpdateStatus = { state: "checking", version: null, hash: null };
 async function checkForUpdate() {
 	const { existsSync } = await import("node:fs");
 	const app = (globalThis as any).process?.execPath?.replace(/[\\/]bin[\\/][^\\/]+$/, "");
-	if (!bundled || !app || existsSync(`${app}/portable.txt`) || existsSync(`${app}/no-update.txt`)) return;
+	const none = () => { update = { state: "none", version: null, hash: null }; };
+	if (!bundled || !app || existsSync(`${app}/portable.txt`) || existsSync(`${app}/no-update.txt`)) return none();
 	try {
 		const local = await Updater.getLocalInfo();
-		if (!local.baseUrl || local.channel === "dev") return;
+		if (!local.baseUrl || local.channel === "dev") return none();
 		const info = await Updater.checkForUpdate();
-		if (info.error || !(info.updateAvailable || info.updateReady)) return;
+		if (info.error) { update = { state: "error", version: null, hash: null, message: String(info.error) }; return; }
+		if (!(info.updateAvailable || info.updateReady)) return none();
 		const { readFile } = await import("node:fs/promises");
 		const mine = await readFile(`${root}/build.json`, "utf8").then(JSON.parse).catch(() => null);
 		const theirs = await fetch(`${local.baseUrl}/stable-win-x64-build.json`).then((r) => (r.ok ? r.json() : null)).catch(() => null) as any;
@@ -444,15 +453,26 @@ async function checkForUpdate() {
 		const stale = stamped ? Date.parse(theirs.builtAt) <= Date.parse(mine.builtAt) : olderVersion(info.version, local.version);
 		if (stale) {
 			console.log(`[3dtiled-desktop] release ${info.version} (${theirs?.builtAt ?? "no stamp"}) is not newer than this build ${local.version} (${mine?.builtAt ?? "no stamp"}): not offered`);
-			return;
+			return none();
 		}
-		if (!info.updateReady) await Updater.downloadUpdate();
-		if (Updater.updateInfo().updateReady) {
-			updateVersion = info.version ?? "";
-			updateHash = info.hash ?? null;
+		const version = info.version ?? "", hash = info.hash ?? null;
+		if (!info.updateReady) {
+			update = { state: "downloading", version, hash };
+			Updater.onStatusChange((e) => {
+				if (e.status === "download-progress" && typeof e.details?.progress === "number") {
+					update = { state: "downloading", version, hash, progress: e.details.progress, bytes: e.details.totalBytes };
+				} else if (e.status === "decompressing") {
+					update = { ...update, progress: 100 };
+				}
+			});
+			try { await Updater.downloadUpdate(); } finally { Updater.onStatusChange(null); }
 		}
+		update = Updater.updateInfo().updateReady
+			? { state: "ready", version, hash }
+			: { state: "error", version, hash, message: Updater.updateInfo().error || "The download did not finish." };
 	} catch (e) {
 		console.warn("[3dtiled-desktop] update check failed:", e);
+		update = { state: "error", version: update.version, hash: update.hash, message: String((e as Error)?.message ?? e) };
 	}
 }
 setTimeout(() => { void checkForUpdate(); }, 4000);

@@ -76,7 +76,7 @@ test('which tools take a file or a folder', () => {
   assert.deepEqual(toolsFor('/data/scan.e57'), ['pdal', 'gocesiumtiler']);
   assert.deepEqual(toolsFor('already.copc.laz'), [], 'a COPC is tiled already: it is streamed, not tiled again');
   assert.deepEqual(toolsFor('model.obj'), ['mago-3d-tiler', 'obj2tiles', 'nexus']);
-  assert.deepEqual(toolsFor('model.glb'), ['mago-3d-tiler', 'rusty-tiles']);
+  assert.deepEqual(toolsFor('model.glb'), ['rusty-tiles', 'mago-3d-tiler']);
   assert.deepEqual(toolsFor('part.stl'), ['mago-3d-tiler', 'nexus']);
   assert.deepEqual(toolsFor('building.ifc'), ['mago-3d-tiler']);
   assert.deepEqual(toolsFor('scene.spz'), ['splat-transform', 'gsl-build-sog', 'gsl-build-rad', 'spark-build-lod']);

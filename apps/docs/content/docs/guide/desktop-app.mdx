@@ -43,8 +43,10 @@ SmartScreen warns on first run.
 
 - **Installer** (`3DTiled-win-x64-Setup-<date>.exe`, about 165 MB): one file. It installs per user under
   `%LOCALAPPDATA%\com.iconem.3dtiled.desktop` and adds Desktop and Start menu shortcuts, named *3D Tiled*:
-  search for "3D Tiled" with the space. It updates itself: a newer build downloads in the background, and
-  an *Update ready* button restarts into it, never on its own, as a conversion may be running. The footer shows the
+  search for "3D Tiled" with the space. It updates itself: at start it looks for a newer build and downloads it in the background, a
+  toast showing the progress; then *Restart and install* (in the toast and at the top) closes the app, installs the
+  update and opens it again, never on its own, as a conversion may be running. Not applied, it is offered again at
+  the next launch; the first launch of the new build says it was updated. The footer shows the
   build, as `v2026.11.4 · 1trdzhm`: the version is only the build day, so the hash is what tells two builds apart.
 - **Portable** (`3DTiled-win-x64-Portable-<date>.zip`, about 250 MB): unzip anywhere and start `3DTiled.cmd`.
   It does not update itself.
@@ -367,9 +369,9 @@ folder, or a table of a PostGIS database. It runs one of the third-party tilers 
 gocesiumtiler, Obj2Tiles, splat-transform…), then streams or previews the result. Its input field is not the dataset
 of the two other tabs.
 
-Two tilers per kind are **starred** and offered first: untwine and PotreeConverter for point clouds, fanvanzh's
-3dtile (OSGB) and mago 3D Tiler for meshes, with Obj2Tiles and rusty-tiles next, splat-transform and Gaussian Splat
-Lite build-sog for splats. With an input, the first
+Tilers marked with a star are offered first: untwine and PotreeConverter for point clouds; for meshes fanvanzh's
+3dtile (it takes OSGB only), rusty-tiles (glTF) and mago 3D Tiler (every other format), then Obj2Tiles;
+splat-transform and Gaussian Splat Lite build-sog for splats. With an input, the first
 starred tool already on the machine is chosen.
 
 It has a page of its own: **[Tile raw input](/docs/guide/desktop-tile-raw-input)**.
@@ -383,7 +385,8 @@ A DEM as Cesium terrain and as analysis tiles, computed on this machine by the t
 
 - **Download on first use.** The tab downloads that service's bundle for this platform (Node plus the service,
   about 52 MB) from a pinned Iconem/terrain-viewer release, checks its SHA-256 and keeps it in the tools folder.
-  `node packages/tilers/cli.js install terrain-service` does the same. No bundle is published for Linux arm64.
+  `node packages/tilers/cli.js install terrain-service` does the same, on every platform the app runs on (Linux arm64
+  since bundle `qgis-plugins-2026-11-26e`).
 - **Start runs it on 127.0.0.1**, on the first free port from 3400 to 3403. A Terrain Viewer service already
   running there (its desktop app's, or its QGIS plugin's) is used as it is, and *Disconnect* leaves it running.
   *Port…* in the card's menu sets the first port tried (kept in `terrain-service.json` beside the library), as in
@@ -397,11 +400,11 @@ A DEM as Cesium terrain and as analysis tiles, computed on this machine by the t
 - **API keys.** A library source that needs one (Mapbox, MapTiler, Cesium ion) gets a key field under it. The key is
   kept on this machine by its name (`mapboxKey`, `maptilerKey`, `cesiumIonKey`), shared by the rows of that provider,
   and sent as that query parameter, which is how the service takes it: it is in the URL you copy.
-- **A Terrain Viewer link as the output.** Choose *Terrain Viewer link* in a row's output menu, or paste the link
-  in the source field: the service's `/view` reads it, and the row lists the modes the link shows (hillshade, colour
-  relief, contours, slope…). Pick any of them: they are stacked in one tile URL with the link's settings (colour
-  ramp and range, hillshade method and light, contour interval…) and, for a stack, each mode's opacity. Set a
-  hypsometric tint up in Terrain Viewer, paste its link, copy the URL.
+- **A Terrain Viewer link as the source.** Set a source and its look up in Terrain Viewer (a hypsometric tint's
+  ramp and range, a hillshade's method and light…), copy its link and paste it in the source field: the service's
+  `/view` reads it, and the new row takes the link's source and lists the modes it shows. Keep any of them: they are
+  stacked in one tile, the service blending them with the link's opacities, behind one XYZ URL to give Blender
+  (or QGIS) as a raster overlay. A row's output menu also has *Terrain Viewer link*, to paste one into a row.
 - **Open** goes to the Terrain Viewer website with the source: 3dtiled's viewer has no custom terrain URL yet.
 
 <figure className="not-prose my-6">
