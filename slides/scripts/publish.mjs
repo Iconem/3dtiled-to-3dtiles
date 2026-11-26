@@ -30,7 +30,9 @@ const REPO = 'jo-chemla/3dtiled-to-3dtiles';
 const TAG = 'slides';
 
 const run = (cmd, args, env = {}) => {
-  const r = spawnSync(cmd, args, { cwd: root, stdio: 'inherit', shell: process.platform === 'win32', env: { ...process.env, ...env } });
+  // gh is a real executable: no shell, so arguments with spaces stay whole on Windows. pnpm needs one there.
+  const shell = process.platform === 'win32' && cmd !== 'gh';
+  const r = spawnSync(cmd, args, { cwd: root, stdio: 'inherit', shell, env: { ...process.env, ...env } });
   if (r.status !== 0) process.exit(r.status ?? 1);
   return r;
 };
@@ -83,7 +85,7 @@ if (wantRelease) {
   const pdfs = readdirSync(join(out, 'pdf'))
     .filter((f) => f.endsWith('.pdf'))
     .map((f) => join(out, 'pdf', f));
-  const exists = spawnSync('gh', ['release', 'view', TAG, '-R', REPO], { cwd: root, stdio: 'ignore', shell: process.platform === 'win32' }).status === 0;
+  const exists = spawnSync('gh', ['release', 'view', TAG, '-R', REPO], { cwd: root, stdio: 'ignore' }).status === 0;
   if (!exists) {
     run('gh', ['release', 'create', TAG, '-R', REPO, '--title', 'Slides: the 3dtiled deck as PDF', '--notes',
       'The open-slide deck in slides/, printed to PDF by `pnpm pdf --release` in slides/. Live at https://docs.3dtiled.iconem.com/docs/slides/',
