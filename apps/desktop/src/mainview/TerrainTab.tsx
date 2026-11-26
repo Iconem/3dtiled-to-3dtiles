@@ -138,7 +138,7 @@ function SourceField({ value, onChange, groups }: { value: string; onChange: (v:
       {count > 0 && (
         <Autocomplete.Portal>
           <Autocomplete.Positioner sideOffset={6} align="start" className="isolate z-50">
-            <Autocomplete.Popup className="w-[max(var(--anchor-width),30rem)] max-w-(--available-width) overflow-hidden rounded-lg bg-popover text-popover-foreground shadow-md ring-1 ring-foreground/10">
+            <Autocomplete.Popup className="[&:has([data-empty])]:hidden w-[max(var(--anchor-width),30rem)] max-w-(--available-width) overflow-hidden rounded-lg bg-popover text-popover-foreground shadow-md ring-1 ring-foreground/10">
               <Autocomplete.List className="max-h-[min(22rem,var(--available-height))] scroll-py-1 overflow-y-auto overscroll-contain p-1 data-empty:p-0">
                 {(g: LibraryGroup) => (
                   <Autocomplete.Group key={g.value} items={g.items} className="block pb-1 last:pb-0">
