@@ -103,6 +103,9 @@ export const TOOLS_DATASETS: Record<string, Asset[]> = {
     // applies ranges to the gzipped bytes).
     { id: 'loadersgl-3tz-web', label: 'loaders.gl test.3tz (mesh, hosted)', type: 'mesh', pkg: 'https://raw.githubusercontent.com/visgl/loaders.gl/master/modules/tiles-3d/test/3d-tiles/data/test.3tz' },
     { id: 'lion-3tz-web', label: 'lion .3tz (implicit octree, hosted)', type: 'pointcloud', pkg: 'https://raw.githubusercontent.com/jo-chemla/3dtiles-samples/main/lion_takanawa/lion_takanawa.3tz' },
+    // One subtree of the City of Helsinki's 2024 reality mesh (CC BY 4.0), 755 MB, on a GitHub release: read by the tile
+    // server with range requests (the release's signed redirect has no CORS, so there is no in-place pill for it).
+    { id: 'helsinki-3dtiles-web', label: 'Helsinki 2024 .3dtiles (mesh, 755 MB, hosted)', type: 'mesh', pkg: 'https://github.com/jo-chemla/3dtiles-samples/releases/download/helsinki-2024-3dtiles/helsinki-2024-2-4.3dtiles' },
   ],
 };
 

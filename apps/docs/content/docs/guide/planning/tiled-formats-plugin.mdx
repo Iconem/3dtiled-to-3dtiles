@@ -1,10 +1,13 @@
 ---
 title: "Tiled formats read in the browser (plan)"
-description: "Plan for 3DTilesRendererJS plugins that read COPC, VPC, Nexus, 3MX, I3S and OSGB directly in the browser, with no tile server, reusing the readers of this repo. What upstream and the splat renderer already cover, the plugin hooks to implement, what ties each reader to Node, and the phases."
+description: "Plan for 3DTilesRendererJS plugins that read COPC, then VPC, directly in the browser (the mesh formats dropped on 2026-11-26), with no tile server, reusing the readers of this repo. What upstream and the splat renderer already cover, the plugin hooks to implement, what ties each reader to Node, and the phases."
 ---
 
 Plan of 2026-11-19, replacing the draft of 2026-11-16. **Not started**: this page is the plan only. The roadmap
 item is on the [future work](/docs/guide/todo-future-work) page.
+
+**Scope cut on 2026-11-26: COPC, then perhaps VPC, nothing else.** Plugins for Nexus, 3MX, I3S and OSGB will not be
+written; those formats stay on the tile server. Phase 3 below is kept only as a record of what was planned.
 
 ## The idea
 
@@ -160,7 +163,7 @@ Sizes are rough, in working days for one person who knows the readers.
 | **0. Spike** | COPC only, in the Potree lab as a new mode next to the server one. Reader called as is, bundled for the browser, decode on the main thread. | Autzen renders from its bucket with no server; time to first tile, tiles per second and main-thread stalls written down beside the server path | 2 |
 | **1. Source and workers** | the source abstraction, `decode` to typed arrays for COPC, the decode worker; the server moves onto the same reader | every existing COPC test passes on the server; the reader's tests also pass in headless Chrome | 3 |
 | **2. COPC and VPC** | `CopcPlugin` on `PointCloudEffectsPlugin`, CRS placement, extra attributes; `VpcPlugin` and the grid VPC | the lab's COPC and VPC presets load in plugin mode, sized and coloured as in server mode | 4 |
-| **3. Meshes** | Nexus, then 3MX, I3S (with SLPK), OSGB | each mesh preset loads in plugin mode, same triangle counts as server mode | 2 to 3 each |
+| ~~**3. Meshes**~~ | dropped on 2026-11-26: Nexus, 3MX, I3S (with SLPK), OSGB stay on the tile server | | |
 | **4. Release** | npm package, a demo page on GitHub Pages per format, the docs below | someone outside loads their own COPC from a README snippet | 2 |
 | **5. Upstream** | show it to 3DTilesRendererJS; ask what, if anything, belongs there. Offer the two Potree cases it refuses (Brotli, LAZ nodes) if wanted | a reply | |
 

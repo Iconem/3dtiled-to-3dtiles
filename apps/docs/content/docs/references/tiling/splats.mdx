@@ -120,21 +120,31 @@ jsdelivr and the forum post are the sources here.
 
 ## Gaussian Splat Lite build-sog and build-rad
 
-The same author's splat library, [Gaussian Splat Lite](https://github.com/WilliamLiu-1997/Gaussian-Splat-Lite)
-(Apache-2.0, 1.10.3, Node 22.12+), whose 3DGS plugin this viewer renders with, ships two tilers with no runtime
-dependencies, no GPU and no build step ([BuildSog.md](https://github.com/WilliamLiu-1997/Gaussian-Splat-Lite/blob/main/docs/BuildSog.md)):
+[Gaussian Splat Lite](https://github.com/WilliamLiu-1997/Gaussian-Splat-Lite) (William Liu, Apache-2.0, 1.10.3,
+Node 22.12 or later) is the splat library the viewer renders with. It also ships two tilers. Both run on the CPU
+with no build step, and this repository bundles them as one-stop tiler tools
+([BuildSog.md](https://github.com/WilliamLiu-1997/Gaussian-Splat-Lite/blob/main/docs/BuildSog.md)).
 
-- **`gsl-build-sog`**: PLY or SPZ to a streamed SOG v3 (`lod-meta.json` + `chunks/`). Coarser levels **merge** splats
-  (`--lod-factor` 2 per level until the scene fits `--root-splats`, `--lod-density` weighting small or dense
-  areas), rather than decimating them as splat-transform does. Keeps up to SH4 with a codebook per chunk, bounded
-  memory (`--memory-budget`, temporary files on disk), `--within-dist` crop, and `--sog-blind` PLY fields (object
-  ids, confidence) carried through every level without averaging.
-- **`gsl-build-rad`**: PLY or SPZ to Spark's RAD in JavaScript, where Spark's own build-lod is Rust source to compile.
+| Tool | Takes | Writes | Against the official tool |
+|---|---|---|---|
+| `gsl-build-sog` | a splat PLY or SPZ | a streamed SOG v3: `lod-meta.json` and `chunks/` | splat-transform makes each coarser level by **dropping** splats; build-sog **merges** them, so a coarse level is fewer, larger splats rather than a subset |
+| `gsl-build-rad` | a splat PLY or SPZ | Spark's RAD (`<name>-lod.rad`) | Spark's own build-lod is Rust source to compile; build-rad is JavaScript |
 
-Its `lod-meta.json` has the same shape as splat-transform's, so the tile server streams it as 3D Tiles
-(`/stream/tileset.json?format=sog`) without change: checked on 2026-11-26 with a five-level output, root tile a glTF
-of 3,750 splats with `KHR_gaussian_splatting`. Both are one-stop tiler tools (`gsl-build-sog`, `gsl-build-rad`),
-bundled with the repo.
+`gsl-build-sog` in more detail:
+
+- **Levels**: each one about `--lod-factor` (2) times smaller than the one below, until the coarsest fits
+  `--root-splats`. `--lod-density` chooses between merging the smallest splats first (low) and keeping detail where
+  the scene is dense (high).
+- **Colour**: spherical harmonics up to degree 4, with a codebook per chunk.
+- **Memory**: bounded by `--memory-budget`, the rest spilled to temporary files.
+- **Clean-up and extras**: `--within-dist` keeps only splats inside a sphere (drops floaters and sky);
+  `--sog-blind` PLY fields, such as object ids or confidence, are carried to every level without being averaged.
+
+Its `lod-meta.json` has the same shape as splat-transform's, so the tile server streams the result as 3D Tiles
+(`/stream/tileset.json?format=sog`) unchanged. Checked on 2026-11-26 on a five-level output: the root tile is a glTF
+of 3,750 splats with `KHR_gaussian_splatting`.
+
+In the desktop app's tool list, `gsl-build-sog` and splat-transform are the two starred splat tilers, offered first.
 
 ## Spark build-lod and RAD
 

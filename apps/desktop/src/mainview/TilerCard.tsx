@@ -19,6 +19,7 @@
  */
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { Button } from '@/components/ui/button';
+import { StarIcon } from 'lucide-react';
 import { Combobox, ComboboxCollection, ComboboxContent, ComboboxEmpty, ComboboxGroup, ComboboxItem, ComboboxLabel, ComboboxList, ComboboxSearch, ComboboxTrigger } from '@/components/ui/combobox';
 import { cn } from '@/lib/utils';
 import type { AppModel } from './App';
@@ -34,7 +35,7 @@ interface ToolOption {
   choices?: string[]; sep?: string;
 }
 interface Tool {
-  id: string; name: string; kind: 'pointcloud' | 'mesh' | 'splat'; summary: string; homepage: string; licence: string;
+  id: string; name: string; kind: 'pointcloud' | 'mesh' | 'splat'; favorite: boolean; summary: string; homepage: string; licence: string;
   inputs: string[]; dir: boolean | 'only'; ply: string | null;
   output: { format: string; label: string };
   delivery: 'bundled' | 'download' | 'uv' | 'cargo' | 'detect'; version: string | null; downloadable: boolean; downloadBytes: number | null;
@@ -140,14 +141,17 @@ export function TilerCard({ app, onStream }: { app: AppModel; onStream: () => vo
     return () => { stale = true; clearTimeout(timer); };
   }, [src]);
 
-  // The tools that take this input: the server's answer once it is in, the extension meanwhile. Offered first: one
-  // that is on this machine already, so that nothing is downloaded unless the user picks a tool that needs it.
+  // The tools that take this input: the server's answer once it is in, the extension meanwhile. Offered first: a
+  // favourite (two per kind, starred) that is on this machine already, then any tool that is, so that nothing is
+  // downloaded unless the user picks a tool that needs it.
   const ext = extOf(src);
   const known = info?.src === src ? info : null;
-  const fitting = useMemo(() => (tools ?? []).filter((t) => (known ? known.ids.includes(t.id) : t.dir !== 'only' && t.inputs.includes(ext))), [tools, ext, known]);
+  const fitting = useMemo(() => (tools ?? []).filter((t) => (known ? known.ids.includes(t.id) : t.dir !== 'only' && t.inputs.includes(ext)))
+    .sort((a, b) => Number(b.favorite) - Number(a.favorite)), [tools, ext, known]);
   // With an input: the tools that take it, one chosen for you. Without: every tool, to look at, none chosen.
-  const offered = src ? fitting : (tools ?? []);
-  const tool = offered.find((t) => t.id === toolId) ?? (src ? fitting.find((t) => t.found.status === 'ready') ?? fitting[0] : null) ?? null;
+  const offered = useMemo(() => (src ? fitting : [...(tools ?? [])].sort((a, b) => Number(b.favorite) - Number(a.favorite))), [src, fitting, tools]);
+  const ready = (t: Tool) => t.found.status === 'ready';
+  const tool = offered.find((t) => t.id === toolId) ?? (src ? fitting.find((t) => t.favorite && ready(t)) ?? fitting.find(ready) ?? fitting[0] : null) ?? null;
   const groups = useMemo(() => (Object.keys(TILER_GROUPS) as Tool['kind'][])
     .map((k) => ({ value: TILER_GROUPS[k], items: offered.filter((t) => t.kind === k) })).filter((g) => g.items.length), [offered]);
   useEffect(() => { if (tool && tool.id !== toolId) setToolId(tool.id); }, [tool, toolId]);
@@ -343,6 +347,7 @@ export function TilerCard({ app, onStream }: { app: AppModel; onStream: () => vo
               <ComboboxTrigger id="tiler-tool" data-value={tool?.id ?? ''} aria-label="Tool" className="min-w-0 flex-1">
                 {tool
                   ? <span className="flex min-w-0 flex-1 items-center gap-2">
+                      {tool.favorite && <StarIcon aria-label="Favourite" className="size-3.5 flex-none fill-current text-amber-500" />}
                       <span className="truncate font-medium">{tool.name}</span>
                       <span className="truncate text-xs text-muted-foreground">→ {tool.output.label}</span>
                       <span className={cn('ml-auto flex-none text-xs', stateClass(tool))}>{state(tool)}</span>
@@ -358,7 +363,8 @@ export function TilerCard({ app, onStream }: { app: AppModel; onStream: () => vo
                       <ComboboxLabel>{group.value}</ComboboxLabel>
                       <ComboboxCollection>
                         {(t: Tool) => (
-                          <ComboboxItem key={t.id} value={t} data-tool={t.id}>
+                          <ComboboxItem key={t.id} value={t} data-tool={t.id} data-favorite={t.favorite || undefined}>
+                            {t.favorite ? <StarIcon aria-label="Favourite" className="size-3.5 flex-none fill-current text-amber-500" /> : <span className="size-3.5 flex-none" />}
                             <span className="truncate font-medium">{t.name}</span>
                             <span className="truncate text-xs text-muted-foreground">→ {t.output.label}</span>
                             <span className={cn('ml-auto flex-none text-xs', stateClass(t))}>{state(t)}</span>

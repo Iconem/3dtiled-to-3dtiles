@@ -25,6 +25,10 @@
  * Windows first: the download entries and the QGIS layouts below are Windows'. Detection by PATH and by environment
  * variable works on every platform.
  *
+ * `favorite` marks the two tools offered first for each kind: for points untwine (COPC) and PotreeConverter, for
+ * meshes Obj2Tiles and mago 3D Tiler, for splats splat-transform (PlayCanvas's own) and Gaussian Splat Lite
+ * build-sog (William Liu's, merged levels).
+ *
  * `kind` is what the tool tiles (pointcloud, mesh, splat); `inputs` the extensions it takes; `dir` whether the input
  * may be a folder of such files (true) or must be one ('only'); `ply` which kind of PLY it reads (points, splats),
  * since the extension alone does not say; `dirInputs` the extensions that make a folder an input, when they are
@@ -302,6 +306,7 @@ export const TOOLS = [
     id: 'untwine',
     name: 'untwine',
     kind: 'pointcloud',
+    favorite: true,
     summary: 'LAS or LAZ files, or a folder of them, to one COPC file, with Hobu\'s untwine: built for very large inputs, the tool QGIS itself uses.',
     homepage: 'https://github.com/hobuinc/untwine',
     licence: 'GPL-3.0',
@@ -358,6 +363,7 @@ export const TOOLS = [
     id: 'potreeconverter',
     name: 'PotreeConverter 2',
     kind: 'pointcloud',
+    favorite: true,
     summary: 'A LAS or LAZ point cloud, or a folder of them, to a Potree 2 octree (metadata.json, hierarchy.bin, octree.bin). Very fast, out of core.',
     homepage: 'https://github.com/potree/PotreeConverter',
     licence: 'BSD-2-Clause',
@@ -596,6 +602,7 @@ export const TOOLS = [
     id: 'obj2tiles',
     name: 'Obj2Tiles',
     kind: 'mesh',
+    favorite: true,
     summary: 'A textured OBJ mesh to 3D Tiles with levels of detail: it decimates, splits and tiles. OpenDroneMap\'s tool, self-contained.',
     homepage: 'https://github.com/OpenDroneMap/Obj2Tiles',
     licence: 'AGPL-3.0',
@@ -659,6 +666,7 @@ export const TOOLS = [
     id: 'mago-3d-tiler',
     name: 'mago 3DTiler',
     kind: 'mesh',
+    favorite: true,
     summary: 'The widest input list: OBJ, FBX, 3DS, glTF, COLLADA, a PLY or STL mesh, IFC, 3MF, X3D, CityGML, KML, Shapefile, GeoJSON, GeoPackage and LAS or LAZ, a file or a folder, to 3D Tiles. A Java program (390 MB), run on a Java 25 runtime that is fetched next to it when the machine has none.',
     homepage: 'https://github.com/Gaia3D/mago-3d-tiler',
     licence: 'MPL-2.0',
@@ -952,6 +960,7 @@ export const TOOLS = [
     id: 'splat-transform',
     name: 'PlayCanvas splat-transform',
     kind: 'splat',
+    favorite: true,
     summary: 'A Gaussian-splat file (PLY, compressed PLY, SPZ, SOG, .splat, .ksplat, or an XGRIDS .lcc) to a streamed SOG with levels of detail, each level a decimation of the one before.',
     homepage: 'https://github.com/playcanvas/splat-transform',
     licence: 'MIT',
@@ -1090,6 +1099,7 @@ export const TOOLS = [
     id: 'gsl-build-sog',
     name: 'Gaussian Splat Lite build-sog',
     kind: 'splat',
+    favorite: true,
     summary: 'A splat PLY or SPZ to a streamed SOG v3 with levels of detail made by merging splats, not decimating them: William Liu\'s tiler, from the splat library this viewer uses. CPU only, bounded memory, keeps up to SH4.',
     homepage: 'https://github.com/WilliamLiu-1997/Gaussian-Splat-Lite/blob/main/docs/BuildSog.md',
     licence: 'Apache-2.0',

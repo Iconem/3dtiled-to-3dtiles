@@ -23,6 +23,16 @@ Format loosely follows [Keep a Changelog](https://keepachangelog.com/).
 - **A large `.3dtiles` sample:** one subtree of the Helsinki 2024 reality mesh (755 MB, 1,720 b3dm, © City of
   Helsinki, CC BY 4.0) on the `helsinki-2024-3dtiles` release of jo-chemla/3dtiles-samples, readable in place
   through the tile server (the release's signed redirect answers Range requests).
+- **Viewer: the Helsinki `.3dtiles` as a Packages pill**, streamed by the tile server from the GitHub release.
+- **Desktop: the Terrain tab's source field is a combo box** listing the running service's library
+  (`/terrain-sources`: 147 sources, Worldwide defaults first, a key icon on those that need an API key), filtered by
+  id, name and type as you type; or free text: a template, a COG or VRT address, or a source as JSON
+  (`{"url": "…", "type": "cog"}`). A library pick keeps the library's name.
+- **Tilers: favourites.** Two tools per kind are starred and offered first, and the first starred tool already on the
+  machine is chosen for an input: untwine and PotreeConverter, Obj2Tiles and mago 3D Tiler, splat-transform and
+  Gaussian Splat Lite build-sog (`favorite` in `tools.js` and `cli.js list --json`).
+- **Docs: the home page opens on the slide deck's cover**, linked to the deck, its presenter view and the PDF; the
+  Terrain tab section has a picture of it with Blender.
 
 ### Changed — 2026-11-26
 - **Remote `.3dtiles` packages are read with wa-sqlite** (`@journeyapps/wa-sqlite`, Asyncify build) and a small HTTP
@@ -33,6 +43,12 @@ Format loosely follows [Keep a Changelog](https://keepachangelog.com/).
   titles and less text per slide.
 - **`iconem-share-links.mjs --create-in`** matches the `project / scene / asset` label, not only the project name.
 - **Docs: 3D Tiles 2.0 on glTF 2.1** updated: cesium-native streams glTF 2.1 tilesets since v0.67.0 (#1508).
+- **Slides reordered (20):** the source trees and the formats come right after the overview; the desktop app comes
+  before the viewer, over three slides (Stream live with the Streams pills; Export, Tile raw input and Library;
+  Terrain); every repository and PR on *Around 3dtiled* is a link; sources are labelled points, meshes, splats.
+- **Roadmap: browser plugins for COPC, then perhaps VPC, only.** Nexus, 3MX, I3S and OSGB stay on the tile server
+  (plan page and future work updated). The point tiler item is now a point and splat tiler.
+- **Docs: Gaussian Splat Lite section rewritten** as a table against the official tools, then its options.
 
 ### Added — 2026-11-25
 - **Desktop: a status pill on each Streams row.** The row's tileset URL is requested once when it appears or its port

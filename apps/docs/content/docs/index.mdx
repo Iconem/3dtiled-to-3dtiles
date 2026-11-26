@@ -3,7 +3,16 @@ title: 3dtiled-to-3dtiles
 description: Offline Converter Packages (CLI/js SDK) and a live streaming middleware from tiled point-cloud/mesh/Gaussian-splat formats to OGC 3D Tiles
 ---
 
+import deckCover from './guide/img/slides-3dtiled.jpg';
+
 export const viewerUrl = process.env.VIEWER_URL || 'http://localhost:3000';
+
+<figure className="not-prose my-6">
+  <a href="/docs/slides/s/3dtiled/" title="Open the slide deck">
+    <img src={deckCover.src} width={deckCover.width} height={deckCover.height} alt="3dtiled: tiled point clouds, meshes and Gaussian splats, streamed as OGC 3D Tiles. The cover of the slide deck" className="h-auto w-full rounded-lg border border-fd-border shadow-sm transition-shadow hover:shadow-md" />
+  </a>
+  <figcaption className="mt-2 text-center text-sm text-fd-muted-foreground">The tour as a <a href="/docs/slides/s/3dtiled/">slide deck</a> (press F to present, <a href="/docs/slides/s/3dtiled/presenter/">presenter view</a>), or as a <a href="https://github.com/jo-chemla/3dtiled-to-3dtiles/releases/download/slides/3dtiled.pdf">PDF</a>.</figcaption>
+</figure>
 
 Converters (offline CLI/SDK) and a live streaming middleware (`packages/tile-server`) that turn tiled
 point-cloud, mesh, and Gaussian-splat formats — COPC, Potree, I3S, streamed-SOG, LCC, RAD, Bentley 3MX,

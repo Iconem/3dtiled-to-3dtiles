@@ -47,7 +47,7 @@ const deliveryOf = (p) => (p.bundled ? 'bundled' : p.uv ? 'uv' : p.cargo ? 'carg
 /** The manifest without its functions: what a form needs. */
 export function listTools() {
   return TOOLS.map((t) => ({
-    id: t.id, name: t.name, kind: t.kind, summary: t.summary, homepage: t.homepage, licence: t.licence,
+    id: t.id, name: t.name, kind: t.kind, favorite: !!t.favorite, summary: t.summary, homepage: t.homepage, licence: t.licence,
     inputs: t.inputs, dir: t.dir ?? false, ply: t.ply ?? null,
     output: { format: t.output.format, label: t.output.label },
     delivery: deliveryOf(t.provide),

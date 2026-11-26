@@ -8,6 +8,7 @@ import desktopExport from './assets/desktop-export.png';
 import desktopTile from './assets/desktop-tile.png';
 import desktopLibrary from './assets/desktop-library.png';
 import desktopStreams from './assets/desktop-streams.png';
+import terrainBlender from './assets/terrain-blender.jpg';
 
 // Sources of every figure: apps/docs/content/docs (supported-formats, architecture-caching, geometric-error,
 // meta-tilesets, aggregate-builder, desktop-app, desktop-tile-raw-input, todo-future-work, planning/*) and CHANGELOG.md.
@@ -362,9 +363,10 @@ const P1Cover: Page = () => (
   </div>
 );
 
-const SrcItem = ({ color, children }: { color: string; children: ReactNode }) => (
+const SrcItem = ({ color, kind, children }: { color: string; kind?: string; children: ReactNode }) => (
   <div style={{ display: 'flex', alignItems: 'center', gap: 14, padding: '9px 0', borderTop: `1px solid ${ink.rule}`, fontSize: 23 }}>
     <Dot color={color} />
+    {kind ? <span style={{ width: 100, flex: 'none', fontSize: 19, color: ink.muted }}>{kind}</span> : null}
     <span>{children}</span>
   </div>
 );
@@ -372,16 +374,16 @@ const SrcItem = ({ color, children }: { color: string; children: ReactNode }) =>
 const P2Overview: Page = () => (
   <Frame eyebrow="Overview" title="Any tiled source, any 3D Tiles client">
     <div style={{ display: 'flex', alignItems: 'center', gap: 0 }}>
-      <div style={{ width: 400, flex: 'none' }}>
+      <div style={{ width: 470, flex: 'none' }}>
         <Label>Sources</Label>
-        <SrcItem color={PTS}>COPC · Potree · VPC</SrcItem>
-        <SrcItem color={MESH}>I3S · OSGB · 3MX · Nexus</SrcItem>
-        <SrcItem color={MESH}>Bing Maps 3D</SrcItem>
-        <SrcItem color={SPLAT}>SOG · RAD · LCC · GeoSplats</SrcItem>
-        <SrcItem color={ink.dim}>.3tz · .3dtiles packages</SrcItem>
+        <SrcItem color={PTS} kind="Points">COPC · Potree · VPC</SrcItem>
+        <SrcItem color={MESH} kind="Meshes">I3S · OSGB · 3MX · Nexus</SrcItem>
+        <SrcItem color={MESH} kind="Meshes">Bing Maps 3D</SrcItem>
+        <SrcItem color={SPLAT} kind="Splats">SOG · RAD · LCC · GeoSplats</SrcItem>
+        <SrcItem color={ink.dim} kind="Packages">.3tz · .3dtiles</SrcItem>
       </div>
       <Arrow />
-      <Box w={520} sub={<span style={{ fontFamily: mono }}>/stream/tileset.json?format=…&amp;url=…</span>}>
+      <Box w={450} sub={<span style={{ fontFamily: mono }}>/stream/tileset.json?format=…&amp;url=…</span>}>
         <div style={{ fontSize: 34 }}>tile-server</div>
         <div style={{ fontSize: 21, fontWeight: 400, color: ink.soft, marginTop: 12 }}>
           reads the source&apos;s hierarchy, decodes one node per request into one GLB
@@ -609,7 +611,7 @@ const Shape = ({ title, formats, children }: { title: string; formats: string; c
 );
 
 const P9Shapes: Page = () => (
-  <Frame eyebrow="Hierarchy vs geometry" title="Ten source trees, one 3D Tiles tree">
+  <Frame eyebrow="Source trees" title="Ten source trees, one 3D Tiles tree">
     <div style={{ display: 'flex', flexDirection: 'column', gap: 24 }}>
       <div style={{ display: 'flex', gap: 25 }}>
         <Shape title="Octree" formats="COPC · Potree">
@@ -883,34 +885,52 @@ const P14Viewer: Page = () => (
   </Frame>
 );
 
+const B = ({ children }: { children: ReactNode }) => <b style={{ color: ink.text, fontWeight: 500 }}>{children}</b>;
+
 const P15Desktop: Page = () => (
   <Frame eyebrow="Clients" title="Desktop app">
     <p style={{ fontSize: 26, color: ink.soft, margin: 0 }}>
       The tile-server on your machine. Windows, macOS, Linux. Nothing is uploaded.
     </p>
     <div style={{ display: 'flex', gap: 60, marginTop: 30 }}>
-      <Shot src={desktopStream} width={480} height={440} caption={<><b style={{ color: ink.text, fontWeight: 500 }}>Stream</b>: a URL for any client</>} />
-      <Shot src={desktopExport} width={480} height={440} caption={<><b style={{ color: ink.text, fontWeight: 500 }}>Export</b>: a static 3D Tiles folder</>} />
-      <Shot src={desktopTile} width={480} height={440} caption={<><b style={{ color: ink.text, fontWeight: 500 }}>Tile</b>: raw input through 21 tools, PDAL to Obj2Tiles</>} />
-    </div>
-  </Frame>
-);
-
-const P16Library: Page = () => (
-  <Frame eyebrow="Clients" title="Library and Streams">
-    <div style={{ display: 'flex', gap: 60 }}>
-      <Shot src={desktopLibrary} width={480} height={480} caption={<><b style={{ color: ink.text, fontWeight: 500 }}>Library</b>: bookmarks, history, samples</>} />
+      <Shot src={desktopStream} width={520} height={480} caption={<><B>Stream live</B>: a dataset in, a URL for any client out</>} />
       <div style={{ flex: 1, minWidth: 0 }}>
-        <Shot src={desktopStreams} width={760} height={312} caption={<><b style={{ color: ink.text, fontWeight: 500 }}>Streams</b>: a status pill per URL</>} />
-        <div style={{ marginTop: 36 }}>
+        <Shot src={desktopStreams} width={1000} height={410} caption={<><B>Streams</B>: a status pill per URL, asking it for its tileset</>} />
+        <div style={{ marginTop: 30 }}>
           <Bullets size={26}>
             <Li>A row for every URL added, copied or previewed</Li>
-            <Li>Rename, reorder, pause, load back into the form</Li>
-            <Li>Kept across restarts</Li>
+            <Li>Rename, reorder, pause, load back into the form; kept across restarts</Li>
           </Bullets>
         </div>
       </div>
     </div>
+  </Frame>
+);
+
+const P16Desktop2: Page = () => (
+  <Frame eyebrow="Clients" title="Export, tile, keep">
+    <div style={{ display: 'flex', gap: 60, marginTop: 10 }}>
+      <Shot src={desktopExport} width={500} height={520} caption={<><B>Export</B>: a static 3D Tiles folder</>} />
+      <Shot src={desktopTile} width={500} height={520} caption={<><B>Tile raw input</B>: one-stop tilers, PDAL to Obj2Tiles, downloaded on first use</>} />
+      <Shot src={desktopLibrary} width={500} height={520} caption={<><B>Library</B>: bookmarks, history, samples</>} />
+    </div>
+  </Frame>
+);
+
+const P16Terrain: Page = () => (
+  <Frame eyebrow="Clients" title="Terrain">
+    <TwoCol
+      leftWidth={1060}
+      left={<Shot src={terrainBlender} width={1060} height={640} position="0% 0%" caption="The Matterhorn in Blender: Mapterhorn terrain, sky-view factor and a hypsometric tint, all from the Terrain tab" />}
+      right={
+        <Bullets size={26}>
+          <Li k="Any DEM">a library id, a tile template, a COG, a VRT</Li>
+          <Li k="Terrain">a quantized-mesh layer.json</Li>
+          <Li k="Analyses">hillshade, slope, sky-view factor, TPI, TRI, contours</Li>
+          <Li k="Local">Terrain Viewer&apos;s tile service, each tile computed on request</Li>
+        </Bullets>
+      }
+    />
   </Frame>
 );
 
@@ -922,34 +942,42 @@ const PR = ({ n, state, children }: { n: string; state: 'merged' | 'open'; child
   </div>
 );
 
+const A = ({ href, children }: { href: string; children: ReactNode }) => (
+  <a href={href} target="_blank" rel="noreferrer" style={{ color: 'inherit', textDecoration: 'none', display: 'block' }}>{children}</a>
+);
+
+const Repo = ({ repo, color, children }: { repo: string; color: string; children: ReactNode }) => (
+  <A href={`https://github.com/${repo}`}>
+    <div style={{ display: 'flex', gap: 22, alignItems: 'center', padding: '16px 0', borderTop: `1px solid ${ink.rule}` }}>
+      <Dot color={color} />
+      <span style={{ fontFamily: mono, fontSize: 24, width: 700, flex: 'none', color: 'var(--osd-accent)' }}>github.com/{repo}</span>
+      <span style={{ fontSize: 22, color: ink.soft }}>{children}</span>
+    </div>
+  </A>
+);
+
 const P17Ecosystem: Page = () => (
   <Frame eyebrow="Ecosystem" title="Around 3dtiled">
-    <div style={{ display: 'flex', gap: 24 }}>
-      <Card title="blender_ogc3dtiles" accent={MESH}>
-        3D Tiles in Blender through cesium-native: meshes, point clouds, splats, voxels, clipping.
-      </Card>
-      <Card title="terrain-viewer" accent={PTS}>
-        Global terrain sources compared, with hillshade, contours and hypsometry, on MapLibre.
-      </Card>
-      <Card title="3dtiles-samples" accent={ink.dim}>
-        Public reproducers on GitHub Pages, behind the upstream issues.
-      </Card>
+    <div style={{ borderBottom: `1px solid ${ink.rule}` }}>
+      <Repo repo="jo-chemla/blender_ogc3dtiles" color={MESH}>3D Tiles in Blender through cesium-native</Repo>
+      <Repo repo="jo-chemla/terrain-viewer" color={PTS}>terrain sources compared; the Terrain tab&apos;s tile service</Repo>
+      <Repo repo="jo-chemla/3dtiles-samples" color={ink.dim}>public reproducers and sample packages</Repo>
+      <Repo repo="WilliamLiu-1997/Gaussian-Splat-Lite" color={SPLAT}>the viewer&apos;s splat renderer, and two tilers</Repo>
     </div>
-    <div style={{ display: 'flex', gap: 60, marginTop: 48 }}>
+    <div style={{ display: 'flex', gap: 60, marginTop: 44 }}>
       <div style={{ flex: 1 }}>
         <Label>NASA-AMMOS/3DTilesRendererJS</Label>
         <div style={{ borderBottom: `1px solid ${ink.rule}` }}>
-          <PR n="#1780" state="merged">point-cloud fixes</PR>
-          <PR n="#1782" state="merged">additive traversal skip</PR>
-          <PR n="#1792" state="open">adaptive point size, ADD octrees</PR>
+          <A href="https://github.com/NASA-AMMOS/3DTilesRendererJS/pull/1780"><PR n="#1780" state="merged">point-cloud fixes</PR></A>
+          <A href="https://github.com/NASA-AMMOS/3DTilesRendererJS/pull/1782"><PR n="#1782" state="merged">additive traversal skip</PR></A>
+          <A href="https://github.com/NASA-AMMOS/3DTilesRendererJS/pull/1792"><PR n="#1792" state="open">adaptive point size, ADD octrees</PR></A>
         </div>
       </div>
       <div style={{ flex: 1 }}>
         <Label>donmccurdy/glTF-Transform</Label>
         <div style={{ borderBottom: `1px solid ${ink.rule}` }}>
-          <PR n="#1877" state="open">GLB writer, 88 ms to 13 ms</PR>
+          <A href="https://github.com/donmccurdy/glTF-Transform/pull/1877"><PR n="#1877" state="open">GLB writer, 88 ms to 13 ms</PR></A>
         </div>
-        <p style={{ fontSize: 22, color: ink.muted, margin: '24px 0 0' }}>blender_ogc3dtiles, terrain-viewer and 3dtiled: github.com/jo-chemla, each with an Iconem fork.</p>
       </div>
     </div>
   </Frame>
@@ -958,15 +986,15 @@ const P17Ecosystem: Page = () => (
 const P18Roadmap: Page = () => (
   <Frame eyebrow="Roadmap" title="Next">
     <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 24 }}>
-      <Card title="Formats in the browser">3DTilesRendererJS plugins for COPC and VPC, then Nexus, 3MX, I3S, OSGB. No server.</Card>
-      <Card title="Point tiler" accent={ink.dim}>
-        Raw points to COPC and 3D Tiles, out of core like PotreeConverter 2.0. Benchmark first.
-      </Card>
-      <Card title="Streaming" accent={ink.dim}>
-        <C>tiling=explicit</C> everywhere; a progress endpoint for hierarchy and full jobs.
+      <Card title="COPC in the browser">A 3DTilesRendererJS plugin for COPC, then VPC. No server.</Card>
+      <Card title="Point and splat tiler" accent={ink.dim}>
+        Raw points and splats to COPC, SOG and 3D Tiles, out of core like PotreeConverter 2.0. Benchmark first.
       </Card>
       <Card title="Spec" accent={ink.dim}>
         3D Tiles 2.0 on glTF 2.1; meshopt for points, which <C>transform=meshopt</C> already writes.
+      </Card>
+      <Card title="Progress endpoint" accent={ink.dim}>
+        Progress for hierarchy and full jobs; <C>tiling=explicit</C> everywhere.
       </Card>
       <Card title="Accuracy" accent={ink.dim}>
         Splat presets compared by eye; errors checked against each format&apos;s own viewer.
@@ -1028,20 +1056,21 @@ export const meta: SlideMeta = {
 export default [
   P1Cover,
   P2Overview,
+  P9Shapes,
+  P11Formats,
   P3Genesis,
   P4Idea,
   P5PushPull,
   P6Cache,
   P7Range,
   P8Hierarchy,
-  P9Shapes,
   P10Error,
-  P11Formats,
   P12Aggregate,
   P13Sets,
-  P14Viewer,
   P15Desktop,
-  P16Library,
+  P16Desktop2,
+  P16Terrain,
+  P14Viewer,
   P17Ecosystem,
   P18Roadmap,
   P19Close,
@@ -1050,21 +1079,22 @@ export default [
 export const notes: (string | undefined)[] = [
   'Open source, MIT. Tiled 3D formats in, OGC 3D Tiles out, converted when a client asks.',
   'Three parts: offline converters, the live tile-server, the clients. The server is the centre.',
+  'Ten shapes of source hierarchy, all mapped onto implicit or explicit 3D Tiles trees.',
+  'From supported-formats. Amber points, blue meshes, violet splats.',
   'Dates from CHANGELOG.md. Started 2026-06-18; the live COPC server came four days later.',
   'Map the source tree, do not rebuild it. TiTiler for COGs is the analogy.',
   'Push walks everything once; pull answers one request at a time. /export bridges the two.',
   'cache=none is the default; cache=full is /convert. Same code path either way.',
   'Every source read goes through core/source-fetch.js with these rules.',
   'Two jobs: the tree is read lazily, a node is decoded on request.',
-  'Ten shapes of source hierarchy, all mapped onto implicit or explicit 3D Tiles trees.',
   'The docs page "Geometric error, format by format" has the line of code behind each rule.',
-  'From supported-formats. Amber points, blue meshes, violet splats.',
   'A mosaic reads only each child root; clients stream tiles from each source directly.',
   'Uploads are never listed; the set name is a hash of the entries.',
+  'Each Streams row says whether its URL answers a tileset. Screenshots from the docs (dark theme).',
+  'Export writes a folder; Tile raw input runs the one-stop tilers; the Library keeps a source plus its options.',
+  'Terrain Viewer tile service, downloaded on first use and run on this machine. Blender add-on as the client.',
   'Public demo; any preset loads live through 3dtiled.iconem.com.',
-  'Desktop screenshots from the docs (dark theme).',
-  'Each Streams row says whether its URL answers a tileset.',
-  'Upstream PR states as of 2026-11-25.',
+  'Every line links to its repository or PR. PR states as of 2026-11-26.',
   'From the TODO / future work page and the planning pages.',
   undefined,
 ];

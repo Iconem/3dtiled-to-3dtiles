@@ -14,6 +14,7 @@ import libraryDark from './img/desktop/library-dark.png';
 import librarySamplesLight from './img/desktop/library-samples-light.png';
 import librarySamplesDark from './img/desktop/library-samples-dark.png';
 import previewShot from './img/desktop/preview.jpg';
+import terrainBlender from './img/desktop/terrain-blender.jpg';
 
 The desktop companion (`apps/desktop`) is the **run-the-middleware-on-device** app: it starts
 `packages/tile-server` locally, then turns a dataset on your disk — or a public URL — into a live OGC
@@ -362,9 +363,13 @@ viewer (48 and 42 tiles). The same exporter is on the CLI as
 ### Tile raw input
 
 A tab of its own for input that is **not tiled yet**: a point cloud, a mesh or Gaussian splats, as a file or a
-folder, or a table of a PostGIS database. It runs one of 21 third-party tilers on it (PDAL, PotreeConverter,
+folder, or a table of a PostGIS database. It runs one of the third-party tilers on it (PDAL, PotreeConverter,
 gocesiumtiler, Obj2Tiles, splat-transform…), then streams or previews the result. Its input field is not the dataset
 of the two other tabs.
+
+Two tilers per kind are **starred** and offered first: untwine and PotreeConverter for point clouds, Obj2Tiles and
+mago 3D Tiler for meshes, splat-transform and Gaussian Splat Lite build-sog for splats. With an input, the first
+starred tool already on the machine is chosen.
 
 It has a page of its own: **[Tile raw input](/docs/guide/desktop-tile-raw-input)**.
 
@@ -380,11 +385,18 @@ A DEM as Cesium terrain and as analysis tiles, computed on this machine by the t
   `node packages/tilers/cli.js install terrain-service` does the same. No bundle is published for Linux arm64.
 - **Start runs it on 127.0.0.1**, on the first free port from 3400 to 3403. A Terrain Viewer service already
   running there (its desktop app's, or its QGIS plugin's) is used as it is, and *Disconnect* leaves it running.
-- **Sources** are a Terrarium or Terrain-RGB template, a COG or VRT address, or a library id (`mapterhorn`).
+- **Sources** come from a combo box: pick one of the service's library sources (Mapterhorn, Esri, AWS, Copernicus
+  GLO-30, national LiDAR DEMs and so on, listed by the running service at `/terrain-sources`), or type your own: a
+  Terrarium or Terrain-RGB template, a COG or VRT address, or a source as JSON (`{"url": "…", "type": "cog"}`).
   Each row has a health pill and gives its `layer.json` (quantized-mesh-1.0, heights on the WGS84 ellipsoid), or
   the XYZ tiles of hillshade, slope, aspect, sky-view factor, TPI, TRI or colour relief, or contours as vector
   tiles. The list is kept in the app, like the Streams list.
 - **Open** goes to the Terrain Viewer website with the source: 3dtiled's viewer has no custom terrain URL yet.
+
+<figure className="not-prose my-6">
+  <img src={terrainBlender.src} width={terrainBlender.width} height={terrainBlender.height} alt="The Terrain tab next to Blender: the Matterhorn from Mapterhorn as quantized-mesh terrain, with sky-view factor and hypsometric tiles from the same service draped on it" loading="lazy" className="mx-auto h-auto max-w-full rounded-lg border border-fd-border shadow-sm" />
+  <figcaption className="mt-2 text-center text-sm text-fd-muted-foreground">The Matterhorn in Blender through <a href="https://github.com/jo-chemla/blender_ogc3dtiles">blender_ogc3dtiles</a>: the tab's <code>layer.json</code> for <code>mapterhorn</code> as terrain, its sky-view factor and a hypsometric tint as raster overlays.</figcaption>
+</figure>
 
 ### Library
 
