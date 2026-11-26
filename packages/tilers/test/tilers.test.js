@@ -79,7 +79,7 @@ test('which tools take a file or a folder', () => {
   assert.deepEqual(toolsFor('model.glb'), ['mago-3d-tiler', 'rusty-tiles']);
   assert.deepEqual(toolsFor('part.stl'), ['mago-3d-tiler', 'nexus']);
   assert.deepEqual(toolsFor('building.ifc'), ['mago-3d-tiler']);
-  assert.deepEqual(toolsFor('scene.spz'), ['splat-transform', 'spark-build-lod']);
+  assert.deepEqual(toolsFor('scene.spz'), ['splat-transform', 'gsl-build-sog', 'gsl-build-rad', 'spark-build-lod']);
   assert.deepEqual(toolsFor('scene.splat'), ['splat-transform', 'spark-build-lod']);
   assert.deepEqual(toolsFor('scan.ptx'), ['pdal'], 'PotreeConverter 1.7 lists PTX but its binary crashes on it');
   assert.deepEqual(toolsFor('cloud.txt'), ['pdal', 'potreeconverter1', 'point-tiler']);
@@ -96,9 +96,9 @@ test('which tools take a file or a folder', () => {
   const packed = ply('scene.compressed.ply', 'element chunk 4\nproperty float min_x\nelement vertex 10\nproperty uint packed_position\nproperty uint packed_rotation');
   assert.deepEqual([sniffPly(points), sniffPly(splats), sniffPly(mesh), sniffPly(packed)], ['points', 'splats', 'mesh', 'splats']);
   assert.deepEqual(toolsFor(points), ['pdal', 'potreeconverter1', 'gocesiumtiler', 'py3dtiles']);
-  assert.deepEqual(toolsFor(splats), ['splat-transform', 'gocesiumtiler-splats', '3dgs-ply-3dtiles-converter', 'spark-build-lod']);
+  assert.deepEqual(toolsFor(splats), ['splat-transform', 'gocesiumtiler-splats', '3dgs-ply-3dtiles-converter', 'gsl-build-sog', 'gsl-build-rad', 'spark-build-lod']);
   assert.deepEqual(toolsFor(mesh), ['mago-3d-tiler', 'nexus'], 'a PLY mesh goes to the mesh tools');
-  assert.equal(toolsFor('not-on-disk.ply').length, 10, 'a PLY that cannot be read is offered every PLY tool');
+  assert.equal(toolsFor('not-on-disk.ply').length, 12, 'a PLY that cannot be read is offered every PLY tool');
 
   // A folder is matched by what it holds.
   const scans = path.join(dir, 'scans'), osgb = path.join(dir, 'oblique');

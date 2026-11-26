@@ -93,6 +93,8 @@ node packages/convert/cli.js tile run <tool> <input> <outDir> [--<option> <value
 | `splat-transform` | `.ply`, `.spz`, `.sog`, `.splat`, `.ksplat`, `.lcc` (splats) | `<outDir>/lod-meta.json` (streamed SOG) | ships with the repo |
 | `gocesiumtiler-splats` | a splat `.ply` | 3D Tiles (SPZ splats) | the same download as `gocesiumtiler` |
 | `3dgs-ply-3dtiles-converter` | a splat `.ply` | 3D Tiles (SPZ splats, merged levels of detail) | ships with the repo |
+| `gsl-build-sog` | a splat `.ply`, `.spz` | `<outDir>/lod-meta.json` (streamed SOG v3, merged levels) | ships with the repo |
+| `gsl-build-rad` | a splat `.ply`, `.spz` | `<outDir>/<name>-lod.rad` | ships with the repo |
 | `spark-build-lod` | a splat `.ply`, `.spz`, `.splat`, `.ksplat` | `<outDir>/<name>-lod.rad` | source, built with `cargo` (the machine's, or a Rust toolchain fetched for the build; `TILED_PRIVATE_RUST=1` forces the second) |
 
 ```sh

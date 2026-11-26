@@ -9,7 +9,8 @@
     "3dtiled-tile": "cli.js"
   },
   "dependencies": {
+    "3dgs-ply-3dtiles-converter": "0.6.5",
     "@playcanvas/splat-transform": "^3.11.1",
-    "3dgs-ply-3dtiles-converter": "0.6.5"
+    "gaussian-splat-lite": "1.10.3"
   }
 }

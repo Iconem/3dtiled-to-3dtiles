@@ -434,6 +434,9 @@ importers:
       '@playcanvas/splat-transform':
         specifier: ^3.11.1
         version: 3.11.1(patch_hash=4d2eac7afddeb3fb292e3f546cf1f98dc60b2fd21ed81fc4e4114a4ce1cc0a78)(playcanvas@2.19.7)
+      gaussian-splat-lite:
+        specifier: 1.10.3
+        version: 1.10.3(three@0.187.0)
 
 packages:
 
@@ -4468,6 +4471,13 @@ packages:
   fuse.js@7.4.2:
     resolution: {integrity: sha512-LVbzjD4WA6UP5B1UnP8wuaXJiLnqMdM/E4fiJXTJ5haJ5b/MBNsK29h2fm6swEoQaVQjvYFWKLE2RanyZIoRVQ==}
     engines: {node: '>=10'}
+
+  gaussian-splat-lite@1.10.3:
+    resolution: {integrity: sha512-b8tYubRLkGiON6UBcJI950vZTa1k3au7XLmloTzAGAp2jvJ4v3d8KkoCMUZfS1h1xeD3B8s9f1CHDBUUdx6Nag==}
+    engines: {node: '>=22.12.0'}
+    hasBin: true
+    peerDependencies:
+      three: '>=0.187.0'
 
   gaussian-splat-lite@1.8.1:
     resolution: {integrity: sha512-pQOWTO4ifW45Re9lhi09QcKVubcVEh1UU9y4sKOqWh3Yn/ZPKkbtI7KB7CShnpOm6U0AgLKJZl6E8jFVSj4l1A==}
@@ -11485,6 +11495,10 @@ snapshots:
   functions-have-names@1.2.3: {}
 
   fuse.js@7.4.2: {}
+
+  gaussian-splat-lite@1.10.3(three@0.187.0):
+    dependencies:
+      three: 0.187.0
 
   gaussian-splat-lite@1.8.1(three@0.187.0):
     dependencies:

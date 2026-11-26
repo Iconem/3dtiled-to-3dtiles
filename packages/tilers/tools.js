@@ -1087,6 +1087,66 @@ export const TOOLS = [
     },
   },
   {
+    id: 'gsl-build-sog',
+    name: 'Gaussian Splat Lite build-sog',
+    kind: 'splat',
+    summary: 'A splat PLY or SPZ to a streamed SOG v3 with levels of detail made by merging splats, not decimating them: William Liu\'s tiler, from the splat library this viewer uses. CPU only, bounded memory, keeps up to SH4.',
+    homepage: 'https://github.com/WilliamLiu-1997/Gaussian-Splat-Lite/blob/main/docs/BuildSog.md',
+    licence: 'Apache-2.0',
+    inputs: ['ply', 'spz'],
+    ply: 'splats',
+    output: { format: 'sog', path: (ctx) => path.join(ctx.outDir, 'lod-meta.json'), label: 'streamed SOG (lod-meta.json)' },
+    provide: { bundled: { package: 'gaussian-splat-lite', script: 'bin/build-sog.js' } },
+    options: [
+      { key: 'maxSh', label: 'Spherical harmonics', type: 'enum', values: ['4', '3', '2', '1', '0'], default: '4', help: '--max-sh: the highest degree kept, limited by the input. 0 is base colour only.' },
+      { key: 'lodFactor', label: 'Reduction per level', type: 'number', min: 1.05, max: 16, default: 2, help: '--lod-factor: each coarser level has about this many times fewer splats, until the scene fits the root budget. Smaller makes more levels and a larger output.' },
+      { key: 'lodDensity', label: 'Keep relative density', type: 'number', min: 0, max: 1, default: 0.4, help: '--lod-density: low merges the smallest splats first; high keeps more detail where the scene is dense.' },
+      { key: 'chunkCount', label: 'Splats per chunk (thousands)', type: 'int', min: 1, max: 4096, default: 256, advanced: true, help: '--lod-chunk-count, in K (1 K = 1024).' },
+      { key: 'regionSplats', label: 'Splats per region (thousands)', type: 'int', min: 1, max: 4096, default: 8, advanced: true, help: '--region-splats: the most a spatial region holds across all levels, in K.' },
+      { key: 'rootSplats', label: 'Coarsest level (thousands)', type: 'int', min: 1, max: 65536, default: 256, advanced: true, help: '--root-splats: the coarsest level holds at most this many, in K.' },
+      { key: 'within', label: 'Keep inside a sphere', type: 'text', numbers: true, default: '', placeholder: 'x,y,z,radius', advanced: true, help: '--within-dist: keep splat centres inside this sphere, in the input\'s coordinates. Removes far floaters and sky.' },
+      { key: 'memory', label: 'Memory (GB)', type: 'number', min: 1, max: 1024, default: 4, advanced: true, help: '--memory-budget: a target, not a hard limit. Lower is slower and uses more temporary disk.' },
+    ],
+    steps(ctx) {
+      const { exe, input, outDir, tmpDir, opt } = ctx;
+      // it refuses to overwrite lod-meta.json and chunks/, which is fine: a run gets its own output folder
+      const cmd = [...exe, input, '-o', outDir, '--temp-dir', tmpDir, '--max-sh', String(opt.maxSh), '--lod-factor', String(opt.lodFactor), '--lod-density', String(opt.lodDensity)];
+      if (opt.chunkCount !== 256) cmd.push('--lod-chunk-count', String(opt.chunkCount));
+      if (opt.regionSplats !== 8) cmd.push('--region-splats', String(opt.regionSplats));
+      if (opt.rootSplats !== 256) cmd.push('--root-splats', String(opt.rootSplats));
+      if (opt.within) cmd.push('--within-dist', String(opt.within).replace(/\s+/g, ''));
+      if (opt.memory !== 4) cmd.push('--memory-budget', String(opt.memory));
+      return [{ cmd, label: 'splats → streamed SOG' }];
+    },
+  },
+  {
+    id: 'gsl-build-rad',
+    name: 'Gaussian Splat Lite build-rad',
+    kind: 'splat',
+    summary: 'A splat PLY or SPZ to a .RAD file with a level-of-detail tree, the format SparkJS streams, in JavaScript: no Rust build, unlike Spark\'s own build-lod. William Liu\'s tiler, CPU only.',
+    homepage: 'https://github.com/WilliamLiu-1997/Gaussian-Splat-Lite',
+    licence: 'Apache-2.0',
+    inputs: ['ply', 'spz'],
+    ply: 'splats',
+    output: { format: 'rad', path: (ctx) => path.join(ctx.outDir, `${ctx.name}-lod.rad`), label: 'RAD (.rad)' },
+    provide: { bundled: { package: 'gaussian-splat-lite', script: 'bin/build-rad.js' } },
+    options: [
+      { key: 'lodBase', label: 'Level spacing', type: 'number', min: 1.1, max: 16, default: 1.75, help: '--lod-base: the size ratio between levels. 1.75 is the tool\'s and Spark\'s default.' },
+      { key: 'maxSh', label: 'Spherical harmonics', type: 'enum', values: ['3', '2', '1', '0'], default: '3', help: '--max-sh: the highest degree kept.' },
+      { key: 'within', label: 'Keep inside a sphere', type: 'text', numbers: true, default: '', placeholder: 'x,y,z,radius', advanced: true, help: '--within-dist: keep splat centres inside this sphere, in the input\'s coordinates.' },
+      { key: 'chunked', label: 'Chunked .rad', type: 'bool', default: false, advanced: true, help: '--rad-chunked: a .rad header and separate .radc files.' },
+      { key: 'memory', label: 'Memory (GB)', type: 'number', min: 1, max: 1024, default: 4, advanced: true, help: '--memory-budget: a target, not a hard limit.' },
+    ],
+    steps(ctx) {
+      const { exe, input, outDir, tmpDir, name, opt } = ctx;
+      const cmd = [...exe, input, '-o', path.join(outDir, `${name}-lod.rad`), '--temp-dir', tmpDir, '--lod-base', String(opt.lodBase), '--max-sh', String(opt.maxSh)];
+      if (opt.within) cmd.push('--within-dist', String(opt.within).replace(/\s+/g, ''));
+      if (opt.chunked) cmd.push('--rad-chunked');
+      if (opt.memory !== 4) cmd.push('--memory-budget', String(opt.memory));
+      return [{ cmd, label: 'splats → RAD' }];
+    },
+  },
+  {
     id: 'spark-build-lod',
     name: 'Spark build-lod',
     kind: 'splat',

@@ -6,6 +6,9 @@ Format loosely follows [Keep a Changelog](https://keepachangelog.com/).
 ## [Unreleased]
 
 ### Added — 2026-11-26
+- **Tilers: Gaussian Splat Lite's `gsl-build-sog` and `gsl-build-rad`** (William Liu, Apache-2.0, bundled): a splat
+  PLY or SPZ to a streamed SOG v3 whose coarser levels merge splats rather than decimate them (up to SH4, bounded
+  memory, CPU only), or to Spark's RAD without a Rust build. The SOG output streams through the tile server as is.
 - **Desktop: a Terrain tab.** Terrain Viewer's tile service (Iconem, MIT) is downloaded on first use from a pinned
   release, SHA-256 checked, then started and stopped by the app (or an already running one is used). Any DEM
   (Terrarium, Terrain-RGB, COG, VRT, LERC, library ids such as `mapterhorn`) becomes a quantized-mesh `layer.json`,
