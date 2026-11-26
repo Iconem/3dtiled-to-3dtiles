@@ -20,7 +20,7 @@
  *               Spec: Maxar MAXAR_content_3tz + CesiumGS/3d-tiles-tools#86.
  *
  * .3dtiles format: SQLite `media` table (key TEXT, content BLOB). A remote one is read by HTTP range requests, a few
- *               database pages per tile (sqlite-http.js, sqlite-wasm-http): never downloaded whole, and a host that
+ *               database pages per tile (sqlite-http.js, wa-sqlite): never downloaded whole, and a host that
  *               ignores Range is refused. A local one is opened in sql.js (pure WASM).
  */
 import fs from 'node:fs';

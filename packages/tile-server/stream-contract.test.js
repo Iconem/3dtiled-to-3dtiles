@@ -133,7 +133,7 @@ test('a failed build is not remembered for ever', async () => {
 
 test('every format reads its source through the shared layer', async () => {
   const dir = path.dirname(fileURLToPath(import.meta.url));
-  for (const f of ['copc-live', 'potree-live', 'sog-live', 'lcc-live', 'lcc2-live', 'rad-live', 'i3s-live', 'threemx-live', 'osgb-live', 'geosplats-live', 'remote-zip', 'range-getter', '3dtiles-self-contained', 'sqlite-http', 'sqlite-http-worker', 'export-live']) {
+  for (const f of ['copc-live', 'potree-live', 'sog-live', 'lcc-live', 'lcc2-live', 'rad-live', 'i3s-live', 'threemx-live', 'osgb-live', 'geosplats-live', 'remote-zip', 'range-getter', '3dtiles-self-contained', 'sqlite-http', 'export-live']) {
     const code = (await readFile(path.join(dir, `${f}.js`), 'utf8')).replace(/\/\*[\s\S]*?\*\/|\/\/.*$/gm, '');
     assert.ok(!/(^|[^.\w])fetch\(/m.test(code), `${f}.js calls fetch itself`);
   }

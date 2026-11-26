@@ -1,5 +1,5 @@
 // A remote .3dtiles (SQLite) is read by byte ranges, a few pages per tile, never downloaded whole; a host that ignores
-// Range is refused (sqlite-http.js, sqlite-http-worker.js, and the /3dtiles-self-contained handler on top).
+// Range is refused (sqlite-http.js, and the /3dtiles-self-contained handler on top).
 import test, { after } from 'node:test';
 import assert from 'node:assert/strict';
 import http from 'node:http';
@@ -59,7 +59,8 @@ function get(key, pkg) {
 
 test('a remote .3dtiles is read by ranges: the tileset and a tile for a small part of the file', async (t) => {
   const h = await host(t);
-  const pkg = `${h.base}/a.3dtiles?token=x%2Fy`;                // a query (a presigned URL) passes SQLite's own URI parsing
+  // a query (a presigned URL, a few KB long) passes SQLite's own URI parsing and file name limits
+  const pkg = `${h.base}/a.3dtiles?token=x%2Fy&X-Amz-Signature=${'a1'.repeat(1200)}`;
   const ts = await get('tileset.json', pkg);
   assert.equal(ts.status, 200);
   assert.equal(JSON.parse(ts.body).root.content.uri, `/3dtiles-self-contained/tiles/3.glb?url=${encodeURIComponent(pkg)}`);
@@ -69,7 +70,7 @@ test('a remote .3dtiles is read by ranges: the tileset and a tile for a small pa
   assert.ok(h.log.requests.every((r) => /^bytes=\d+-\d+$/.test(r)), `only plain ranges: ${h.log.requests}`);
   assert.ok(h.log.bytes < FILE.length / 8, `read ${h.log.bytes} bytes of ${FILE.length}`);
   assert.equal((await get('tiles/none.glb', pkg)).status, 404);
-  // in parallel, on the threads, each its own bytes
+  // in parallel, on the connections, each its own bytes
   const many = await Promise.all([10, 20, 30, 39].map((i) => get(`tiles/${i}.glb`, pkg)));
   many.forEach((r, k) => assert.ok(r.body.equals(TILES[[10, 20, 30, 39][k]]), `tile ${[10, 20, 30, 39][k]}`));
   assert.ok(h.log.bytes < FILE.length / 2, `read ${h.log.bytes} bytes of ${FILE.length} for six tiles of forty`);

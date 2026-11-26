@@ -490,11 +490,18 @@ first open, then serves each tile with a single `fs.read()` at the stored offset
 `npx 3d-tiles-tools serve` but in-process, with CORS open and no additional CLI.
 
 `.3dtiles` is an SQLite database (`key TEXT, content BLOB`). A remote one is queried in place by HTTP range
-requests ([sqlite-wasm-http](https://github.com/mmomtchev/sqlite-wasm-http): the official SQLite WASM build with an
-HTTP VFS, in `packages/tile-server/sqlite-http.js`): opening it and serving `tileset.json` reads a few pages, about
-25 KB of a 10 MB package, and a tile its own pages plus some read-ahead. Its pages go through
-`packages/core/source-fetch.js`, so retries, the per-host cap and the refusal of hosts that ignore Range apply. A
-local one is opened in sql.js. Smaller SQLite pages (`PRAGMA page_size = 1024; VACUUM;`) make the index lookups
+requests ([wa-sqlite](https://github.com/powersync-ja/wa-sqlite), `@journeyapps/wa-sqlite`, its Asyncify build: SQLite
+in WASM whose file reads may be async JavaScript, with a small HTTP VFS in `packages/tile-server/sqlite-http.js`, on the
+server's own thread, no worker): opening it and serving `tileset.json` reads a few pages, about 37 KB in 9 requests of
+the 755 MB [Helsinki sample](https://github.com/jo-chemla/3dtiles-samples/releases/tag/helsinki-2024-3dtiles), and a
+tile its own pages plus some read-ahead: a read doubles in size while the page before it is already cached, so a tile
+of that sample (median 438 KB) costs about 7.5 requests and 1.16 times its size in bytes. The pages sit in one LRU
+cache (`TILED_SQLITE_CACHE_MB`, default 64) shared by the connections (`TILED_SQLITE_CONNECTIONS` SQLite instances,
+default 2, each running one query at a time) and every open file (`TILED_SQLITE_MAX_OPEN`, default 16). Its pages go
+through `packages/core/source-fetch.js`, so retries, the per-host cap and the refusal of hosts that ignore Range
+apply; the first 100 bytes are read before SQLite is, so a 404 or a host ignoring Range is reported as such. A GitHub
+release asset works: its download URL redirects to a signed URL that answers ranges. A local one is opened in
+sql.js. Smaller SQLite pages (`PRAGMA page_size = 1024; VACUUM;`) make the index lookups
 cheaper still; the in-repo packer writes 4096-byte pages.
 
 **Create packages** — this repo ships a dependency-free packer (`scripts/pack-3dtiles.mjs`, ZIP+STORED

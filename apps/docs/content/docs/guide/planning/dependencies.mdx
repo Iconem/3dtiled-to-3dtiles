@@ -47,8 +47,7 @@ the shared `core` and meta-converter, as one workspace group.
 | `@loaders.gl/i3s` | `/stream?format=i3s` |
 | `@loaders.gl/zip` | `.3tz` / SLPK zip random access |
 | `@playcanvas/splat-transform` | `/stream?format=sog`, `/extract` splat merge |
-| `sqlite-wasm-http` | remote `.3dtiles` read by HTTP range requests (SQLite WASM + HTTP VFS) |
-| `@mmomtchev/web-worker` | the Web Worker `sqlite-wasm-http` expects, on Node's worker threads |
+| `@journeyapps/wa-sqlite` | remote `.3dtiles` read by HTTP range requests (SQLite WASM, Asyncify build, with the HTTP VFS in `sqlite-http.js`) |
 | workspace: `3dtiles-convert-core`, `3dtiles-tools`, `i3s-to-3dtiles`, `implicit-to-explicit` | shared decode/encode + tileset transforms |
 
 ### `packages/copc-to-3dtiles`
