@@ -7,6 +7,7 @@
  *   node packages/tilers/cli.js for <input> [--json]          the tools that take this file or folder
  *   node packages/tilers/cli.js samples <folder>              write tiny synthetic inputs to try the tools on
  *   node packages/tilers/cli.js install <tool>                download a tool that publishes a binary (hash-checked)
+ *   node packages/tilers/cli.js detect|install terrain-service   the same for a service (SERVICES: Terrain Viewer's tile service)
  *   node packages/tilers/cli.js run <tool> <input> <outDir> [--<option> <value>]… [--install] [--overwrite] [--dry-run]
  *
  * `run` prints the tool's own output as it comes, then one line a caller can parse:
@@ -18,7 +19,7 @@
  * so nothing the caller sends reaches a command line unchecked.
  */
 import fs from 'node:fs';
-import { TOOLS, listTools, detectTool, installTool, planRun, runTool, toolsFor, describeInput, toolsDir, stepLine } from './index.js';
+import { TOOLS, SERVICES, listTools, detectTool, detectRuntime, installTool, installRuntime, planRun, runTool, toolsFor, describeInput, toolsDir, stepLine } from './index.js';
 import { writeSamples, SAMPLES } from './samples.js';
 
 const argv = process.argv.slice(2), cmd = argv[0];
@@ -37,7 +38,7 @@ try {
       t.options.map((o) => `${' '.repeat(17)}--${o.key} <${o.type === 'enum' ? o.values.join('|') : o.type}>  default ${JSON.stringify(o.default)}  ${o.help}`).join('\n')).join('\n\n'));
   } else if (cmd === 'detect') {
     const ids = argv[1] && !argv[1].startsWith('--') ? [argv[1]] : TOOLS.map((t) => t.id);
-    const found = ids.map((id) => detectTool(id));
+    const found = ids.map((id) => (SERVICES[id] ? detectRuntime(id) : detectTool(id)));
     out({ tools: found, toolsDir: toolsDir() }, found.map((d) => `${d.id.padEnd(16)} ${d.status.padEnd(8)} ${where(d)}`).join('\n'));
   } else if (cmd === 'for') {
     if (!argv[1]) fail('usage: for <input>');
@@ -51,7 +52,8 @@ try {
     console.log(`TILER_SAMPLES ${JSON.stringify({ dir: argv[1], files })}`);
   } else if (cmd === 'install') {
     if (!argv[1]) fail('usage: install <tool>');
-    const r = await installTool(argv[1], { log: (l) => console.log(l), force: argv.includes('--force') });
+    const o = { log: (l) => console.log(l), force: argv.includes('--force') };
+    const r = SERVICES[argv[1]] ? await installRuntime(argv[1], null, o) : await installTool(argv[1], o);
     out(r, r.downloaded ? `ready: ${r.exe}` : `already installed: ${r.exe}`);
   } else if (cmd === 'run') {
     const pos = [], opts = {}, flags = new Set();

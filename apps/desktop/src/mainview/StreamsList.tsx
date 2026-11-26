@@ -90,7 +90,7 @@ export function StreamsCard({ streams, editing, current, onEdit }: { streams: St
   );
 }
 
-type Health = { state: 'checking' | 'ok' | 'err' | 'idle'; detail: string };
+export type Health = { state: 'checking' | 'ok' | 'err' | 'idle'; detail: string };
 
 /**
  * Does the row's URL answer a tileset? One GET of its tileset.json when the row appears or its URL changes (the
@@ -126,7 +126,7 @@ function useHealth(url: string, paused: boolean, auto: boolean): [Health, () => 
   return [h, () => setNonce((n) => n + 1)];
 }
 
-const HEALTH_LOOK: Record<Health['state'], { label: string; cls: string }> = {
+export const HEALTH_LOOK: Record<Health['state'], { label: string; cls: string }> = {
   ok: { label: 'OK', cls: 'border-emerald-600/40 bg-emerald-500/15 text-emerald-600 dark:text-emerald-400' },
   err: { label: 'Error', cls: 'border-red-600/40 bg-red-500/15 text-red-600 dark:text-red-400' },
   checking: { label: 'Checking', cls: '' },

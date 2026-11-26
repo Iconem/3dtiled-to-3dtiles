@@ -2,10 +2,11 @@
  * Launcher view — builds a tileset URL, exercises it against the locally-spawned tile-server, and
  * keeps a small library of datasets you care about.
  *
- * Four tabs, one job each:
+ * Five tabs, one job each:
  *   Stream live — a tiled dataset as a paste-ready URL, converted on demand.
  *   Export      — the same dataset (one card, shown above both tabs) written to a folder.
  *   Tile raw input — a third-party tiler run on input that is not tiled yet; it has its own input field.
+ *   Terrain     — a DEM as quantized-mesh terrain and analysis tiles, through Terrain Viewer's tile service (TerrainTab).
  *   Library     — the samples (folded), bookmarks with a cached structural check (tiles/depth/leaves from
  *                 /stats), and a history of what was served or exported.
  *
@@ -28,6 +29,7 @@ import { ExportCard } from './ExportCard';
 import { LINKS } from './catalog';
 import { RELEASE_URL, setServerWorkers, base, buildLabel, docsUrl, fitWindowForPreview, openExternal, pickerAvailable, pickerRpc, restoreWindow, staticPort, tilePort, viewerUrl } from './host';
 import { LibraryTab } from './LibraryTab';
+import { TerrainTab } from './TerrainTab';
 import { TilerCard } from './TilerCard';
 import { loadLibrary, noteServed, parseLibrary, saveLocal, serialize, type DatasetOptions, type Library } from './library';
 import { DatasetCard, StreamTab, WORKERS, WORKERS_TITLE } from './StreamTab';
@@ -76,9 +78,10 @@ const TAB_TITLES = {
   stream: 'A tiled dataset (COPC, Potree, SOG, RAD, LCC, I3S…) as a 3D Tiles URL, converted on demand',
   export: 'The same dataset written to a folder as 3D Tiles',
   tile: 'A raw point cloud, mesh or splat file that is not tiled yet: run a tiler on it',
+  terrain: 'A DEM (Terrarium, Terrain-RGB, COG…) as quantized-mesh terrain and hillshade, slope… tiles, served on this machine',
   library: 'Samples, bookmarks, and what you served or exported',
 } as const;
-const TAB_LABELS = { stream: 'Stream live', export: 'Export', tile: 'Tile raw input', library: 'Library' } as const;
+const TAB_LABELS = { stream: 'Stream live', export: 'Export', tile: 'Tile raw input', terrain: 'Terrain', library: 'Library' } as const;
 
 export function App() {
   const [theme, , setTheme] = useTheme();
@@ -255,7 +258,7 @@ export function App() {
         <Tabs value={tab} onValueChange={(v) => setTab(String(v))} className="gap-0">
           {/* Tabs as a browser draws them: a rule across the window, the open tab underlined on it. */}
           <TabsList id="tabs" variant="line" className="mb-4 w-full items-end justify-start gap-1 rounded-none border-b border-border p-0 group-data-horizontal/tabs:h-auto">
-            {(['stream', 'export', 'tile', 'library'] as const).map((name) => (
+            {(['stream', 'export', 'tile', 'terrain', 'library'] as const).map((name) => (
               <Tip key={name} text={TAB_TITLES[name]} side="bottom">
                 <TabsTrigger value={name} data-tab={name}
                   className="h-10 flex-none gap-2 rounded-none border-0 px-4 text-sm font-medium text-muted-foreground hover:text-foreground data-active:text-foreground group-data-horizontal/tabs:after:-bottom-px">
@@ -271,6 +274,7 @@ export function App() {
           <TabsContent value="stream" id="panel-stream" keepMounted><StreamTab app={app} /></TabsContent>
           <TabsContent value="export" id="panel-export" keepMounted><ExportCard app={app} /></TabsContent>
           <TabsContent value="tile" id="panel-tile" keepMounted><TilerCard app={app} onStream={() => setTab('stream')} /></TabsContent>
+          <TabsContent value="terrain" id="panel-terrain" keepMounted><TerrainTab app={app} active={tab === 'terrain'} /></TabsContent>
           <TabsContent value="library" id="panel-library" keepMounted><LibraryTab app={app} /></TabsContent>
         </Tabs>
 

@@ -8,7 +8,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import zlib from 'node:zlib';
-import { TOOLS, RUNTIMES, RUST_BUILD, toolById, listTools, toolsFor, describeInput, parseDb, sniffPly, resolveOptions, planRun, unzip, untar, installTool, detectTool, detectRuntime, commandLine, stepLine } from '../index.js';
+import { TOOLS, RUNTIMES, SERVICES, RUST_BUILD, toolById, listTools, toolsFor, describeInput, parseDb, sniffPly, resolveOptions, planRun, unzip, untar, installTool, detectTool, detectRuntime, commandLine, stepLine } from '../index.js';
 
 const found = (exe = ['tool.exe']) => ({ status: 'ready', source: 'path', exe });
 const tmp = () => fs.mkdtempSync(path.join(os.tmpdir(), 'tilers-test-'));
@@ -49,7 +49,7 @@ test('the manifest: every tool says what it takes, what it writes, how it is del
     }
     assert.equal(JSON.parse(JSON.stringify(t)).id, t.id, 'plain data: it goes to a form as JSON');
   }
-  for (const t of [...TOOLS, ...Object.values(RUNTIMES).map((r) => ({ provide: r }))]) for (const [key, dl] of Object.entries(t.provide.download ?? {})) {
+  for (const t of [...TOOLS, ...[...Object.values(RUNTIMES), ...Object.values(SERVICES)].map((r) => ({ provide: r }))]) for (const [key, dl] of Object.entries(t.provide.download ?? {})) {
     if (key === 'version') continue;
     assert.match(dl.url, /^https:\/\/github\.com\/[^/]+\/[^/]+\/releases\/download\//, 'a release asset of the project itself');
     assert.match(dl.sha256, /^[0-9a-f]{64}$/); assert.ok(dl.bytes > 0 && dl.exe);

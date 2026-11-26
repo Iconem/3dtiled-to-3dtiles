@@ -161,11 +161,11 @@ Two Node children, both reusing scripts already in this repo:
 If a 3dtiled server is already listening on a candidate port (e.g. you have `pnpm dev` up), the app
 **adopts** it instead of starting a second copy, and leaves it running on quit.
 
-## The four tabs
+## The five tabs
 
 *Stream live* and *Export to a folder* share one tiled dataset, in a card shown above both: it stays what it was
 when you go from one to the other. *Tile raw input* has its own input field, for files that are not tiled yet.
-*Library* lists what you kept, with the samples folded at its top. The tabs are drawn as a browser draws them: a
+*Terrain* turns a DEM into Cesium terrain and analysis tiles. *Library* lists what you kept, with the samples folded at its top. The tabs are drawn as a browser draws them: a
 rule across the window, the open tab underlined on it.
 
 ### How the window is laid out
@@ -369,6 +369,22 @@ of the two other tabs.
 It has a page of its own: **[Tile raw input](/docs/guide/desktop-tile-raw-input)**.
 
 <AppScreen light={tileLight} dark={tileDark} alt="The Tile raw input tab with a LAS file as input and PDAL chosen" />
+
+### Terrain
+
+A DEM as Cesium terrain and as analysis tiles, computed on this machine by the tile service of
+[Terrain Viewer](https://github.com/jo-chemla/terrain-viewer) (Iconem, MIT).
+
+- **Download on first use.** The tab downloads that service's bundle for this platform (Node plus the service,
+  about 52 MB) from a pinned Iconem/terrain-viewer release, checks its SHA-256 and keeps it in the tools folder.
+  `node packages/tilers/cli.js install terrain-service` does the same. No bundle is published for Linux arm64.
+- **Start runs it on 127.0.0.1**, on the first free port from 3400 to 3403. A Terrain Viewer service already
+  running there (its desktop app's, or its QGIS plugin's) is used as it is, and *Disconnect* leaves it running.
+- **Sources** are a Terrarium or Terrain-RGB template, a COG or VRT address, or a library id (`mapterhorn`).
+  Each row has a health pill and gives its `layer.json` (quantized-mesh-1.0, heights on the WGS84 ellipsoid), or
+  the XYZ tiles of hillshade, slope, aspect, sky-view factor, TPI, TRI or colour relief, or contours as vector
+  tiles. The list is kept in the app, like the Streams list.
+- **Open** goes to the Terrain Viewer website with the source: 3dtiled's viewer has no custom terrain URL yet.
 
 ### Library
 

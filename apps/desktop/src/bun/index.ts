@@ -24,6 +24,7 @@
 import Electrobun, { BrowserWindow, Updater, Utils, defineElectrobunRPC } from "electrobun/main";
 import type { DesktopRPC } from "../shared/rpc-schema";
 import { createCliRunner, defaultSpawn } from "./cli-runner";
+import { createTerrainService } from "./terrain-service";
 
 const TILE_PORTS = [3001, 3031, 3032, 3033];
 const STATIC_PORTS = [3041, 3042, 3043];
@@ -260,6 +261,10 @@ const WIN = { x: 100, y: 40, width: 800, height: 940, maxWidth: 1600, maxHeight:
 const cli = createCliRunner({ spawn: await defaultSpawn(), cwd: root, node });
 children.push({ kill: () => cli.killAll() });
 
+/** The Terrain tab's tile service (Terrain Viewer's), started only when the tab asks: see terrain-service.ts. */
+const terrain = createTerrainService({ root, node });
+children.push({ kill: () => terrain.kill() });
+
 // The library outlives the app's folder, which every update replaces, and is shared by a portable copy.
 const libraryDir = env.LOCALAPPDATA ? `${env.LOCALAPPDATA}/3D Tiled` : `${env.HOME ?? "."}/.3dtiled`;
 const libraryFile = `${libraryDir}/library.json`;
@@ -293,6 +298,7 @@ const rpc = defineElectrobunRPC<DesktopRPC, "bun">("bun", {
 			runCli: ({ args, then }) => ({ id: cli.run(then ? [args, then] : [args]) }),
 			cliStatus: ({ id }) => cli.status(id),
 			cancelCli: ({ id }) => cli.cancel(id),
+			terrainService: ({ action }) => terrain.request(action),
 
 			readLibrary: async () => {
 				const { readFile } = await import("node:fs/promises");

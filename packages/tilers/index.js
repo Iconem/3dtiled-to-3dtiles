@@ -22,9 +22,12 @@ import os from 'node:os';
 import path from 'node:path';
 import zlib from 'node:zlib';
 import { createRequire } from 'node:module';
-import { TOOLS, RUNTIMES, RUST_BUILD, toolById } from './tools.js';
+import { TOOLS, RUNTIMES, SERVICES, RUST_BUILD, toolById } from './tools.js';
 
-export { TOOLS, RUNTIMES, RUST_BUILD, toolById };
+export { TOOLS, RUNTIMES, SERVICES, RUST_BUILD, toolById };
+
+/** A runtime, or a service (SERVICES): both are one pinned release asset per platform, found and fetched alike. */
+const runtimeById = (id) => RUNTIMES[id] ?? SERVICES[id];
 
 const isWin = process.platform === 'win32';
 const platformKey = `${process.platform}-${process.arch}`;
@@ -216,7 +219,7 @@ function majorOf(rt, exe) {
  * @returns {{id:string, status:'ready'|'missing', source?:string, exe?:string[], version?:string|null, downloadable:boolean, bytes:number|null, hint?:string}}
  */
 export function detectRuntime(id, min = null) {
-  const rt = RUNTIMES[id];
+  const rt = runtimeById(id);
   if (!rt) throw new Error(`unknown runtime "${id}"`);
   const dl = rt.download?.[platformKey], base = { id, downloadable: !!dl, bytes: dl?.bytes ?? null };
   const fits = (exe) => !min || !rt.version || (majorOf(rt, exe) ?? 0) >= min;
@@ -483,7 +486,7 @@ async function privateRust(home, { log, fetch }) {
 
 /** Download a runtime (RUNTIMES) that is not on the machine. One already there is left alone. */
 export async function installRuntime(id, min = null, o = {}) {
-  const rt = RUNTIMES[id], log = o.log ?? (() => {}), found = detectRuntime(id, min);
+  const rt = runtimeById(id), log = o.log ?? (() => {}), found = detectRuntime(id, min);
   if (found.status === 'ready' && !o.force) return { id, exe: found.exe[0], downloaded: false };
   const dl = rt.download?.[platformKey];
   if (!dl) throw new Error(`${rt.name} has no download for ${platformKey}: ${found.hint}`);

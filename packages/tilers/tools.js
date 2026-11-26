@@ -135,6 +135,43 @@ export const RUNTIMES = {
 };
 
 /**
+ * Services this app downloads and runs beside its own tile-server, rather than tools run once on an input. Fetched and
+ * checked the same way as a runtime (a release asset per platform, its SHA-256 pinned), found the same way
+ * (`detectRuntime`, `installRuntime`, the CLI's `detect` and `install`), never on PATH.
+ *
+ * terrain-service: Terrain Viewer's tile service (Iconem, MIT, github.com/Iconem/terrain-viewer, `tile-server/`): any
+ * DEM (Terrarium or Terrain-RGB tiles, a COG, a VRT, LERC, a raw WMS) as quantized-mesh terrain (`layer.json`) and as
+ * XYZ tiles of its analyses (hillshade, slope, sky-view factor, TPI, contours…), computed per tile. Its authors publish
+ * it as one zip per platform holding Node and the service (`bin/node`, `server.mjs`, `node_modules` with that platform's
+ * sharp), the bundle its QGIS plugin installs; these are the hashes that plugin pins (`service_pins.json`, the release's
+ * SHA256SUMS). No Linux arm64 bundle is published. The desktop app's Terrain tab starts it (`node server.mjs`, in its folder).
+ */
+export const SERVICES = {
+  'terrain-service': {
+    id: 'terrain-service', name: 'Terrain Viewer tile service', licence: 'MIT', homepage: 'https://github.com/Iconem/terrain-viewer/tree/main/tile-server',
+    download: {
+      version: 'qgis-plugins-2026-11-26b',
+      'win32-x64': {
+        url: 'https://github.com/Iconem/terrain-viewer/releases/download/qgis-plugins-2026-11-26b/terrain-viewer-tile-service-windows-x64.zip',
+        sha256: 'beacfd8bab50e110b60b2e9c3aa8c4a5259e6ceb9066c604cbf4950b3404580b', bytes: 52253086, exe: 'bin/node.exe',
+      },
+      'linux-x64': {
+        url: 'https://github.com/Iconem/terrain-viewer/releases/download/qgis-plugins-2026-11-26b/terrain-viewer-tile-service-linux-x64.zip',
+        sha256: '79d31e87f99e646cb5d214d6c3ad45b498d0ad9fcf89aa9f4ed77a56f39f90c8', bytes: 62842660, exe: 'bin/node',
+      },
+      'darwin-arm64': {
+        url: 'https://github.com/Iconem/terrain-viewer/releases/download/qgis-plugins-2026-11-26b/terrain-viewer-tile-service-macos-arm64.zip',
+        sha256: '7bcc00b3b1afcca008e12f2588826831099d38cd613e27a9dd068f7c7119a52e', bytes: 55867364, exe: 'bin/node',
+      },
+      'darwin-x64': {
+        url: 'https://github.com/Iconem/terrain-viewer/releases/download/qgis-plugins-2026-11-26b/terrain-viewer-tile-service-macos-x64.zip',
+        sha256: '07ef6a03763cf26d7545212669988eafd33fe22e8daa8be286eb9702daecb65d', bytes: 57830669, exe: 'bin/node',
+      },
+    },
+  },
+};
+
+/**
  * A Rust toolchain for a tool published as source only, when the machine has none that can build it: rustup's own
  * installer, pinned and hash-checked here, which then fetches a pinned toolchain and verifies it itself.
  * On Windows the `windows-gnullvm` host is used: it links with the `rust-lld` it ships, so neither Visual Studio's

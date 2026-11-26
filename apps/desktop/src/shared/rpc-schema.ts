@@ -6,6 +6,27 @@
  */
 import type { RPCSchema } from 'electrobun/main';
 
+/** The Terrain tab's service (src/bun/terrain-service.ts): Terrain Viewer's tile service, downloaded and run here. */
+export interface TerrainServiceStatus {
+  state: 'stopped' | 'starting' | 'running' | 'error';
+  /** Its address while it runs: http://127.0.0.1:<port>. */
+  url: string | null;
+  port: number | null;
+  /** Started by this app (false: one already running was adopted, and is left running on Stop). */
+  owned: boolean;
+  pid: number | null;
+  message?: string;
+  /** The pinned bundle is in the tools folder. */
+  installed: boolean;
+  version: string | null;
+  /** A bundle is published for this platform, and its size. */
+  downloadable: boolean;
+  bytes: number | null;
+  hint: string | null;
+  /** Its last output lines. */
+  log: string[];
+}
+
 export interface DesktopRPC {
   bun: RPCSchema<{
     requests: {
@@ -89,6 +110,14 @@ export interface DesktopRPC {
       updateStatus: {
         params: Record<string, never>;
         response: { version: string | null; hash: string | null };
+      };
+      /**
+       * The Terrain tab's service: its status, or start / stop it, or look again for an install (`refresh`, after the
+       * view ran `packages/tilers/cli.js install terrain-service`). `start` answers at once, state `starting`.
+       */
+      terrainService: {
+        params: { action: 'status' | 'start' | 'stop' | 'refresh' };
+        response: TerrainServiceStatus;
       };
       /** Stop the servers and restart into the downloaded update. */
       applyUpdate: {
