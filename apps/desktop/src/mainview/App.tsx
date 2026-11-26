@@ -203,9 +203,12 @@ export function App() {
   useEffect(() => {
     if (!pickerAvailable()) return;
     let stop = false, timer: ReturnType<typeof setTimeout> | undefined;
+    let misses = 0;
     const poll = async () => {
+      // A request can time out (the RPC answers within 1 s, and the host is busy unpacking a download): ask again.
       const s = await pickerRpc!.request.updateStatus({}).catch(() => null);
-      if (stop || !s) return;
+      if (stop) return;
+      if (!s) { if (++misses < 600) timer = setTimeout(poll, 3000); return; }
       const name = s.version ? `3D Tiled ${buildLabel(s.version, s.hash)}` : 'A new 3D Tiled build';
       if (s.state === 'downloading') {
         toast('Update available', { id: 'update', description: <UpdateProgress name={name} progress={s.progress} bytes={s.bytes} />, duration: Infinity, closeButton: true });

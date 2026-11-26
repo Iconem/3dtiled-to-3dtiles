@@ -270,6 +270,10 @@ children.push({ kill: () => terrain.kill() });
 
 const libraryFile = `${libraryDir}/library.json`;
 
+// The update looked for at start (checkForUpdate, below). Declared before the RPC: the view asks for it as soon as
+// the window opens, while this module still awaits the servers further down.
+let update: UpdateStatus = { state: "checking", version: null, hash: null };
+
 const rpc = defineElectrobunRPC<DesktopRPC, "bun">("bun", {
 	handlers: {
 		requests: {
@@ -434,7 +438,6 @@ export function olderVersion(a: unknown, b: unknown) {   // is a older than b
 	for (let i = 0; i < Math.max(x.length, y.length); i++) { const d = (x[i] ?? 0) - (y[i] ?? 0); if (d) return d < 0; }
 	return false;
 }
-let update: UpdateStatus = { state: "checking", version: null, hash: null };
 async function checkForUpdate() {
 	const { existsSync } = await import("node:fs");
 	const app = (globalThis as any).process?.execPath?.replace(/[\\/]bin[\\/][^\\/]+$/, "");
