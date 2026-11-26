@@ -8,6 +8,29 @@ Format loosely follows [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+### Added — 2026-11-26
+- **Desktop: a Terrain tab.** Terrain Viewer's tile service (Iconem, MIT) is downloaded on first use from a pinned
+  release, SHA-256 checked, then started and stopped by the app (or an already running one is used). Any DEM
+  (Terrarium, Terrain-RGB, COG, VRT, LERC, library ids such as `mapterhorn`) becomes a quantized-mesh `layer.json`,
+  or hillshade, slope, aspect, sky-view factor, TPI, TRI and colour-relief tiles, with copy buttons and health pills.
+  Tilers: `SERVICES` beside `RUNTIMES`; `cli.js detect|install terrain-service`.
+- **Slides online.** The `docs` image builds `slides/` and serves the deck, with play and presenter modes, at
+  https://docs.3dtiled.iconem.com/docs/slides/; Guide › Slides links it and the PDF. `pnpm pdf --release` in
+  `slides/` prints the deck and uploads it to the `slides` GitHub release; the PDF is not committed.
+- **A large `.3dtiles` sample:** one subtree of the Helsinki 2024 reality mesh (755 MB, 1,720 b3dm, © City of
+  Helsinki, CC BY 4.0) on the `helsinki-2024-3dtiles` release of jo-chemla/3dtiles-samples, readable in place
+  through the tile server (the release's signed redirect answers Range requests).
+
+### Changed — 2026-11-26
+- **Remote `.3dtiles` packages are read with wa-sqlite** (`@journeyapps/wa-sqlite`, Asyncify build) and a small HTTP
+  VFS on the server's own thread: no worker; sqlite-wasm-http and `@mmomtchev/web-worker` are gone. Same requests per
+  tile, about 20% fewer bytes read, repeat reads from the cache. URLs over 64 characters (presigned, GitHub release
+  downloads) now open. `TILED_SQLITE_THREADS` is now `TILED_SQLITE_CONNECTIONS` (the old name still works).
+- **Slides redone** in the open-slide house style of the terrain-viewer decks (white, Geist, one accent), with short
+  titles and less text per slide.
+- **`iconem-share-links.mjs --create-in`** matches the `project / scene / asset` label, not only the project name.
+- **Docs: 3D Tiles 2.0 on glTF 2.1** updated: cesium-native streams glTF 2.1 tilesets since v0.67.0 (#1508).
+
 ### Added — 2026-11-25
 - **Desktop: a status pill on each Streams row.** The row's tileset URL is requested once when it appears or its port
   changes: green *OK* when it answers a tileset, red *Error* with the reason in its tooltip. A click checks again.
